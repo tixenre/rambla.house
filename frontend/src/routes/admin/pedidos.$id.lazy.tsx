@@ -1003,6 +1003,7 @@ function PedidoEditorPage() {
         pagado={pagadoMonto}
         open={openPagoModal}
         onOpenChange={setOpenPagoModal}
+        esEstudio={esEstudio}
       />
       <EnviarDocsDialog
         pedidoId={p.id}

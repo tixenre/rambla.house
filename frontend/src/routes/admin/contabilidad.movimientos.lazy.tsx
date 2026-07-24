@@ -106,23 +106,31 @@ function MovimientosPage() {
   const qc = useQueryClient();
   const [tipoFiltro, setTipoFiltro] = useState<string>("");
   const [beneficiarioFiltro, setBeneficiarioFiltro] = useState<string>("");
+  const [cuentaFiltro, setCuentaFiltro] = useState<string>("");
   const [modoRegistro, setModoRegistro] = useState<"movimiento" | "cambio_divisa">("movimiento");
   // Mes del cobro expandido (muestra los pagos individuales inline). Uno a la vez.
   const [expandedMes, setExpandedMes] = useState<string | null>(null);
 
   const invalidar = () => qc.invalidateQueries({ queryKey: ["admin", "contabilidad"] });
 
+  const cuentasQ = useQuery({
+    queryKey: ["admin", "contabilidad", "cuentas-list"],
+    queryFn: () => adminApi.listCuentas(),
+  });
+  const cuentas: Cuenta[] = cuentasQ.data?.cuentas ?? [];
+
   const movsQ = useQuery({
     queryKey: [
       "admin",
       "contabilidad",
       "movimientos",
-      { tipo: tipoFiltro, ben: beneficiarioFiltro },
+      { tipo: tipoFiltro, ben: beneficiarioFiltro, cuenta: cuentaFiltro },
     ],
     queryFn: () =>
       adminApi.listMovimientos({
         tipo: tipoFiltro || undefined,
         beneficiario: beneficiarioFiltro || undefined,
+        cuenta_id: cuentaFiltro ? Number(cuentaFiltro) : undefined,
       }),
   });
 
@@ -266,27 +274,39 @@ function MovimientosPage() {
           <CambioDivisaForm onCreated={invalidar} />
         )}
 
-        {/* Filtro por tipo */}
-        <div className="flex flex-wrap gap-1">
-          {[
-            ["", "Todos"],
-            ["cobro", "Cobros"],
-            ...TIPOS_MOVIMIENTO.map((t) => [t, TIPO_MOVIMIENTO_META[t].label] as [string, string]),
-          ].map(([val, lbl]) => (
-            <button
-              key={val}
-              type="button"
-              onClick={() => setTipoFiltro(val)}
-              className={cn(
-                "rounded-md border px-2.5 py-1.5 text-xs font-medium transition",
-                tipoFiltro === val
-                  ? "border-ink bg-ink text-background"
-                  : "border-muted-foreground/30 text-muted-foreground hover:border-ink hover:text-ink",
-              )}
-            >
-              {lbl}
-            </button>
-          ))}
+        {/* Filtro por tipo + cuenta */}
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-wrap gap-1">
+            {[
+              ["", "Todos"],
+              ["cobro", "Cobros"],
+              ...TIPOS_MOVIMIENTO.map(
+                (t) => [t, TIPO_MOVIMIENTO_META[t].label] as [string, string],
+              ),
+            ].map(([val, lbl]) => (
+              <button
+                key={val}
+                type="button"
+                onClick={() => setTipoFiltro(val)}
+                className={cn(
+                  "rounded-md border px-2.5 py-1.5 text-xs font-medium transition",
+                  tipoFiltro === val
+                    ? "border-ink bg-ink text-background"
+                    : "border-muted-foreground/30 text-muted-foreground hover:border-ink hover:text-ink",
+                )}
+              >
+                {lbl}
+              </button>
+            ))}
+          </div>
+          <Field label="Cuenta">
+            <CuentaSelect
+              cuentas={cuentas}
+              value={cuentaFiltro}
+              onChange={setCuentaFiltro}
+              placeholder="Todas las cuentas"
+            />
+          </Field>
         </div>
 
         {beneficiarioFiltro && (

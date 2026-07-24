@@ -86,6 +86,12 @@ function ReporteMensualPage() {
                   cost
                 />
                 <CascadaRow
+                  label="Parte del Estudio"
+                  note="otra unidad de negocio, no una comisión"
+                  value={`− ${formatARS(r.parte_estudio)}`}
+                  cost
+                />
+                <CascadaRow
                   label="Gastos operativos"
                   value={`− ${formatARS(r.gastos.total)}`}
                   cost
@@ -100,10 +106,12 @@ function ReporteMensualPage() {
               />
             </div>
 
-            {/* Por socio: devengado vs percibido + movimientos del mes */}
+            {/* Por socio: devengado vs percibido + movimientos del mes.
+                "Estudio" entra sin cargos/pagos (no es socio humano, no tiene
+                cuenta corriente) — el gate de abajo ya lo deja en "—". */}
             <Section variant="plain" title="Por socio">
               <AdminTable<string>
-                rows={["Pablo", "Tincho", "Rambla"]}
+                rows={["Pablo", "Tincho", "Rambla", "Estudio"]}
                 getRowKey={(s) => s}
                 columns={[
                   {
