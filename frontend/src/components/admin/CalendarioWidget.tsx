@@ -24,6 +24,14 @@ import {
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
 import { estadoClase, estadoClaseEstudio } from "@/design-system/ui/estado-color";
 import { esPedidoEstudio } from "@/lib/tipos-pedido";
+import {
+  minutosDelDia,
+  mismoDiaCalendario,
+  ubicarEnCarriles,
+  type SegmentoHora,
+} from "@/lib/calendario-horas";
+
+const PX_POR_HORA_EJE = 48;
 
 const MESES = [
   "Enero",
@@ -225,6 +233,73 @@ function ItemBar({
   );
 }
 
+/** Bloque posicionado por hora — mismo criterio de color/click que `ItemBar`,
+ *  pero dentro de la grilla de horas (vista Semana, ítems de un solo día:
+ *  turnos del Estudio + sus bloqueos). Un pedido multi-día no llega acá —
+ *  ver el partition `itemsBarra`/`itemsHora` en el componente principal. */
+function HoraBloque({
+  seg,
+  onNavigatePedido,
+}: {
+  seg: SegmentoHora<CalendarioItem>;
+  onNavigatePedido: (id: number) => void;
+}) {
+  const { item, carril, totalCarriles, top, height } = seg;
+  const widthPct = 100 / totalCarriles;
+  const style = { top, height, left: `${carril * widthPct}%`, width: `${widthPct}%` };
+  const horaLabel = `${item.fecha_desde.slice(11, 16)}–${item.fecha_hasta.slice(11, 16)}`;
+
+  if (item.kind === "bloqueo") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            style={style}
+            className="absolute overflow-hidden rounded-md border border-dashed border-muted-foreground/40 bg-muted/50 px-1.5 py-1 text-left text-2xs leading-tight text-muted-foreground"
+          >
+            <div className="truncate font-medium">{item.label}</div>
+            <div className="truncate opacity-80">{horaLabel}</div>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-64 whitespace-normal">
+          <div className="font-semibold">{item.label}</div>
+          <div className="mt-0.5 opacity-80">{horaLabel} hs</div>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  const p = item;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={() => onNavigatePedido(p.id)}
+          style={style}
+          className={cn(
+            "absolute overflow-hidden rounded-md border px-1.5 py-1 text-left text-2xs leading-tight transition hover:opacity-80",
+            esPedidoEstudio(p) ? estadoClaseEstudio(p.estado) : estadoClase(p.estado),
+          )}
+        >
+          <div className="truncate font-medium">
+            #{p.numero_pedido ?? p.id} · {p.cliente_nombre || "Sin cliente"}
+          </div>
+          <div className="truncate opacity-80">{horaLabel}</div>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-64 whitespace-normal">
+        <div className="font-semibold">
+          #{p.numero_pedido ?? p.id} · {p.cliente_nombre || "Sin cliente"}
+        </div>
+        <div className="mt-0.5 opacity-80">{horaLabel} hs</div>
+        {p.equipos && <div className="mt-0.5 opacity-80">{p.equipos}</div>}
+        <div className="mt-0.5 opacity-80">{fmtArs(p.monto_total)}</div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export type CalendarioWidgetProps = {
   /** "compact" baja la altura de cada celda y muestra menos pedidos por día. */
   variant?: "full" | "compact";
@@ -335,9 +410,24 @@ export function CalendarioWidget({
     return [...pedidos, ...bloqueosVisibles];
   }, [pedidosVisibles, bloqueosVisibles]);
 
+  // En vista Semana, un ítem de UN SOLO día calendario (turno del Estudio,
+  // su bloqueo) se posiciona por hora en vez de como barra de todo el día —
+  // mucho más legible (ver `lib/calendario-horas.ts`). Multi-día (la mayoría
+  // de los alquileres normales) sigue como barra, sin cambios. En Mes no hay
+  // espacio para un eje de horas — todo sigue como barra, como siempre.
+  const { itemsBarra, itemsHora } = useMemo(() => {
+    if (view !== "semana") return { itemsBarra: itemsVisibles, itemsHora: [] as CalendarioItem[] };
+    const barra: CalendarioItem[] = [];
+    const hora: CalendarioItem[] = [];
+    for (const it of itemsVisibles) {
+      (mismoDiaCalendario(it.fecha_desde, it.fecha_hasta) ? hora : barra).push(it);
+    }
+    return { itemsBarra: barra, itemsHora: hora };
+  }, [itemsVisibles, view]);
+
   const byDay = useMemo(() => {
     const map = new Map<string, CalendarioItem[]>();
-    for (const it of itemsVisibles) {
+    for (const it of itemsBarra) {
       const start = new Date(it.fecha_desde);
       const end = new Date(it.fecha_hasta);
       const cur = new Date(start);
@@ -349,7 +439,32 @@ export function CalendarioWidget({
       }
     }
     return map;
-  }, [itemsVisibles]);
+  }, [itemsBarra]);
+
+  const itemsHoraPorDia = useMemo(() => {
+    const map = new Map<string, CalendarioItem[]>();
+    for (const it of itemsHora) {
+      const k = it.fecha_desde.slice(0, 10);
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(it);
+    }
+    return map;
+  }, [itemsHora]);
+
+  // Rango de horas del eje: ajustado a lo que hay que mostrar esta semana
+  // (con un poco de aire), no un horario fijo — así una clase a las 7 u
+  // otra a las 23 entran igual sin recortarse. `null` = no hay nada de un
+  // solo día esta semana → la sección de horas ni se renderiza.
+  const rangoHoras = useMemo(() => {
+    if (itemsHora.length === 0) return null;
+    let min = 24;
+    let max = 0;
+    for (const it of itemsHora) {
+      min = Math.min(min, Math.floor(minutosDelDia(it.fecha_desde) / 60));
+      max = Math.max(max, Math.ceil(minutosDelDia(it.fecha_hasta) / 60));
+    }
+    return { desde: Math.max(0, min), hasta: Math.min(24, Math.max(max, min + 1)) };
+  }, [itemsHora]);
 
   const cursorMonth = cursor.getMonth();
   const compact = variant === "compact";
@@ -557,6 +672,64 @@ export function CalendarioWidget({
           })}
         </div>
       </TooltipProvider>
+
+      {view === "semana" && rangoHoras && (
+        <TooltipProvider delayDuration={200}>
+          <div className="overflow-x-auto rounded-lg border hairline bg-background">
+            <div className="grid min-w-[720px] grid-cols-[48px_repeat(7,1fr)]">
+              <div
+                className="relative"
+                style={{ height: (rangoHoras.hasta - rangoHoras.desde) * PX_POR_HORA_EJE }}
+              >
+                {Array.from(
+                  { length: rangoHoras.hasta - rangoHoras.desde },
+                  (_, i) => rangoHoras.desde + i,
+                ).map((h) => (
+                  <div
+                    key={h}
+                    className="absolute right-1 -translate-y-1/2 font-mono text-2xs text-muted-foreground"
+                    style={{ top: (h - rangoHoras.desde) * PX_POR_HORA_EJE }}
+                  >
+                    {String(h).padStart(2, "0")}h
+                  </div>
+                ))}
+              </div>
+              {cells.map((d) => {
+                const key = ymd(d);
+                const items = itemsHoraPorDia.get(key) ?? [];
+                const segmentos = ubicarEnCarriles(items, rangoHoras.desde, PX_POR_HORA_EJE);
+                return (
+                  <div
+                    key={key}
+                    className="relative border-l hairline"
+                    style={{ height: (rangoHoras.hasta - rangoHoras.desde) * PX_POR_HORA_EJE }}
+                  >
+                    {Array.from(
+                      { length: rangoHoras.hasta - rangoHoras.desde },
+                      (_, i) => rangoHoras.desde + i,
+                    ).map((h) => (
+                      <div
+                        key={h}
+                        className="absolute left-0 right-0 border-t hairline"
+                        style={{ top: (h - rangoHoras.desde) * PX_POR_HORA_EJE }}
+                      />
+                    ))}
+                    {segmentos.map((seg) => (
+                      <HoraBloque
+                        key={`${seg.item.kind}-${seg.item.id}`}
+                        seg={seg}
+                        onNavigatePedido={(id) =>
+                          navigate({ to: "/admin/pedidos/$id", params: { id: String(id) } })
+                        }
+                      />
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </TooltipProvider>
+      )}
 
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="text-xs text-muted-foreground">

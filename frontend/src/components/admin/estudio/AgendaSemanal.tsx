@@ -24,6 +24,7 @@ import { Spinner } from "@/design-system/ui/spinner";
 import { cn } from "@/lib/utils";
 import { estudioAdminApi, type EstudioAgendaBloque } from "@/lib/admin/api";
 import { estadoClaseEstudio } from "@/design-system/ui/estado-color";
+import { ubicarEnCarriles } from "@/lib/calendario-horas";
 import type { PedidoEstado } from "@/lib/admin/api";
 
 const DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
@@ -40,56 +41,14 @@ function inicioDeSemana(d: Date): Date {
   return start;
 }
 
-function minutosDelDia(iso: string): number {
-  const hh = Number(iso.slice(11, 13));
-  const mm = Number(iso.slice(14, 16));
-  return hh * 60 + mm;
-}
-
-type Segmento = EstudioAgendaBloque & { top: number; height: number };
-
-/** Empaquetado greedy simple: si dos bloques del MISMO día se solapan (no
- *  debería pasar en datos válidos — el backend lo impide), se dividen el
- *  ancho de la columna en partes iguales en vez de superponerse ilegibles. */
-function ubicarEnCarriles(bloques: EstudioAgendaBloque[], openHour: number) {
-  const ordenados = [...bloques].sort(
-    (a, b) => minutosDelDia(a.fecha_desde) - minutosDelDia(b.fecha_desde),
-  );
-  const finDeCarril: number[] = [];
-  const porCarril: EstudioAgendaBloque[][] = [];
-  for (const b of ordenados) {
-    const inicio = minutosDelDia(b.fecha_desde);
-    let carril = finDeCarril.findIndex((fin) => fin <= inicio);
-    if (carril === -1) {
-      carril = finDeCarril.length;
-      porCarril.push([]);
-    }
-    finDeCarril[carril] = Math.max(minutosDelDia(b.fecha_hasta), inicio + 30);
-    porCarril[carril].push(b);
-  }
-  const totalCarriles = porCarril.length || 1;
-  return ordenados.map((b) => {
-    const carril = porCarril.findIndex((xs) => xs.includes(b));
-    const inicio = minutosDelDia(b.fecha_desde) - openHour * 60;
-    const fin = minutosDelDia(b.fecha_hasta) - openHour * 60;
-    return {
-      b,
-      carril,
-      totalCarriles,
-      top: (inicio / 60) * PX_POR_HORA,
-      height: Math.max(((fin - inicio) / 60) * PX_POR_HORA, 20),
-    };
-  });
-}
-
 function BloqueCard({
   seg,
   onNavigatePedido,
 }: {
-  seg: ReturnType<typeof ubicarEnCarriles>[number];
+  seg: ReturnType<typeof ubicarEnCarriles<EstudioAgendaBloque>>[number];
   onNavigatePedido: (id: number) => void;
 }) {
-  const { b, carril, totalCarriles, top, height } = seg;
+  const { item: b, carril, totalCarriles, top, height } = seg;
   const widthPct = 100 / totalCarriles;
   const style = {
     top,
@@ -238,7 +197,7 @@ export function AgendaSemanal({
             {dias.map((d) => {
               const key = ymd(d);
               const bloques = bloquesPorDia.get(key) ?? [];
-              const segmentos = ubicarEnCarriles(bloques, openHour);
+              const segmentos = ubicarEnCarriles(bloques, openHour, PX_POR_HORA);
               return (
                 <div
                   key={key}
@@ -254,7 +213,7 @@ export function AgendaSemanal({
                   ))}
                   {segmentos.map((seg) => (
                     <BloqueCard
-                      key={`${seg.b.tipo}-${seg.b.id}`}
+                      key={`${seg.item.tipo}-${seg.item.id}`}
                       seg={seg}
                       onNavigatePedido={onNavigatePedido}
                     />
