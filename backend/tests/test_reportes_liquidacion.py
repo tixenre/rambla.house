@@ -31,6 +31,11 @@ class TestRepartir:
         for dueno in ("Rambla", "Pablo", "Tincho"):
             assert sum(repartir(dueno, 123456, DEFAULT_MODELO).values()) == pytest.approx(123456)
 
+    def test_estudio_se_lleva_todo(self):
+        # Economía separada (#1283): el Estudio no reparte con nadie más — es
+        # otra unidad de negocio, no una comisión sobre un equipo de Rambla.
+        assert repartir("Estudio", 90000, DEFAULT_MODELO) == {"Estudio": 90000}
+
 
 class TestValidarModelo:
     def test_default_es_valido(self):

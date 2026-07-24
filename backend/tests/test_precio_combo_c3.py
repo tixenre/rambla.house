@@ -41,6 +41,64 @@ def test_redondea():
     assert _precio_combo_calc([{"precio_jornada": 333, "cantidad": 1, "descuento_pct": 33}]) == 223
 
 
+class TestResolverDescuentoUniforme:
+    """#1283 Fase 5 — dado un precio objetivo, resuelve el % uniforme que hace
+    que `_precio_combo_calc` recomputado dé exactamente ese precio."""
+
+    def test_resuelve_precio_exacto(self):
+        from services.precios import resolver_descuento_uniforme, _precio_combo_calc
+
+        comps = [
+            {"precio_jornada": 1000, "cantidad": 2, "descuento_pct": 0},
+            {"precio_jornada": 500, "cantidad": 1, "descuento_pct": 0},
+        ]
+        # bruto = 2500. Objetivo 2000 → d = 20%.
+        d = resolver_descuento_uniforme(comps, 2000)
+        assert d == pytest.approx(20.0)
+        aplicado = [{**c, "descuento_pct": d} for c in comps]
+        assert _precio_combo_calc(aplicado) == 2000
+
+    def test_objetivo_igual_al_bruto_da_descuento_cero(self):
+        from services.precios import resolver_descuento_uniforme
+
+        comps = [{"precio_jornada": 1000, "cantidad": 1, "descuento_pct": 0}]
+        assert resolver_descuento_uniforme(comps, 1000) == pytest.approx(0.0)
+
+    def test_objetivo_cero_da_descuento_100(self):
+        from services.precios import resolver_descuento_uniforme
+
+        comps = [{"precio_jornada": 1000, "cantidad": 1, "descuento_pct": 0}]
+        assert resolver_descuento_uniforme(comps, 0) == pytest.approx(100.0)
+
+    def test_rechaza_objetivo_mayor_al_bruto(self):
+        from services.precios import resolver_descuento_uniforme
+
+        comps = [{"precio_jornada": 1000, "cantidad": 1, "descuento_pct": 0}]
+        with pytest.raises(ValueError, match="no puede superar"):
+            resolver_descuento_uniforme(comps, 1001)
+
+    def test_rechaza_sin_componentes(self):
+        from services.precios import resolver_descuento_uniforme
+
+        with pytest.raises(ValueError, match="no tienen precio base"):
+            resolver_descuento_uniforme([], 100)
+
+    def test_rechaza_objetivo_negativo(self):
+        from services.precios import resolver_descuento_uniforme
+
+        comps = [{"precio_jornada": 1000, "cantidad": 1, "descuento_pct": 0}]
+        with pytest.raises(ValueError, match="negativo"):
+            resolver_descuento_uniforme(comps, -1)
+
+    def test_ignora_el_descuento_previo_de_las_lineas(self):
+        # El descuento VIEJO de cada línea no importa para resolver el nuevo — se
+        # pisa por completo (el bruto se calcula sin descuento, como siempre).
+        from services.precios import resolver_descuento_uniforme
+
+        comps = [{"precio_jornada": 1000, "cantidad": 1, "descuento_pct": 99}]
+        assert resolver_descuento_uniforme(comps, 500) == pytest.approx(50.0)
+
+
 def test_campos_nulos_tolerados():
     # precio/cantidad/descuento None → tratados como 0
     comps = [

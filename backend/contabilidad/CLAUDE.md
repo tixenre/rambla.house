@@ -68,14 +68,21 @@ Reglas que NO se rompen:
   Una de las dos cuentas tiene que ser ARS (hoy solo hay ARS/USD). No reimplementar esta cuenta fuera
   de la puerta única.
 - **Devengado (P&L) ≠ percibido (saldo de caja)** a propósito: pueden no coincidir mes a mes.
-- **Cobradores en la constante única `COBRADORES`** (Pablo/Tincho/Rambla; Rambla = cobrador por
-  defecto) + `SOCIOS_HUMANOS` (Pablo/Tincho). **No duplicar** esos valores fuera de la constante.
+- **Cobradores en la constante única `COBRADORES`** (Pablo/Tincho/Rambla/**Estudio**; Rambla = cobrador
+  por defecto) + `SOCIOS_HUMANOS` (Pablo/Tincho, sin cambios). **No duplicar** esos valores fuera de la
+  constante. **`PARTES`** (rendición) es el mismo universo de 4. **Estudio** (economía separada del
+  Estudio de grabación, iniciativa #1283) es una **caja real** (`Caja Estudio`, `tipo='fondo'`,
+  `socio='Estudio'` — mismo puente 1:1 que Fondo Rambla), NO un socio humano: `es_cc=False` sale solo
+  de `socio not in SOCIOS_HUMANOS`, sin tocar `queries/saldos.py`. Un `tipo='fondo'` solo puede
+  representar a un cobrador NO-humano (`_SOCIOS_FONDO` en `commands/cuentas.py` = COBRADORES menos
+  SOCIOS_HUMANOS = Rambla/Estudio); `crear_cuenta` persiste `socio` para `tipo in ("socio","fondo")`
+  (antes solo para `"socio"` — un fondo nuevo lo perdía en silencio, fix 2026-07-23).
 - **Socios (Pablo/Tincho) = cuenta corriente, NO caja:** su saldo es `arranque + cobró − su parte ±
   rendiciones` (>0 DEUDOR le debe a Rambla, <0 ACREEDOR Rambla le debe, 0 saldado); `su parte` sale de
   la liquidación (`reportes/`). **No** suman al total disponible y una **negativa (acreedor) NO es
-  error** de reconciliación. Solo **Rambla/Fondo Rambla** es caja de plata real (su parte no se resta).
-  Un socio humano tiene su plata real en un banco propio, fuera del sistema — su cuenta acá es **puro
-  balance de deuda**, nunca plata física. Por eso (2026-07-02, `_validar_cuentas_y_categoria`):
+  error** de reconciliación. Solo **Rambla/Fondo Rambla y Estudio/Caja Estudio** son cajas de plata real
+  (su parte no se resta). Un socio humano tiene su plata real en un banco propio, fuera del sistema — su
+  cuenta acá es **puro balance de deuda**, nunca plata física. Por eso (2026-07-02, `_validar_cuentas_y_categoria`):
   **`retiro`/`aporte` están BLOQUEADOS contra una cuenta de socio** (representan plata entrando/
   saliendo de una caja real, sin sentido contra un balance de deuda); **`transferencia`/`ajuste`
   siguen permitidos** (`saldar()` los necesita); **`gasto` está PERMITIDO a propósito** — "el socio

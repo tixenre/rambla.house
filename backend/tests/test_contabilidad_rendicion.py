@@ -14,8 +14,8 @@ def _by(personas):
 
 
 class TestNetting:
-    def test_partes_son_pablo_tincho_rambla(self):
-        assert set(PARTES) == {"Pablo", "Tincho", "Rambla"}
+    def test_partes_son_pablo_tincho_rambla_estudio(self):
+        assert set(PARTES) == {"Pablo", "Tincho", "Rambla", "Estudio"}
 
     def test_todo_cobrado_por_uno_reparte_a_los_demas(self):
         # Junio del ejemplo: total 200k, todo lo cobró Tincho.
@@ -32,6 +32,19 @@ class TestNetting:
         assert {"de": "Tincho", "a": "Pablo", "monto": 70000} in sug
         assert {"de": "Tincho", "a": "Rambla", "monto": 123000} in sug
         assert sum(s["monto"] for s in sug) == 193000  # cierra
+
+    def test_cuarta_parte_estudio_participa_del_netting(self):
+        # Estudio le corresponden 50k pero no cobró nada — Rambla cobró de más
+        # (incluida la parte del Estudio, ej. un pago mal asignado) y debe
+        # transferirle. Mismo mecanismo que las otras 3 partes — no es un
+        # caso especial, solo una 4ta fila en PARTES.
+        corresponde = {"Pablo": 0, "Tincho": 0, "Rambla": 0, "Estudio": 50000}
+        cobrado = {"Pablo": 0, "Tincho": 0, "Rambla": 50000, "Estudio": 0}
+        r = _netting(corresponde, cobrado, {"Pablo": 0, "Tincho": 0, "Rambla": 0, "Estudio": 0})
+        by = _by(r["personas"])
+        assert by["Estudio"]["pendiente"] == 50000
+        assert by["Rambla"]["pendiente"] == -50000
+        assert r["sugeridos"] == [{"de": "Rambla", "a": "Estudio", "monto": 50000}]
 
     def test_balanceado_no_sugiere_nada(self):
         corresponde = {"Pablo": 100, "Tincho": 100, "Rambla": 0}

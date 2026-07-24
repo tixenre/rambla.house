@@ -150,3 +150,104 @@ def test_reorder_al_mismo_orden_no_escribe(setup):
         assert despues["xmin"] == antes["xmin"]
     finally:
         conn.close()
+
+
+# ── Precio objetivo del combo (#1283 Fase 5) ─────────────────────────────────
+
+COMBO, C1, C2, SIMPLE = 9_601_001, 9_601_002, 9_601_003, 9_601_004
+
+
+def _limpiar_combo(conn):
+    conn.execute("DELETE FROM kit_componentes WHERE equipo_id IN (%s,%s)" % (COMBO, SIMPLE))
+    conn.execute("DELETE FROM equipos WHERE id IN (%s,%s,%s,%s)" % (COMBO, C1, C2, SIMPLE))
+
+
+@pytest.fixture
+def setup_combo(monkeypatch):
+    monkeypatch.setenv("ADMIN_BYPASS_AUTH", "1")
+    from database import get_db, init_db
+
+    init_db()
+    conn = get_db()
+    try:
+        _limpiar_combo(conn)
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, tipo) VALUES (%s,%s,%s,%s)",
+            (COMBO, "combo-precio-objetivo-test", 9999, "combo"),
+        )
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, tipo) VALUES (%s,%s,%s,%s)",
+            (SIMPLE, "simple-precio-objetivo-test", 1, "simple"),
+        )
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, precio_jornada) VALUES (%s,%s,%s,%s)",
+            (C1, "componente-1", 5, 1000),
+        )
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, precio_jornada) VALUES (%s,%s,%s,%s)",
+            (C2, "componente-2", 5, 500),
+        )
+        conn.execute(
+            "INSERT INTO kit_componentes (equipo_id, componente_id, cantidad) VALUES (%s,%s,%s)",
+            (COMBO, C1, 2),
+        )
+        conn.execute(
+            "INSERT INTO kit_componentes (equipo_id, componente_id, cantidad) VALUES (%s,%s,%s)",
+            (COMBO, C2, 1),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    yield
+    conn = get_db()
+    try:
+        _limpiar_combo(conn)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def test_precio_objetivo_aplica_descuento_uniforme(setup_combo):
+    from routes.equipos.kit import PrecioObjetivoBody, set_precio_objetivo_combo
+
+    # bruto = 1000×2 + 500×1 = 2500. Objetivo 2000 → 20% en CADA línea.
+    out = set_precio_objetivo_combo(COMBO, PrecioObjetivoBody(precio_objetivo=2000), _fake_request())
+    assert out["precio_combo"] == 2000
+    assert {round(c["descuento_pct"], 4) for c in out["kit"]} == {20.0}
+
+
+def test_precio_objetivo_rechaza_equipo_no_combo(setup_combo):
+    from fastapi import HTTPException
+    from routes.equipos.kit import PrecioObjetivoBody, set_precio_objetivo_combo
+
+    with pytest.raises(HTTPException) as exc:
+        set_precio_objetivo_combo(SIMPLE, PrecioObjetivoBody(precio_objetivo=100), _fake_request())
+    assert exc.value.status_code == 400
+    assert "combo" in exc.value.detail
+
+
+def test_precio_objetivo_rechaza_sin_componentes(setup_combo):
+    from fastapi import HTTPException
+    from database import get_db
+    from routes.equipos.kit import PrecioObjetivoBody, set_precio_objetivo_combo
+
+    conn = get_db()
+    try:
+        conn.execute("UPDATE equipos SET tipo='combo' WHERE id=%s", (SIMPLE,))
+        conn.commit()
+    finally:
+        conn.close()
+    with pytest.raises(HTTPException) as exc:
+        set_precio_objetivo_combo(SIMPLE, PrecioObjetivoBody(precio_objetivo=100), _fake_request())
+    assert exc.value.status_code == 400
+    assert "componentes" in exc.value.detail
+
+
+def test_precio_objetivo_rechaza_objetivo_mayor_al_bruto(setup_combo):
+    from fastapi import HTTPException
+    from routes.equipos.kit import PrecioObjetivoBody, set_precio_objetivo_combo
+
+    with pytest.raises(HTTPException) as exc:
+        set_precio_objetivo_combo(COMBO, PrecioObjetivoBody(precio_objetivo=99999), _fake_request())
+    assert exc.value.status_code == 400
+    assert "no puede superar" in exc.value.detail

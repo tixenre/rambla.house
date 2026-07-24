@@ -408,6 +408,40 @@ def test_vto_pago_con_fecha_hasta_como_datetime_no_string():
     assert req.fecha_serv_hasta == date(2026, 7, 1)
 
 
+def test_construir_comprobante_pedido_estudio_mismo_dia_no_rompe():
+    """Chequeo de compatibilidad ARCA para el Estudio (#1283 Fase 6): un turno
+    del estudio dura HORAS, no días — `fecha_desde`/`fecha_hasta` caen en el
+    MISMO día calendario (ej. 10:00 a 12:00). `construir_comprobante` usa
+    SIEMPRE `Concepto.SERVICIOS` (correcto: alquilar es un servicio, no vender
+    un producto — no depende de `tipo`), y `_parse_fecha` trunca cada datetime
+    a `.date()` — mismo día en ambas puntas da `fecha_serv_desde ==
+    fecha_serv_hasta`, que ARCA acepta (un servicio de un solo día). El
+    comprobante es UNA línea consolidada (`_conceptos`, sin desglose de ítems),
+    así que tampoco hereda el bug de display "1 jornada" que tenía el
+    Presupuesto (ya arreglado en Fase 2) — no hay nada que mostrar mal.
+    `ComprobanteRequest.__post_init__` corre la validación completa de ARCA
+    (`_validar_estructura`/`_validar_fechas_servicio`) al construirse: si esto
+    no lanza, el comprobante es válido de punta a punta."""
+    from services.facturacion.comprobante_pedido import construir_comprobante
+    from arca_fe import Concepto, Emisor, CondicionIva
+
+    pedido = {
+        **_fake_pedido(),
+        "fecha_desde": datetime(2026, 7, 20, 10, 0),
+        "fecha_hasta": datetime(2026, 7, 20, 12, 0),
+    }
+    emisor_obj = Emisor(cuit=20300000003, punto_venta=2, condicion_iva=CondicionIva.MONOTRIBUTO)
+
+    req = construir_comprobante(
+        pedido, emisor_obj, CondicionIva.MONOTRIBUTO, fecha=date(2026, 7, 21),
+    )
+
+    assert req.concepto == Concepto.SERVICIOS
+    assert req.fecha_serv_desde == date(2026, 7, 20)
+    assert req.fecha_serv_hasta == date(2026, 7, 20)
+    assert req.fecha_vto_pago is not None
+
+
 def test_vto_pago_de_la_nc_tambien_respeta_la_fecha_del_comprobante():
     from services.facturacion.comprobante_pedido import construir_comprobante_nc
     from arca_fe import Emisor, CondicionIva, CbteAsoc, CbteTipo

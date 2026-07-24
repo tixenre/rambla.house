@@ -36,6 +36,7 @@ from services.precios import bruto_linea, calcular_total, jornadas_periodo, tipo
 from services.fechas import validar_rango_fechas
 from descuentos.queries.jornadas import obtener_descuento_jornadas
 from descuentos.queries.cliente import obtener_descuento_cliente
+from tipos_pedido import es_pedido_estudio
 
 # Modelos Pydantic del pedido: viven en `modelos.py` (split de este archivo, issue
 # de tracking #1254). Re-exportados acá TAL CUAL — `routes/alquileres/__init__.py`
@@ -328,9 +329,20 @@ def _recalcular_total_pedido(conn, id: int) -> None:
     Reentrante dentro de la misma transacción (`_apply_pedido_datos` ya puede
     tener la fila lockeada al llamar acá — Postgres no deadlockea consigo
     mismo). No es el motor de reservas (ese lockea `equipos`, tabla distinta).
+
+    No-op para pedidos del Estudio (`tipo` en `TIPOS_ESTUDIO`): sus ítems
+    llevan la plata real del espacio/promo directo en `subtotal`
+    (`cobro_modo='fijo'`, ver `routes/estudio.py`), no un `precio_jornada`
+    recalculable desde jornadas/descuentos — recalcular acá pisaría
+    `monto_total` a partir de esos subtotales con la fórmula de un alquiler
+    normal, rompiéndolo (bug vivo detectado en la auditoría de la economía
+    del Estudio). Sus ítems y su plata se editan desde los endpoints propios
+    de `routes/estudio.py`, que ya escriben `monto_total` directo.
     """
     p = conn.execute("SELECT * FROM alquileres WHERE id=%s FOR UPDATE", (id,)).fetchone()
     if not p:
+        return
+    if es_pedido_estudio(p):
         return
     d0 = to_datetime(p["fecha_desde"]) if p["fecha_desde"] else None
     d1 = to_datetime(p["fecha_hasta"]) if p["fecha_hasta"] else None
@@ -413,6 +425,18 @@ def propagar_descuento_a_presupuestos(conn, cliente_id: int) -> int:
     return len(ids)
 
 
+def _fecha_cambia(persistido, nuevo) -> bool:
+    """True si `nuevo` (string ISO del payload, o None) representa una fecha
+    DISTINTA de la ya persistida. Normaliza ambos con `to_datetime` en vez de
+    comparar strings crudos: el editor admin re-envía `fecha_desde`/
+    `fecha_hasta` en TODO guardado de "datos" —incluso uno que solo toca
+    notas— así que comparar por igualdad de string daría falso-positivo en
+    cada guardado (mismo instante, formato/precisión distintos)."""
+    p_dt = to_datetime(persistido) if persistido else None
+    n_dt = to_datetime(nuevo) if nuevo else None
+    return p_dt != n_dt
+
+
 def _apply_pedido_datos(conn, id: int, data: "PedidoDatos", es_admin: bool = False) -> dict:
     """Aplica un cambio parcial de datos (cliente/fechas/notas/descuento) al pedido.
 
@@ -427,6 +451,14 @@ def _apply_pedido_datos(conn, id: int, data: "PedidoDatos", es_admin: bool = Fal
     `FOR UPDATE`: lockea la fila del pedido — ver el mismo comentario en
     `_recalcular_total_pedido` (que esta función llama más abajo; relockear la
     misma fila en la misma transacción es reentrante, no deadlockea).
+
+    Pedidos del Estudio (`tipo` en `TIPOS_ESTUDIO`): un cambio de fecha/hora
+    real se rechaza (409) — este endpoint nunca revalida stock (ni el genérico
+    ni el buffer propio del espacio; ver `update_pedido_datos`), así que
+    aplicarlo sin más movería un turno confirmado a una franja ya ocupada sin
+    ningún chequeo. Notas/cliente/etc. pasan igual (`_recalcular_total_pedido`
+    ya es no-op para este tipo). Reprogramar un turno real es un endpoint
+    propio de `routes/estudio.py` (revalida `_centinela_libre`/motor).
     """
     p = conn.execute("SELECT * FROM alquileres WHERE id=%s FOR UPDATE", (id,)).fetchone()
     if not p:
@@ -437,6 +469,16 @@ def _apply_pedido_datos(conn, id: int, data: "PedidoDatos", es_admin: bool = Fal
     for _k in ("fecha_desde", "fecha_hasta"):
         if _k in payload and not payload[_k]:
             payload[_k] = None
+
+    if es_pedido_estudio(p) and (
+        ("fecha_desde" in payload and _fecha_cambia(p["fecha_desde"], payload["fecha_desde"]))
+        or ("fecha_hasta" in payload and _fecha_cambia(p["fecha_hasta"], payload["fecha_hasta"]))
+    ):
+        raise HTTPException(
+            409,
+            "Las fechas de un pedido del Estudio se reprograman desde Admin → Estudio "
+            "(para revalidar la disponibilidad del espacio).",
+        )
 
     cliente_cambio = "cliente_id" in payload and payload["cliente_id"]
     if cliente_cambio:
@@ -525,10 +567,19 @@ def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
     `FOR UPDATE`: lockea la fila del pedido — mismo motivo que
     `_recalcular_total_pedido` (evitar lost-update entre dos escritores
     concurrentes del mismo pedido).
+
+    Rechaza pedidos del Estudio (`tipo` en `TIPOS_ESTUDIO`, 409): este
+    reemplazo reconstruye subtotales con la fórmula de un alquiler normal
+    (jornadas × precio de catálogo) y perdería el ítem centinela que bloquea
+    el espacio — sus ítems se editan desde `routes/estudio.py`.
     """
     p = conn.execute("SELECT * FROM alquileres WHERE id=%s FOR UPDATE", (id,)).fetchone()
     if not p:
         raise HTTPException(404, "Pedido no encontrado")
+    if es_pedido_estudio(p):
+        raise HTTPException(
+            409, "Los ítems de un pedido del Estudio se editan desde Admin → Estudio."
+        )
     if not items:
         raise HTTPException(400, "Debe tener al menos un ítem")
 

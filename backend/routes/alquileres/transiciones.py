@@ -39,6 +39,7 @@ from fastapi import HTTPException
 
 from database import to_datetime
 from reservas import validar_stock as _check_stock
+from tipos_pedido import es_pedido_estudio
 
 # Estados que reservan stock activamente — entrar a uno de estos desde uno que
 # NO reserva exige re-validar stock (ver `_requiere_revalidar_stock`).
@@ -81,6 +82,30 @@ def _requiere_revalidar_stock(estado_actual: str, estado_nuevo: str) -> bool:
     ya está contado en la disponibilidad; re-chequear en cada lateral (ej.
     confirmado→retirado) sería redundante."""
     return estado_nuevo in ESTADOS_QUE_RESERVAN and estado_actual not in ESTADOS_QUE_RESERVAN
+
+
+def _revalidar_stock(conn, p) -> list[str]:
+    """Errores de stock/disponibilidad (YA formateados como mensaje) al
+    transicionar el pedido `p` a un estado que reserva.
+
+    Pedidos del Estudio (`tipo` en `TIPOS_ESTUDIO`) van por su propio
+    revalidador (`routes.estudio.revalidar_disponibilidad_estudio`: espacio
+    con SU buffer propio + equipos reales por el motor) — el `_check_stock`
+    genérico leería el ítem centinela como un equipo más y lo validaría con
+    el buffer GLOBAL, no el propio del espacio (bug encontrado auditando la
+    economía del Estudio: confirmar/transicionar un pedido de estudio no
+    revalidaba con el buffer correcto).
+
+    Import diferido de `routes.estudio` — ese módulo ya importa de
+    `routes.alquileres` (mismo motivo que el resto de los imports diferidos
+    de este archivo, ver `cambiar_estado`)."""
+    if es_pedido_estudio(p):
+        from routes.estudio import revalidar_disponibilidad_estudio
+        return revalidar_disponibilidad_estudio(conn, p)
+    return [
+        f"Sin stock suficiente: {s}"
+        for s in _check_stock(conn, p["id"], p["fecha_desde"], p["fecha_hasta"])
+    ]
 
 
 def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, actor: str) -> dict:
@@ -138,9 +163,7 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
         if not conn.execute("SELECT 1 FROM alquiler_items WHERE pedido_id=%s", (pedido_id,)).fetchone():
             errores.append("El pedido no tiene equipos cargados.")
         if p["fecha_desde"] and p["fecha_hasta"] and not errores:
-            sin_stock = _check_stock(conn, pedido_id, p["fecha_desde"], p["fecha_hasta"])
-            for s in sin_stock:
-                errores.append(f"Sin stock suficiente: {s}")
+            errores.extend(_revalidar_stock(conn, p))
         if errores:
             raise HTTPException(422, {"errores": errores})
 
@@ -149,9 +172,9 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
         and not fuente_es_historica
         and p["fecha_desde"] and p["fecha_hasta"]
     ):
-        sin_stock = _check_stock(conn, pedido_id, p["fecha_desde"], p["fecha_hasta"])
+        sin_stock = _revalidar_stock(conn, p)
         if sin_stock:
-            raise HTTPException(422, {"errores": [f"Sin stock suficiente: {s}" for s in sin_stock]})
+            raise HTTPException(422, {"errores": sin_stock})
 
     updates: dict = {"estado": estado_nuevo}
     numero_asignado = False

@@ -31,7 +31,7 @@ DEFAULT_TEMPLATES: dict[str, dict[str, str]] = {
 <p style="margin:0 0 8px;">Hola {{{{ cliente_nombre_pila }}}}, gracias por tu pedido <strong>#{{{{ numero_pedido }}}}</strong>. Lo estamos revisando y te confirmamos la disponibilidad a la brevedad.</p>
 {{% if mensaje_admin %}}{b.callout("mensaje_admin")}{{% endif %}}
 <p {b.LBL}>Tu pedido</p>
-<p style="margin:0 0 4px;"><strong>Retiro:</strong> {{{{ fecha_desde }}}}<br><strong>Devolución:</strong> {{{{ fecha_hasta }}}}{{% if cantidad_jornadas %}}<br><strong>Jornadas:</strong> {{{{ cantidad_jornadas }}}}{{% endif %}}</p>
+<p style="margin:0 0 4px;"><strong>Retiro:</strong> {{{{ fecha_desde }}}}<br><strong>Devolución:</strong> {{{{ fecha_hasta }}}}{{% if periodo_label %}}<br><strong>Duración:</strong> {{{{ periodo_label }}}}{{% endif %}}</p>
 {{{{ items_html|safe }}}}
 <p {b.TOTAL}><strong>Total estimado: {{{{ total }}}}</strong></p>
 {{% if docs_adjuntos %}}<p style="margin:6px 0 4px;">Te adjuntamos en este mail: <strong>{{{{ docs_adjuntos|join(', ') }}}}</strong>.</p>{{% endif %}}
@@ -45,8 +45,8 @@ Recibimos tu pedido #{{ numero_pedido }}. Lo estamos revisando y te confirmamos 
 {{ mensaje_admin }}
 {% endif %}
 Retiro: {{ fecha_desde }}
-Devolución: {{ fecha_hasta }}{% if cantidad_jornadas %}
-Jornadas: {{ cantidad_jornadas }}{% endif %}
+Devolución: {{ fecha_hasta }}{% if periodo_label %}
+Duración: {{ periodo_label }}{% endif %}
 
 {{ items_text }}
 
@@ -66,7 +66,7 @@ Cuando lo confirmemos vas a poder descargar el remito y el contrato desde ahí.
 <p style="margin:0 0 8px;">Hola {{{{ cliente_nombre_pila }}}}, confirmamos tu pedido <strong>#{{{{ numero_pedido }}}}</strong>. Acá tenés todos los datos de tu reserva.</p>
 {{% if mensaje_admin %}}{b.callout("mensaje_admin")}{{% endif %}}
 <p {b.LBL}>Reserva</p>
-<p style="margin:0 0 4px;"><strong>Retiro:</strong> {{{{ fecha_desde }}}}<br><strong>Devolución:</strong> {{{{ fecha_hasta }}}}{{% if cantidad_jornadas %}}<br><strong>Jornadas:</strong> {{{{ cantidad_jornadas }}}}{{% endif %}}</p>
+<p style="margin:0 0 4px;"><strong>Retiro:</strong> {{{{ fecha_desde }}}}<br><strong>Devolución:</strong> {{{{ fecha_hasta }}}}{{% if periodo_label %}}<br><strong>Duración:</strong> {{{{ periodo_label }}}}{{% endif %}}</p>
 <p {b.LBL}>Equipos</p>
 {{{{ items_html|safe }}}}
 <p {b.LBL}>Pago</p>
@@ -86,8 +86,8 @@ Tu pedido #{{ numero_pedido }} está confirmado. Acá tenés todos los datos de 
 {% endif %}
 RESERVA
 Retiro: {{ fecha_desde }}
-Devolución: {{ fecha_hasta }}{% if cantidad_jornadas %}
-Jornadas: {{ cantidad_jornadas }}{% endif %}
+Devolución: {{ fecha_hasta }}{% if periodo_label %}
+Duración: {{ periodo_label }}{% endif %}
 
 EQUIPOS
 {{ items_text }}

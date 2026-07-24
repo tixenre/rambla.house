@@ -11,6 +11,7 @@ import type {
   TrabajoOrdenItem,
   FotoOrdenItem,
   DescuentoJornada,
+  CalendarioBloqueo,
 } from "./types";
 
 // ── Estudio (singleton E1) ───────────────────────────────────────────────────
@@ -28,6 +29,14 @@ export const estudioAdminApi = {
       }
       return r.json() as Promise<{ pack: EstudioPackEquipoCurado[] }>;
     }),
+  // Bloqueos no-pedido en [desde, hasta] (slots fijos + clases de taller) —
+  // overlay del calendario del dashboard admin (get_calendario no los ve).
+  getOcupacion: (desde: string, hasta: string) => {
+    const sp = new URLSearchParams({ desde, hasta });
+    return authedJson<{ bloqueos: CalendarioBloqueo[] }>(
+      `/api/admin/estudio/ocupacion?${sp.toString()}`,
+    );
+  },
   listSlots: () => authedJson<{ slots: EstudioSlotFijo[] }>("/api/admin/estudio/slots"),
   createSlot: (data: EstudioSlotInput) =>
     authedPostJson<EstudioSlotFijo>("/api/admin/estudio/slots", data),

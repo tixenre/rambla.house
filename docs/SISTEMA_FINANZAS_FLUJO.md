@@ -54,6 +54,7 @@ debe depender de un route).
 | ¿Cuánto se cobró de un pedido? | `alquiler_pagos` | única tabla (`routes/alquileres/pagos.py`) | `monto_pagado` (cache derivado), liquidación, contabilidad |
 | ¿Hay stock/está disponible? | `backend/reservas/` | motor sagrado | gate único `create_pedido_retry` |
 | ¿Qué % de lo facturado es de Rambla vs. de un dueño de equipo? | `backend/reportes/liquidacion.py` + `comisiones.py` | `liquidar`, `repartir` | `contabilidad` (`partes_socios`, llama literal a `liquidar`), reporte mensual |
+| ¿A qué economía pertenece la plata de un pedido del Estudio? | `equipos.dueno` (por ítem) + `contabilidad.constants.{COBRADORES,PARTES}` | centinela `dueno='Estudio'`, promo `dueno='Rambla'`, suelto → su dueño real | `liquidar`/`filas_atribucion` (genérico, sin caso especial), `pyl.ganancia_neta` (`parte_estudio`), rendición (netting a 4 partes) |
 | ¿Cuánta plata tiene Rambla en sus cajas / cuánto le debe cada socio? | `backend/contabilidad/` | `queries/saldos.py::calcular_saldos` | tablero, reporte mensual |
 | ¿La factura discrimina IVA correctamente? | `backend/services/facturacion/` (`docs/SISTEMA_FACTURACION.md`) | `arca_fe/comprobante.py` | deriva de `monto_total`/`iva_monto` ya persistidos — **no recalcula** |
 | ¿Qué ve el cliente en pantalla? | — | — | **nunca calcula**: solo renderiza lo que el backend ya resolvió (regla dura, `MEMORIA.md` 2026-06-29) — con **una excepción confirmada**, ver Hallazgos |
@@ -72,7 +73,10 @@ debe depender de un route).
   `contabilidad`) + reconciliación (semáforo, ver abajo).
 - **`backend/contabilidad/`** (`CLAUDE.md` propio) — la plata interna: cajas, cuenta corriente de
   socios, movimientos, P&L, su propio cierre mensual (`movimientos` bloqueados). **Consume**
-  `reportes.liquidacion.liquidar()` para `partes_socios` — no recalcula el reparto.
+  `reportes.liquidacion.liquidar()` para `partes_socios` — no recalcula el reparto. Desde #1283
+  (Fases 3-4), **"Estudio" es una economía separada más**: 4to cobrador/parte (`COBRADORES`/`PARTES`),
+  con su propia caja real (`Caja Estudio`, `tipo='fondo'`) — mismo mecanismo que Rambla/Fondo Rambla,
+  sin caso especial en ningún consumidor genérico (`filas_atribucion`, `_netting`, `calcular_saldos`).
 - **`backend/services/facturacion/`** (`docs/SISTEMA_FACTURACION.md`) — Factura A/B/C, IVA, ARCA.
   Deriva de `monto_total`/`iva_monto` ya persistidos; la Nota de Crédito usa el snapshot de la
   factura ORIGINAL (no el pedido en vivo), para no quedar descuadrada ante ARCA si el precio cambió.

@@ -367,6 +367,42 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export ALEMBIC_DB_TEST=1
           python -m pytest tests/test_backfill_descuento_cliente_pct_migration_db.py -v --tb=short -m integration
+      - name: Backfill dueno='Estudio' + comisiones contra Postgres real (Fase 4, #1283)
+        run: |
+          cd backend
+          # El centinela pasa de dueno='Rambla' a 'Estudio' (economía separada) y
+          # comisiones_modelo custom del dueño suma la entrada Estudio sin pisar lo
+          # que ya estaba. Escrito en la Fase 4 de #1283 pero nunca se le agregó
+          # step propio — no corría en CI hasta ahora.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export ALEMBIC_DB_TEST=1
+          python -m pytest tests/test_backfill_estudio_dueno_comisiones_migration_db.py -v --tb=short -m integration
+      - name: Backfill ítems veraces del Estudio contra Postgres real (Fase 2, #1283)
+        run: |
+          cd backend
+          # Pedidos viejos del Estudio con centinela en $0 pasan a ítems veraces
+          # (Σ subtotales = monto_total): sin pack → centinela = monto_total; con
+          # pack → split espacio/pack. Escrito en la Fase 2 de #1283 pero nunca se
+          # le agregó step propio — no corría en CI hasta ahora.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export ALEMBIC_DB_TEST=1
+          python -m pytest tests/test_backfill_items_estudio_migration_db.py -v --tb=short -m integration
+      - name: Unificar equipos legacy del Estudio contra Postgres real (#1283)
+        run: |
+          cd backend
+          # Re-atribuye el historial de los 2 equipos simples pre-centinela
+          # (id 266/327, productos reales con pedidos ya facturados) al
+          # centinela/combo actuales y los borra — incluye la guarda de
+          # componente-vivo-de-otro-combo y el caso sin pack curado.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export ALEMBIC_DB_TEST=1
+          python -m pytest tests/test_unificar_estudio_legacy_migration_db.py -v --tb=short -m integration
       - name: Escuela v2 — video hero + modalidades de pago contra Postgres real (F4a, #1278)
         run: |
           cd backend

@@ -12,6 +12,7 @@ from database import get_db
 from rate_limit import limiter, ADMIN_WRITE_LIMIT
 from routes.equipos.core import router
 from services.contenido import contenido_de
+from services.precios import precio_combo, resolver_descuento_uniforme
 
 
 class KitItem(BaseModel):
@@ -137,6 +138,51 @@ def remove_kit_item(id: int, componente_id: int, request: Request):
                 (id, componente_id)
             )
             conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
+
+
+class PrecioObjetivoBody(BaseModel):
+    precio_objetivo: int = Field(ge=0, le=2_147_483_647)
+
+
+@router.post("/admin/equipos/{id}/combo/precio-objetivo")
+@limiter.limit(ADMIN_WRITE_LIMIT)
+def set_precio_objetivo_combo(id: int, data: PrecioObjetivoBody, request: Request):
+    """Aplica un % de descuento UNIFORME a TODAS las líneas del combo para que
+    su precio derivado (`precio_combo`) sea exactamente `precio_objetivo` —
+    atajo para no tener que tantear el % línea por línea a mano (#1283 Fase 5).
+    """
+    require_admin(request)
+    with get_db() as conn:
+        try:
+            eq = conn.execute("SELECT tipo FROM equipos WHERE id=%s", (id,)).fetchone()
+            if not eq:
+                raise HTTPException(404, "Equipo no encontrado")
+            if eq["tipo"] != "combo":
+                raise HTTPException(400, "Solo se puede fijar un precio objetivo para un combo")
+            # Mismo WHERE que `precio_combo` (services/precios.py): componentes
+            # vivos del combo — para que el % resuelto coincida con lo que se
+            # recalcula después.
+            rows = conn.execute(
+                "SELECT e.precio_jornada, kc.cantidad "
+                "FROM kit_componentes kc JOIN equipos e ON e.id = kc.componente_id "
+                "WHERE kc.equipo_id = %s AND e.eliminado_at IS NULL",
+                (id,),
+            ).fetchall()
+            if not rows:
+                raise HTTPException(400, "El combo no tiene componentes")
+            try:
+                descuento = resolver_descuento_uniforme(rows, data.precio_objetivo)
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+            conn.execute(
+                "UPDATE kit_componentes SET descuento_pct = %s WHERE equipo_id = %s",
+                (descuento, id),
+            )
+            conn.commit()
+            return {"kit": get_kit(id), "precio_combo": precio_combo(conn, id)}
         except Exception:
             conn.rollback()
             raise

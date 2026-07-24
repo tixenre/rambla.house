@@ -18,6 +18,10 @@ DEFAULT_MODELO: dict[str, dict[str, float]] = {
     "Rambla": {"Rambla": 100},
     "Pablo": {"Pablo": 50, "Rambla": 45, "Tincho": 5},
     "Tincho": {"Tincho": 50, "Rambla": 45, "Pablo": 5},
+    # Economía separada del Estudio (#1283): el centinela del espacio tiene
+    # dueno='Estudio' — su plata queda 100% para el Estudio, no se reparte
+    # con Rambla/Pablo/Tincho (es otra unidad de negocio, no una comisión).
+    "Estudio": {"Estudio": 100},
 }
 
 SETTING_KEY = "comisiones_modelo"

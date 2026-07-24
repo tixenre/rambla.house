@@ -11,6 +11,14 @@ donde `comisiones a dueños = facturado − parte de Rambla` (todo lo facturado 
 no es de Rambla, según el reparto de la liquidación). La parte de Rambla ya la
 calcula el reparto (`reportes/comisiones`); acá solo se compone.
 
+**El Estudio (economía separada, #1283) NO es una "comisión a dueños"**: es otra
+unidad de negocio de la misma empresa, no un costo pagado a un tercero. Por eso
+se descuenta APARTE (`parte_estudio`) en vez de mezclarse en `comisiones_duenos`
+— mostrarlo como "costo" en la cascada del P&L sería engañoso. `ganancia_neta`
+sigue siendo solo la parte de Rambla menos gastos (el Estudio nunca formó parte
+de esa ganancia; esto es sobre cómo se ETIQUETA el desglose, no un cambio en el
+número final).
+
 OJO: la base de ingreso (devengado) es distinta a la del **saldo de caja** (que se
 mueve por plata entrante, incluidas señas). La dualidad devengado vs percibido es
 a propósito. Si el mes está cerrado (#721) el devengado sale de la foto congelada.
@@ -32,22 +40,28 @@ def _resumen_devengado(conn, mes: str) -> dict:
 
 def ganancia_neta(conn, mes: str) -> dict:
     """Ganancia de Rambla del mes = **parte de Rambla − gastos**. Expone el desglose
-    completo: facturado (devengado total), comisiones a dueños y gastos por categoría.
+    completo: facturado (devengado total), comisiones a dueños, parte del Estudio
+    y gastos por categoría.
 
     La comisión de los dueños NO se cuenta como ganancia de Rambla: se descuenta
-    (vía usar la parte de Rambla en lugar del total facturado).
+    (vía usar la parte de Rambla en lugar del total facturado). La parte del
+    Estudio TAMPOCO es comisión a dueños (es otra economía, no un costo) — se
+    descuenta aparte para que `comisiones_duenos` no la mezcle con Pablo/Tincho.
     """
     desde, hasta = rango_mes(mes)
     resumen = _resumen_devengado(conn, mes)
     facturado = int(resumen["total"])
-    parte_rambla = int(resumen["por_beneficiario"].get("Rambla", 0))
-    comisiones_duenos = facturado - parte_rambla
+    por_benef = resumen["por_beneficiario"]
+    parte_rambla = int(por_benef.get("Rambla", 0))
+    parte_estudio = int(por_benef.get("Estudio", 0))
+    comisiones_duenos = facturado - parte_rambla - parte_estudio
     por_categoria = gastos_por_categoria(conn, desde, hasta)
     gastos = sum(int(g["monto"]) for g in por_categoria)
     return {
         "mes": mes,
         "facturado": facturado,
         "comisiones_duenos": comisiones_duenos,
+        "parte_estudio": parte_estudio,
         "gastos": gastos,
         "ganancia_neta": parte_rambla - gastos,
         "gastos_por_categoria": por_categoria,

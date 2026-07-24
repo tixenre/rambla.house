@@ -1269,7 +1269,8 @@ def _init_db_schema(conn):
         INSERT INTO cuentas (nombre, tipo, socio, moneda, orden) VALUES
             ('Caja Tincho', 'socio', 'Tincho', 'ARS', 1),
             ('Caja Pablo',  'socio', 'Pablo',  'ARS', 2),
-            ('Fondo Rambla','fondo', 'Rambla',  'ARS', 5)
+            ('Fondo Rambla','fondo', 'Rambla',  'ARS', 5),
+            ('Caja Estudio','fondo', 'Estudio', 'ARS', 6)
         ON CONFLICT DO NOTHING
     """)
     # `ON CONFLICT DO NOTHING` SIN target (no `(nombre) WHERE activa`): la tabla
@@ -1654,6 +1655,13 @@ def _init_db_schema(conn):
             UNIQUE (estudio_id, equipo_id)
         )
     """)
+    # Promo combo (#1283 Fase 5): reemplaza al pack curado por un equipo real
+    # tipo='combo' (dueno='Rambla', oculto del catálogo) — el precio deriva de
+    # sus componentes (precio_combo) en vez de un `pack_precio` fijo suelto.
+    # NULL = todavía no se creó (el pack sigue siendo el mecanismo vigente,
+    # ⏰ LEGACY hasta que la Fase 8 lo retire). ON DELETE SET NULL: si el combo
+    # se borra, el estudio no rompe — vuelve al estado "sin promo".
+    conn.execute("ALTER TABLE estudio ADD COLUMN IF NOT EXISTS promo_combo_id INTEGER REFERENCES equipos(id) ON DELETE SET NULL")
 
     # Registro de búsquedas del catálogo público (analítica interna). Acompaña a
     # la migración i1c2d3e4f5a6 — acá garantizamos su creación en cada boot
@@ -1759,11 +1767,15 @@ def _init_db_schema(conn):
     # SAGRADO sin lógica nueva. Es un recurso interno: invisible al catálogo,
     # filtros, listado admin, ranking y specs (es_recurso_interno=TRUE). Idempotente:
     # solo se crea si el estudio todavía no tiene un equipo asociado.
+    # `dueno='Estudio'` (economía separada, Fase 4 de #1283 — antes 'Rambla'): las
+    # horas del espacio se atribuyen al Estudio en la liquidación/P&L, no a Rambla
+    # rental. Una BD que YA tenía el centinela con dueno='Rambla' la migra la
+    # migración de backfill (esquema en dos capas para este dato puntual).
     est_row = conn.execute("SELECT equipo_id FROM estudio WHERE id = 1").fetchone()
     if est_row is not None and est_row["equipo_id"] is None:
         cur_cent = conn.execute("""
             INSERT INTO equipos (nombre, cantidad, visible_catalogo, dueno, es_recurso_interno)
-            VALUES ('Estudio (espacio)', 1, 0, 'Rambla', TRUE)
+            VALUES ('Estudio (espacio)', 1, 0, 'Estudio', TRUE)
             RETURNING id
         """)
         centinela_id = cur_cent.fetchone()["id"]
@@ -1945,6 +1957,7 @@ def _init_db_schema(conn):
             nota            TEXT NOT NULL DEFAULT '',
             portada_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL,
             portada_url     TEXT NOT NULL DEFAULT '',
+            orden           INTEGER NOT NULL DEFAULT 0,
             created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -1957,6 +1970,10 @@ def _init_db_schema(conn):
     conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS nota TEXT NOT NULL DEFAULT ''")
     conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS portada_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL")
     conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS portada_url TEXT NOT NULL DEFAULT ''")
+    # Orden manual (independiente de fecha) — el backfill de datos existentes
+    # vive SOLO en la migración Alembic (y3z4a5b6c7d8), no acá: repetirlo en
+    # cada arranque pisaría cualquier reorden manual ya guardado.
+    conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS orden INTEGER NOT NULL DEFAULT 0")
 
     # Escuela v2 F3: instructores como ENTIDAD propia (antes solo texto suelto en
     # `talleres.instructor_*`) — un taller puede tener varios, un instructor puede

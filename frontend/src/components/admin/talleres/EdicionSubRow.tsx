@@ -107,7 +107,7 @@ export function EdicionSubRow({
   return (
     <div
       className={`rounded-lg border transition-colors ${
-        expanded ? "border-ink/20 bg-ink/3" : "border-border/50"
+        expanded ? "border-ink/20 bg-surface" : "border-border/50"
       }`}
     >
       {/* Edition header */}

@@ -165,6 +165,7 @@ class TestTemplatesEnriquecidos:
         "fecha_desde": "20 may · 10:00",
         "fecha_hasta": "24 may · 18:00",
         "cantidad_jornadas": 4,
+        "periodo_label": "4 jornadas",  # lo que produciría _pedido_email_context para cantidad_jornadas=4
         "total": "$ 12.500",
         "pago_estado": "Pagado $ 6.250 · saldo pendiente $ 6.250",
         "items_html": "<table></table>",
@@ -212,10 +213,10 @@ class TestTemplatesEnriquecidos:
             "docs_adjuntos": ["Contrato", "Cotización"],
         }
         html, text = self._render(key, ctx)
-        assert "Jornadas:</strong> 4" in html
+        assert "Duración:</strong> 4 jornadas" in html
         assert "¡Te esperamos el jueves!" in html
         assert "Contrato, Cotización" in html
-        assert "Jornadas: 4" in text
+        assert "Duración: 4 jornadas" in text
         assert "Contrato, Cotización" in text
 
     def test_confirmado_sin_adjuntos_cae_al_portal(self):

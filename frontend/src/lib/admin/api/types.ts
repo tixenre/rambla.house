@@ -565,8 +565,8 @@ export type EquipoPendienteCompat = {
 };
 
 // Pagos: destinatario (a quién se cobró) y método. Espeja las constantes del
-// backend (`routes/alquileres.py`); los defaults se aplican en el modal.
-export const DESTINATARIOS_PAGO = ["Rambla", "Tincho", "Pablo"] as const;
+// backend (`contabilidad/constants.py::COBRADORES`); los defaults se aplican en el modal.
+export const DESTINATARIOS_PAGO = ["Rambla", "Tincho", "Pablo", "Estudio"] as const;
 export const METODOS_PAGO = ["transferencia", "efectivo"] as const;
 
 export interface PagoLogRow {
@@ -899,6 +899,15 @@ export type CalendarioPedido = {
   fecha_hasta: string;
   monto_total: number;
   equipos: string | null;
+};
+
+/** Bloqueo del estudio que no es un pedido (slot fijo recurrente o clase de
+ * taller publicada) — overlay del calendario admin, GET /admin/estudio/ocupacion. */
+export type CalendarioBloqueo = {
+  tipo: "slot_fijo" | "taller";
+  label: string;
+  fecha_desde: string;
+  fecha_hasta: string;
 };
 
 /** Una fila agregada de búsquedas: un término normalizado con cuántas veces se

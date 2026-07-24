@@ -20,6 +20,11 @@ from contabilidad.queries.cuentas import obtener_cuenta
 # `moneda` se fija al crear (cambiarla con movimientos cargados rompería el saldo).
 _CAMPOS_EDITABLES = ("nombre", "saldo_inicial", "fecha_apertura", "orden", "activa")
 
+# Cobradores que un fondo puede representar — los dos no-humanos de COBRADORES
+# (Rambla y Estudio son cajas reales de la empresa/economía separada, no
+# personas; los socios humanos van por `tipo='socio'`, no por un fondo).
+_SOCIOS_FONDO = tuple(c for c in COBRADORES if c not in SOCIOS_HUMANOS)
+
 
 def validar_cuenta(data: dict) -> None:
     """Valida la forma de una cuenta. Lanza ValueError si es inválida. PURA.
@@ -43,15 +48,15 @@ def validar_cuenta(data: dict) -> None:
     if socio and socio not in COBRADORES:
         raise ValueError(f"El cobrador debe ser uno de {', '.join(COBRADORES)}.")
     # Cada tipo acota qué cobrador puede representar: socio → Pablo/Tincho;
-    # fondo → Rambla (o ninguno); caja/banco → ningún cobrador.
+    # fondo → Rambla o Estudio (o ninguno); caja/banco → ningún cobrador.
     if tipo == "socio":
         if socio not in SOCIOS_HUMANOS:
             raise ValueError(f"Una cuenta de socio debe representar a {', '.join(SOCIOS_HUMANOS)}.")
     elif tipo == "fondo":
-        if socio and socio != "Rambla":
-            raise ValueError("Un fondo solo puede representar a Rambla (o a nadie).")
+        if socio and socio not in _SOCIOS_FONDO:
+            raise ValueError(f"Un fondo solo puede representar a {' o '.join(_SOCIOS_FONDO)} (o a nadie).")
     elif socio:
-        raise ValueError("Solo una caja de socio (Pablo/Tincho) o el fondo (Rambla) tienen cobrador.")
+        raise ValueError("Solo una caja de socio (Pablo/Tincho) o un fondo (Rambla/Estudio) tienen cobrador.")
 
     si = data.get("saldo_inicial", 0)
     if si is None:
@@ -75,7 +80,11 @@ def crear_cuenta(conn, *, nombre, tipo, socio=None, moneda="ARS", saldo_inicial=
     data = {"nombre": (nombre or "").strip(), "tipo": tipo, "moneda": moneda,
             "socio": (socio or None), "saldo_inicial": int(saldo_inicial or 0)}
     validar_cuenta(data)
-    socio_val = data["socio"] if tipo == "socio" else None
+    # `fondo` SÍ persiste su cobrador (Rambla/Estudio) — antes solo `socio` lo
+    # hacía, así que crear un fondo nuevo (ej. Caja Estudio) por este camino
+    # descartaba el cobrador en silencio; el seed de Fondo Rambla lo sorteaba
+    # insertando la fila por SQL directo, no vía este comando.
+    socio_val = data["socio"] if tipo in ("socio", "fondo") else None
 
     # Default de `fecha_apertura` = el clean start de la liquidación (constante única
     # en reportes/), como bound param (DAL: nada de literales de valor en el SQL).

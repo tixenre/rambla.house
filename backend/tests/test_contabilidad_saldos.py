@@ -66,8 +66,8 @@ class TestValidarCuenta:
         with pytest.raises(ValueError):
             validar_cuenta({"nombre": "X", "tipo": "caja", "moneda": "EUR"})
 
-    def test_cobradores_son_los_tres(self):
-        assert set(COBRADORES) == {"Pablo", "Tincho", "Rambla"}
+    def test_cobradores_son_los_cuatro(self):
+        assert set(COBRADORES) == {"Pablo", "Tincho", "Rambla", "Estudio"}
 
 
 class TestCalcularSaldos:

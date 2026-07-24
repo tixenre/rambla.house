@@ -57,6 +57,11 @@ except Exception:  # pragma: no cover — fallback para correr el módulo aislad
     def es_responsable_inscripto(perfil):
         return str(perfil or "").lower().startswith("responsable")
 
+try:
+    from tipos_pedido import TIPOS_ESTUDIO
+except Exception:  # pragma: no cover — fallback para correr el módulo aislado
+    TIPOS_ESTUDIO = ("estudio", "estudio_fijo")
+
 # Datos del locador (env vars en producción)
 OWNER_NOMBRE    = os.getenv("OWNER_NOMBRE",    "Marín Javier Santini Calarco")
 OWNER_CUIL      = os.getenv("OWNER_CUIL",      "23-37389102-9")
@@ -543,6 +548,39 @@ def _jornadas(pedido):
         return 1
 
 
+def _es_pedido_estudio(pedido) -> bool:
+    return pedido.get("tipo") in TIPOS_ESTUDIO
+
+
+def _horas_estudio(pedido) -> int:
+    """Duración en horas de un turno del estudio — la franja siempre es un
+    múltiplo exacto de horas (`_franja_estudio`), `round` es solo defensivo."""
+    try:
+        d0, d1 = _as_dt(pedido["fecha_desde"]), _as_dt(pedido["fecha_hasta"])
+        return max(1, round((d1 - d0).total_seconds() / 3600))
+    except Exception:
+        return 1
+
+
+def _periodo_label(pedido, j) -> str:
+    """"4 horas" para un pedido del Estudio; "N jornada(s)" para un alquiler
+    normal — display en horas del Estudio (2026-07-23): un turno de 4hs
+    mostrando "1 jornada" confundía en presupuesto/contrato/mail."""
+    if _es_pedido_estudio(pedido):
+        h = _horas_estudio(pedido)
+        return f'{h} hora{"s" if h != 1 else ""}'
+    return f'{j} jornada{"s" if j != 1 else ""}'
+
+
+def _periodo_stat(pedido, j) -> tuple[int, str]:
+    """Como `_periodo_label` pero separado en (número, label) — para los
+    stat-tiles del packing list, que muestran el número y el label en spans
+    distintos en vez de un string combinado."""
+    if _es_pedido_estudio(pedido):
+        return _horas_estudio(pedido), ("Hora" if _horas_estudio(pedido) == 1 else "Horas")
+    return j, ("Jornada" if j == 1 else "Jornadas")
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 #  PRESUPUESTO   (reemplaza _pedido_html)
 # ═══════════════════════════════════════════════════════════════════════════
@@ -616,16 +654,17 @@ def _pedido_html(pedido):
     periodo = (
         '<div class="meta-block"><div class="meta-label">Período de alquiler</div>'
         f'<div class="meta-val">{_fmt_date_dow(pedido.get("fecha_desde"))} → {_fmt_date_dow(pedido.get("fecha_hasta"))}</div>'
-        f'<div class="meta-accent">{j} jornada{"s" if j != 1 else ""}{fa}</div></div>'
+        f'<div class="meta-accent">{_periodo_label(pedido, j)}{fa}</div></div>'
     )
+    precio_col = "Precio / hora" if _es_pedido_estudio(pedido) else "Precio / jornada"
     body = (
         _membrete(pedido, "Remito", _ref(pedido), _fmt_date_long(pedido.get("emitido") or datetime.now()))
         + f'<div class="meta">{_cliente_block(pedido)}{periodo}</div>'
         + '<table class="items"><thead><tr><th></th><th>Equipo</th>'
-          '<th class="c">Cant.</th><th class="r">Precio / jornada</th><th class="r">Subtotal</th></tr></thead>'
+          f'<th class="c">Cant.</th><th class="r">{precio_col}</th><th class="r">Subtotal</th></tr></thead>'
           f'<tbody>{"".join(rows)}</tbody></table>'
         + '<div class="total-section"><div><div class="total-box total-box--light">' + "".join(tr) + "</div>"
-        + f'<div class="total-foot">{j} jornada{"s" if j != 1 else ""} · '
+        + f'<div class="total-foot">{_periodo_label(pedido, j)} · '
           f'{len(items)} equipo{"s" if len(items) != 1 else ""}{" · Factura A" if es_ri else ""}</div></div></div>'
         + notas + _footer()
     )
@@ -825,7 +864,7 @@ def _contrato_html(pedido, mostrar_locador=True, fonts_ligeras=False, locador_ov
           '<div class="meta-block"><div class="meta-label">Período de locación</div>'
           f'<div class="meta-val">{_fmt_date_dow(pedido.get("fecha_desde"))} al {_fmt_date_dow(pedido.get("fecha_hasta"))}</div></div>'
           '<div class="meta-block"><div class="meta-label">Duración</div>'
-          f'<div class="meta-val">{j} jornada{"s" if j != 1 else ""}</div></div></div>'
+          f'<div class="meta-val">{_periodo_label(pedido, j)}</div></div></div>'
         + '<div class="partes">'
         + (
             '<div class="parte"><div class="parte-head">Locador</div>'
@@ -967,7 +1006,9 @@ def _packing_list_html(pedido):
         + '<div class="pk-summary">'
           f'<div class="pk-stat"><span class="n">{len(items)}</span><span class="l">Equipos principales</span></div>'
           f'<div class="pk-stat"><span class="n">{unidades}</span><span class="l">Unidades totales</span></div>'
-          f'<div class="pk-stat"><span class="n">{_jornadas(pedido)}</span><span class="l">Jornadas</span></div></div>'
+          + '<div class="pk-stat"><span class="n">{}</span><span class="l">{}</span></div></div>'.format(
+                *_periodo_stat(pedido, _jornadas(pedido))
+            )
         + '<div class="firmas">'
           '<div class="firma"><div class="rol">Controló salida</div><div class="name">&nbsp;</div><div class="sub">Nombre · fecha · hora</div></div>'
           '<div class="firma"><div class="rol">Controló retorno</div><div class="name">&nbsp;</div><div class="sub">Nombre · fecha · hora</div></div></div>'
