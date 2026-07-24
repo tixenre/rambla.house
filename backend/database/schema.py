@@ -2015,6 +2015,42 @@ def _init_db_schema(conn):
     # dropeada en la misma fase) — "Trabajó con" ahora lee de acá.
     conn.execute("ALTER TABLE instructores ADD COLUMN IF NOT EXISTS proyectos TEXT NOT NULL DEFAULT ''")
 
+    # Instituciones (co-presentadoras de un taller, ej. "Rambla" + "Filmar") —
+    # mismo patrón que instructores (entidad propia + N↔N con talleres, un
+    # taller puede tener varias, una institución puede co-presentar varios
+    # talleres). A propósito SIN `rol`/`proyectos` (no aplican a una
+    # organización) y SIN `activo` (en instructores quedó vestigial — nadie lo
+    # lee ni lo filtra — no se copia un campo que no rinde).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS instituciones (
+            id            SERIAL PRIMARY KEY,
+            nombre        TEXT NOT NULL,
+            descripcion   TEXT NOT NULL DEFAULT '',
+            instagram     TEXT NOT NULL DEFAULT '',
+            web           TEXT NOT NULL DEFAULT '',
+            logo_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL,
+            logo_url      TEXT NOT NULL DEFAULT '',
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS taller_instituciones (
+            taller_id      INTEGER NOT NULL REFERENCES talleres(id) ON DELETE CASCADE,
+            institucion_id INTEGER NOT NULL REFERENCES instituciones(id) ON DELETE CASCADE,
+            orden          INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (taller_id, institucion_id)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_instituciones_taller "
+        "ON taller_instituciones(taller_id, orden)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_instituciones_institucion "
+        "ON taller_instituciones(institucion_id)"
+    )
+
     # Escuela v2 F4a: video hero (YouTube) del concepto. Mismo extractor que
     # estudio_trabajos (services.media.youtube.extract_video_id), pero acá SÍ
     # se descarga y guarda el poster en R2 (store_youtube_poster) — es

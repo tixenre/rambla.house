@@ -166,6 +166,30 @@ def _get_instructores_taller(conn, taller_id: int) -> list[dict]:
     return [_instructor_dict(r) for r in rows]
 
 
+def _institucion_dict(row) -> dict:
+    return {
+        "id": row["id"],
+        "nombre": row["nombre"],
+        "descripcion": row["descripcion"],
+        "instagram": row["instagram"],
+        "web": row["web"],
+        "logo_url": row["logo_url"] or "",
+        "logo_media_id": row["logo_media_id"],
+    }
+
+
+def _get_instituciones_taller(conn, taller_id: int) -> list[dict]:
+    """Instituciones co-presentadoras de un taller (ej. "Rambla" + "Filmar"),
+    ordenadas. Mismo patrón que _get_instructores_taller."""
+    rows = conn.execute(
+        "SELECT ins.* FROM instituciones ins "
+        "JOIN taller_instituciones ti ON ti.institucion_id = ins.id "
+        "WHERE ti.taller_id = %s ORDER BY ti.orden, ins.id",
+        (taller_id,),
+    ).fetchall()
+    return [_institucion_dict(r) for r in rows]
+
+
 def _trabajo_dict(row) -> dict:
     return {
         "id": row["id"],
@@ -267,7 +291,9 @@ def _edicion_lite(row) -> dict:
     }
 
 
-def _edicion_to_public_dict(row, clases=None, instructores=None, modalidades=None, trabajos=None) -> dict:
+def _edicion_to_public_dict(
+    row, clases=None, instructores=None, modalidades=None, trabajos=None, instituciones=None,
+) -> dict:
     """Convierte edicion_row (JOIN talleres) al shape plano del API público."""
     return {
         "id": row["id"],
@@ -303,6 +329,9 @@ def _edicion_to_public_dict(row, clases=None, instructores=None, modalidades=Non
         # F3: instructores como entidad (además de los campos legacy arriba,
         # servidos en paralelo hasta F6).
         "instructores": instructores if instructores is not None else [],
+        # Instituciones co-presentadoras (ej. "Rambla" + "Filmar") — mismo
+        # patrón que instructores.
+        "instituciones": instituciones if instituciones is not None else [],
         # sesiones = backward compat con el frontend (lee de clases_taller)
         "sesiones": clases if clases is not None else [],
         # F4a: video hero del concepto + modalidades de pago (con fallback
@@ -354,7 +383,9 @@ def _edicion_to_admin_dict(edicion_row, clases=None, modalidades=None) -> dict:
     }
 
 
-def _concepto_to_admin_dict(taller_row, ediciones=None, instructores=None, trabajos=None) -> dict:
+def _concepto_to_admin_dict(
+    taller_row, ediciones=None, instructores=None, trabajos=None, instituciones=None,
+) -> dict:
     """Convierte una fila de talleres (concepto) al shape admin con ediciones anidadas."""
     return {
         "id": taller_row["id"],
@@ -371,6 +402,7 @@ def _concepto_to_admin_dict(taller_row, ediciones=None, instructores=None, traba
         "video_url": _row_get(taller_row, "video_url", ""),
         "video_poster_url": _row_get(taller_row, "video_poster_url", ""),
         "instructores": instructores if instructores is not None else [],
+        "instituciones": instituciones if instituciones is not None else [],
         "ediciones": ediciones if ediciones is not None else [],
         # F4c: FAQ del concepto + trabajos pasados (solo YouTube, sin testimonios).
         "faqs": _row_get(taller_row, "faqs", []) or [],
@@ -568,6 +600,7 @@ def list_talleres():
             _edicion_to_public_dict(
                 r, _get_clases(conn, r["id"]), _get_instructores_taller(conn, r["taller_id"]),
                 _get_modalidades(conn, r["id"]),
+                instituciones=_get_instituciones_taller(conn, r["taller_id"]),
             )
             for r in rows
         ]
@@ -590,6 +623,7 @@ def get_taller(slug: str, request: Request):
         d = _edicion_to_public_dict(
             row, _get_clases(conn, row["id"]), _get_instructores_taller(conn, row["taller_id"]),
             _get_modalidades(conn, row["id"]), _get_trabajos_taller(conn, row["taller_id"]),
+            instituciones=_get_instituciones_taller(conn, row["taller_id"]),
         )
 
         # Próxima edición: misma concepto (taller_id), numero_edicion mayor
@@ -1095,6 +1129,24 @@ class TallerInstructoresBody(BaseModel):
     instructor_ids: list[int]
 
 
+class InstitucionBody(BaseModel):
+    nombre: str
+    descripcion: str = ""
+    instagram: str = ""
+    web: str = ""
+
+
+class InstitucionUpdateBody(BaseModel):
+    nombre: str | None = None
+    descripcion: str | None = None
+    instagram: str | None = None
+    web: str | None = None
+
+
+class TallerInstitucionesBody(BaseModel):
+    institucion_ids: list[int]
+
+
 class FaqItemBody(BaseModel):
     pregunta: str
     respuesta: str = ""
@@ -1166,6 +1218,7 @@ def admin_list_talleres(request: Request):
                 _concepto_to_admin_dict(
                     t, ediciones, _get_instructores_taller(conn, t["id"]),
                     _get_trabajos_taller(conn, t["id"]),
+                    instituciones=_get_instituciones_taller(conn, t["id"]),
                 )
             )
     return result
@@ -1295,12 +1348,14 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
             # test_talleres_f2_db.py, se colgaba justo por esto).
             clases_out = _get_clases(conn, e_row["id"])
             instructores_out = _get_instructores_taller(conn, taller_id)
+            instituciones_out = _get_instituciones_taller(conn, taller_id)
         except Exception:
             conn.rollback()
             raise
 
     return _concepto_to_admin_dict(
-        t_row, [_edicion_to_admin_dict(e_row, clases_out)], instructores_out
+        t_row, [_edicion_to_admin_dict(e_row, clases_out)], instructores_out,
+        instituciones=instituciones_out,
     )
 
 
@@ -1469,10 +1524,13 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
             ]
             instructores_out = _get_instructores_taller(conn, taller_id)
             trabajos_out = _get_trabajos_taller(conn, taller_id)
+            instituciones_out = _get_instituciones_taller(conn, taller_id)
         except Exception:
             conn.rollback()
             raise
-    return _concepto_to_admin_dict(t_row, ediciones, instructores_out, trabajos_out)
+    return _concepto_to_admin_dict(
+        t_row, ediciones, instructores_out, trabajos_out, instituciones=instituciones_out,
+    )
 
 
 @router.patch("/admin/ediciones/{edicion_id}")
@@ -1849,6 +1907,173 @@ def admin_set_taller_instructores(taller_id: int, body: TallerInstructoresBody, 
         conn.commit()
         instructores_out = _get_instructores_taller(conn, taller_id)
     return {"instructores": instructores_out}
+
+
+# ── Instituciones co-presentadoras (ej. "Rambla" + "Filmar") ────────────────────
+# Mismo patrón que instructores: entidad propia + N↔N con talleres.
+
+_INSTITUCION_LOGO_SPECS = [
+    DeriveSpec(name="display", square=False, max_width=400),
+    DeriveSpec(name="display-sm", square=False, max_width=200),
+]
+
+
+@router.get("/admin/instituciones")
+def admin_list_instituciones(request: Request):
+    """Lista todas las instituciones (para el selector del taller)."""
+    require_admin(request)
+    with get_db() as conn:
+        rows = conn.execute("SELECT * FROM instituciones ORDER BY nombre").fetchall()
+        return [_institucion_dict(r) for r in rows]
+
+
+@router.post("/admin/instituciones", status_code=201)
+def admin_create_institucion(body: InstitucionBody, request: Request):
+    require_admin(request)
+    if not body.nombre.strip():
+        raise HTTPException(400, "El nombre es obligatorio")
+    with get_db() as conn:
+        cur = conn.execute(
+            "INSERT INTO instituciones (nombre, descripcion, instagram, web) "
+            "VALUES (%s, %s, %s, %s) RETURNING id",
+            (body.nombre.strip(), body.descripcion.strip(),
+             body.instagram.strip(), body.web.strip()),
+        )
+        institucion_id = cur.fetchone()["id"]
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM instituciones WHERE id = %s", (institucion_id,)
+        ).fetchone()
+    return _institucion_dict(row)
+
+
+@router.patch("/admin/instituciones/{institucion_id}")
+def admin_update_institucion(institucion_id: int, body: InstitucionUpdateBody, request: Request):
+    require_admin(request)
+    sets = []
+    params: list = []
+    if body.nombre is not None:
+        if not body.nombre.strip():
+            raise HTTPException(400, "El nombre es obligatorio")
+        sets.append("nombre = %s"); params.append(body.nombre.strip())
+    if body.descripcion is not None:
+        sets.append("descripcion = %s"); params.append(body.descripcion.strip())
+    if body.instagram is not None:
+        sets.append("instagram = %s"); params.append(body.instagram.strip())
+    if body.web is not None:
+        sets.append("web = %s"); params.append(body.web.strip())
+    if not sets:
+        raise HTTPException(400, "No hay campos para actualizar")
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM instituciones WHERE id = %s", (institucion_id,)
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(404, "Institución no encontrada")
+        sets.append("updated_at = NOW()")
+        params.append(institucion_id)
+        conn.execute(f"UPDATE instituciones SET {', '.join(sets)} WHERE id = %s", params)
+        conn.commit()
+        row = conn.execute(
+            "SELECT * FROM instituciones WHERE id = %s", (institucion_id,)
+        ).fetchone()
+    return _institucion_dict(row)
+
+
+@router.delete("/admin/instituciones/{institucion_id}", status_code=200)
+def admin_delete_institucion(institucion_id: int, request: Request):
+    """Borra una institución. 409 si está vinculada a algún taller (desvincular
+    primero) — mismo criterio que instructores."""
+    require_admin(request)
+    with get_db() as conn:
+        existing = conn.execute(
+            "SELECT id FROM instituciones WHERE id = %s", (institucion_id,)
+        ).fetchone()
+        if existing is None:
+            raise HTTPException(404, "Institución no encontrada")
+        vinculada = conn.execute(
+            "SELECT 1 FROM taller_instituciones WHERE institucion_id = %s LIMIT 1",
+            (institucion_id,),
+        ).fetchone()
+        if vinculada:
+            raise HTTPException(409, "Desvinculala de sus talleres antes de borrarla")
+        conn.execute("DELETE FROM instituciones WHERE id = %s", (institucion_id,))
+        conn.commit()
+    return {"ok": True}
+
+
+@router.post("/admin/instituciones/{institucion_id}/upload-logo")
+async def admin_upload_logo_institucion(institucion_id: int, request: Request):
+    """Sube el logo de una institución a R2 vía el motor de media."""
+    require_admin(request)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM instituciones WHERE id = %s", (institucion_id,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "Institución no encontrada")
+
+    form = await request.form()
+    file = form.get("file")
+    if file is None or not hasattr(file, "read"):
+        raise HTTPException(400, "Falta el campo 'file' en el form-data")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Archivo vacío")
+    if len(raw) > FOTO_MAX_MB * 1024 * 1024:
+        raise HTTPException(413, f"Archivo muy grande (máx {FOTO_MAX_MB} MB)")
+
+    try:
+        with get_db() as conn:
+            asset = store_upload(
+                raw, kind="institucion-logo", derive_specs=_INSTITUCION_LOGO_SPECS, conn=conn
+            )
+            display = asset.variant("display") or (asset.variants[0] if asset.variants else None)
+            url = display.url if display else ""
+            conn.execute(
+                "UPDATE instituciones SET logo_media_id = %s, logo_url = %s, "
+                "updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                (asset.id, url, institucion_id),
+            )
+            conn.commit()
+    except MediaError as e:
+        raise HTTPException(e.status, e.detail)
+    except Exception as e:
+        logger.error("upload_logo_institucion: error inesperado: %s", e, exc_info=True)
+        raise HTTPException(502, "No se pudo subir el logo. Intentá de nuevo.")
+
+    return {"ok": True, "url": url, "media_id": asset.id}
+
+
+@router.put("/admin/talleres/{taller_id}/instituciones")
+def admin_set_taller_instituciones(taller_id: int, body: TallerInstitucionesBody, request: Request):
+    """Reemplaza la lista (ordenada) de instituciones co-presentadoras de un taller."""
+    require_admin(request)
+    with get_db() as conn:
+        t = conn.execute("SELECT id FROM talleres WHERE id = %s", (taller_id,)).fetchone()
+        if t is None:
+            raise HTTPException(404, "Taller no encontrado")
+        if body.institucion_ids:
+            existentes = {
+                r["id"]
+                for r in conn.execute(
+                    "SELECT id FROM instituciones WHERE id = ANY(%s)", (body.institucion_ids,)
+                ).fetchall()
+            }
+            faltantes = set(body.institucion_ids) - existentes
+            if faltantes:
+                raise HTTPException(400, f"Institución(es) inexistente(s): {sorted(faltantes)}")
+        conn.execute("DELETE FROM taller_instituciones WHERE taller_id = %s", (taller_id,))
+        for orden, institucion_id in enumerate(body.institucion_ids):
+            conn.execute(
+                "INSERT INTO taller_instituciones (taller_id, institucion_id, orden) "
+                "VALUES (%s, %s, %s)",
+                (taller_id, institucion_id, orden),
+            )
+        conn.commit()
+        instituciones_out = _get_instituciones_taller(conn, taller_id)
+    return {"instituciones": instituciones_out}
 
 
 # ── Trabajos pasados (F4c) ─────────────────────────────────────────────────────

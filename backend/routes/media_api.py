@@ -139,11 +139,29 @@ def _get_instructor_perfil_media(conn, entity_id: int) -> list[dict]:
     return [_build_asset(conn, adapted)]
 
 
+def _get_institucion_logo_media(conn, entity_id: int) -> list[dict]:
+    """Logo de una institución co-presentadora (ej. "Rambla"/"Filmar").
+    entity_id = institucion_id."""
+    row = conn.execute(
+        "SELECT id, logo_url, logo_media_id FROM instituciones WHERE id = %s",
+        (entity_id,),
+    ).fetchone()
+    if not row:
+        return []
+    media_id = row["logo_media_id"]
+    url = row["logo_url"] or ""
+    if not media_id and not url:
+        return []
+    adapted = {"id": row["id"], "media_id": media_id, "orden": 0, "es_principal": True, "url": url}
+    return [_build_asset(conn, adapted)]
+
+
 _KIND_HANDLERS = {
     "equipo": _get_equipo_media,
     "estudio": _get_estudio_media,
     "taller-clase": _get_taller_clase_media,
     "instructor-perfil": _get_instructor_perfil_media,
+    "institucion-logo": _get_institucion_logo_media,
 }
 
 
