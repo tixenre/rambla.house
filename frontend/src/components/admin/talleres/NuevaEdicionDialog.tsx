@@ -35,7 +35,6 @@ export function NuevaEdicionDialog({
       ? Math.max(...concepto.ediciones.map((e) => e.numero_edicion)) + 1
       : 1;
 
-  const [tipo, setTipo] = useState("intensivo");
   const [clases, setClases] = useState<ClaseBody[]>([]);
   const [cupos, setCupos] = useState("12");
   const [precioTotal, setPrecioTotal] = useState("0");
@@ -43,7 +42,6 @@ export function NuevaEdicionDialog({
 
   useEffect(() => {
     if (open) {
-      setTipo("intensivo");
       setClases([]);
       setCupos("12");
       setPrecioTotal("0");
@@ -69,7 +67,6 @@ export function NuevaEdicionDialog({
       toast.error("La edición anterior no tiene clases");
       return;
     }
-    setTipo(ultima.tipo_taller);
     setClases(
       ultima.clases.map((c) => ({
         fecha: c.fecha,
@@ -107,7 +104,9 @@ export function NuevaEdicionDialog({
       return;
     }
     mut.mutate({
-      tipo_taller: tipo,
+      // `tipo_taller` no tiene UI propia (Escuela v2) — el backend igual lo
+      // exige (NOT NULL), así que viaja fijo.
+      tipo_taller: "intensivo",
       clases,
       cupos_total: c,
       precio_total: pt,
@@ -138,12 +137,7 @@ export function NuevaEdicionDialog({
                 </Button>
               )}
             </div>
-            <ClasesAsistente
-              tipo={tipo}
-              onTipoChange={setTipo}
-              clases={clases}
-              onChange={setClases}
-            />
+            <ClasesAsistente clases={clases} onChange={setClases} />
             {clases.length > 0 && (
               <div className="mt-4 pointer-events-none select-none">
                 <TallerCalendario sesiones={clases} />

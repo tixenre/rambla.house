@@ -16,12 +16,10 @@ import { updateEdicionInCache } from "./cache";
 export function ClasesSection({ edicion }: { edicion: EdicionAdmin }) {
   const qc = useQueryClient();
   const [editing, setEditing] = useState(false);
-  const [tipo, setTipo] = useState(edicion.tipo_taller || "intensivo");
   const [clases, setClases] = useState<ClaseBody[]>(edicion.clases ?? []);
   const [numeroEdicion, setNumeroEdicion] = useState(String(edicion.numero_edicion));
 
   useEffect(() => {
-    setTipo(edicion.tipo_taller || "intensivo");
     setClases(edicion.clases ?? []);
     setNumeroEdicion(String(edicion.numero_edicion));
   }, [edicion.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -54,11 +52,12 @@ export function ClasesSection({ edicion }: { edicion: EdicionAdmin }) {
       toast.error("Agregá al menos una clase");
       return;
     }
-    mut.mutate({ tipo_taller: tipo, clases });
+    // `tipo_taller` no tiene UI propia (Escuela v2): se preserva el valor ya
+    // guardado de la edición, no se re-decide acá.
+    mut.mutate({ tipo_taller: edicion.tipo_taller || "intensivo", clases });
   }
 
   function handleCancel() {
-    setTipo(edicion.tipo_taller || "intensivo");
     setClases(edicion.clases ?? []);
     setEditing(false);
   }
@@ -110,7 +109,7 @@ export function ClasesSection({ edicion }: { edicion: EdicionAdmin }) {
     </div>
   ) : (
     <div className="flex flex-col gap-5">
-      <ClasesAsistente tipo={tipo} onTipoChange={setTipo} clases={clases} onChange={setClases} />
+      <ClasesAsistente clases={clases} onChange={setClases} />
       {clases.length > 0 && (
         <div className="pointer-events-none select-none">
           <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3">

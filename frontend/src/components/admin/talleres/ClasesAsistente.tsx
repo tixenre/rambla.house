@@ -7,53 +7,13 @@ import { talleresAdminApi } from "@/lib/admin/api/talleres";
 import { Button } from "@/design-system/ui/button";
 import { Input } from "@/design-system/ui/input";
 import { Textarea } from "@/design-system/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/design-system/ui/select";
 import { HoraSelect } from "./HoraSelect";
-import { cn } from "@/lib/utils";
 import { fijarFormatoDeLinea } from "@/lib/talleres/temario";
 
-const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
-
-// Horarios en MINUTOS desde medianoche (Escuela v2 F1): 510 = 8:30.
-function generarClasesSemanales(
-  diaSemana: number,
-  mesDesde: string,
-  mesHasta: string,
-  horaInicioMin: number,
-  horaFinMin: number,
-): ClaseBody[] {
-  const [yD, mD] = mesDesde.split("-").map(Number);
-  const [yH, mH] = mesHasta.split("-").map(Number);
-  const end = new Date(yH, mH, 0);
-  const jsDay = (diaSemana + 1) % 7;
-  const cur = new Date(yD, mD - 1, 1);
-  while (cur.getDay() !== jsDay) cur.setDate(cur.getDate() + 1);
-  const result: ClaseBody[] = [];
-  while (cur <= end) {
-    result.push({
-      fecha: cur.toISOString().slice(0, 10),
-      hora_inicio_min: horaInicioMin,
-      hora_fin_min: horaFinMin,
-    });
-    cur.setDate(cur.getDate() + 7);
-  }
-  return result;
-}
-
 export function ClasesAsistente({
-  tipo,
-  onTipoChange,
   clases,
   onChange,
 }: {
-  tipo: string;
-  onTipoChange: (t: string) => void;
   clases: ClaseBody[];
   onChange: (s: ClaseBody[]) => void;
 }) {
@@ -61,13 +21,8 @@ export function ClasesAsistente({
   const [newFecha, setNewFecha] = useState("");
   const [newIni, setNewIni] = useState(540);
   const [newFin, setNewFin] = useState(780);
-  const [diaSemana, setDiaSemana] = useState(0);
-  const [mesDesde, setMesDesde] = useState("");
-  const [mesHasta, setMesHasta] = useState("");
-  const [semIni, setSemIni] = useState(540);
-  const [semFin, setSemFin] = useState(780);
 
-  function addIntensivo() {
+  function addClase() {
     if (!newFecha) {
       toast.error("Ingresá una fecha");
       return;
@@ -78,32 +33,16 @@ export function ClasesAsistente({
     }
     // Se permite repetir fecha (e incluso franja): "Clase 11 y 12 se dictan
     // juntas". El backend rechaza el duplicado EXACTO (fecha+franja+título).
+    // Fecha/hora de cada clase son editables después, en su propia card —
+    // esto solo agrega el punto de partida (una clase distinta a la vez;
+    // para un taller entero, "Copiar clases de la edición anterior" cubre
+    // el caso común de re-editar un taller que ya corrió).
     onChange(
       [...clases, { fecha: newFecha, hora_inicio_min: newIni, hora_fin_min: newFin }].sort((a, b) =>
         a.fecha.localeCompare(b.fecha),
       ),
     );
     setNewFecha("");
-  }
-
-  function generateSemanal() {
-    if (!mesDesde || !mesHasta) {
-      toast.error("Ingresá ambos meses");
-      return;
-    }
-    if (mesDesde > mesHasta) {
-      toast.error("El mes desde debe ser anterior al hasta");
-      return;
-    }
-    if (semIni >= semFin) {
-      toast.error("Hora inicio debe ser menor a hora fin");
-      return;
-    }
-    const generated = generarClasesSemanales(diaSemana, mesDesde, mesHasta, semIni, semFin);
-    const existingDates = new Set(generated.map((g) => g.fecha));
-    const kept = clases.filter((s) => !existingDates.has(s.fecha));
-    onChange([...kept, ...generated].sort((a, b) => a.fecha.localeCompare(b.fecha)));
-    toast.success(`${generated.length} clases generadas`);
   }
 
   function removeAt(idx: number) {
@@ -159,96 +98,29 @@ export function ClasesAsistente({
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center gap-3">
-        <span className="text-xs font-mono uppercase tracking-wider text-muted-foreground shrink-0">
-          Tipo
-        </span>
-        <Select value={tipo} onValueChange={onTipoChange}>
-          <SelectTrigger className="w-[180px]">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="intensivo">Intensivo</SelectItem>
-            <SelectItem value="semanal">Semanal</SelectItem>
-          </SelectContent>
-        </Select>
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">Fecha</label>
+          <Input
+            type="date"
+            value={newFecha}
+            onChange={(e) => setNewFecha(e.target.value)}
+            className="w-[160px]"
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">Desde</label>
+          <HoraSelect value={newIni} onChange={setNewIni} min={0} max={1410} />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">Hasta</label>
+          <HoraSelect value={newFin} onChange={setNewFin} min={30} max={1440} />
+        </div>
+        <Button variant="outline" size="sm" onClick={addClase} className="gap-1.5">
+          <Plus className="h-3.5 w-3.5" />
+          Agregar clase
+        </Button>
       </div>
-
-      {tipo === "intensivo" && (
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Fecha</label>
-            <Input
-              type="date"
-              value={newFecha}
-              onChange={(e) => setNewFecha(e.target.value)}
-              className="w-[160px]"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Desde</label>
-            <HoraSelect value={newIni} onChange={setNewIni} min={0} max={1410} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Hasta</label>
-            <HoraSelect value={newFin} onChange={setNewFin} min={30} max={1440} />
-          </div>
-          <Button variant="outline" size="sm" onClick={addIntensivo} className="gap-1.5">
-            <Plus className="h-3.5 w-3.5" />
-            Agregar fecha
-          </Button>
-        </div>
-      )}
-
-      {tipo === "semanal" && (
-        <div className="flex flex-wrap items-end gap-2">
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Día</label>
-            <Select value={String(diaSemana)} onValueChange={(v) => setDiaSemana(Number(v))}>
-              <SelectTrigger className="w-[130px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DIAS.map((d, i) => (
-                  <SelectItem key={i} value={String(i)}>
-                    {d}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Desde (mes)</label>
-            <Input
-              type="month"
-              value={mesDesde}
-              onChange={(e) => setMesDesde(e.target.value)}
-              className="w-[140px]"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Hasta (mes)</label>
-            <Input
-              type="month"
-              value={mesHasta}
-              onChange={(e) => setMesHasta(e.target.value)}
-              className="w-[140px]"
-            />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Desde</label>
-            <HoraSelect value={semIni} onChange={setSemIni} min={0} max={1410} />
-          </div>
-          <div className="flex flex-col gap-1">
-            <label className="text-xs text-muted-foreground">Hasta</label>
-            <HoraSelect value={semFin} onChange={setSemFin} min={30} max={1440} />
-          </div>
-          <Button variant="outline" size="sm" onClick={generateSemanal} className="gap-1.5">
-            <Plus className="h-3.5 w-3.5" />
-            Generar
-          </Button>
-        </div>
-      )}
 
       {clases.length > 0 ? (
         <div className="flex flex-col gap-2">

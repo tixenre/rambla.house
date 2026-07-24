@@ -30,7 +30,6 @@ export function NuevoConceptoDialog({
 }) {
   const [nombre, setNombre] = useState("");
   const [instructorNombre, setInstructorNombre] = useState("");
-  const [tipo, setTipo] = useState("intensivo");
   const [clases, setClases] = useState<ClaseBody[]>([]);
   const [cupos, setCupos] = useState("12");
   const [precioTotal, setPrecioTotal] = useState("0");
@@ -40,7 +39,6 @@ export function NuevoConceptoDialog({
     if (open) {
       setNombre("");
       setInstructorNombre("");
-      setTipo("intensivo");
       setClases([]);
       setCupos("12");
       setPrecioTotal("0");
@@ -85,7 +83,9 @@ export function NuevoConceptoDialog({
       nombre: nombre.trim(),
       instructor_nombre: instructorNombre.trim(),
       edicion: {
-        tipo_taller: tipo,
+        // `tipo_taller` no tiene UI propia (Escuela v2) — el backend igual lo
+        // exige (NOT NULL), así que viaja fijo.
+        tipo_taller: "intensivo",
         clases,
         cupos_total: c,
         precio_total: pt,
@@ -130,12 +130,7 @@ export function NuevoConceptoDialog({
             <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3">
               Clases — 1.ª edición *
             </p>
-            <ClasesAsistente
-              tipo={tipo}
-              onTipoChange={setTipo}
-              clases={clases}
-              onChange={setClases}
-            />
+            <ClasesAsistente clases={clases} onChange={setClases} />
             {clases.length > 0 && (
               <div className="mt-4 pointer-events-none select-none">
                 <TallerCalendario sesiones={clases} />
