@@ -204,8 +204,14 @@ export function ReservaDialog({
         estado: estadoAlta,
       });
     },
-    onSuccess: () => {
+    onSuccess: (pedido) => {
       toast.success(editando ? "Turno actualizado" : "Turno creado");
+      if (pedido.promo_advertencia) {
+        toast.warning("La promo se reservó incompleta", {
+          description: pedido.promo_advertencia,
+          duration: 7000,
+        });
+      }
       qc.invalidateQueries({ queryKey: ["admin", "estudio", "reservas"] });
       qc.invalidateQueries({ queryKey: ["admin", "estudio", "agenda"] });
       onSaved();

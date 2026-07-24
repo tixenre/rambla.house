@@ -4,8 +4,11 @@ La promo reemplaza al pack curado: un equipo real `tipo='combo'` (dueno=
 'Rambla', oculto del catálogo), creado desde `POST /admin/estudio/promo/
 crear-desde-pack` a partir de `estudio_pack_equipos`, con su precio clavado
 vía un descuento % uniforme (`resolver_descuento_uniforme`). Reservar CON
-promo agrega una línea del combo a precio fijo (ítems veraces) y exige stock
-DURO (409 si falta, sin best-effort — a diferencia del pack).
+promo agrega una línea del combo a precio fijo (ítems veraces) — BEST-EFFORT
+(2026-07-24): si falta stock de algún componente no bloquea la reserva, cobra
+el precio fijo completo igual y avisa vía `promo_advertencia` (mismo criterio
+que tenía el pack ⏰ retirado). Los sueltos (equipos elegidos aparte, no acá)
+siguen siendo stock DURO — ver `test_estudio_admin_reservas_db.py`.
 
 OPT-IN y SEGURO POR DEFECTO (mismo gating que los demás *_db.py):
     DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test \
@@ -263,7 +266,11 @@ def test_reserva_con_promo_items_veraces_y_atribucion_rambla(client_con_db, setu
     assert promo_item["dueno"] == "Rambla"  # NO los dueños tradicionales de EQ_A/EQ_B
 
 
-def test_reserva_con_promo_sin_stock_da_409_y_no_crea_pedido(client_con_db, setup):
+def test_reserva_con_promo_sin_stock_es_best_effort_no_bloquea(client_con_db, setup):
+    """La promo es BEST-EFFORT (mismo criterio que tenía el pack ⏰ retirado,
+    2026-07-24): si un componente no tiene stock, la reserva NO se bloquea —
+    se crea igual, cobra el precio fijo completo de la promo (una sola línea,
+    ítems veraces) y avisa qué faltó vía `promo_advertencia`."""
     assert _crear_promo(client_con_db, precio_objetivo=1200).status_code == 201
 
     from database import get_db
@@ -289,17 +296,28 @@ def test_reserva_con_promo_sin_stock_da_409_y_no_crea_pedido(client_con_db, setu
     finally:
         conn.close()
 
-    antes = client_con_db.get("/api/estudio").status_code  # sanity: server up
-    assert antes == 200
-
     r = _reservar(client_con_db, fecha="2030-04-05", start="14:00", horas=2, con_promo=True)
-    assert r.status_code == 409, r.text
+    assert r.status_code == 201, r.text
+    data = r.json()
+    pedido_id = data["id"]
+    assert data["promo_advertencia"] is not None
+    assert "Equipo promo B" in data["promo_advertencia"]
 
     conn = get_db()
     try:
-        n = conn.execute(
-            "SELECT COUNT(*) AS n FROM alquileres WHERE cliente_id=%s", (CLIENTE_ID,)
-        ).fetchone()["n"]
+        pedido = conn.execute(
+            "SELECT monto_total FROM alquileres WHERE id=%s", (pedido_id,)
+        ).fetchone()
+        items = conn.execute(
+            "SELECT ai.equipo_id, ai.subtotal, ai.cobro_modo "
+            "FROM alquiler_items ai WHERE ai.pedido_id=%s ORDER BY ai.id",
+            (pedido_id,),
+        ).fetchall()
     finally:
         conn.close()
-    assert n == 0  # la transacción completa se descartó — nada a medio crear
+
+    # 10000/h × 2h (espacio) + 1200 (promo, precio FIJO completo pese al
+    # faltante — best-effort no descuenta nada, solo avisa).
+    assert pedido["monto_total"] == 21200
+    promo_item = next(it for it in items if it["subtotal"] == 1200)
+    assert promo_item["cobro_modo"] == "fijo"

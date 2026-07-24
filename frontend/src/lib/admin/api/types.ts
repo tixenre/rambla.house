@@ -1168,6 +1168,11 @@ export type Pedido = {
    *  slot mensual del Estudio, #1283) — ver `lib/tipos-pedido.ts`. Ítems/
    *  fechas de un pedido del Estudio se editan desde Estudio → Reservas. */
   tipo?: "diaria" | "estudio" | "estudio_fijo";
+  /** Presente solo en la respuesta de crear/editar un turno del Estudio: si
+   *  la promo (combo) se reservó con algún componente sin stock — best-effort,
+   *  nunca bloquea la reserva, pero el admin/cliente debe saberlo. `null`/
+   *  ausente = todo lo de la promo estaba disponible. */
+  promo_advertencia?: string | null;
   items: PedidoItem[];
   pagos?: PedidoPago[];
   /** True si hay una `solicitudes_modificacion` con estado='pendiente' para

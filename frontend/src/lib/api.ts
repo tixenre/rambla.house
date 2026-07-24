@@ -367,10 +367,13 @@ export type EstudioReservaBody = {
 /** Crea una reserva real del estudio (entra como solicitud, estado='solicitado').
  *  Requiere cliente logueado: usa authedPostJson (manda la cookie de sesión). */
 export async function apiCrearReservaEstudio(body: EstudioReservaBody) {
-  const res = await authedPostJson<{ id: number; numero_pedido: number | null }>(
-    "/api/estudio/reservas",
-    body,
-  );
+  const res = await authedPostJson<{
+    id: number;
+    numero_pedido: number | null;
+    /** Si la promo se reservó con algún componente sin stock (best-effort,
+     *  nunca bloquea) — ver `routes/estudio.py::_crear_pedido_estudio`. */
+    promo_advertencia?: string | null;
+  }>("/api/estudio/reservas", body);
   // Analytics: estudio reservado (no-op si GA no está activo).
   trackReservarEstudio({
     horas: body.horas,

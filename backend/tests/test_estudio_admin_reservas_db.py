@@ -46,17 +46,20 @@ EQ_SUELTO, EQ_SUELTO_UNICO = 9_475_002, 9_475_003
 EQ_PROMO_COMP = 9_475_004
 PROMO_COMBO_ID = 9_475_005
 PED_EXTRA = 9_475_090
+OCUPANTE_PROMO_ID = 9_475_091
 
 
 def _limpiar(conn):
     conn.execute(
         "DELETE FROM alquiler_items WHERE pedido_id IN "
-        "(SELECT id FROM alquileres WHERE cliente_id = %s OR cliente_nombre LIKE %s OR id = %s)",
-        (CLIENTE_ID, "Reserva admin test%", PED_EXTRA),
+        "(SELECT id FROM alquileres WHERE cliente_id = %s OR cliente_nombre LIKE %s "
+        "OR id IN (%s,%s))",
+        (CLIENTE_ID, "Reserva admin test%", PED_EXTRA, OCUPANTE_PROMO_ID),
     )
     conn.execute(
-        "DELETE FROM alquileres WHERE cliente_id = %s OR cliente_nombre LIKE %s OR id = %s",
-        (CLIENTE_ID, "Reserva admin test%", PED_EXTRA),
+        "DELETE FROM alquileres WHERE cliente_id = %s OR cliente_nombre LIKE %s "
+        "OR id IN (%s,%s)",
+        (CLIENTE_ID, "Reserva admin test%", PED_EXTRA, OCUPANTE_PROMO_ID),
     )
     conn.execute("UPDATE estudio SET promo_combo_id = NULL WHERE id = 1")
     conn.execute("DELETE FROM kit_componentes WHERE equipo_id = %s", (PROMO_COMBO_ID,))
@@ -228,6 +231,53 @@ def test_crear_reserva_admin_con_promo_y_espacio_override(client_con_db, setup):
     data = r.json()
     # espacio override (5000, no 20000) + promo (1000, sin descuento) = 6000.
     assert data["monto_total"] == 6000
+    assert data["promo_advertencia"] is None
+
+
+def test_crear_reserva_admin_con_promo_sin_stock_es_best_effort(client_con_db, setup):
+    """La promo es BEST-EFFORT también desde el admin (mismo núcleo
+    `_crear_pedido_estudio` que el flujo público) — a diferencia de un suelto
+    (ver `test_crear_reserva_admin_sueltos_sin_stock_da_409_y_no_persiste`,
+    que sigue siendo stock DURO), si falta stock de un componente de la
+    promo la reserva no se bloquea: se crea igual, cobra el precio fijo
+    completo y avisa vía `promo_advertencia`."""
+    from database import get_db
+    from routes.estudio import _franja_estudio, _get_estudio_row
+
+    conn = get_db()
+    try:
+        estudio = _get_estudio_row(conn)
+        fd, fh = _franja_estudio(estudio, "2030-05-09", "10:00", 2)
+        # Agota TODO el stock de EQ_PROMO_COMP (cantidad=5) con otro pedido en
+        # la MISMA franja — la promo depende de él, así que el combo deja de
+        # tener stock disponible.
+        conn.execute(
+            """INSERT INTO alquileres (id, cliente_nombre, estado, fecha_desde, fecha_hasta, monto_total)
+               VALUES (%s,'Ocupante promo admin',%s,%s,%s,5000)""",
+            (OCUPANTE_PROMO_ID, "confirmado", fd, fh),
+        )
+        conn.execute(
+            "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, subtotal) VALUES (%s,%s,5,5000)",
+            (OCUPANTE_PROMO_ID, EQ_PROMO_COMP),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    r = client_con_db.post(
+        "/api/admin/estudio/reservas",
+        json={
+            "fecha": "2030-05-09", "start": "10:00", "horas": 2,
+            "cliente_nombre": "Reserva admin test — promo best-effort",
+            "con_promo": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["promo_advertencia"] is not None
+    assert "Componente promo admin test" in data["promo_advertencia"]
+    # 10000/h × 2h (espacio) + 1000 (promo, precio FIJO completo) = 21000.
+    assert data["monto_total"] == 21000
 
 
 def test_crear_reserva_admin_sueltos_sin_stock_da_409_y_no_persiste(client_con_db, setup):
@@ -389,6 +439,52 @@ def test_editar_reserva_agrega_suelto(client_con_db, setup):
     )
     assert r2.status_code == 200, r2.text
     assert r2.json()["monto_total"] == 22000  # 20000 (espacio sin cambios) + 2000
+
+
+def test_editar_reserva_agrega_promo_sin_stock_es_best_effort(client_con_db, setup):
+    """Mismo criterio best-effort que la creación (ver
+    `test_crear_reserva_admin_con_promo_sin_stock_es_best_effort`) — editar un
+    turno para sumarle la promo cuando su componente no tiene stock tampoco
+    bloquea, cobra el precio fijo completo y avisa."""
+    from database import get_db
+    from routes.estudio import _franja_estudio, _get_estudio_row
+
+    r = client_con_db.post(
+        "/api/admin/estudio/reservas",
+        json={
+            "fecha": "2030-05-14", "start": "10:00", "horas": 2,
+            "cliente_nombre": "Reserva admin test — editar promo best-effort",
+        },
+    )
+    assert r.status_code == 201, r.text
+    pedido_id = r.json()["id"]
+
+    conn = get_db()
+    try:
+        estudio = _get_estudio_row(conn)
+        fd, fh = _franja_estudio(estudio, "2030-05-14", "10:00", 2)
+        conn.execute(
+            """INSERT INTO alquileres (id, cliente_nombre, estado, fecha_desde, fecha_hasta, monto_total)
+               VALUES (%s,'Ocupante promo admin edit',%s,%s,%s,5000)""",
+            (OCUPANTE_PROMO_ID, "confirmado", fd, fh),
+        )
+        conn.execute(
+            "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, subtotal) VALUES (%s,%s,5,5000)",
+            (OCUPANTE_PROMO_ID, EQ_PROMO_COMP),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    r2 = client_con_db.patch(
+        f"/api/admin/estudio/reservas/{pedido_id}",
+        json={"con_promo": True},
+    )
+    assert r2.status_code == 200, r2.text
+    data = r2.json()
+    assert data["promo_advertencia"] is not None
+    assert "Componente promo admin test" in data["promo_advertencia"]
+    assert data["monto_total"] == 21000  # 20000 (espacio) + 1000 (promo completo)
 
 
 def test_editar_reserva_bloquea_estudio_fijo(client_con_db, setup):

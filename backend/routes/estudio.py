@@ -1695,13 +1695,15 @@ def _crear_pedido_estudio(
     cliente_id, cliente_nombre, cliente_email, cliente_telefono,
     con_promo: bool, sueltos: list | None,
     espacio_monto: int | None, estado: str, numero_pedido: int,
-) -> int:
+) -> tuple[int, Optional[str]]:
     """Núcleo de creación de un pedido del Estudio (#1283 Fase 6 — extraído de
     `crear_reserva_estudio`, que ahora es un wrapper: sesión+Didit+anticipación
-    +'solicitado'). Arma los ítems (promo+sueltos DUROS / centinela DURO) y el
-    pedido, todo en la transacción del `conn` del caller (no commitea — eso es
-    responsabilidad del caller). Devuelve `pedido_id`. El pack (⏰ mecanismo
-    legacy anterior a la promo) se retiró en la Fase 8, #1283.
+    +'solicitado'). Arma los ítems (promo BEST-EFFORT / sueltos DUROS /
+    centinela DURO) y el pedido, todo en la transacción del `conn` del caller
+    (no commitea — eso es responsabilidad del caller). Devuelve
+    `(pedido_id, promo_advertencia)` — el segundo es `None` salvo que la
+    promo se haya reservado con algún componente sin stock (ver abajo). El
+    pack (⏰ mecanismo legacy anterior a la promo) se retiró en la Fase 8, #1283.
 
     NO valida identidad ni anticipación — son gates del CALLER, distintos entre
     el flujo público y el admin. SÍ valida slot/taller (conflicto estructural,
@@ -1756,29 +1758,48 @@ def _crear_pedido_estudio(
         ),
     )
 
-    # ── Promo (combo) + sueltos: requisito DURO, sin best-effort ────────────
-    # A diferencia del pack ⏰ retirado (equipos sueltos best-effort, valor fijo
-    # pase lo que pase), la promo y los sueltos son equipos/combos a precio fijo
-    # YA comprometido con el cliente: si algún componente/equipo no tiene stock,
-    # la reserva falla entera (409) en vez de servir una versión parcial
-    # silenciosa. Se valida ANTES de insertar (`validar_stock_hipotetico`,
-    # como en `revalidar_disponibilidad_estudio`) — NO insertar-y-recién-
-    # chequear: el gate toma sus propios `FOR UPDATE` (expande combos con la
-    # MISMA pieza que cualquier compuesto, `_expandir_mult`), y si el INSERT
-    # fuera antes, el lock implícito FOR KEY SHARE del propio insert quedaría
-    # en el camino del FOR UPDATE del gate — mismo deadlock que el centinela
-    # (ver comentario abajo), aplicado acá por las dudas.
+    # Se valida ANTES de insertar (`validar_stock_hipotetico`, como en
+    # `revalidar_disponibilidad_estudio`) — NO insertar-y-recién-chequear: el
+    # gate toma sus propios `FOR UPDATE` (expande combos con la MISMA pieza
+    # que cualquier compuesto, `_expandir_mult`), y si el INSERT fuera antes,
+    # el lock implícito FOR KEY SHARE del propio insert quedaría en el camino
+    # del FOR UPDATE del gate — mismo deadlock que el centinela (ver
+    # comentario abajo), aplicado acá por las dudas.
     _Item = namedtuple("_Item", ["equipo_id", "cantidad"])
-    items_a_validar = []
+
+    # ── Promo (combo): BEST-EFFORT, nunca bloquea ───────────────────────────
+    # Mismo criterio que tenía el pack ⏰ retirado: la promo es un bundle a
+    # precio fijo — lo que no hay no bloquea la reserva, se cobra el precio
+    # fijo igual (`monto_total` ya sumó `promo_precio` arriba) y se avisa qué
+    # faltó (`promo_advertencia`, lo muestra el caller). Sigue siendo UNA sola
+    # línea (`equipo_id=promo_combo_id`, ítems veraces Fase 5) — no hay líneas
+    # parciales del combo; el motor sigue expandiendo su demanda completa y
+    # recursiva para cualquier chequeo FUTURO (`validar_stock_hipotetico`
+    # queda sagrado, sin excepción) — acá solo se decide NO reventar el 409
+    # con lo que ya devolvió. Corre igual (toma sus locks, sirve para el
+    # mensaje) aunque no bloquee.
+    promo_advertencia: Optional[str] = None
     if con_promo:
-        items_a_validar.append(_Item(estudio["promo_combo_id"], 1))
-    items_a_validar.extend(_Item(s.equipo_id, s.cantidad) for s in sueltos)
-    if items_a_validar:
-        errores = validar_stock_hipotetico(
-            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(), items_a_validar
+        errores_promo = validar_stock_hipotetico(
+            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
+            [_Item(estudio["promo_combo_id"], 1)],
         )
-        if errores:
-            raise HTTPException(409, f"Sin stock suficiente: {'; '.join(errores)}")
+        if errores_promo:
+            promo_advertencia = (
+                f"La promo se reservó igual, pero sin stock de: {'; '.join(errores_promo)}"
+            )
+
+    # ── Sueltos: requisito DURO, sin best-effort ────────────────────────────
+    # A diferencia de la promo (arriba), un suelto es un equipo elegido por su
+    # nombre, ya comprometido con el cliente: si no hay stock, la reserva
+    # entera falla (409) en vez de servir una versión parcial silenciosa.
+    if sueltos:
+        errores_sueltos = validar_stock_hipotetico(
+            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
+            [_Item(s.equipo_id, s.cantidad) for s in sueltos],
+        )
+        if errores_sueltos:
+            raise HTTPException(409, f"Sin stock suficiente: {'; '.join(errores_sueltos)}")
 
     if con_promo:
         conn.execute(
@@ -1827,7 +1848,7 @@ def _crear_pedido_estudio(
         (pedido_id, estudio["equipo_id"], espacio_monto_final, espacio_monto_final),
     )
 
-    return pedido_id
+    return pedido_id, promo_advertencia
 
 
 @router.post("/estudio/reservas", status_code=201)
@@ -1880,7 +1901,7 @@ def crear_reserva_estudio(body: EstudioReservaCreate, request: Request, backgrou
                     f"Necesitás reservar con al menos {estudio['anticipacion_min_horas']} h de anticipación",
                 )
 
-            pedido_id = _crear_pedido_estudio(
+            pedido_id, promo_advertencia = _crear_pedido_estudio(
                 conn, estudio=estudio, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
                 cliente_id=cliente_id, cliente_nombre=cliente_nombre,
                 cliente_email=cliente_email, cliente_telefono=cliente_telefono,
@@ -1891,6 +1912,7 @@ def crear_reserva_estudio(body: EstudioReservaCreate, request: Request, backgrou
 
             conn.commit()
             pedido = _get_alquiler_detail(conn, pedido_id)
+            pedido["promo_advertencia"] = promo_advertencia
         except Exception:
             conn.rollback()
             raise
@@ -2141,7 +2163,7 @@ def crear_reserva_estudio_admin(body: EstudioReservaAdminCreate, request: Reques
             )
             fecha_desde, fecha_hasta = _franja_estudio(estudio, body.fecha, body.start, body.horas)
 
-            pedido_id = _crear_pedido_estudio(
+            pedido_id, promo_advertencia = _crear_pedido_estudio(
                 conn, estudio=estudio, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
                 cliente_id=cliente_id, cliente_nombre=cliente_nombre,
                 cliente_email=cliente_email, cliente_telefono=cliente_telefono,
@@ -2150,7 +2172,9 @@ def crear_reserva_estudio_admin(body: EstudioReservaAdminCreate, request: Reques
                 numero_pedido=_next_numero_pedido(conn),
             )
             conn.commit()
-            return _reserva_estudio_admin_dict(conn, pedido_id)
+            resp = _reserva_estudio_admin_dict(conn, pedido_id)
+            resp["promo_advertencia"] = promo_advertencia
+            return resp
         except Exception:
             conn.rollback()
             raise
@@ -2258,17 +2282,28 @@ def editar_reserva_estudio_admin(pedido_id: int, body: EstudioReservaAdminUpdate
             # insertar primero dejaría el lock implícito FOR KEY SHARE del
             # propio insert en el camino del FOR UPDATE que toma el gate).
             _Item = namedtuple("_Item", ["equipo_id", "cantidad"])
-            items_a_validar = []
+
+            # Promo: BEST-EFFORT, nunca bloquea (mismo criterio que
+            # `_crear_pedido_estudio` — ver ese docstring para el porqué).
+            promo_advertencia: Optional[str] = None
             if con_promo:
-                items_a_validar.append(_Item(estudio["promo_combo_id"], 1))
-            items_a_validar.extend(_Item(s.equipo_id, s.cantidad) for s in sueltos)
-            if items_a_validar:
-                errores = validar_stock_hipotetico(
+                errores_promo = validar_stock_hipotetico(
                     conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
-                    items_a_validar,
+                    [_Item(estudio["promo_combo_id"], 1)],
                 )
-                if errores:
-                    raise HTTPException(409, f"Sin stock suficiente: {'; '.join(errores)}")
+                if errores_promo:
+                    promo_advertencia = (
+                        f"La promo se reservó igual, pero sin stock de: {'; '.join(errores_promo)}"
+                    )
+
+            # Sueltos: requisito DURO, sin best-effort.
+            if sueltos:
+                errores_sueltos = validar_stock_hipotetico(
+                    conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
+                    [_Item(s.equipo_id, s.cantidad) for s in sueltos],
+                )
+                if errores_sueltos:
+                    raise HTTPException(409, f"Sin stock suficiente: {'; '.join(errores_sueltos)}")
 
             if con_promo:
                 promo_precio = precio_jornada_efectivo(conn, estudio["promo_combo_id"]) or 0
@@ -2302,7 +2337,9 @@ def editar_reserva_estudio_admin(pedido_id: int, body: EstudioReservaAdminUpdate
             )
 
             conn.commit()
-            return _reserva_estudio_admin_dict(conn, pedido_id)
+            resp = _reserva_estudio_admin_dict(conn, pedido_id)
+            resp["promo_advertencia"] = promo_advertencia
+            return resp
         except Exception:
             conn.rollback()
             raise

@@ -294,6 +294,12 @@ export function StudioBookingForm({
         description: "Te llevamos a tu portal para seguir el estado.",
         duration: 6000,
       });
+      if (res.promo_advertencia) {
+        toast.warning("La promo se reservó incompleta", {
+          description: res.promo_advertencia,
+          duration: 7000,
+        });
+      }
       setReturnedFromLogin(false);
       navigate({ to: "/cliente/portal", search: { nuevo: res.id } });
     } catch (err) {
