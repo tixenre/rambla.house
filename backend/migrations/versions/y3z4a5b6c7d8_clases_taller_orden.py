@@ -15,7 +15,7 @@ columna, el backfill es un evento único de esta migración (repetirlo en cada
 arranque de la app pisaría cualquier reorden manual ya guardado).
 
 Revision ID: y3z4a5b6c7d8
-Revises: mrgestbrescu
+Revises: unifestlegacy
 Create Date: 2026-07-24
 """
 from typing import Sequence, Union
@@ -23,7 +23,7 @@ from typing import Sequence, Union
 from alembic import op
 
 revision: str = "y3z4a5b6c7d8"
-down_revision: Union[str, Sequence[str], None] = "mrgestbrescu"
+down_revision: Union[str, Sequence[str], None] = "unifestlegacy"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
