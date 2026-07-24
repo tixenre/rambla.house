@@ -5,6 +5,7 @@ import {
   CollapsibleTrigger,
 } from "@/design-system/ui/collapsible";
 import type { Sesion } from "@/lib/api";
+import { parseTemario, type LineaTemario } from "@/lib/talleres/temario";
 
 function fmtFechaCorta(fecha: string): string {
   const d = new Date(fecha + "T12:00:00");
@@ -22,6 +23,33 @@ function Bullet({ text, index }: { text: string; index: number }) {
   );
 }
 
+function TituloTemario({ text }: { text: string }) {
+  return <p className="font-semibold text-sm text-ink mt-2 first:mt-0">{text}</p>;
+}
+
+// Agrupa bullets consecutivos en un solo <ul> (semántica válida) con un
+// título propio entre medio de cada corte — el índice numerado de un bullet
+// sigue la posición GLOBAL entre todos los grupos, no se reinicia por grupo.
+type Grupo =
+  | { tipo: "titulo"; texto: string }
+  | { tipo: "bullets"; items: { texto: string; index: number }[] };
+
+function agruparBloques(bloques: LineaTemario[]): Grupo[] {
+  const grupos: Grupo[] = [];
+  let bulletIdx = 0;
+  for (const b of bloques) {
+    if (b.tipo === "titulo") {
+      grupos.push({ tipo: "titulo", texto: b.texto });
+      continue;
+    }
+    const entry = { texto: b.texto, index: bulletIdx++ };
+    const last = grupos[grupos.length - 1];
+    if (last?.tipo === "bullets") last.items.push(entry);
+    else grupos.push({ tipo: "bullets", items: [entry] });
+  }
+  return grupos;
+}
+
 export function ClaseCard({
   clase,
   numero,
@@ -31,10 +59,7 @@ export function ClaseCard({
   numero: number;
   defaultOpen: boolean;
 }) {
-  const bullets = clase.descripcion
-    .split("\n")
-    .map((b) => b.trim())
-    .filter(Boolean);
+  const grupos = agruparBloques(parseTemario(clase.descripcion));
   const horaLabel = clase.hora_fin_str
     ? `${clase.hora_inicio_str} – ${clase.hora_fin_str}`
     : clase.hora_inicio_str;
@@ -69,12 +94,20 @@ export function ClaseCard({
               className="w-full max-h-64 rounded-xl object-cover"
             />
           )}
-          {bullets.length > 0 && (
-            <ul className="flex flex-col gap-3">
-              {bullets.map((b, i) => (
-                <Bullet key={i} text={b} index={i} />
-              ))}
-            </ul>
+          {grupos.length > 0 && (
+            <div className="flex flex-col gap-1">
+              {grupos.map((g, gi) =>
+                g.tipo === "titulo" ? (
+                  <TituloTemario key={gi} text={g.texto} />
+                ) : (
+                  <ul key={gi} className="flex flex-col gap-3">
+                    {g.items.map((it) => (
+                      <Bullet key={it.index} text={it.texto} index={it.index} />
+                    ))}
+                  </ul>
+                ),
+              )}
+            </div>
           )}
           {clase.nota && <p className="text-sm text-muted-foreground italic">{clase.nota}</p>}
         </div>

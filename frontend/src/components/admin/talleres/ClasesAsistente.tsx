@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Plus } from "lucide-react";
+import { useRef, useState } from "react";
+import { Heading, List, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import type { ClaseBody } from "@/lib/admin/api/types";
@@ -15,7 +15,8 @@ import {
   SelectValue,
 } from "@/design-system/ui/select";
 import { HoraSelect } from "./HoraSelect";
-import { fmtHhmm } from "@/lib/talleres/formato";
+import { cn } from "@/lib/utils";
+import { fijarFormatoDeLinea } from "@/lib/talleres/temario";
 
 const DIAS = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"];
 
@@ -111,6 +112,25 @@ export function ClasesAsistente({
 
   function patchAt(idx: number, patch: Partial<ClaseBody>) {
     onChange(clases.map((s, i) => (i === idx ? { ...s, ...patch } : s)));
+  }
+
+  const textareaRefs = useRef<Record<number, HTMLTextAreaElement | null>>({});
+
+  function aplicarFormato(idx: number, formato: "titulo" | "bullet") {
+    const el = textareaRefs.current[idx];
+    if (!el) return;
+    const { texto, cursor } = fijarFormatoDeLinea(
+      el.value,
+      el.selectionStart ?? el.value.length,
+      formato,
+    );
+    patchAt(idx, { descripcion: texto });
+    // El re-render de React actualiza `el.value` de forma async — recién ahí
+    // se puede restaurar la posición del cursor sin que quede pisada.
+    requestAnimationFrame(() => {
+      el.focus();
+      el.setSelectionRange(cursor, cursor);
+    });
   }
 
   async function subirPortada(idx: number, file: File) {
@@ -245,22 +265,37 @@ export function ClasesAsistente({
                 key={s.id ?? `nueva-${idx}`}
                 className="rounded-xl border border-border/50 bg-muted/20 p-3 flex flex-col gap-2"
               >
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-semibold text-ink shrink-0">
-                    {new Date(s.fecha + "T12:00:00").toLocaleDateString("es-AR", {
-                      weekday: "short",
-                      day: "numeric",
-                      month: "short",
-                    })}
-                  </span>
-                  <span className="text-xs text-muted-foreground shrink-0">
-                    {fmtHhmm(s.hora_inicio_min)}–{fmtHhmm(s.hora_fin_min)}
-                  </span>
+                <div className="flex flex-wrap items-center gap-2">
+                  {/* Fecha/hora propias de ESTA clase — no atadas al patrón del
+                      generador: un taller real tiene clases más largas, en otro
+                      día, o reprogramadas. El backend ya trata cada clase como
+                      fila independiente (sin cambios ahí). */}
+                  <Input
+                    type="date"
+                    value={s.fecha}
+                    onChange={(e) => patchAt(idx, { fecha: e.target.value })}
+                    className="h-8 text-xs w-[136px] shrink-0"
+                  />
+                  <HoraSelect
+                    value={s.hora_inicio_min}
+                    onChange={(v) => patchAt(idx, { hora_inicio_min: v })}
+                    min={0}
+                    max={1410}
+                    className="h-8 w-[84px] shrink-0 text-xs"
+                  />
+                  <span className="text-xs text-muted-foreground shrink-0">–</span>
+                  <HoraSelect
+                    value={s.hora_fin_min}
+                    onChange={(v) => patchAt(idx, { hora_fin_min: v })}
+                    min={30}
+                    max={1440}
+                    className="h-8 w-[84px] shrink-0 text-xs"
+                  />
                   <Input
                     value={s.titulo ?? ""}
                     onChange={(e) => patchAt(idx, { titulo: e.target.value })}
                     placeholder={`Clase ${idx + 1}: título`}
-                    className="h-8 text-sm flex-1 min-w-0"
+                    className="h-8 text-sm flex-1 min-w-[140px]"
                   />
                   <button
                     onClick={() => removeAt(idx)}
@@ -270,13 +305,41 @@ export function ClasesAsistente({
                     ×
                   </button>
                 </div>
-                <Textarea
-                  value={s.descripcion ?? ""}
-                  onChange={(e) => patchAt(idx, { descripcion: e.target.value })}
-                  placeholder="Temario / descripción (1 ítem por línea)"
-                  rows={2}
-                  className="resize-y text-sm"
-                />
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => aplicarFormato(idx, "titulo")}
+                      className="h-6 w-6 grid place-items-center rounded text-muted-foreground hover:bg-ink/5 hover:text-ink transition"
+                      title="Marcar la línea del cursor como título"
+                      aria-label="Marcar la línea del cursor como título"
+                    >
+                      <Heading className="h-3.5 w-3.5" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => aplicarFormato(idx, "bullet")}
+                      className="h-6 w-6 grid place-items-center rounded text-muted-foreground hover:bg-ink/5 hover:text-ink transition"
+                      title="Marcar la línea del cursor como punto"
+                      aria-label="Marcar la línea del cursor como punto"
+                    >
+                      <List className="h-3.5 w-3.5" />
+                    </button>
+                    <span className="text-2xs text-muted-foreground/60">
+                      Título / punteo — aplica a la línea donde está el cursor
+                    </span>
+                  </div>
+                  <Textarea
+                    ref={(el) => {
+                      textareaRefs.current[idx] = el;
+                    }}
+                    value={s.descripcion ?? ""}
+                    onChange={(e) => patchAt(idx, { descripcion: e.target.value })}
+                    placeholder="Temario / descripción — un ítem por línea"
+                    rows={2}
+                    className="resize-y text-sm"
+                  />
+                </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <Input
                     value={s.nota ?? ""}
