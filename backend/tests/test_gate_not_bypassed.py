@@ -39,8 +39,6 @@ GATE_SYMBOLS = {
 # Cada uno está documentado en el código fuente como "el caller valida".
 #   - _apply_pedido_items (alquileres): docstring "No valida stock — el caller
 #     debe llamar a _check_stock si corresponde".
-#   - _agregar_items_pack (estudio): el pack es best-effort; crear_reserva_estudio
-#     llama _check_stock tras insertarlo y revierte si no hay stock.
 #   - _regenerar_pedidos_slot (estudio, Fase 2 — ítems veraces): el ítem
 #     centinela que inserta es para que la plata del slot se atribuya/vea en
 #     la liquidación, NO el mecanismo de bloqueo — ese sigue siendo
@@ -48,11 +46,12 @@ GATE_SYMBOLS = {
 #     (`crear_slot`/`actualizar_slot`, vía `verificar_sesiones_disponibles`)
 #     ANTES de regenerar. Reventar la reserva acá sería doble validación de
 #     algo que el caller ya chequeó.
+# ⏰ `_agregar_items_pack` (estudio) — el delegador del pack — se retiró en la
+# Fase 8 (#1283) junto con el mecanismo que validaba.
 # Clave = path relativo a routes/ (ej. "alquileres/core.py"), así desambigua entre
 # los varios core.py de los paquetes split (#501).
 ALLOWLIST_DELEGADORES = {
     ("alquileres/core.py", "_apply_pedido_items"),
-    ("estudio.py", "_agregar_items_pack"),
     ("estudio.py", "_regenerar_pedidos_slot"),
 }
 

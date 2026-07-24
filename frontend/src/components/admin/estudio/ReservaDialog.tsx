@@ -2,7 +2,7 @@
  * ReservaDialog — alta/edición de un turno del Estudio desde el back-office
  * (#1283 Fase 6). Sin sesión de cliente ni Didit ni anticipación mínima (eso
  * es del flujo público) — acá el admin carga a mano: cliente real o texto
- * libre, pack/promo, equipos sueltos, override del precio del espacio.
+ * libre, promo, equipos sueltos, override del precio del espacio.
  *
  * El front NO calcula plata (MEMORIA 2026-06-29): el desglose se pide en vivo
  * a `GET /admin/estudio/reservas/cotizar` (debounced) y solo se muestra.
@@ -80,7 +80,7 @@ export function ReservaDialog({
   const editando = !!reserva;
 
   // El detalle completo (items) solo hace falta para hidratar la edición —
-  // la lista no trae con_pack/con_promo/sueltos.
+  // la lista no trae con_promo/sueltos.
   const detalleQ = useQuery({
     queryKey: ["admin", "pedido", reserva?.id],
     queryFn: () => adminApi.getPedido(reserva!.id),
@@ -93,7 +93,6 @@ export function ReservaDialog({
   const [clienteId, setClienteId] = useState<number | null>(null);
   const [clienteNombreElegido, setClienteNombreElegido] = useState<string | null>(null);
   const [clienteNombreLibre, setClienteNombreLibre] = useState("");
-  const [conPack, setConPack] = useState(false);
   const [conPromo, setConPromo] = useState(false);
   const [sueltos, setSueltos] = useState<SueltoLocal[]>([]);
   const [espacioOverride, setEspacioOverride] = useState<string>("");
@@ -116,7 +115,6 @@ export function ReservaDialog({
       setClienteId(null);
       setClienteNombreElegido(null);
       setClienteNombreLibre("");
-      setConPack(false);
       setConPromo(false);
       setSueltos([]);
       setEspacioOverride("");
@@ -138,7 +136,6 @@ export function ReservaDialog({
     const centinela = estudio.equipo_id;
     const promoId = estudio.promo_combo_id;
     const otros = p.items.filter((it) => it.equipo_id !== centinela);
-    setConPack(otros.some((it) => it.equipo_id === null));
     setConPromo(!!promoId && otros.some((it) => it.equipo_id === promoId));
     setSueltos(
       otros
@@ -167,14 +164,13 @@ export function ReservaDialog({
       fecha,
       start,
       horas,
-      con_pack: conPack,
       con_promo: conPromo,
       sueltos: sueltosInput,
       // Excluye el propio turno del chequeo de disponibilidad al editar —
       // si no, siempre se vería "ocupado" por su propia franja.
       pedido_id: reserva?.id,
     }),
-    [fecha, start, horas, conPack, conPromo, sueltosInput, reserva?.id],
+    [fecha, start, horas, conPromo, sueltosInput, reserva?.id],
   );
   const cotizarDebounced = useDebouncedValue(cotizarParams, 400);
 
@@ -191,7 +187,6 @@ export function ReservaDialog({
           fecha,
           start,
           horas,
-          con_pack: conPack,
           con_promo: conPromo,
           sueltos: sueltosInput,
           espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
@@ -203,7 +198,6 @@ export function ReservaDialog({
         horas,
         cliente_id: clienteId,
         cliente_nombre: clienteId ? null : clienteNombreLibre.trim() || null,
-        con_pack: conPack,
         con_promo: conPromo,
         sueltos: sueltosInput,
         espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
@@ -332,20 +326,14 @@ export function ReservaDialog({
               </Field>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
-              {estudio.pack_activo && (
-                <label className="flex items-center gap-2 text-sm">
-                  <Switch checked={conPack} onCheckedChange={setConPack} />
-                  Pack (⏰ legacy)
-                </label>
-              )}
-              {estudio.promo_combo_id && (
+            {estudio.promo_combo_id && (
+              <div className="grid grid-cols-2 gap-3">
                 <label className="flex items-center gap-2 text-sm">
                   <Switch checked={conPromo} onCheckedChange={setConPromo} />
                   {estudio.promo?.nombre || "Promo"}
                 </label>
-              )}
-            </div>
+              </div>
+            )}
 
             <Field label="Equipos sueltos (opcional)">
               <EquipoComboSearch
@@ -429,12 +417,6 @@ export function ReservaDialog({
                     <span className="text-muted-foreground">Espacio</span>
                     <span>{formatARS(cotiz.espacio)}</span>
                   </div>
-                  {cotiz.pack > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Pack</span>
-                      <span>{formatARS(cotiz.pack)}</span>
-                    </div>
-                  )}
                   {cotiz.promo > 0 && (
                     <div className="flex justify-between">
                       <span className="text-muted-foreground">Promo</span>

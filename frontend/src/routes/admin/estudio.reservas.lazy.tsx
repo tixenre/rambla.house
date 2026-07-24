@@ -38,7 +38,7 @@ function EstudioReservasPage() {
     <AdminPage
       title="Reservas del Estudio"
       maxW="wide"
-      description="Agenda y alta de turnos — el pack/promo y equipos sueltos se cargan acá."
+      description="Agenda y alta de turnos — la promo y equipos sueltos se cargan acá."
     >
       <ReservasSection estudio={data} />
     </AdminPage>

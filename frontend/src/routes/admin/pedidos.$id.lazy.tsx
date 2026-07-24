@@ -425,7 +425,7 @@ function PedidoEditorPage() {
               <Info className="h-4 w-4 text-ink shrink-0 mt-0.5" />
               <div className="min-w-0">
                 <span className="font-medium text-ink">Este pedido es un turno del Estudio.</span>{" "}
-                El horario, el pack/promo y los equipos sueltos se editan desde{" "}
+                El horario, la promo y los equipos sueltos se editan desde{" "}
                 <Link to="/admin/estudio/reservas" className="underline text-muted-foreground">
                   Estudio → Reservas
                 </Link>
@@ -624,7 +624,7 @@ function PedidoEditorPage() {
             </button>
           </Section>
 
-          {/* Equipos — turno del Estudio: el centinela/pack/promo/sueltos se
+          {/* Equipos — turno del Estudio: el centinela/promo/sueltos se
               cargan desde Estudio → Reservas (el buscador y la edición por
               línea se neutralizan acá, el backend los rechaza con 409). */}
           <Section variant="card" tone="elevated" icon={Box} title={`Equipos · ${items.length}`}>

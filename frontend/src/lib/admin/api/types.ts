@@ -1165,8 +1165,6 @@ export type Pedido = {
    *  slot mensual del Estudio, #1283) — ver `lib/tipos-pedido.ts`. Ítems/
    *  fechas de un pedido del Estudio se editan desde Estudio → Reservas. */
   tipo?: "diaria" | "estudio" | "estudio_fijo";
-  /** Legacy pack incluido (⏰, se retira Fase 8) — solo pedidos tipo estudio. */
-  estudio_con_pack?: boolean;
   items: PedidoItem[];
   pagos?: PedidoPago[];
   /** True si hay una `solicitudes_modificacion` con estado='pendiente' para
@@ -1255,8 +1253,10 @@ export type EstudioConfig = {
   close_hour: number;
   buffer_horas: number;
   anticipacion_min_horas: number;
-  // ⏰ LEGACY — reemplazados por promo_combo_id/promo, se retiran en la Fase 8.
-  pack_activo: boolean;
+  // pack_nombre/pack_precio: defaults de una-vez leídos por
+  // crear_promo_desde_pack — ya no tienen UI de edición (Fase 8, #1283).
+  // pack_descripcion SIGUE viva: es la descripción de la promo actual
+  // (_promo_info la reusa), editable desde PromoSection.
   pack_nombre: string;
   pack_descripcion: string;
   pack_precio: number;
@@ -1363,10 +1363,7 @@ export type EstudioInput = {
   close_hour?: number;
   buffer_horas?: number;
   anticipacion_min_horas?: number;
-  pack_activo?: boolean;
-  pack_nombre?: string;
   pack_descripcion?: string;
-  pack_precio?: number;
   features_json?: string;
   faq_json?: string;
   direccion?: string;
@@ -1391,14 +1388,6 @@ export type EstudioSlotFijo = {
 
 export type EstudioSlotInput = Omit<EstudioSlotFijo, "id">;
 
-export type EstudioPackEquipoCurado = {
-  id: number;
-  nombre: string;
-  marca: string | null;
-  foto_url: string | null;
-  orden: number;
-};
-
 // ── Reservas del Estudio (admin, #1283 Fase 6) ───────────────────────────────
 
 /** Fila liviana de `GET /admin/estudio/reservas` — para la lista. El detalle
@@ -1416,7 +1405,6 @@ export type EstudioReservaListItem = {
   monto_total: number;
   monto_pagado: number;
   estado: PedidoEstado;
-  estudio_con_pack: boolean;
 };
 
 export type EstudioAgendaBloque = {
@@ -1435,7 +1423,6 @@ export type EstudioSueltoInput = { equipo_id: number; cantidad: number };
  *  plata, solo lo muestra (MEMORIA 2026-06-29). No muta nada. */
 export type EstudioCotizacion = {
   espacio: number;
-  pack: number;
   promo: number;
   sueltos: Array<{ equipo_id: number; cantidad: number; precio_jornada: number; subtotal: number }>;
   monto_total: number;
@@ -1449,7 +1436,6 @@ export type EstudioReservaCreateInput = {
   horas: number;
   cliente_id?: number | null;
   cliente_nombre?: string | null;
-  con_pack?: boolean;
   con_promo?: boolean;
   sueltos?: EstudioSueltoInput[];
   espacio_monto?: number | null;
@@ -1460,7 +1446,6 @@ export type EstudioReservaUpdateInput = {
   fecha?: string;
   start?: string;
   horas?: number;
-  con_pack?: boolean;
   con_promo?: boolean;
   sueltos?: EstudioSueltoInput[];
   espacio_monto?: number | null;

@@ -119,12 +119,6 @@ class TestBuildResponse:
         result = _build_response(row, fotos)
         assert result["fotos"] == fotos
 
-    def test_pack_activo_bool(self):
-        from routes.estudio import _build_response
-        row = self._make_row(pack_activo=1)  # simulando valor DB integer
-        result = _build_response(row, [])
-        assert result["pack_activo"] is True
-
 
 # ── Guards de admin ───────────────────────────────────────────────────────────
 
@@ -181,33 +175,6 @@ class TestEstudioAdminGuards:
 
         with pytest.raises(HTTPException) as exc:
             upload_foto_from_url(UploadFromUrlBody(url="https://example.com/img.jpg"), FakeRequest())
-        assert exc.value.status_code == 401
-
-    def test_listar_pack_requiere_admin(self, monkeypatch):
-        monkeypatch.delenv("ADMIN_BYPASS_AUTH", raising=False)
-        monkeypatch.setattr("auth.guards.get_session", lambda req: None)
-        from routes.estudio import listar_pack
-
-        with pytest.raises(HTTPException) as exc:
-            listar_pack(FakeRequest())
-        assert exc.value.status_code == 401
-
-    def test_agregar_pack_requiere_admin(self, monkeypatch):
-        monkeypatch.delenv("ADMIN_BYPASS_AUTH", raising=False)
-        monkeypatch.setattr("auth.guards.get_session", lambda req: None)
-        from routes.estudio import agregar_pack_equipo, PackEquipoCreate
-
-        with pytest.raises(HTTPException) as exc:
-            agregar_pack_equipo(PackEquipoCreate(equipo_id=1), FakeRequest())
-        assert exc.value.status_code == 401
-
-    def test_quitar_pack_requiere_admin(self, monkeypatch):
-        monkeypatch.delenv("ADMIN_BYPASS_AUTH", raising=False)
-        monkeypatch.setattr("auth.guards.get_session", lambda req: None)
-        from routes.estudio import quitar_pack_equipo
-
-        with pytest.raises(HTTPException) as exc:
-            quitar_pack_equipo(1, FakeRequest())
         assert exc.value.status_code == 401
 
 
@@ -513,11 +480,8 @@ class TestCentinelaNoLeak:
         assert "es_recurso_interno = FALSE" in self._src(admin_equipos_sin_serie)
 
 
-# ── E3: pack dinámico (Grip / Iluminación / Modificadores) ────────────────────
-#
-# El espacio (centinela) sigue con _centinela_libre (buffer propio). Los equipos
-# del pack son reales → motor sagrado (get_disponibilidad / _check_stock, buffer
-# global). Estos tests patchean el motor para aislar la orquestación del pack.
+# ── E3: pack curado ⏰ (Fase 8, #1283: retirado — solo sobrevive
+# `_pack_equipo_ids`, que `crear_promo_desde_pack` sigue leyendo) ──────────────
 
 import routes.estudio as estudio_mod
 
@@ -536,63 +500,6 @@ class _CurLastrowid:
     @property
     def lastrowid(self):
         return self._lastrowid
-
-
-class _NamesConn(_ConnCM):
-    """Responde solo la query de nombres de _pack_disponible."""
-
-    def __init__(self, names):
-        self.names = names  # {id: (nombre, marca)}
-
-    def execute(self, sql, params=()):
-        su = " ".join(sql.split()).upper()
-        if "FROM EQUIPOS E WHERE E.ID = ANY(" in su:
-            ids = params[0]
-            return _Cur(
-                [{"id": i, "nombre": self.names[i][0], "marca": self.names[i][1],
-                  "foto_url": self.names[i][2] if len(self.names[i]) > 2 else None}
-                 for i in ids if i in self.names]
-            )
-        return _Cur([])
-
-
-class TestPackDisponible:
-    """_pack_disponible: solo equipos con >= 1 disponible; lo reservado no entra."""
-
-    def test_filtra_por_disponibilidad(self, monkeypatch):
-        from datetime import datetime
-        # Pack candidatos: 10, 11, 12. El 11 está ocupado (disp 0) → no entra.
-        monkeypatch.setattr(estudio_mod, "_pack_equipo_ids", lambda conn: [10, 11, 12])
-        monkeypatch.setattr(
-            estudio_mod, "get_disponibilidad",
-            lambda fd, fh, excl=None: {"10": 2, "11": 0, "12": 1},
-        )
-        conn = _NamesConn({10: ("Trípode", "Manfrotto"), 12: ("HMI", "Arri")})
-        out = estudio_mod._pack_disponible(
-            conn, datetime(2026, 6, 1, 14), datetime(2026, 6, 1, 16)
-        )
-        ids = {e["id"]: e["cantidad"] for e in out}
-        assert ids == {10: 2, 12: 1}  # el 11 (reservado) quedó afuera
-
-    def test_sin_candidatos_lista_vacia(self, monkeypatch):
-        from datetime import datetime
-        monkeypatch.setattr(estudio_mod, "_pack_equipo_ids", lambda conn: [])
-        out = estudio_mod._pack_disponible(
-            _NamesConn({}), datetime(2026, 6, 1, 14), datetime(2026, 6, 1, 16)
-        )
-        assert out == []
-
-    def test_incluye_foto_url(self, monkeypatch):
-        from datetime import datetime
-        monkeypatch.setattr(estudio_mod, "_pack_equipo_ids", lambda conn: [10])
-        monkeypatch.setattr(
-            estudio_mod, "get_disponibilidad", lambda fd, fh, excl=None: {"10": 1}
-        )
-        conn = _NamesConn({10: ("HMI", "Arri", "https://cdn/hmi.webp")})
-        out = estudio_mod._pack_disponible(
-            conn, datetime(2026, 6, 1, 14), datetime(2026, 6, 1, 16)
-        )
-        assert out[0]["foto_url"] == "https://cdn/hmi.webp"
 
 
 class _PackTablaConn(_ConnCM):
@@ -617,88 +524,6 @@ class TestPackEquipoIds:
 
     def test_pack_vacio(self):
         assert estudio_mod._pack_equipo_ids(_PackTablaConn([])) == []
-
-
-class _PackCrudConn(_ConnCM):
-    """Fake conn para el CRUD del pack: graba INSERT/DELETE y responde el equipo."""
-
-    def __init__(self, equipo=None):
-        self.equipo = equipo  # dict o None
-        self.inserted = None
-        self.deleted = None
-        self.committed = False
-
-    def execute(self, sql, params=()):
-        su = " ".join(sql.split()).upper()
-        if su.startswith("SELECT ID, ES_RECURSO_INTERNO, ELIMINADO_AT FROM EQUIPOS"):
-            return _Cur([self.equipo] if self.equipo else [])
-        if "MAX(ORDEN)" in su:
-            return _Cur([{"next": 0}])
-        if su.startswith("INSERT INTO ESTUDIO_PACK_EQUIPOS"):
-            self.inserted = params
-            return _Cur([])
-        if su.startswith("DELETE FROM ESTUDIO_PACK_EQUIPOS"):
-            self.deleted = params
-            return _Cur([])
-        return _Cur([])
-
-    def commit(self):
-        self.committed = True
-
-    def rollback(self):
-        pass
-
-    def close(self):
-        pass
-
-
-class TestPackCrud:
-    """CRUD del pack curado (con ADMIN_BYPASS_AUTH)."""
-
-    def test_agregar_inserta(self, monkeypatch):
-        monkeypatch.setenv("ADMIN_BYPASS_AUTH", "1")
-        conn = _PackCrudConn(equipo={"id": 5, "es_recurso_interno": False, "eliminado_at": None})
-        monkeypatch.setattr(estudio_mod, "get_db", lambda: conn)
-        monkeypatch.setattr(estudio_mod, "_pack_curado", lambda c: [{"id": 5}])
-        from routes.estudio import agregar_pack_equipo, PackEquipoCreate
-
-        out = agregar_pack_equipo(PackEquipoCreate(equipo_id=5), FakeRequest())
-        assert conn.inserted is not None and conn.inserted[0] == 5
-        assert conn.committed
-        assert out == {"pack": [{"id": 5}]}
-
-    def test_agregar_recurso_interno_falla(self, monkeypatch):
-        monkeypatch.setenv("ADMIN_BYPASS_AUTH", "1")
-        conn = _PackCrudConn(equipo={"id": 9, "es_recurso_interno": True, "eliminado_at": None})
-        monkeypatch.setattr(estudio_mod, "get_db", lambda: conn)
-        from routes.estudio import agregar_pack_equipo, PackEquipoCreate
-
-        with pytest.raises(HTTPException) as exc:
-            agregar_pack_equipo(PackEquipoCreate(equipo_id=9), FakeRequest())
-        assert exc.value.status_code == 400
-        assert conn.inserted is None
-
-    def test_agregar_inexistente_404(self, monkeypatch):
-        monkeypatch.setenv("ADMIN_BYPASS_AUTH", "1")
-        conn = _PackCrudConn(equipo=None)
-        monkeypatch.setattr(estudio_mod, "get_db", lambda: conn)
-        from routes.estudio import agregar_pack_equipo, PackEquipoCreate
-
-        with pytest.raises(HTTPException) as exc:
-            agregar_pack_equipo(PackEquipoCreate(equipo_id=123), FakeRequest())
-        assert exc.value.status_code == 404
-
-    def test_quitar_borra(self, monkeypatch):
-        monkeypatch.setenv("ADMIN_BYPASS_AUTH", "1")
-        conn = _PackCrudConn()
-        monkeypatch.setattr(estudio_mod, "get_db", lambda: conn)
-        monkeypatch.setattr(estudio_mod, "_pack_curado", lambda c: [])
-        from routes.estudio import quitar_pack_equipo
-
-        out = quitar_pack_equipo(5, FakeRequest())
-        assert conn.deleted == (5,)
-        assert conn.committed
-        assert out == {"pack": []}
 
 
 _INSERT_COLS_RE = re.compile(r"\(([^()]+)\)\s*VALUES\s*\(([^()]+)\)", re.IGNORECASE)
@@ -794,89 +619,31 @@ def _patch_post_collaborators(monkeypatch, conn, estudio_row, disp, pack_ids):
     monkeypatch.setattr(estudio_mod, "_require_cliente", lambda req: {"cliente_id": 7, "role": "cliente"})
 
 
-def _estudio_row_full(**overrides):
-    row = _estudio_row()
-    row.update({"pack_activo": True, "pack_precio": 30000, "pack_nombre": "Pack Todo Incluido"})
-    row.update(overrides)
-    return row
+class TestCrearReservaSinPack:
+    """POST /estudio/reservas — orquestación y monto (el pack ⏰ se retiró en
+    la Fase 8, #1283: ya no hay un camino "con pack" que probar acá)."""
 
-
-class TestCrearReservaPack:
-    """POST /estudio/reservas con/ sin pack — orquestación y monto."""
-
-    def _post(self, monkeypatch, con_pack, disp, pack_ids, estudio_row=None):
+    def test_crea_solo_el_centinela(self, monkeypatch):
         from datetime import timedelta
         from fastapi import BackgroundTasks
         from database import now_ar
         from routes.estudio import crear_reserva_estudio, EstudioReservaCreate
 
         conn = _RecordingConn()
-        est = estudio_row or _estudio_row_full()
-        _patch_post_collaborators(monkeypatch, conn, est, disp, pack_ids)
+        _patch_post_collaborators(monkeypatch, conn, _estudio_row(), {}, [])
 
-        # Fecha futura válida dentro del horario [open, close].
         manana = (now_ar() + timedelta(days=2)).strftime("%Y-%m-%d")
-        body = EstudioReservaCreate(fecha=manana, start="14:00", horas=2, con_pack=con_pack)
+        body = EstudioReservaCreate(fecha=manana, start="14:00", horas=2)
         crear_reserva_estudio(body, FakeRequest(), BackgroundTasks())
-        return conn
 
-    def test_con_pack_suma_precio_y_crea_items(self, monkeypatch):
-        conn = self._post(
-            monkeypatch, con_pack=True,
-            disp={"10": 2, "11": 1}, pack_ids=[10, 11],
-        )
-        # monto_total = precio_hora(10000)*2 + pack_precio(30000) = 50000
-        # INSERT alquileres params: (... , monto_total, estado, fuente, tipo, estudio_con_pack, numero)
-        params = conn.alquiler_params
-        assert 50000 in params           # monto_total
-        assert True in params            # estudio_con_pack = TRUE
-        # 4 ítems: pack 10 (×2) + pack 11 (×1), ambos informativos a $0 — la
-        # línea personalizada con el precio FIJO del pack (Fase 2) — y el
-        # centinela (equipo_id=99) con el monto REAL del espacio.
-        by_eq = {it["equipo_id"]: it for it in conn.items if it.get("equipo_id") is not None}
-        assert by_eq[10]["cantidad"] == 2 and by_eq[10]["precio_jornada"] == 0
-        assert by_eq[11]["cantidad"] == 1 and by_eq[11]["precio_jornada"] == 0
-        centinela = by_eq[99]
-        assert centinela["precio_jornada"] == 20000  # precio_hora(10000) * 2 horas
-        assert centinela["subtotal"] == 20000
-        assert centinela["cobro_modo"] == "fijo"
-
-        linea_pack = next(it for it in conn.items if it.get("equipo_id") is None)
-        assert linea_pack["precio_jornada"] == 30000  # pack_precio
-        assert linea_pack["subtotal"] == 30000
-        assert linea_pack["cobro_modo"] == "fijo"
-        assert linea_pack["nombre_libre"] == "Pack Todo Incluido"
-
-        # espacio(20000) + pack(30000) + 0 + 0 = monto_total(50000): ítems veraces.
-        assert sum(it["subtotal"] for it in conn.items) == 50000
-        assert conn.committed is True
-
-    def test_sin_pack_no_crea_items_de_equipos(self, monkeypatch):
-        conn = self._post(
-            monkeypatch, con_pack=False,
-            disp={"10": 2, "11": 1}, pack_ids=[10, 11],
-        )
-        # monto_total = 10000*2 = 20000 (sin pack_precio)
+        # monto_total = precio_hora(10000) * 2 horas = 20000, sin nada más.
         assert 20000 in conn.alquiler_params
-        assert False in conn.alquiler_params  # estudio_con_pack = FALSE
-        # Solo el centinela (con el monto real); ningún equipo del pack ni línea de pack.
+        assert False in conn.alquiler_params  # estudio_con_pack = FALSE, siempre
         assert len(conn.items) == 1
         assert conn.items[0]["equipo_id"] == 99
         assert conn.items[0]["precio_jornada"] == 20000
         assert conn.items[0]["subtotal"] == 20000
         assert conn.items[0]["cobro_modo"] == "fijo"
-
-    def test_pack_inactivo_ignora_con_pack(self, monkeypatch):
-        # pack_activo=False → aunque el cliente mande con_pack, no se cobra ni agrega.
-        est = _estudio_row_full(pack_activo=False)
-        conn = self._post(
-            monkeypatch, con_pack=True,
-            disp={"10": 2}, pack_ids=[10], estudio_row=est,
-        )
-        assert 20000 in conn.alquiler_params
-        assert len(conn.items) == 1
-        assert conn.items[0]["equipo_id"] == 99
-        assert conn.items[0]["precio_jornada"] == 20000
 
 
 # ── E4: slots fijos recurrentes mensuales ──────────────────────────────────────
@@ -1115,7 +882,7 @@ class TestReservaLoginObligatorio:
         from routes.estudio import crear_reserva_estudio, EstudioReservaCreate
 
         conn = _RecordingConn()
-        _patch_post_collaborators(monkeypatch, conn, _estudio_row_full(), {}, [])
+        _patch_post_collaborators(monkeypatch, conn, _estudio_row(), {}, [])
         manana = (now_ar() + timedelta(days=2)).strftime("%Y-%m-%d")
         crear_reserva_estudio(
             EstudioReservaCreate(fecha=manana, start="14:00", horas=2),

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/design-system/ui/button";
 import { Input } from "@/design-system/ui/input";
 import { MoneyInput } from "@/design-system/ui/money-input";
+import { Textarea } from "@/design-system/ui/textarea";
 import { estudioAdminApi } from "@/lib/admin/api";
 import type { EstudioConfig } from "@/lib/admin/api";
 import { formatARS } from "@/lib/format";
@@ -15,12 +16,15 @@ import { Section, Field } from "./shared";
 /** Gestión de la promo de equipos (combo real que reemplaza al pack curado,
  *  #1283 Fase 5). Si ya existe (`config.promo_combo_id`), solo muestra su
  *  estado — precio/componentes se editan desde Equipos como cualquier otro
- *  combo, no acá (evita mantener dos formularios para lo mismo). Si no
- *  existe, ofrece crearla desde el pack curado actual. */
+ *  combo, no acá (evita mantener dos formularios para lo mismo). La
+ *  descripción SÍ se edita acá (`pack_descripcion`, viva: `_promo_info` la
+ *  reusa como descripción de la promo actual). Si no existe, ofrece crearla
+ *  desde el pack curado actual. */
 export function PromoSection({ config }: { config: EstudioConfig }) {
   const qc = useQueryClient();
   const [nombre, setNombre] = useState(config.pack_nombre || "");
   const [precioObjetivo, setPrecioObjetivo] = useState(config.pack_precio || 0);
+  const [descripcion, setDescripcion] = useState(config.pack_descripcion || "");
 
   const crearMut = useMutation({
     mutationFn: () =>
@@ -33,6 +37,16 @@ export function PromoSection({ config }: { config: EstudioConfig }) {
       toast.success("Promo creada");
     },
     onError: (e) => toast.error("No se pudo crear la promo", { description: (e as Error).message }),
+  });
+
+  const guardarDescripcionMut = useMutation({
+    mutationFn: () => estudioAdminApi.update({ pack_descripcion: descripcion }),
+    onSuccess: (res) => {
+      qc.setQueryData(["admin", "estudio"], res);
+      toast.success("Descripción guardada");
+    },
+    onError: (e) =>
+      toast.error("No se pudo guardar la descripción", { description: (e as Error).message }),
   });
 
   if (config.promo_combo_id && config.promo) {
@@ -70,6 +84,27 @@ export function PromoSection({ config }: { config: EstudioConfig }) {
           El precio y los componentes de la promo se editan desde Equipos — es un combo normal,
           igual que cualquier otro.
         </p>
+        <div className="mt-3">
+          <Field label="Descripción de la promo">
+            <Textarea
+              value={descripcion}
+              onChange={(e) => setDescripcion(e.target.value)}
+              rows={2}
+              placeholder="Qué incluye, para qué sirve…"
+            />
+          </Field>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-2"
+            disabled={
+              guardarDescripcionMut.isPending || descripcion === (config.pack_descripcion || "")
+            }
+            onClick={() => guardarDescripcionMut.mutate()}
+          >
+            Guardar descripción
+          </Button>
+        </div>
       </Section>
     );
   }

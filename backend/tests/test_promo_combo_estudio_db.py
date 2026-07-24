@@ -146,13 +146,17 @@ def test_crear_promo_desde_pack_reemplaza_pack(client_con_db, setup):
     assert r.status_code == 201, r.text
     data = r.json()
 
-    assert data["pack_activo"] is False  # reemplaza al pack
     combo_id = data["promo_combo_id"]
     assert combo_id
 
     from database import get_db
     conn = get_db()
     try:
+        # pack_activo se apaga (columna todavía viva, pero el campo ya no viaja
+        # en la respuesta — el pack ⏰ se retiró de la API en la Fase 8, #1283).
+        estudio_row = conn.execute("SELECT pack_activo FROM estudio WHERE id=1").fetchone()
+        assert estudio_row["pack_activo"] is False
+
         combo = conn.execute(
             "SELECT tipo, dueno, visible_catalogo, cantidad, eliminado_at "
             "FROM equipos WHERE id=%s", (combo_id,),

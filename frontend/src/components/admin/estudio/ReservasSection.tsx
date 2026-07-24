@@ -6,7 +6,7 @@
  *
  * Agenda semanal (ocupación) + lista (todos los turnos, cualquier fecha) —
  * ambas vistas del mismo `GET /admin/estudio/reservas`. Editar horario/
- * pack/promo/sueltos pasa por `ReservaDialog`; pagos/documentos/estado del
+ * promo/sueltos pasa por `ReservaDialog`; pagos/documentos/estado del
  * pedido siguen en `/admin/pedidos/$id` (el editor genérico bloquea items/
  * fechas para tipo estudio, Fase 1 — no se reimplementa acá).
  */

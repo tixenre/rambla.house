@@ -5,7 +5,6 @@ import type {
   EstudioFoto,
   EstudioSlotFijo,
   EstudioSlotInput,
-  EstudioPackEquipoCurado,
   EstudioTrabajo,
   EstudioTrabajoInput,
   TrabajoOrdenItem,
@@ -25,17 +24,6 @@ import type {
 
 export const estudioAdminApi = {
   get: () => authedJson<EstudioConfig>("/api/admin/estudio"),
-  listPack: () => authedJson<{ pack: EstudioPackEquipoCurado[] }>("/api/admin/estudio/pack"),
-  addPackEquipo: (equipo_id: number) =>
-    authedPostJson<{ pack: EstudioPackEquipoCurado[] }>("/api/admin/estudio/pack", { equipo_id }),
-  removePackEquipo: (equipo_id: number) =>
-    authedFetch(`/api/admin/estudio/pack/${equipo_id}`, { method: "DELETE" }).then(async (r) => {
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        throw new Error(d?.detail ?? `DELETE pack → ${r.status}`);
-      }
-      return r.json() as Promise<{ pack: EstudioPackEquipoCurado[] }>;
-    }),
   // Bloqueos no-pedido en [desde, hasta] (slots fijos + clases de taller) —
   // overlay del calendario del dashboard admin (get_calendario no los ve).
   getOcupacion: (desde: string, hasta: string) => {
@@ -127,7 +115,6 @@ export const estudioAdminApi = {
     fecha: string;
     start: string;
     horas: number;
-    con_pack?: boolean;
     con_promo?: boolean;
     sueltos?: EstudioSueltoInput[];
     /** Al cotizar la EDICIÓN de un turno ya existente: se excluye a sí mismo
@@ -139,7 +126,6 @@ export const estudioAdminApi = {
       fecha: params.fecha,
       start: params.start,
       horas: String(params.horas),
-      con_pack: String(!!params.con_pack),
       con_promo: String(!!params.con_promo),
       sueltos_json: JSON.stringify(params.sueltos ?? []),
     });
