@@ -45,7 +45,10 @@ export function SortableClaseCard({
       ref={setNodeRef}
       style={style}
       className={cn(
-        "rounded-xl border border-border/50 bg-muted/20 p-3 flex flex-col gap-2 transition-shadow",
+        // `surface-elevated` (no `muted`): esta card vive DENTRO de la sección
+        // de la edición, que ya es `bg-surface` — necesita un tono más claro
+        // para distinguirse, no uno más oscuro que casi se le confunde encima.
+        "rounded-xl border border-border/50 bg-surface-elevated shadow-sm p-3 flex flex-col gap-2 transition-shadow",
         isDragging && "shadow-lg opacity-80",
       )}
     >
