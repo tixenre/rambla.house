@@ -1,14 +1,30 @@
 import { useRef, useState } from "react";
-import { Heading, List, Plus } from "lucide-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import type { ClaseBody } from "@/lib/admin/api/types";
 import { talleresAdminApi } from "@/lib/admin/api/talleres";
 import { Button } from "@/design-system/ui/button";
 import { Input } from "@/design-system/ui/input";
-import { Textarea } from "@/design-system/ui/textarea";
 import { HoraSelect } from "./HoraSelect";
+import { SortableClaseCard } from "./SortableClaseCard";
 import { fijarFormatoDeLinea } from "@/lib/talleres/temario";
+import { nextDraftId } from "@/lib/talleres/draftId";
 
 export function ClasesAsistente({
   clases,
@@ -22,6 +38,11 @@ export function ClasesAsistente({
   const [newIni, setNewIni] = useState(540);
   const [newFin, setNewFin] = useState(780);
 
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
   function addClase() {
     if (!newFecha) {
       toast.error("Ingresá una fecha");
@@ -33,16 +54,23 @@ export function ClasesAsistente({
     }
     // Se permite repetir fecha (e incluso franja): "Clase 11 y 12 se dictan
     // juntas". El backend rechaza el duplicado EXACTO (fecha+franja+título).
-    // Fecha/hora de cada clase son editables después, en su propia card —
-    // esto solo agrega el punto de partida (una clase distinta a la vez;
-    // para un taller entero, "Copiar clases de la edición anterior" cubre
-    // el caso común de re-editar un taller que ya corrió).
-    onChange(
-      [...clases, { fecha: newFecha, hora_inicio_min: newIni, hora_fin_min: newFin }].sort((a, b) =>
-        a.fecha.localeCompare(b.fecha),
-      ),
-    );
+    // Se agrega AL FINAL, sin re-ordenar por fecha — el orden es manual
+    // (arrastrás para ubicarla donde corresponda; "Clase N" sale de la
+    // posición, no de la fecha).
+    onChange([
+      ...clases,
+      { id: nextDraftId(), fecha: newFecha, hora_inicio_min: newIni, hora_fin_min: newFin },
+    ]);
     setNewFecha("");
+  }
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const oldIdx = clases.findIndex((c) => c.id === active.id);
+    const newIdx = clases.findIndex((c) => c.id === over.id);
+    if (oldIdx === -1 || newIdx === -1) return;
+    onChange(arrayMove(clases, oldIdx, newIdx));
   }
 
   function removeAt(idx: number) {
@@ -74,7 +102,9 @@ export function ClasesAsistente({
 
   async function subirPortada(idx: number, file: File) {
     const clase = clases[idx];
-    if (!clase.id) return; // el botón está deshabilitado sin id, doble red
+    // Id sintético (draft sin guardar todavía) es negativo — el botón ya
+    // está deshabilitado en ese caso, esto es la segunda red.
+    if (!clase.id || clase.id < 0) return;
     try {
       const r = await talleresAdminApi.uploadPortadaClase(clase.id, file);
       patchAt(idx, { portada_url: r.url, portada_media_id: r.media_id });
@@ -86,7 +116,7 @@ export function ClasesAsistente({
 
   async function quitarPortada(idx: number) {
     const clase = clases[idx];
-    if (!clase.id) return;
+    if (!clase.id || clase.id < 0) return;
     try {
       await talleresAdminApi.deletePortadaClase(clase.id);
       patchAt(idx, { portada_url: "", portada_media_id: null });
@@ -130,139 +160,39 @@ export function ClasesAsistente({
           </p>
           {/* F2: cada clase es una card editable — título, descripción (temario,
               1 ítem por línea), nota y portada. La portada requiere clase
-              GUARDADA (id); el resto viaja junto con "Guardar clases". */}
-          <div className="flex flex-col gap-2.5">
-            {clases.map((s, idx) => (
-              <div
-                key={s.id ?? `nueva-${idx}`}
-                className="rounded-xl border border-border/50 bg-muted/20 p-3 flex flex-col gap-2"
-              >
-                <div className="flex flex-wrap items-center gap-2">
-                  {/* Fecha/hora propias de ESTA clase — no atadas al patrón del
-                      generador: un taller real tiene clases más largas, en otro
-                      día, o reprogramadas. El backend ya trata cada clase como
-                      fila independiente (sin cambios ahí). */}
-                  <Input
-                    type="date"
-                    value={s.fecha}
-                    onChange={(e) => patchAt(idx, { fecha: e.target.value })}
-                    className="h-8 text-xs w-[136px] shrink-0"
-                  />
-                  <HoraSelect
-                    value={s.hora_inicio_min}
-                    onChange={(v) => patchAt(idx, { hora_inicio_min: v })}
-                    min={0}
-                    max={1410}
-                    className="h-8 w-[84px] shrink-0 text-xs"
-                  />
-                  <span className="text-xs text-muted-foreground shrink-0">–</span>
-                  <HoraSelect
-                    value={s.hora_fin_min}
-                    onChange={(v) => patchAt(idx, { hora_fin_min: v })}
-                    min={30}
-                    max={1440}
-                    className="h-8 w-[84px] shrink-0 text-xs"
-                  />
-                  <Input
-                    value={s.titulo ?? ""}
-                    onChange={(e) => patchAt(idx, { titulo: e.target.value })}
-                    placeholder={`Clase ${idx + 1}: título`}
-                    className="h-8 text-sm flex-1 min-w-[140px]"
-                  />
-                  <button
-                    onClick={() => removeAt(idx)}
-                    className="h-8 w-8 shrink-0 flex items-center justify-center text-muted-foreground/60 hover:text-destructive transition rounded"
-                    aria-label="Quitar clase"
-                  >
-                    ×
-                  </button>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <div className="flex items-center gap-1">
-                    <button
-                      type="button"
-                      onClick={() => aplicarFormato(idx, "titulo")}
-                      className="h-6 w-6 grid place-items-center rounded text-muted-foreground hover:bg-ink/5 hover:text-ink transition"
-                      title="Marcar la línea del cursor como título"
-                      aria-label="Marcar la línea del cursor como título"
-                    >
-                      <Heading className="h-3.5 w-3.5" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => aplicarFormato(idx, "bullet")}
-                      className="h-6 w-6 grid place-items-center rounded text-muted-foreground hover:bg-ink/5 hover:text-ink transition"
-                      title="Marcar la línea del cursor como punto"
-                      aria-label="Marcar la línea del cursor como punto"
-                    >
-                      <List className="h-3.5 w-3.5" />
-                    </button>
-                    <span className="text-2xs text-muted-foreground/60">
-                      Título / punteo — aplica a la línea donde está el cursor
-                    </span>
-                  </div>
-                  <Textarea
-                    ref={(el) => {
+              GUARDADA (id real); el resto viaja junto con "Guardar clases".
+              Arrastrable: "Clase N" sale de la posición en esta lista, no de
+              la fecha (una clase puede ser pedagógicamente la 5ta sin ser la
+              5ta cronológica). */}
+          <DndContext
+            sensors={sensors}
+            collisionDetection={closestCenter}
+            onDragEnd={handleDragEnd}
+          >
+            <SortableContext
+              items={clases.map((c) => c.id!)}
+              strategy={verticalListSortingStrategy}
+            >
+              <div className="flex flex-col gap-2.5">
+                {clases.map((s, idx) => (
+                  <SortableClaseCard
+                    key={s.id}
+                    id={s.id!}
+                    numero={idx + 1}
+                    clase={s}
+                    onPatch={(patch) => patchAt(idx, patch)}
+                    onRemove={() => removeAt(idx)}
+                    onAplicarFormato={(formato) => aplicarFormato(idx, formato)}
+                    onSubirPortada={(file) => void subirPortada(idx, file)}
+                    onQuitarPortada={() => void quitarPortada(idx)}
+                    textareaRef={(el) => {
                       textareaRefs.current[idx] = el;
                     }}
-                    value={s.descripcion ?? ""}
-                    onChange={(e) => patchAt(idx, { descripcion: e.target.value })}
-                    placeholder="Temario / descripción — un ítem por línea"
-                    rows={2}
-                    className="resize-y text-sm"
                   />
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Input
-                    value={s.nota ?? ""}
-                    onChange={(e) => patchAt(idx, { nota: e.target.value })}
-                    placeholder="Nota (opcional, ej: se dicta junto a la clase 12)"
-                    className="h-8 text-sm flex-1 min-w-[180px]"
-                  />
-                  {s.portada_url ? (
-                    <span className="flex items-center gap-1.5 shrink-0">
-                      <img
-                        src={s.portada_url}
-                        alt="Portada"
-                        className="h-8 w-12 rounded object-cover border border-border/50"
-                      />
-                      <button
-                        onClick={() => quitarPortada(idx)}
-                        className="text-xs text-muted-foreground hover:text-destructive transition"
-                      >
-                        Quitar portada
-                      </button>
-                    </span>
-                  ) : (
-                    <label
-                      className={
-                        s.id
-                          ? "text-xs font-medium text-ink underline underline-offset-2 cursor-pointer shrink-0"
-                          : "text-xs text-muted-foreground/50 shrink-0 cursor-not-allowed"
-                      }
-                      title={
-                        s.id ? "Subir portada" : "Guardá las clases primero para subir portada"
-                      }
-                    >
-                      + Portada
-                      {/* eslint-disable-next-line no-restricted-syntax -- input file: no hay componente DS */}
-                      <input
-                        type="file"
-                        accept="image/jpeg,image/png,image/webp"
-                        className="hidden"
-                        disabled={!s.id}
-                        onChange={(e) => {
-                          const f = e.target.files?.[0];
-                          if (f) void subirPortada(idx, f);
-                          e.target.value = "";
-                        }}
-                      />
-                    </label>
-                  )}
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
+            </SortableContext>
+          </DndContext>
         </div>
       ) : (
         <p className="text-xs text-muted-foreground/60 italic">

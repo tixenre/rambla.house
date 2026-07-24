@@ -18,6 +18,7 @@ import {
 } from "@/design-system/ui/dialog";
 import { TallerCalendario } from "@/components/talleres/TallerCalendario";
 import { ClasesAsistente } from "./ClasesAsistente";
+import { nextDraftId } from "@/lib/talleres/draftId";
 
 export function NuevaEdicionDialog({
   concepto,
@@ -69,6 +70,7 @@ export function NuevaEdicionDialog({
     }
     setClases(
       ultima.clases.map((c) => ({
+        id: nextDraftId(),
         fecha: c.fecha,
         hora_inicio_min: c.hora_inicio_min,
         hora_fin_min: c.hora_fin_min,
