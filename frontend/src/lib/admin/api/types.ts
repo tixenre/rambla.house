@@ -897,6 +897,9 @@ export type CalendarioPedido = {
   numero_pedido: number | null;
   cliente_nombre: string | null;
   estado: PedidoEstado;
+  /** "diaria" (default) | "estudio"/"estudio_fijo" — ver `lib/tipos-pedido.ts`.
+   *  Distingue el color de un turno del Estudio en el calendario general. */
+  tipo?: "diaria" | "estudio" | "estudio_fijo";
   fecha_desde: string;
   fecha_hasta: string;
   monto_total: number;

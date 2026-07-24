@@ -22,7 +22,8 @@ import {
   type PedidoEstado,
 } from "@/lib/admin/api";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
-import { estadoClase } from "@/design-system/ui/estado-color";
+import { estadoClase, estadoClaseEstudio } from "@/design-system/ui/estado-color";
+import { esPedidoEstudio } from "@/lib/tipos-pedido";
 
 const MESES = [
   "Enero",
@@ -202,7 +203,7 @@ function ItemBar({
           style={gridStyle}
           className={cn(
             "block min-w-0 self-center truncate px-1.5 py-1 text-left text-2xs leading-tight transition hover:opacity-80 sm:text-xs",
-            estadoClase(p.estado),
+            esPedidoEstudio(p) ? estadoClaseEstudio(p.estado) : estadoClase(p.estado),
             roundedCls,
           )}
         >
@@ -311,6 +312,8 @@ export function CalendarioWidget({
     const data = calQ.data ?? [];
     return filtroEstado ? data.filter((p) => p.estado === filtroEstado) : data;
   }, [calQ.data, filtroEstado]);
+
+  const hayTurnosEstudio = useMemo(() => pedidosVisibles.some(esPedidoEstudio), [pedidosVisibles]);
 
   const bloqueosVisibles = useMemo<CalendarioItem[]>(() => {
     const data = ocupQ.data?.bloqueos ?? [];
@@ -573,6 +576,18 @@ export function CalendarioWidget({
               <span className="mr-1 inline-flex items-center gap-1.5 border-r hairline pr-2 text-2xs text-muted-foreground">
                 <span className="inline-block h-2.5 w-4 rounded-sm border border-dashed border-muted-foreground/50 bg-muted/50" />
                 Estudio (slot fijo / taller)
+              </span>
+            )}
+            {hayTurnosEstudio && (
+              <span className="mr-1 inline-flex items-center gap-2.5 border-r hairline pr-2 text-2xs text-muted-foreground">
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-2.5 w-4 rounded-sm border border-[var(--color-estudio)]/40 bg-[var(--color-estudio-soft)]" />
+                  Estudio: por venir
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-2.5 w-4 rounded-sm border border-[var(--color-estudio)] bg-[var(--color-estudio)]" />
+                  realizado
+                </span>
               </span>
             )}
             {LEGEND_ESTADOS.map((e) => {

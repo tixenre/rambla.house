@@ -23,7 +23,7 @@ import { Button } from "@/design-system/ui/button";
 import { Spinner } from "@/design-system/ui/spinner";
 import { cn } from "@/lib/utils";
 import { estudioAdminApi, type EstudioAgendaBloque } from "@/lib/admin/api";
-import { estadoClase } from "@/design-system/ui/estado-color";
+import { estadoClaseEstudio } from "@/design-system/ui/estado-color";
 import type { PedidoEstado } from "@/lib/admin/api";
 
 const DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
@@ -107,7 +107,7 @@ function BloqueCard({
         style={style}
         className={cn(
           "absolute rounded-md border px-1.5 py-1 text-left text-2xs leading-tight transition hover:opacity-80 overflow-hidden",
-          estadoClase(b.estado as PedidoEstado),
+          estadoClaseEstudio(b.estado as PedidoEstado),
         )}
       >
         <div className="truncate font-medium">
