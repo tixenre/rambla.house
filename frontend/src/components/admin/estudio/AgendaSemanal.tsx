@@ -16,23 +16,22 @@
  * reinterpretaría en el timezone del browser. Se comparan como texto.
  */
 import { useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { Button } from "@/design-system/ui/button";
 import { Spinner } from "@/design-system/ui/spinner";
 import { cn } from "@/lib/utils";
+import { ymd } from "@/lib/calendario-mes";
 import { estudioAdminApi, type EstudioAgendaBloque } from "@/lib/admin/api";
 import { estadoClaseEstudio } from "@/design-system/ui/estado-color";
 import { ubicarEnCarriles } from "@/lib/calendario-horas";
 import type { PedidoEstado } from "@/lib/admin/api";
+import { agruparBloquesPorDia } from "./agendaUtils";
 
 const DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 const PX_POR_HORA = 48;
-
-function ymd(d: Date): string {
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 function inicioDeSemana(d: Date): Date {
   const dow = (d.getDay() + 6) % 7; // Lunes = 0
@@ -93,10 +92,14 @@ export function AgendaSemanal({
   openHour,
   closeHour,
   onNavigatePedido,
+  vistaSwitch,
 }: {
   openHour: number;
   closeHour: number;
   onNavigatePedido: (id: number) => void;
+  /** Control Semana/Mes que arma `Agenda` — se pinta en la misma fila de
+   * navegación para no sumar una fila entera solo para el toggle. */
+  vistaSwitch?: ReactNode;
 }) {
   const [cursor, setCursor] = useState(() => new Date());
   const inicio = useMemo(() => inicioDeSemana(cursor), [cursor]);
@@ -118,15 +121,10 @@ export function AgendaSemanal({
     queryFn: () => estudioAdminApi.getAgenda(desde, hasta),
   });
 
-  const bloquesPorDia = useMemo(() => {
-    const map = new Map<string, EstudioAgendaBloque[]>();
-    for (const b of agendaQ.data?.bloques ?? []) {
-      const key = b.fecha_desde.slice(0, 10);
-      if (!map.has(key)) map.set(key, []);
-      map.get(key)!.push(b);
-    }
-    return map;
-  }, [agendaQ.data]);
+  const bloquesPorDia = useMemo(
+    () => agruparBloquesPorDia(agendaQ.data?.bloques ?? []),
+    [agendaQ.data],
+  );
 
   const horas = Array.from({ length: closeHour - openHour }, (_, i) => openHour + i);
   const alturaTotal = (closeHour - openHour) * PX_POR_HORA;
@@ -136,30 +134,33 @@ export function AgendaSemanal({
   return (
     <div>
       <div className="mb-3 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              setCursor((c) => new Date(c.getFullYear(), c.getMonth(), c.getDate() - 7))
-            }
-          >
-            <ChevronLeft className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setCursor(new Date())}>
-            Hoy
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() =>
-              setCursor((c) => new Date(c.getFullYear(), c.getMonth(), c.getDate() + 7))
-            }
-          >
-            <ChevronRight className="h-4 w-4" />
-          </Button>
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setCursor((c) => new Date(c.getFullYear(), c.getMonth(), c.getDate() - 7))
+              }
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setCursor(new Date())}>
+              Hoy
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setCursor((c) => new Date(c.getFullYear(), c.getMonth(), c.getDate() + 7))
+              }
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+          <span className="t-eyebrow">{label}</span>
         </div>
-        <span className="t-eyebrow">{label}</span>
+        {vistaSwitch}
       </div>
 
       {agendaQ.isLoading ? (

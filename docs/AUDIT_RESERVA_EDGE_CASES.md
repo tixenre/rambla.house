@@ -135,6 +135,37 @@ const ok = { fecha_desde:'2026-10-06T10:00:00', fecha_hasta:'2026-10-08T12:00:00
 
 > R5: el feature-gating de "modificar pedidos" vive sólo en el front (`features.ts`). El endpoint valida stock/horarios igual, así que no es hueco de seguridad, pero la feature "apagada" es invocable por API. Probablemente la concurrencia (H1) también lo afecta (comparte `_check_stock`).
 
+## Pase 10 — Re-chequeo post iniciativa Estudio/Talleres (#1283 Fases 5-8 + pedido mensual de taller)
+
+> Corrido contra un seed local MÍNIMO propio (6 equipos, 0 clientes de base — no el clon de
+> staging de los pases 1-9), armado ad-hoc para esta pasada. `STAGING_LOGIN_SECRET` no estaba
+> seteado en el proceso — se reinició uvicorn para poder usar `staging-login`/`staging-verify`
+> con 2 clientes de prueba (`EDGE-TEST Uno/Dos`, verificados vía `identity.kyc`, nunca UPDATE
+> manual a `dni_validado_at`). Limpieza verificada al final: `alquileres` volvió a las 6 filas
+> originales (153,155,206,208,240,242), `clientes=0`, `auth_sessions=0`.
+
+| # | Test | Repro | Esperado | Resultado |
+|---|------|-------|----------|-----------|
+| P10-1 | IDOR cruzado, 2 clientes reales (detalle + cancelar + 5 documentos) | Uno crea pedido, Dos intenta las 7 superficies | 404 en las 7 | ✅ **404×7** (control positivo: Uno sobre lo propio → 200) |
+| P10-2 | Integridad de precio (`POST /api/cliente/pedidos`, no el admin) | `precio_jornada:1` en el body de un ítem de $45000 | ignorado, usa catálogo | ✅ **45000**, no 1 |
+| P10-3 | **Overflow de `precio_jornada` vía admin** (`POST /alquileres`, `PedidoItem` sin cota superior) | `precio_jornada:99999999999999` | 4xx limpio | 🟡 **500 crudo** `NumericValueOutOfRange` — ver H6. Rollback limpio (sin pedido huérfano) |
+| P10-4 | Concurrencia/sobreventa, equipo stock=1, 10 curl paralelos reales (no browser) | 10× `POST` mismo ítem | 1×201, resto 409 | ✅ **1×201, 9×409, 0×500** — **H1 confirmado RESUELTO** (advisory lock, MEMORIA 2026-06-22) |
+| P10-5 | Guardas de stock (cantidad>stock) + buffer (12h, reconfigurado ad-hoc para esta pasada) | cantidad 3 sobre stock 2; back-to-back dentro del buffer | 409 ambos | ✅ **409/409**, mensajes claros |
+| P10-6 | Validación de input (8 sub-casos: cantidad 0/-1/1000, equipo_id string/-5/0, fecha malformada/invertida/pasada) | `POST /api/cliente/pedidos` | 4xx limpio, nunca 500 | ✅ **8/8 limpio** (422/400/404 según caso) |
+| P10-7 | Descuentos: `max(cliente, jornadas)`, no aditivo | cliente 30% + tier jornadas 50% (10 días) | 50%, no 80% | ✅ **50%**, `descuento_origen:"jornadas"` |
+| P10-8 | XSS en `notas` | `<script>alert(1)</script>` vía preview `?format=html` (el PDF real no se pudo probar, ver nota) | escapado | ✅ **`&lt;script&gt;`**, cero `<script>` crudo |
+
+> **Nota de entorno:** el PDF real (`.../remito` sin `?format=html`) da 500 en este sandbox — no
+> es un bug de la app: `backend/pdf.py` pide el browser `chromium_headless_shell`, que no está
+> instalado acá (solo el `chromium` normal, usado por `ui-audit.mjs`). El preview `?format=html`
+> (el mismo HTML antes de rasterizar) sí se pudo ejercitar y confirma el escapado — no se probó
+> el rasterizado en sí. Anotado para no re-perder tiempo con esto en la próxima pasada local.
+
+> **P10-1/2/4/6/7/8 reconfirman hallazgos de pases anteriores** (A3/A3b, P1, C1/C2, R1/R2, D-max,
+> I1) contra datos frescos — sin drift. **P10-3 es hallazgo nuevo** (H6, abajo). El resto de los
+> hallazgos abiertos (H2 ya arreglado por otra iniciativa, H3/H4/H5) no se re-testeó en esta
+> pasada — seguir usando los pases 1-9 como referencia para esos.
+
 ## Hallazgos (consolidado)
 
 ### H1 · 🔴 ALTA · Bookings concurrentes del MISMO ítem → 500 INTERMITENTE (aun con stock de sobra)
@@ -164,6 +195,11 @@ const ok = { fecha_desde:'2026-10-06T10:00:00', fecha_hasta:'2026-10-08T12:00:00
 ### H5 · 🟢 MENOR · Otros
 - **Idempotencia:** double-submit secuencial del mismo carrito crea pedidos duplicados si hay stock (la UI lo mitiga deshabilitando el botón al enviar). Sin idempotency key en la API.
 - **cotizar ignora ítems inexistentes** en silencio (B6) — total como si costaran 0.
+
+### H6 · 🟡 MEDIA · `PedidoItem.precio_jornada` sin cota superior → 500 crudo vía admin (Pase 10, P10-3)
+- **Qué:** `precio_jornada` (`routes/alquileres/modelos.py::PedidoItem`) solo valida "no negativo" (`validate_precio`) — a diferencia de `descuento_manual_monto` en el mismo archivo, que SÍ tiene un tope explícito (`>= 2_147_483_647` rechazado) con un comentario que dice literalmente que existe para evitar este mismo problema (cierre de la auditoría de contabilidad, 2026-07-02). `alquiler_items.precio_jornada` es `INTEGER` (tope Postgres 2147483647); un valor mayor (probado: `99999999999999`) rompe ese tope en el INSERT y ni `create_pedido` ni `update_alquiler_items` traducen la excepción (`map_pg_errors` está en contabilidad/pagos/facturación/productoras/clientes pero no en `routes/alquileres/`) → cae cruda al handler global → **500** con `{"detail":"NumericValueOutOfRange: integer out of range"}` expuesto tal cual en local (en Railway el body sería genérico, pero el 500 igual ocurre).
+- **Alcance:** solo admin puede mandar `precio_jornada` arbitrario (`POST /alquileres`, `PUT /alquileres/{id}/items`) — el endpoint del cliente (`POST /api/cliente/pedidos`) ignora el valor del body y usa el precio del catálogo (P10-2), así que no es explotable por un cliente. Confirmado que NO deja pedidos huérfanos (rollback limpio).
+- **Fix sugerido:** mismo patrón que `_validar_descuento_manual_monto` — un `field_validator` en `PedidoItem.precio_jornada` que rechace `>= 2_147_483_647` con un mensaje 422 claro.
 
 ---
 
