@@ -1957,6 +1957,7 @@ def _init_db_schema(conn):
             nota            TEXT NOT NULL DEFAULT '',
             portada_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL,
             portada_url     TEXT NOT NULL DEFAULT '',
+            orden           INTEGER NOT NULL DEFAULT 0,
             created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
@@ -1969,6 +1970,10 @@ def _init_db_schema(conn):
     conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS nota TEXT NOT NULL DEFAULT ''")
     conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS portada_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL")
     conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS portada_url TEXT NOT NULL DEFAULT ''")
+    # Orden manual (independiente de fecha) — el backfill de datos existentes
+    # vive SOLO en la migración Alembic (y3z4a5b6c7d8), no acá: repetirlo en
+    # cada arranque pisaría cualquier reorden manual ya guardado.
+    conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS orden INTEGER NOT NULL DEFAULT 0")
 
     # Escuela v2 F3: instructores como ENTIDAD propia (antes solo texto suelto en
     # `talleres.instructor_*`) — un taller puede tener varios, un instructor puede
