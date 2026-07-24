@@ -18,10 +18,14 @@ export function CuentaSelect({
   cuentas,
   value,
   onChange,
+  placeholder = "Elegir…",
 }: {
   cuentas: Cuenta[];
   value: string;
   onChange: (v: string) => void;
+  /** Texto de la opción vacía — "Elegir…" en un form (requiere elegir),
+   *  "Todas las cuentas" en un filtro (vacío = sin filtrar). */
+  placeholder?: string;
 }) {
   return (
     <select
@@ -29,7 +33,7 @@ export function CuentaSelect({
       onChange={(e) => onChange(e.target.value)}
       className="h-9 rounded-md border hairline bg-surface-elevated px-2 text-sm"
     >
-      <option value="">Elegir…</option>
+      <option value="">{placeholder}</option>
       {cuentas.map((c) => (
         <option key={c.id} value={c.id}>
           {c.nombre}

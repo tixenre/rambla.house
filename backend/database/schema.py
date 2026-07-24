@@ -489,9 +489,12 @@ def _init_db_schema(conn):
     """)
 
     # Estudio E2: tipo de alquiler ('diaria' = pedido normal por jornada;
-    # 'estudio' = reserva del espacio por horas). El DEFAULT 'diaria' es clave:
-    # las reservas existentes y las queries de overlap (que NO filtran por tipo)
-    # quedan idénticas. `estudio_con_pack` se reserva para E3 (pack Grip/Luz).
+    # 'estudio'/'estudio_fijo' = reserva del espacio por horas / slot mensual;
+    # 'taller' = resumen mensual de una edición de taller, ver
+    # `_regenerar_pedidos_taller`). El DEFAULT 'diaria' es clave: las reservas
+    # existentes y las queries de overlap (que NO filtran por tipo) quedan
+    # idénticas. `estudio_con_pack` se reserva para E3 (pack Grip/Luz). Sin
+    # CHECK constraint — cualquier texto es válido, el enum vive en el código.
     conn.execute("ALTER TABLE alquileres ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'diaria'")
     conn.execute("ALTER TABLE alquileres ADD COLUMN IF NOT EXISTS estudio_con_pack BOOLEAN NOT NULL DEFAULT FALSE")
 
@@ -1939,6 +1942,36 @@ def _init_db_schema(conn):
     # TABLE de arriba — era 100% redundante (ver migración
     # q4r5s6t7u8v9_drop_redundant_plain_indexes).
 
+    # Economía del taller (#1283-adjacent): si la edición usa el espacio del
+    # Estudio y/o equipos de alquiler, con un valor que el admin tipea a mano
+    # (no se deriva de asistencia real) — `_regenerar_pedidos_taller` los
+    # traduce en ítems del pedido mensual, atribuidos automático vía
+    # `equipos.dueno` (Estudio / Rambla), igual que hace el Estudio con sus
+    # slots fijos. La matrícula/curso en sí NO tiene columna — se tipea como
+    # línea personalizada dentro del pedido ya generado.
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS usa_estudio BOOLEAN NOT NULL DEFAULT FALSE")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_estudio INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_estudio_modo TEXT NOT NULL DEFAULT 'mensual'")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS usa_equipos BOOLEAN NOT NULL DEFAULT FALSE")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_equipos INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_equipos_modo TEXT NOT NULL DEFAULT 'mensual'")
+    # Migración idempotente (mismo patrón que spec_propuestas_pendientes_tipo_check):
+    # dropear+re-crear en vez de "ADD CONSTRAINT IF NOT EXISTS" (Postgres no lo soporta para CHECK).
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_estudio_modo_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_estudio_modo_check "
+        "CHECK (valor_estudio_modo IN ('mensual','total'))"
+    )
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_equipos_modo_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_equipos_modo_check "
+        "CHECK (valor_equipos_modo IN ('mensual','total'))"
+    )
+    # Vincula cada pedido mensual generado con su edición, para regenerar
+    # futuros sin tocar pasados/pagados (mismo patrón que `estudio_slot_id`).
+    # NULL en todo pedido normal → cero impacto.
+    conn.execute("ALTER TABLE alquileres ADD COLUMN IF NOT EXISTS taller_edicion_id INTEGER REFERENCES ediciones_taller(id) ON DELETE SET NULL")
+
     # Horas en MINUTOS desde medianoche (0..1440) — soporta medias horas (8:30).
     # El sufijo _min es deliberado: un lector legacy que espere horas enteras
     # falla ruidoso en SQL en vez de comparar horas contra minutos en silencio.
@@ -2014,6 +2047,42 @@ def _init_db_schema(conn):
     # Escuela v2 F6: proyectos por-instructor (reemplaza `talleres.instructor_proyectos`,
     # dropeada en la misma fase) — "Trabajó con" ahora lee de acá.
     conn.execute("ALTER TABLE instructores ADD COLUMN IF NOT EXISTS proyectos TEXT NOT NULL DEFAULT ''")
+
+    # Instituciones (co-presentadoras de un taller, ej. "Rambla" + "Filmar") —
+    # mismo patrón que instructores (entidad propia + N↔N con talleres, un
+    # taller puede tener varias, una institución puede co-presentar varios
+    # talleres). A propósito SIN `rol`/`proyectos` (no aplican a una
+    # organización) y SIN `activo` (en instructores quedó vestigial — nadie lo
+    # lee ni lo filtra — no se copia un campo que no rinde).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS instituciones (
+            id            SERIAL PRIMARY KEY,
+            nombre        TEXT NOT NULL,
+            descripcion   TEXT NOT NULL DEFAULT '',
+            instagram     TEXT NOT NULL DEFAULT '',
+            web           TEXT NOT NULL DEFAULT '',
+            logo_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL,
+            logo_url      TEXT NOT NULL DEFAULT '',
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS taller_instituciones (
+            taller_id      INTEGER NOT NULL REFERENCES talleres(id) ON DELETE CASCADE,
+            institucion_id INTEGER NOT NULL REFERENCES instituciones(id) ON DELETE CASCADE,
+            orden          INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (taller_id, institucion_id)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_instituciones_taller "
+        "ON taller_instituciones(taller_id, orden)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_instituciones_institucion "
+        "ON taller_instituciones(institucion_id)"
+    )
 
     # Escuela v2 F4a: video hero (YouTube) del concepto. Mismo extractor que
     # estudio_trabajos (services.media.youtube.extract_video_id), pero acá SÍ

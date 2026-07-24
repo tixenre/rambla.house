@@ -13,10 +13,10 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, R
 from pydantic import BaseModel, Field
 
 from auth.guards import require_admin
-from database import MARCA_SUBQUERY, get_db, now_ar, row_to_dict, to_datetime
+from database import get_db, now_ar, row_to_dict, to_datetime
 from rate_limit import limiter, ADMIN_WRITE_LIMIT, ADMIN_UPLOAD_LIMIT, CLIENTE_WRITE_LIMIT
 from clientes.queries.identidad import nombre_completo_cliente
-from reservas import ESTADOS_RESERVADO, validar_stock as _check_stock, validar_stock_hipotetico
+from reservas import ESTADOS_RESERVADO, validar_stock_hipotetico
 from routes.alquileres import (
     _dispatch_pedido_creado_emails,
     _enriquecer_pedidos_con_cliente,
@@ -117,7 +117,13 @@ def _build_response(row, fotos: list) -> dict:
         "close_hour": row["close_hour"],
         "buffer_horas": row["buffer_horas"],
         "anticipacion_min_horas": row["anticipacion_min_horas"],
-        "pack_activo": bool(row["pack_activo"]),
+        # ⏰ LEGACY del pack (Fase 8, #1283) — el mecanismo del pack (con_pack,
+        # pack_activo, la curación de estudio_pack_equipos) se retiró, pero estas
+        # 3 columnas SIGUEN vivas con otro rol: `pack_descripcion` es la
+        # descripción de la PROMO actual (`_promo_info` la reusa, nunca se
+        # agregó un campo nuevo); `pack_nombre`/`pack_precio` son el default
+        # de nombre/precio si algún día se recrea una promo borrada
+        # (`crear_promo_desde_pack`). No confundir con el pack legacy.
         "pack_nombre": row["pack_nombre"],
         "pack_descripcion": row["pack_descripcion"],
         "pack_precio": row["pack_precio"],
@@ -514,13 +520,12 @@ def _get_trabajos(conn, solo_activos: bool = True) -> list:
 
 @router.get("/estudio")
 def get_estudio(response: Response):
-    """Devuelve la configuración pública del estudio + fotos + pack curado + trabajos."""
+    """Devuelve la configuración pública del estudio + fotos + promo + trabajos."""
     response.headers["Cache-Control"] = "public, max-age=30, stale-while-revalidate=30"
     with get_db() as conn:
         row = _get_estudio_row(conn)
         fotos = _get_fotos(conn)
         resp = _build_response(row, fotos)
-        resp["pack_equipos"] = _pack_curado(conn)
         resp["promo"] = _promo_info(conn, row)
         resp["trabajos"] = _get_trabajos(conn, solo_activos=True)
         return resp
@@ -538,7 +543,6 @@ def get_estudio_admin(request: Request):
         row = _get_estudio_row(conn)
         fotos = _get_fotos(conn)
         resp = _build_response(row, fotos)
-        resp["pack_equipos"] = _pack_curado(conn)
         resp["promo"] = _promo_info(conn, row)
         resp["trabajos"] = _get_trabajos(conn, solo_activos=False)
         return resp
@@ -553,10 +557,10 @@ class EstudioUpdate(BaseModel):
     close_hour: Optional[int] = None
     buffer_horas: Optional[int] = None
     anticipacion_min_horas: Optional[int] = None
-    pack_activo: Optional[bool] = None
-    pack_nombre: Optional[str] = None
+    # ⏰ pack_activo/pack_nombre/pack_precio retirados (Fase 8, #1283) — el pack
+    # ya no existe como mecanismo editable. `pack_descripcion` queda: es la
+    # descripción EN VIVO de la promo actual (ver `_build_response`).
     pack_descripcion: Optional[str] = None
-    pack_precio: Optional[int] = None
     features_json: Optional[str] = None
     faq_json: Optional[str] = None
     direccion: Optional[str] = None
@@ -1227,127 +1231,13 @@ def _pack_equipo_ids(conn) -> list[int]:
     return [r["id"] for r in rows]
 
 
-def _pack_disponible(conn, fecha_desde, fecha_hasta, exclude_pedido_id: int | None = None) -> list[dict]:
-    """Equipos curados del pack con >= 1 unidad disponible en la franja. La
-    disponibilidad sale del motor sagrado (get_disponibilidad aplica el buffer
-    global de equipos), así que lo ya reservado no aparece. Devuelve
-    [{id, nombre, marca, foto_url, cantidad}]."""
-    pack_ids = _pack_equipo_ids(conn)
-    if not pack_ids:
-        return []
-    disp = get_disponibilidad(
-        fecha_desde.isoformat(), fecha_hasta.isoformat(), exclude_pedido_id
-    )
-    libres = {eid: disp.get(str(eid), 0) for eid in pack_ids if disp.get(str(eid), 0) >= 1}
-    if not libres:
-        return []
-    rows = conn.execute(
-        f"""
-        SELECT e.id, e.nombre, e.foto_url, {MARCA_SUBQUERY}
-        FROM equipos e
-        WHERE e.id = ANY(%s)
-        ORDER BY e.nombre
-        """,
-        (list(libres.keys()),),
-    ).fetchall()
-    return [
-        {
-            "id": r["id"],
-            "nombre": r["nombre"],
-            "marca": r["marca"],
-            "foto_url": r["foto_url"],
-            "cantidad": libres[r["id"]],
-        }
-        for r in rows
-    ]
-
-
-def _pack_curado(conn) -> list[dict]:
-    """Lista curada del pack (en orden), con nombre/marca/foto y `cantidad` =
-    stock total del equipo en el Rental (lo que muestra la ficha pública como
-    "5× C-stand"). Sin filtrar por disponibilidad de franja (eso es del público
-    en `_pack_disponible`). Sirve al admin y a la ficha pública."""
-    rows = conn.execute(
-        f"""
-        SELECT pe.equipo_id AS id, pe.orden, e.nombre, e.foto_url, e.cantidad,
-               {MARCA_SUBQUERY}
-        FROM estudio_pack_equipos pe
-        JOIN equipos e ON e.id = pe.equipo_id
-        WHERE pe.estudio_id = 1
-          AND e.eliminado_at IS NULL
-        ORDER BY pe.orden, pe.id
-        """,
-    ).fetchall()
-    return [
-        {
-            "id": r["id"],
-            "nombre": r["nombre"],
-            "marca": r["marca"],
-            "foto_url": r["foto_url"],
-            "cantidad": r["cantidad"],
-            "orden": r["orden"],
-        }
-        for r in rows
-    ]
-
-
-# ── Admin: CRUD del pack curado (v2-C) ──────────────────────────────────────────
-
-@router.get("/admin/estudio/pack")
-def listar_pack(request: Request):
-    require_admin(request)
-    with get_db() as conn:
-        return {"pack": _pack_curado(conn)}
-
-
-class PackEquipoCreate(BaseModel):
-    equipo_id: int
-
-
-@router.post("/admin/estudio/pack", status_code=201)
-@limiter.limit(ADMIN_WRITE_LIMIT)
-def agregar_pack_equipo(body: PackEquipoCreate, request: Request):
-    require_admin(request)
-    with get_db() as conn:
-        try:
-            eq = conn.execute(
-                "SELECT id, es_recurso_interno, eliminado_at FROM equipos WHERE id = %s",
-                (body.equipo_id,),
-            ).fetchone()
-            if not eq or eq["eliminado_at"] is not None:
-                raise HTTPException(404, "Equipo no encontrado")
-            if eq["es_recurso_interno"]:
-                raise HTTPException(400, "No se puede agregar un recurso interno al pack")
-            orden = conn.execute(
-                "SELECT COALESCE(MAX(orden), -1) + 1 AS next FROM estudio_pack_equipos WHERE estudio_id = 1"
-            ).fetchone()["next"]
-            conn.execute(
-                "INSERT INTO estudio_pack_equipos (estudio_id, equipo_id, orden) "
-                "VALUES (1, %s, %s) ON CONFLICT (estudio_id, equipo_id) DO NOTHING",
-                (body.equipo_id, orden),
-            )
-            conn.commit()
-            return {"pack": _pack_curado(conn)}
-        except Exception:
-            conn.rollback()
-            raise
-
-
-@router.delete("/admin/estudio/pack/{equipo_id}")
-@limiter.limit(ADMIN_WRITE_LIMIT)
-def quitar_pack_equipo(equipo_id: int, request: Request):
-    require_admin(request)
-    with get_db() as conn:
-        try:
-            conn.execute(
-                "DELETE FROM estudio_pack_equipos WHERE estudio_id = 1 AND equipo_id = %s",
-                (equipo_id,),
-            )
-            conn.commit()
-            return {"pack": _pack_curado(conn)}
-        except Exception:
-            conn.rollback()
-            raise
+# ⏰ Retirados en Fase 8 (#1283): `_pack_disponible` (disponibilidad del pack
+# para el público), `_pack_curado` (listado con foto/marca para el admin/
+# ficha pública) y el CRUD `/admin/estudio/pack` que los alimentaba —
+# curar "qué equipos entran al pack" no tiene sentido una vez que la promo
+# existe (sus componentes se editan como cualquier combo, desde Equipos).
+# `_pack_equipo_ids` (abajo) SOBREVIVE: `crear_promo_desde_pack` la sigue
+# usando para sembrar los componentes si algún día se recrea una promo borrada.
 
 
 # ── Admin: promo combo (#1283 Fase 5 — reemplaza al pack) ───────────────────────
@@ -1769,52 +1659,26 @@ def estudio_disponibilidad(
             return {
                 "libre": False,
                 "motivo": f"Necesitás reservar con al menos {estudio['anticipacion_min_horas']} h de anticipación",
-                "pack": [],
                 "promo": None,
             }
 
         libre, motivo = _estudio_disponible(conn, estudio, fecha_desde, fecha_hasta)
         if not libre:
-            return {"libre": False, "motivo": motivo, "pack": [], "promo": None}
+            return {"libre": False, "motivo": motivo, "promo": None}
 
-        # Pack: equipos disponibles en la franja (solo si el pack está activo).
-        # ⏰ LEGACY — el pack sigue funcionando hasta que la Fase 8 lo retire.
-        pack = (
-            _pack_disponible(conn, fecha_desde, fecha_hasta)
-            if estudio["pack_activo"]
-            else []
-        )
-        # Promo: reemplaza al pack (#1283 Fase 5) — misma franja, disponibilidad
-        # derivada de sus componentes vía get_disponibilidad (compuesto genérico).
+        # Disponibilidad derivada de sus componentes vía get_disponibilidad
+        # (compuesto genérico) — misma franja.
         promo = _promo_info(conn, estudio, fecha_desde, fecha_hasta)
-        return {"libre": True, "motivo": None, "pack": pack, "promo": promo}
+        return {"libre": True, "motivo": None, "promo": promo}
 
 
 class EstudioReservaCreate(BaseModel):
     fecha: str
     start: str
     horas: int
-    con_pack: bool = False   # ⏰ LEGACY — reemplazado por con_promo (Fase 5, #1283)
     con_promo: bool = False
     # Los datos del cliente NO vienen del body: salen de la sesión + tabla clientes
     # (reserva con login obligatorio, igual que el portal /api/cliente/pedidos).
-
-
-def _agregar_items_pack(conn, pedido_id: int, fecha_desde, fecha_hasta, pack_ids: list[int]) -> None:
-    """Inserta un alquiler_item por cada equipo del pack con stock disponible en
-    la franja (cantidad = lo disponible, precio 0 — el pack es valor fijo). Asume
-    que las filas de `pack_ids` ya están lockeadas (FOR UPDATE) por el caller."""
-    disp = get_disponibilidad(fecha_desde.isoformat(), fecha_hasta.isoformat(), pedido_id)
-    for eid in pack_ids:
-        qty = disp.get(str(eid), 0)
-        if qty >= 1:
-            conn.execute(
-                """
-                INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, subtotal)
-                VALUES (%s,%s,%s,%s,%s)
-                """,
-                (pedido_id, eid, qty, 0, 0),
-            )
 
 
 class SueltoItem(BaseModel):
@@ -1829,14 +1693,17 @@ class SueltoItem(BaseModel):
 def _crear_pedido_estudio(
     conn, *, estudio, fecha_desde, fecha_hasta,
     cliente_id, cliente_nombre, cliente_email, cliente_telefono,
-    con_pack: bool, con_promo: bool, sueltos: list | None,
+    con_promo: bool, sueltos: list | None,
     espacio_monto: int | None, estado: str, numero_pedido: int,
-) -> int:
+) -> tuple[int, Optional[str]]:
     """Núcleo de creación de un pedido del Estudio (#1283 Fase 6 — extraído de
     `crear_reserva_estudio`, que ahora es un wrapper: sesión+Didit+anticipación
-    +'solicitado'). Arma los ítems (pack ⏰ best-effort / promo+sueltos DUROS /
+    +'solicitado'). Arma los ítems (promo BEST-EFFORT / sueltos DUROS /
     centinela DURO) y el pedido, todo en la transacción del `conn` del caller
-    (no commitea — eso es responsabilidad del caller). Devuelve `pedido_id`.
+    (no commitea — eso es responsabilidad del caller). Devuelve
+    `(pedido_id, promo_advertencia)` — el segundo es `None` salvo que la
+    promo se haya reservado con algún componente sin stock (ver abajo). El
+    pack (⏰ mecanismo legacy anterior a la promo) se retiró en la Fase 8, #1283.
 
     NO valida identidad ni anticipación — son gates del CALLER, distintos entre
     el flujo público y el admin. SÍ valida slot/taller (conflicto estructural,
@@ -1854,15 +1721,11 @@ def _crear_pedido_estudio(
     if taller_nombre:
         raise HTTPException(409, f"Esa franja está reservada para el taller «{taller_nombre}»")
 
-    con_pack = bool(con_pack) and bool(estudio["pack_activo"])
-    # La promo reemplaza al pack (#1283 Fase 5): en la práctica son
-    # mutuamente excluyentes (crear la promo apaga pack_activo), pero no
-    # se fuerza acá — cada flag depende solo de que SU mecanismo siga vigente.
     con_promo = bool(con_promo) and bool(estudio["promo_combo_id"])
     sueltos = sueltos or []
 
     # `espacio_monto` es la plata REAL del espacio (va al ítem centinela,
-    # Fase 2 — ítems veraces); `monto_total` sigue siendo espacio + pack/promo/
+    # Fase 2 — ítems veraces); `monto_total` sigue siendo espacio + promo/
     # sueltos, como siempre. El precio de la promo/sueltos se resuelve UNA vez
     # acá y queda congelado en el ítem (como cualquier otra plata de pedido) —
     # si el combo/equipo cambia de precio después, este pedido ya cobrado no
@@ -1872,8 +1735,6 @@ def _crear_pedido_estudio(
         espacio_monto if espacio_monto is not None else (estudio["precio_hora"] or 0) * horas
     )
     monto_total = espacio_monto_final
-    if con_pack:
-        monto_total += estudio["pack_precio"] or 0
     promo_precio = precio_jornada_efectivo(conn, estudio["promo_combo_id"]) or 0 if con_promo else 0
     if con_promo:
         monto_total += promo_precio
@@ -1893,76 +1754,52 @@ def _crear_pedido_estudio(
         (
             cliente_id, cliente_nombre, cliente_email, cliente_telefono,
             fecha_desde, fecha_hasta, monto_total, estado,
-            "estudio", "estudio", con_pack, numero_pedido,
+            "estudio", "estudio", False, numero_pedido,
         ),
     )
 
-    # ── Pack PRIMERO (antes del ítem centinela) ─────────────────────────────
-    # Así _check_stock solo ve los equipos reales del pack y nunca el
-    # centinela → no se mezcla el buffer global con el propio del espacio.
-    if con_pack:
-        pack_ids = _pack_equipo_ids(conn)
-        if pack_ids:
-            # Lock de las filas del pack: serializa contra otras reservas que
-            # toquen estos equipos (su _check_stock también las lockea).
-            conn.execute("SELECT id FROM equipos WHERE id = ANY(%s) FOR UPDATE", (pack_ids,))
-            _agregar_items_pack(conn, pedido_id, fecha_desde, fecha_hasta, pack_ids)
-            # Gate del motor (FOR UPDATE). Best-effort: si algo se lo llevó
-            # otro entre el snapshot y el lock, re-snapshoteamos bajo el lock
-            # (ya refleja a los competidores commiteados) en vez de fallar
-            # toda la reserva. El espacio sí es requisito duro (abajo).
-            fd_iso, fh_iso = fecha_desde.isoformat(), fecha_hasta.isoformat()
-            if _check_stock(conn, pedido_id, fd_iso, fh_iso):
-                conn.execute(
-                    "DELETE FROM alquiler_items WHERE pedido_id = %s AND equipo_id = ANY(%s)",
-                    (pedido_id, pack_ids),
-                )
-                _agregar_items_pack(conn, pedido_id, fecha_desde, fecha_hasta, pack_ids)
-
-        # Línea personalizada con el precio FIJO del pack (Fase 2, ítems
-        # veraces): antes el pack no tenía NINGÚN ítem con plata propia —
-        # el prorrateo de la liquidación (que reparte `monto_total` por
-        # `subtotal` de ítem) caía al fallback "partes iguales" entre el
-        # centinela y los equipos del pack (todos a $0), derramando valor
-        # del espacio hacia los DUEÑOS de esos equipos. `equipo_id=NULL`
-        # → dueño 'Rambla' por default en la liquidación (`COALESCE`) —
-        # coherente con que la promo es plata de Rambla, no de los
-        # dueños tradicionales. Se cobra el precio fijo del pack pase lo
-        # que pase con la disponibilidad de sus equipos (best-effort de
-        # arriba: lo que no entró, no entró — el precio no cambia).
-        pack_precio = estudio["pack_precio"] or 0
-        conn.execute(
-            """
-            INSERT INTO alquiler_items
-                (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, nombre_libre, cobro_modo)
-            VALUES (%s,NULL,1,%s,%s,%s,'fijo')
-            """,
-            (pedido_id, pack_precio, pack_precio, estudio["pack_nombre"] or "Pack de equipos"),
-        )
-
-    # ── Promo (combo) + sueltos: requisito DURO, sin best-effort ────────────
-    # A diferencia del pack (equipos sueltos best-effort, valor fijo pase lo
-    # que pase), la promo y los sueltos son equipos/combos a precio fijo YA
-    # comprometido con el cliente: si algún componente/equipo no tiene stock,
-    # la reserva falla entera (409) en vez de servir una versión parcial
-    # silenciosa. Se valida ANTES de insertar (`validar_stock_hipotetico`,
-    # como en `revalidar_disponibilidad_estudio`) — NO insertar-y-recién-
-    # chequear: el gate toma sus propios `FOR UPDATE` (expande combos con la
-    # MISMA pieza que cualquier compuesto, `_expandir_mult`), y si el INSERT
-    # fuera antes, el lock implícito FOR KEY SHARE del propio insert quedaría
-    # en el camino del FOR UPDATE del gate — mismo deadlock que el centinela
-    # (ver comentario abajo), aplicado acá por las dudas.
+    # Se valida ANTES de insertar (`validar_stock_hipotetico`, como en
+    # `revalidar_disponibilidad_estudio`) — NO insertar-y-recién-chequear: el
+    # gate toma sus propios `FOR UPDATE` (expande combos con la MISMA pieza
+    # que cualquier compuesto, `_expandir_mult`), y si el INSERT fuera antes,
+    # el lock implícito FOR KEY SHARE del propio insert quedaría en el camino
+    # del FOR UPDATE del gate — mismo deadlock que el centinela (ver
+    # comentario abajo), aplicado acá por las dudas.
     _Item = namedtuple("_Item", ["equipo_id", "cantidad"])
-    items_a_validar = []
+
+    # ── Promo (combo): BEST-EFFORT, nunca bloquea ───────────────────────────
+    # Mismo criterio que tenía el pack ⏰ retirado: la promo es un bundle a
+    # precio fijo — lo que no hay no bloquea la reserva, se cobra el precio
+    # fijo igual (`monto_total` ya sumó `promo_precio` arriba) y se avisa qué
+    # faltó (`promo_advertencia`, lo muestra el caller). Sigue siendo UNA sola
+    # línea (`equipo_id=promo_combo_id`, ítems veraces Fase 5) — no hay líneas
+    # parciales del combo; el motor sigue expandiendo su demanda completa y
+    # recursiva para cualquier chequeo FUTURO (`validar_stock_hipotetico`
+    # queda sagrado, sin excepción) — acá solo se decide NO reventar el 409
+    # con lo que ya devolvió. Corre igual (toma sus locks, sirve para el
+    # mensaje) aunque no bloquee.
+    promo_advertencia: Optional[str] = None
     if con_promo:
-        items_a_validar.append(_Item(estudio["promo_combo_id"], 1))
-    items_a_validar.extend(_Item(s.equipo_id, s.cantidad) for s in sueltos)
-    if items_a_validar:
-        errores = validar_stock_hipotetico(
-            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(), items_a_validar
+        errores_promo = validar_stock_hipotetico(
+            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
+            [_Item(estudio["promo_combo_id"], 1)],
         )
-        if errores:
-            raise HTTPException(409, f"Sin stock suficiente: {'; '.join(errores)}")
+        if errores_promo:
+            promo_advertencia = (
+                f"La promo se reservó igual, pero sin stock de: {'; '.join(errores_promo)}"
+            )
+
+    # ── Sueltos: requisito DURO, sin best-effort ────────────────────────────
+    # A diferencia de la promo (arriba), un suelto es un equipo elegido por su
+    # nombre, ya comprometido con el cliente: si no hay stock, la reserva
+    # entera falla (409) en vez de servir una versión parcial silenciosa.
+    if sueltos:
+        errores_sueltos = validar_stock_hipotetico(
+            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
+            [_Item(s.equipo_id, s.cantidad) for s in sueltos],
+        )
+        if errores_sueltos:
+            raise HTTPException(409, f"Sin stock suficiente: {'; '.join(errores_sueltos)}")
 
     if con_promo:
         conn.execute(
@@ -1993,8 +1830,7 @@ def _crear_pedido_estudio(
     # FOR UPDATE sobre la fila del otro — deadlock simétrico (encontrado con
     # `test_concurrencia_admin_dos_altas_misma_franja_solo_una_pasa`). Lockeando
     # ANTES de insertar, la 2da transacción espera acá, nunca llega a insertar
-    # su propia fila en conflicto. Mismo criterio que el pack (arriba: lockea
-    # `pack_ids` antes de `_agregar_items_pack`).
+    # su propia fila en conflicto.
     conn.execute("SELECT id FROM equipos WHERE id = %s FOR UPDATE", (estudio["equipo_id"],))
     if not _centinela_libre(conn, estudio["equipo_id"], fecha_desde, fecha_hasta,
                             estudio["buffer_horas"], exclude_pedido_id=pedido_id):
@@ -2012,7 +1848,7 @@ def _crear_pedido_estudio(
         (pedido_id, estudio["equipo_id"], espacio_monto_final, espacio_monto_final),
     )
 
-    return pedido_id
+    return pedido_id, promo_advertencia
 
 
 @router.post("/estudio/reservas", status_code=201)
@@ -2065,17 +1901,18 @@ def crear_reserva_estudio(body: EstudioReservaCreate, request: Request, backgrou
                     f"Necesitás reservar con al menos {estudio['anticipacion_min_horas']} h de anticipación",
                 )
 
-            pedido_id = _crear_pedido_estudio(
+            pedido_id, promo_advertencia = _crear_pedido_estudio(
                 conn, estudio=estudio, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
                 cliente_id=cliente_id, cliente_nombre=cliente_nombre,
                 cliente_email=cliente_email, cliente_telefono=cliente_telefono,
-                con_pack=body.con_pack, con_promo=body.con_promo, sueltos=None,
+                con_promo=body.con_promo, sueltos=None,
                 espacio_monto=None, estado="solicitado",
                 numero_pedido=_next_numero_pedido(conn),
             )
 
             conn.commit()
             pedido = _get_alquiler_detail(conn, pedido_id)
+            pedido["promo_advertencia"] = promo_advertencia
         except Exception:
             conn.rollback()
             raise
@@ -2138,7 +1975,7 @@ def listar_reservas_estudio(
             """
             SELECT a.id, a.numero_pedido, a.cliente_id, a.cliente_nombre,
                    a.fecha_desde, a.fecha_hasta, a.monto_total, a.monto_pagado,
-                   a.estado, a.estudio_con_pack
+                   a.estado
             FROM alquileres a
             WHERE a.tipo = 'estudio'
               AND (%s::date IS NULL OR a.fecha_hasta >= %s::date)
@@ -2240,12 +2077,16 @@ def agenda_estudio(request: Request, desde: str = Query(...), hasta: str = Query
 def cotizar_reserva_estudio(
     request: Request,
     fecha: str = Query(...), start: str = Query(...), horas: int = Query(...),
-    con_pack: bool = False, con_promo: bool = False,
+    con_promo: bool = False,
     sueltos_json: str = Query("[]"),
+    pedido_id: Optional[int] = None,
 ):
     """Desglose de plata de una reserva ANTES de crearla — no muta nada (el
     front no calcula plata, MEMORIA 2026-06-29). `sueltos_json` es
-    `[{"equipo_id":N,"cantidad":N}]` codificado."""
+    `[{"equipo_id":N,"cantidad":N}]` codificado. `pedido_id`: al cotizar la
+    EDICIÓN de un turno ya existente, se excluye a sí mismo del chequeo de
+    disponibilidad — si no, un turno siempre se vería "ocupado" por su propia
+    franja (bug real encontrado al verificar el editor: #1283 Fase 6)."""
     require_admin(request)
     try:
         sueltos_raw = json.loads(sueltos_json)
@@ -2259,14 +2100,10 @@ def cotizar_reserva_estudio(
             raise HTTPException(409, "El estudio todavía no tiene un recurso asociado")
         fecha_desde, fecha_hasta = _franja_estudio(estudio, fecha, start, horas)
 
-        con_pack = bool(con_pack) and bool(estudio["pack_activo"])
         con_promo = bool(con_promo) and bool(estudio["promo_combo_id"])
         espacio_monto = (estudio["precio_hora"] or 0) * horas
-        desglose = {"espacio": espacio_monto, "pack": 0, "promo": 0, "sueltos": []}
+        desglose = {"espacio": espacio_monto, "promo": 0, "sueltos": []}
         total = espacio_monto
-        if con_pack:
-            desglose["pack"] = estudio["pack_precio"] or 0
-            total += desglose["pack"]
         if con_promo:
             promo_precio = precio_jornada_efectivo(conn, estudio["promo_combo_id"]) or 0
             desglose["promo"] = promo_precio
@@ -2281,7 +2118,9 @@ def cotizar_reserva_estudio(
             total += subtotal
         desglose["monto_total"] = total
 
-        libre, motivo = _estudio_disponible(conn, estudio, fecha_desde, fecha_hasta)
+        libre, motivo = _estudio_disponible(
+            conn, estudio, fecha_desde, fecha_hasta, exclude_pedido_id=pedido_id,
+        )
         desglose["espacio_disponible"] = libre
         desglose["espacio_motivo"] = motivo
         return desglose
@@ -2293,7 +2132,6 @@ class EstudioReservaAdminCreate(BaseModel):
     horas: int
     cliente_id: Optional[int] = None
     cliente_nombre: Optional[str] = None
-    con_pack: bool = False
     con_promo: bool = False
     sueltos: list[SueltoItem] = []
     espacio_monto: Optional[int] = None
@@ -2325,16 +2163,18 @@ def crear_reserva_estudio_admin(body: EstudioReservaAdminCreate, request: Reques
             )
             fecha_desde, fecha_hasta = _franja_estudio(estudio, body.fecha, body.start, body.horas)
 
-            pedido_id = _crear_pedido_estudio(
+            pedido_id, promo_advertencia = _crear_pedido_estudio(
                 conn, estudio=estudio, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
                 cliente_id=cliente_id, cliente_nombre=cliente_nombre,
                 cliente_email=cliente_email, cliente_telefono=cliente_telefono,
-                con_pack=body.con_pack, con_promo=body.con_promo, sueltos=body.sueltos,
+                con_promo=body.con_promo, sueltos=body.sueltos,
                 espacio_monto=body.espacio_monto, estado=body.estado,
                 numero_pedido=_next_numero_pedido(conn),
             )
             conn.commit()
-            return _reserva_estudio_admin_dict(conn, pedido_id)
+            resp = _reserva_estudio_admin_dict(conn, pedido_id)
+            resp["promo_advertencia"] = promo_advertencia
+            return resp
         except Exception:
             conn.rollback()
             raise
@@ -2344,7 +2184,6 @@ class EstudioReservaAdminUpdate(BaseModel):
     fecha: Optional[str] = None
     start: Optional[str] = None
     horas: Optional[int] = None
-    con_pack: Optional[bool] = None
     con_promo: Optional[bool] = None
     sueltos: Optional[list[SueltoItem]] = None
     espacio_monto: Optional[int] = None
@@ -2399,10 +2238,20 @@ def editar_reserva_estudio_admin(pedido_id: int, body: EstudioReservaAdminUpdate
                 "FROM alquiler_items WHERE pedido_id = %s AND equipo_id != %s",
                 (pedido_id, estudio["equipo_id"]),
             ).fetchall()
-            pack_actual = any(it["equipo_id"] is None for it in items_actuales)
+            # El pack ⏰ se retiró (Fase 8, #1283): ya no hay forma de RE-crear su
+            # línea si este endpoint la borrara y recalculara sin ella (el
+            # reemplazo completo de abajo es incondicional) — fail-loud en vez de
+            # perder plata en silencio. Vacío en la práctica desde que existe la
+            # promo (`crear_promo_desde_pack` apaga `pack_activo`); solo puede
+            # dispararse en un turno viejo creado ANTES de esta migración.
+            if any(it["equipo_id"] is None for it in items_actuales):
+                raise HTTPException(
+                    409,
+                    "Este turno todavía usa el pack (mecanismo retirado) — no se puede "
+                    "editar desde acá. Contactá a soporte para migrarlo a la promo.",
+                )
             promo_actual = any(it["equipo_id"] == estudio["promo_combo_id"] for it in items_actuales)
 
-            con_pack = body.con_pack if body.con_pack is not None else pack_actual
             con_promo = body.con_promo if body.con_promo is not None else promo_actual
             if body.sueltos is not None:
                 sueltos = body.sueltos
@@ -2427,37 +2276,34 @@ def editar_reserva_estudio_admin(pedido_id: int, body: EstudioReservaAdminUpdate
                 (pedido_id, estudio["equipo_id"]),
             )
 
-            con_pack = bool(con_pack) and bool(estudio["pack_activo"])
             con_promo = bool(con_promo) and bool(estudio["promo_combo_id"])
             monto_total = espacio_monto
-            if con_pack:
-                pack_ids = _pack_equipo_ids(conn)
-                if pack_ids:
-                    conn.execute("SELECT id FROM equipos WHERE id = ANY(%s) FOR UPDATE", (pack_ids,))
-                    _agregar_items_pack(conn, pedido_id, fecha_desde, fecha_hasta, pack_ids)
-                monto_total += estudio["pack_precio"] or 0
-                conn.execute(
-                    """INSERT INTO alquiler_items
-                           (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, nombre_libre, cobro_modo)
-                       VALUES (%s,NULL,1,%s,%s,%s,'fijo')""",
-                    (pedido_id, estudio["pack_precio"] or 0, estudio["pack_precio"] or 0,
-                     estudio["pack_nombre"] or "Pack de equipos"),
-                )
             # Validar ANTES de insertar (mismo motivo que `_crear_pedido_estudio`:
             # insertar primero dejaría el lock implícito FOR KEY SHARE del
             # propio insert en el camino del FOR UPDATE que toma el gate).
             _Item = namedtuple("_Item", ["equipo_id", "cantidad"])
-            items_a_validar = []
+
+            # Promo: BEST-EFFORT, nunca bloquea (mismo criterio que
+            # `_crear_pedido_estudio` — ver ese docstring para el porqué).
+            promo_advertencia: Optional[str] = None
             if con_promo:
-                items_a_validar.append(_Item(estudio["promo_combo_id"], 1))
-            items_a_validar.extend(_Item(s.equipo_id, s.cantidad) for s in sueltos)
-            if items_a_validar:
-                errores = validar_stock_hipotetico(
+                errores_promo = validar_stock_hipotetico(
                     conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
-                    items_a_validar,
+                    [_Item(estudio["promo_combo_id"], 1)],
                 )
-                if errores:
-                    raise HTTPException(409, f"Sin stock suficiente: {'; '.join(errores)}")
+                if errores_promo:
+                    promo_advertencia = (
+                        f"La promo se reservó igual, pero sin stock de: {'; '.join(errores_promo)}"
+                    )
+
+            # Sueltos: requisito DURO, sin best-effort.
+            if sueltos:
+                errores_sueltos = validar_stock_hipotetico(
+                    conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
+                    [_Item(s.equipo_id, s.cantidad) for s in sueltos],
+                )
+                if errores_sueltos:
+                    raise HTTPException(409, f"Sin stock suficiente: {'; '.join(errores_sueltos)}")
 
             if con_promo:
                 promo_precio = precio_jornada_efectivo(conn, estudio["promo_combo_id"]) or 0
@@ -2486,12 +2332,14 @@ def editar_reserva_estudio_admin(pedido_id: int, body: EstudioReservaAdminUpdate
             )
             conn.execute(
                 "UPDATE alquileres SET fecha_desde = %s, fecha_hasta = %s, monto_total = %s, "
-                "estudio_con_pack = %s, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
-                (fecha_desde, fecha_hasta, monto_total, con_pack, pedido_id),
+                "estudio_con_pack = FALSE, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                (fecha_desde, fecha_hasta, monto_total, pedido_id),
             )
 
             conn.commit()
-            return _reserva_estudio_admin_dict(conn, pedido_id)
+            resp = _reserva_estudio_admin_dict(conn, pedido_id)
+            resp["promo_advertencia"] = promo_advertencia
+            return resp
         except Exception:
             conn.rollback()
             raise

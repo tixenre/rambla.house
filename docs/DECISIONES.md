@@ -1272,6 +1272,23 @@ cancel-in-progress` ya cancela corridas viejas.
   son paralelos como `--color-amber` (marca) vs `--amber` (token de Tailwind en `@theme`).
 - **Límites del theming (fijos, no se tematizan por área):** focus rings (`border-amber/60`), estados de
   UI cross-app, badges del kit (`EstadoBadge`/`PagoBadge`), back-office, paleta de status.
+- **Excepción acotada (2026-07-24) — Calendario general del Dashboard.** Al cerrar la iniciativa del
+  Estudio (#1283), el supervisor marcó una tensión real: `CalendarioWidget.tsx` (la vista "Semana"/"Mes"
+  del Dashboard, que mezcla pedidos de TODAS las líneas de negocio) usa `estadoClaseEstudio` para pintar
+  los turnos del Estudio con `--color-estudio` en vez del color de estado genérico — contradice la letra
+  de "back-office → amber/status fijos, nunca por área". Confirmado con el dueño: se mantiene, porque el
+  caso de uso es distinto al que la regla original protegía (evitar re-themear pantallas de back-office
+  "porque sí") — acá el color es la señal más barata para distinguir de un vistazo qué turno es del
+  Estudio en una vista que por diseño mezcla todo. **Es la ÚNICA excepción**: no habilita re-themear
+  ninguna otra pantalla de back-office por área. Dentro de la agenda propia del Estudio
+  (`AgendaSemanal.tsx`, ya 100% Estudio) el mismo color no tiene tensión — ahí no es "por área en una
+  vista mixta", es simplemente la identidad de la única cosa que se muestra.
+- **Why de la excepción.** Alternativas consideradas: (a) un ícono/etiqueta en vez de color — pierde la
+  lectura instantánea que el color da en una grilla densa; (b) revertir a status genérico — vuelve a
+  mezclar visualmente el Estudio con el rental normal, que fue exactamente el problema que motivó
+  `estadoClaseEstudio` en primer lugar (_2026-07-24 — turnos del Estudio con color propio en el
+  calendario general_, más abajo). El color gana porque el costo (una excepción puntual, documentada) es
+  menor que el beneficio (reconocimiento inmediato en la única vista que mezcla las 3 líneas de negocio).
 - **WCAG sobre `#E9552F`:** `text-ink` puro (4.88:1) es el único opaco viable para texto normal sobre
   el fondo naranja — ink/90 = 3.80:1 (falla AA), ink/65 = 3.00:1 (falla). Naranja sobre ink: ≥ 80%
   de opacidad para pasar AA normal (80% → 4.60:1, 70% → 4.15:1 falla). La sección "Reservar" de
@@ -3238,3 +3255,92 @@ passed).
 `backend/arca_fe/__init__.py` (imports/`__all__`/version), `backend/arca_fe/pyproject.toml` (extra
 `pdf` + version), `backend/arca_fe/README.md` (instalación, Quickstart, sección nueva "Render a
 PDF/imagen", "Qué NO cubre").
+
+### 2026-07-24 — `_regenerar_pedidos_taller` = nuevo miembro de la familia motor-único (espejo de `_regenerar_pedidos_slot`)
+
+- **Contexto.** El dueño pidió "traer un poco de orden" a Talleres: que cada edición genere un pedido
+  mensual de resumen (no uno por alumno/clase), visible en liquidación/Estadísticas como cualquier otro
+  pedido — hoy esa plata es 100% invisible para el sistema financiero. Ya existía un mecanismo idéntico
+  para el Estudio (`estudio_slots_fijos` + `_regenerar_pedidos_slot`, slots recurrentes mensuales) — la
+  decisión fue reusarlo al pie de la letra, no inventar un mecanismo nuevo.
+- **Decisión.** Cada edición gana 2 pares de campos (`usa_estudio`/`valor_estudio`/`valor_estudio_modo`,
+  `usa_equipos`/`valor_equipos`/`valor_equipos_modo`; `modo` = `'mensual'` o `'total'`, este último
+  reparte en partes iguales con el remanente de redondeo pinneado al ÚLTIMO mes del rango completo —
+  estable ante re-cálculos). `_regenerar_pedidos_taller` (`backend/routes/talleres.py`) corre síncrono
+  en los 3 puntos donde una edición se crea/edita (`admin_create_taller`, `admin_create_edicion`,
+  `admin_update_edicion` — el primero inserta la edición INLINE, no pasa por el segundo, fácil de
+  perderse), dentro de `pg_advisory_xact_lock(_ADVISORY_NS_TALLER=5390423, edicion_id)` — namespace
+  propio, keyed por edición (no un singleton `1` como el del Estudio, acá hay muchas ediciones
+  independientes). Conserva/borra/recrea: pasado o pagado se conserva; futuro impago se borra y
+  recrea contra la config actual.
+- **Fix propio (el slot NO lo necesita).** También se conserva un mes cuyo pedido tiene MÁS ítems que
+  los que el generador crearía (`max(1, int(usa_estudio)+int(usa_equipos))`) — sin esto, la línea de
+  matrícula que el admin tipeó a mano (línea personalizada dentro del pedido ya generado) se borraría en
+  silencio la próxima vez que se editara `valor_estudio`/`valor_equipos`/las clases. Heurística por
+  CANTIDAD de ítems, no un flag `es_manual` dedicado — un toggle de `usa_estudio`/`usa_equipos` que
+  reduzca el conteo auto en un mes ya generado (sin edición manual real) también queda conservado
+  ("sticky" pero no destructivo; el admin edita el pedido a mano si hace falta corregirlo).
+- **Atribución 100% genérica.** `filas_atribucion` (`backend/reportes/liquidacion.py`) ya hace
+  `LEFT JOIN equipos ... COALESCE(dueno,'Rambla')` — el ítem del Estudio usa `equipo_id` del centinela
+  real (`dueno='Estudio'`); el de equipos usa `equipo_id=NULL` (línea personalizada, atribuye a
+  'Rambla' por default). Cero código de atribución nuevo — mismo mecanismo que ya resolvía esto para el
+  Estudio.
+- **Bug real encontrado verificando en browser (no en los tests).** Un ítem de CATÁLOGO con
+  `cobro_modo='fijo'` (el centinela del Estudio en un pedido de taller, que SÍ queda editable normal a
+  diferencia de un pedido del Estudio) no sobrevivía ningún guardado del editor genérico de pedidos:
+  `_apply_pedido_items` (`routes/alquileres/core.py`) hardcodeaba `cobro_modo='jornada'` para todo ítem
+  de catálogo (inflaba el subtotal ×jornadas del pedido, ~30 en un mes) y el validador Pydantic
+  (`PedidoItem.validate_linea_libre`, `routes/alquileres/modelos.py`) directamente rechazaba la
+  combinación con 422 antes de llegar ahí. Se relajó la validación (un ítem de catálogo SÍ puede ser
+  'fijo' — el front no expone el control para elegirlo a mano, así que no reabre ningún footgun de UI) y
+  se corrigió `_apply_pedido_items` para preservar el `cobro_modo` entrante en vez de pisarlo. Sin efecto
+  en pedidos normales (sus ítems de catálogo siempre traen 'jornada' desde que se cargaron).
+- **Otros arreglos de paso.** La línea personalizada nueva del editor de pedidos defaultea a `cobro_modo:
+  'fijo'` cuando `pedido.tipo === 'taller'` (evita el mismo ×jornadas si el admin agrega la matrícula a
+  mano). `routes/estadisticas.py` extiende sus 7 exclusiones existentes de `('estudio','estudio_fijo')`
+  a también `'taller'` (mismo criterio ya usado para separar la economía del Estudio de las tarjetas de
+  rental).
+- **Tests.** `test_talleres.py` (unit, espejo de `test_estudio.py::TestRegenerarPedidosSlot`): N pedidos
+  por N meses, mensual vs. total, remanente estable en el mes calendario real (no en "el último mes que
+  se regenera" — test discriminante: conserva el ÚLTIMO mes por pago y confirma que los que SÍ se
+  regeneran no heredan el remanente), conserva-si-pagado, conserva-si-más-ítems, edición inactiva no
+  genera nada, ambos flags apagados → ítem placeholder (nunca un pedido sin ítems).
+  `test_talleres_liquidacion_db.py` (integración, Postgres real): confirma la atribución Estudio/Rambla
+  y la exclusión de Estadísticas. `test_pedido_apply_items_regresion_500.py` +
+  `test_pedido_validations.py`: regresión del fix de `cobro_modo`.
+- **Why.** Reusar `_regenerar_pedidos_slot` byte-a-byte en vez de una tabla/mecanismo nuevo mantiene
+  "una sola forma de cada cosa" (fuente única de "reservar mensual recurrente → pedido"). La atribución
+  vía `equipos.dueno` ya era genérica — extenderla a un tercer consumidor (Talleres, después de rental y
+  Estudio) confirma que el diseño escala sin tocar el motor de liquidación.
+
+### 2026-07-24 — La promo del Estudio es best-effort; solo los sueltos son stock duro
+
+- **Contexto.** El pack legacy del Estudio (retirado en la Fase 8, #1283) fue reemplazado por una promo
+  combo (Fase 5) que en su primera versión era stock DURO: si cualquier componente no tenía stock, la
+  reserva se rechazaba con 409 y no se creaba nada. El dueño pidió volver al comportamiento del pack
+  viejo: _"si una luz no está disponible, que no me bloquee, que diga que esa no está disponible, pero
+  deja igual"_.
+- **Decisión.** Confirmado por `AskUserQuestion` que la semántica es a nivel PROMO completa (no
+  per-componente "esencial"): TODOS los componentes de la promo son best-effort. `_crear_pedido_estudio`
+  (`backend/routes/estudio.py`) separa la validación en dos bloques — la promo llama a
+  `validar_stock_hipotetico` pero solo arma un string informativo `promo_advertencia` (nunca levanta
+  excepción); los equipos SUELTOS (elegidos a mano, fuera de la promo) siguen validando con el mismo gate
+  y SÍ levantan `HTTPException(409, ...)` si falta stock — la reserva completa no se crea. Los 3 puntos
+  de creación/edición (`crear_reserva_estudio`, `crear_reserva_estudio_admin`,
+  `editar_reserva_estudio_admin`) devuelven `promo_advertencia` en la respuesta; el frontend
+  (`ReservaDialog.tsx`, `StudioBookingForm.tsx`) muestra un toast de advertencia cuando viene seteado.
+  Cuando la promo se reserva incompleta, se cobra el precio COMPLETO igual (no se descuenta el
+  componente faltante) — es una decisión de negocio explícita, no un bug.
+- **Por qué no tocar el gate.** El motor de reservas sigue siendo estricto (`solo_esenciales=False`
+  siempre) — "best-effort" es una decisión del CALLER sobre qué hacer con el resultado del gate, no una
+  semántica nueva del gate mismo. Esto preserva "el core de reservas es sagrado" sin necesitar tocar
+  `backend/reservas/`.
+- **Tests.** `test_promo_combo_estudio_db.py` (renombrado
+  `test_reserva_con_promo_sin_stock_es_best_effort_no_bloquea`): la promo sin stock da 201 (no 409),
+  `promo_advertencia` menciona el componente faltante, `monto_total` cobra el precio completo.
+  `test_estudio_admin_reservas_db.py`: mismo comportamiento en creación/edición admin, más el caso
+  contrario (`promo_advertencia is None` cuando hay stock completo).
+- **Why.** Ya cambió de criterio una vez en esta misma iniciativa (de duro heredado del pack legacy, a
+  best-effort explícito) — se fija por escrito acá para que una futura sesión no lo "corrija" de vuelta a
+  duro pensando que es un bug. El supervisor lo hace cumplir: un 409 nuevo en la validación de la promo
+  es la señal de que alguien reintrodujo el comportamiento viejo.

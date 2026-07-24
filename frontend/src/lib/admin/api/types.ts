@@ -778,6 +778,8 @@ export interface ReporteMensual {
   gastos: { total: number; por_categoria: { categoria: string; monto: number }[] };
   /** Lo facturado que NO es de Rambla (parte de los dueños): un costo, no ganancia. */
   comisiones_duenos: number;
+  /** Lo facturado que es del Estudio (otra unidad de negocio, no una comisión). */
+  parte_estudio: number;
   ganancia_neta: number;
   socios_mes: {
     cargos: Record<string, number>;
@@ -895,6 +897,10 @@ export type CalendarioPedido = {
   numero_pedido: number | null;
   cliente_nombre: string | null;
   estado: PedidoEstado;
+  /** "diaria" (default) | "estudio"/"estudio_fijo" | "taller" — ver
+   *  `lib/tipos-pedido.ts`. Distingue el color de un turno del Estudio en el
+   *  calendario general. */
+  tipo?: "diaria" | "estudio" | "estudio_fijo" | "taller";
   fecha_desde: string;
   fecha_hasta: string;
   monto_total: number;
@@ -1003,6 +1009,24 @@ export type EstadisticasData = {
   };
   por_dueno: { dueno: string; total_ars: number; items: number }[];
   favoritos_equipo?: { equipo: string; total_favoritos: number; clientes_unicos: number }[];
+  /** Economía separada del Estudio (#1283 Fase 7) — turnos reales +
+   *  meses de slot fijo, aparte de las tarjetas de rental de arriba. */
+  estudio: {
+    totales: {
+      total_turnos: number;
+      total_meses_slot_fijo: number;
+      total_clientes: number;
+      total_ars: number;
+      horas_vendidas: number;
+    };
+    por_mes: {
+      mes: string;
+      turnos: number;
+      meses_slot_fijo: number;
+      total_ars: number;
+      horas_vendidas: number;
+    }[];
+  };
 };
 
 export type Cliente = {
@@ -1141,6 +1165,17 @@ export type Pedido = {
   descuento_origen?: "manual" | "cliente" | "jornadas" | "ninguno" | null;
   notas: string | null;
   created_at?: string;
+  /** "diaria" (default, alquiler normal) | "estudio"/"estudio_fijo" (turno o
+   *  slot mensual del Estudio, #1283) | "taller" (resumen mensual de una
+   *  edición, ver `_regenerar_pedidos_taller`) — ver `lib/tipos-pedido.ts`.
+   *  Ítems/fechas de un pedido del Estudio se editan desde Estudio → Reservas;
+   *  un pedido de taller queda editable normal. */
+  tipo?: "diaria" | "estudio" | "estudio_fijo" | "taller";
+  /** Presente solo en la respuesta de crear/editar un turno del Estudio: si
+   *  la promo (combo) se reservó con algún componente sin stock — best-effort,
+   *  nunca bloquea la reserva, pero el admin/cliente debe saberlo. `null`/
+   *  ausente = todo lo de la promo estaba disponible. */
+  promo_advertencia?: string | null;
   items: PedidoItem[];
   pagos?: PedidoPago[];
   /** True si hay una `solicitudes_modificacion` con estado='pendiente' para
@@ -1229,10 +1264,15 @@ export type EstudioConfig = {
   close_hour: number;
   buffer_horas: number;
   anticipacion_min_horas: number;
-  pack_activo: boolean;
+  // pack_nombre/pack_precio: defaults de una-vez leídos por
+  // crear_promo_desde_pack — ya no tienen UI de edición (Fase 8, #1283).
+  // pack_descripcion SIGUE viva: es la descripción de la promo actual
+  // (_promo_info la reusa), editable desde PromoSection.
   pack_nombre: string;
   pack_descripcion: string;
   pack_precio: number;
+  promo_combo_id: number | null;
+  promo?: EstudioPromo | null;
   features: Array<{ label: string; value: string }> | null;
   faq: Array<{ q: string; a: string }> | null;
   direccion: string;
@@ -1243,6 +1283,16 @@ export type EstudioConfig = {
   updated_at: string | null;
   fotos: EstudioFoto[];
   trabajos: EstudioTrabajo[];
+};
+
+/** La promo de equipos (combo real que reemplaza al pack, #1283 Fase 5). */
+export type EstudioPromo = {
+  equipo_id: number;
+  nombre: string;
+  descripcion: string;
+  foto_url: string | null;
+  precio: number;
+  disponible?: boolean;
 };
 
 export type EstudioTrabajoFoto = {
@@ -1324,10 +1374,7 @@ export type EstudioInput = {
   close_hour?: number;
   buffer_horas?: number;
   anticipacion_min_horas?: number;
-  pack_activo?: boolean;
-  pack_nombre?: string;
   pack_descripcion?: string;
-  pack_precio?: number;
   features_json?: string;
   faq_json?: string;
   direccion?: string;
@@ -1352,12 +1399,67 @@ export type EstudioSlotFijo = {
 
 export type EstudioSlotInput = Omit<EstudioSlotFijo, "id">;
 
-export type EstudioPackEquipoCurado = {
+// ── Reservas del Estudio (admin, #1283 Fase 6) ───────────────────────────────
+
+/** Fila liviana de `GET /admin/estudio/reservas` — para la lista. El detalle
+ *  completo (tras crear/editar) es un `Pedido` normal (misma puerta,
+ *  `_get_alquiler_detail`). */
+export type EstudioReservaListItem = {
   id: number;
-  nombre: string;
-  marca: string | null;
-  foto_url: string | null;
-  orden: number;
+  numero_pedido: number | null;
+  cliente_id: number | null;
+  cliente_nombre: string | null;
+  cliente_email?: string | null;
+  cliente_telefono?: string | null;
+  fecha_desde: string;
+  fecha_hasta: string;
+  monto_total: number;
+  monto_pagado: number;
+  estado: PedidoEstado;
+};
+
+export type EstudioAgendaBloque = {
+  tipo: "turno" | "slot" | "taller";
+  id: number;
+  numero_pedido: number | null;
+  titulo: string;
+  fecha_desde: string;
+  fecha_hasta: string;
+  estado: string;
+};
+
+export type EstudioSueltoInput = { equipo_id: number; cantidad: number };
+
+/** Desglose de `GET /admin/estudio/reservas/cotizar` — el front no calcula
+ *  plata, solo lo muestra (MEMORIA 2026-06-29). No muta nada. */
+export type EstudioCotizacion = {
+  espacio: number;
+  promo: number;
+  sueltos: Array<{ equipo_id: number; cantidad: number; precio_jornada: number; subtotal: number }>;
+  monto_total: number;
+  espacio_disponible: boolean;
+  espacio_motivo: string | null;
+};
+
+export type EstudioReservaCreateInput = {
+  fecha: string; // YYYY-MM-DD
+  start: string; // HH:MM
+  horas: number;
+  cliente_id?: number | null;
+  cliente_nombre?: string | null;
+  con_promo?: boolean;
+  sueltos?: EstudioSueltoInput[];
+  espacio_monto?: number | null;
+  estado?: "solicitado" | "confirmado" | "retirado";
+};
+
+export type EstudioReservaUpdateInput = {
+  fecha?: string;
+  start?: string;
+  horas?: number;
+  con_promo?: boolean;
+  sueltos?: EstudioSueltoInput[];
+  espacio_monto?: number | null;
 };
 
 // ── Descuentos por jornadas ──────────────────────────────────────────────────
@@ -1422,6 +1524,16 @@ export type EdicionAdmin = {
   modalidades: ModalidadPagoBody[];
   // F4c: NULL = sin cierre (siempre abierto).
   fecha_cierre_inscripcion: string | null;
+  // Economía del taller (ver `_regenerar_pedidos_taller`, backend): si la
+  // edición usa el espacio del Estudio y/o equipos de alquiler, con un valor
+  // que el admin tipea a mano — 'mensual' (mismo valor cada mes) o 'total'
+  // (se reparte en partes iguales entre los meses de la edición).
+  usa_estudio: boolean;
+  valor_estudio: number;
+  valor_estudio_modo: "mensual" | "total";
+  usa_equipos: boolean;
+  valor_equipos: number;
+  valor_equipos_modo: "mensual" | "total";
 };
 
 // F4c: mini-KPIs de una edición — plata ya resuelta por el backend (el front
@@ -1466,6 +1578,8 @@ export type TallerConcepto = {
   video_poster_url: string;
   // F3: instructores como entidad (además de instructor_* legacy arriba).
   instructores: Instructor[];
+  // Instituciones co-presentadoras (ej. "Rambla" + "Filmar").
+  instituciones: Institucion[];
   ediciones: EdicionAdmin[];
   // F4c: FAQ del concepto + trabajos pasados (solo YouTube).
   faqs: FaqItem[];
@@ -1485,6 +1599,18 @@ export type Instructor = {
   foto_media_id: number | null;
   // F6: "Trabajó con" — reemplaza el legacy `instructor_proyectos` (1 por taller).
   proyectos: string;
+};
+
+// Institución co-presentadora de un taller (ej. "Rambla" + "Filmar") — mismo
+// patrón que Instructor: entidad propia, N↔N con talleres.
+export type Institucion = {
+  id: number;
+  nombre: string;
+  descripcion: string;
+  instagram: string;
+  web: string;
+  logo_url: string;
+  logo_media_id: number | null;
 };
 
 export type Inscripcion = {

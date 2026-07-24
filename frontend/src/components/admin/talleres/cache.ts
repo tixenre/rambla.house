@@ -27,3 +27,14 @@ export function updateConceptoInstructoresInCache(
     prev?.map((c) => (c.id === conceptoId ? { ...c, instructores } : c)),
   );
 }
+
+// Mismo patrón: setTallerInstituciones devuelve solo { instituciones }.
+export function updateConceptoInstitucionesInCache(
+  qc: QueryClient,
+  conceptoId: number,
+  instituciones: TallerConcepto["instituciones"],
+) {
+  qc.setQueryData(["admin", "talleres"], (prev: TallerConcepto[] | undefined) =>
+    prev?.map((c) => (c.id === conceptoId ? { ...c, instituciones } : c)),
+  );
+}

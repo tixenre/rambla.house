@@ -27,37 +27,16 @@ import {
   type VerificacionPanelEstado,
 } from "@/components/rental/account/VerificacionRequeridaPanel";
 import { STUDIO, STUDIO_PHONE } from "@/data/studio";
-import { apiGetEstudioDisponibilidad, apiCrearReservaEstudio } from "@/lib/api";
+import { apiGetEstudioDisponibilidad, apiCrearReservaEstudio, type EstudioPromo } from "@/lib/api";
+import { pad, buildTimeSlots } from "@/lib/estudio-slots";
 
 export type StudioBookingConfig = {
   pricePerHour: number;
   minHours: number;
   openHour: number;
   closeHour: number;
-  packActivo: boolean;
-  packPrecio: number;
+  promo?: EstudioPromo | null;
 };
-
-function pad(n: number) {
-  return n.toString().padStart(2, "0");
-}
-
-function buildTimeSlots(openHour: number, closeHour: number, minHours: number) {
-  const slots: { value: string; label: string; hour: number; minute: 0 | 30 }[] = [];
-  const lastStartMin = closeHour * 60 - minHours * 60;
-  for (let h = openHour; h < closeHour; h++) {
-    for (const m of [0, 30] as const) {
-      if (h * 60 + m > lastStartMin) continue;
-      slots.push({
-        value: `${pad(h)}:${pad(m)}`,
-        label: `${pad(h)}:${pad(m)}`,
-        hour: h,
-        minute: m,
-      });
-    }
-  }
-  return slots;
-}
 
 type Disponibilidad = "idle" | "checking" | "libre" | "ocupado" | "error";
 
@@ -83,7 +62,7 @@ function Section({
   );
 }
 
-const QUERY_KEYS = { d: "d", h: "h", dur: "dur", pack: "pack" } as const;
+const QUERY_KEYS = { d: "d", h: "h", dur: "dur", promo: "promo" } as const;
 
 function readBookingFromQuery() {
   if (typeof window === "undefined") return null;
@@ -91,8 +70,8 @@ function readBookingFromQuery() {
   const d = sp.get(QUERY_KEYS.d);
   const h = sp.get(QUERY_KEYS.h);
   const dur = sp.get(QUERY_KEYS.dur);
-  const pack = sp.get(QUERY_KEYS.pack);
-  if (!d && !h && !dur && !pack) return null;
+  const promo = sp.get(QUERY_KEYS.promo);
+  if (!d && !h && !dur && !promo) return null;
   let parsedDate: Date | undefined;
   if (d) {
     const [y, mo, da] = d.split("-").map((n) => parseInt(n, 10));
@@ -105,7 +84,7 @@ function readBookingFromQuery() {
     date: parsedDate,
     start: h && /^\d{2}:\d{2}$/.test(h) ? h : null,
     hours: dur && /^\d+$/.test(dur) ? parseInt(dur, 10) : null,
-    withPack: pack === "1",
+    withPromo: promo === "1",
   };
 }
 
@@ -118,21 +97,20 @@ function clearBookingQuery() {
 
 export function StudioBookingForm({
   config,
-  withPack,
-  onPackChange,
+  withPromo,
+  onPromoChange,
 }: {
   config?: StudioBookingConfig;
   /** Estado controlado por el padre — permite que el aside sea reactivo */
-  withPack: boolean;
-  onPackChange: (v: boolean) => void;
+  withPromo: boolean;
+  onPromoChange: (v: boolean) => void;
 }) {
   const navigate = useNavigate();
   const pricePerHour = config?.pricePerHour ?? STUDIO.pricePerHour;
   const minHours = config?.minHours ?? STUDIO.minHours;
   const openHour = config?.openHour ?? STUDIO.openHour;
   const closeHour = config?.closeHour ?? STUDIO.closeHour;
-  const packActivo = config?.packActivo ?? false;
-  const packPrecio = config?.packPrecio ?? 0;
+  const promo = config?.promo ?? null;
 
   const initial = useMemo(() => readBookingFromQuery(), []);
   const [date, setDate] = useState<Date | undefined>(initial?.date);
@@ -143,11 +121,11 @@ export function StudioBookingForm({
   useEffect(() => {
     if (initial) {
       clearBookingQuery();
-      if (initial.withPack) onPackChange(true);
+      if (initial.withPromo) onPromoChange(true);
       const t = setTimeout(() => setReturnedFromLogin(false), 12_000);
       return () => clearTimeout(t);
     }
-  }, [initial, onPackChange]);
+  }, [initial, onPromoChange]);
 
   const [auth, setAuth] = useState<"checking" | "in" | "out">("checking");
   const [verificado, setVerificado] = useState(false);
@@ -229,8 +207,8 @@ export function StudioBookingForm({
   }, [slots, startSlot]);
 
   const subtotal = pricePerHour * hours;
-  const packTotal = withPack ? packPrecio : 0;
-  const total = subtotal + packTotal;
+  const promoTotal = withPromo ? (promo?.precio ?? 0) : 0;
+  const total = subtotal + promoTotal;
 
   const fechaISO = date ? format(date, "yyyy-MM-dd") : null;
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -274,7 +252,7 @@ export function StudioBookingForm({
       [QUERY_KEYS.d]: fechaISO ?? "",
       [QUERY_KEYS.h]: startSlot,
       [QUERY_KEYS.dur]: String(hours),
-      [QUERY_KEYS.pack]: withPack ? "1" : "0",
+      [QUERY_KEYS.promo]: withPromo ? "1" : "0",
     }).toString();
 
   const handleVerificar = async () => {
@@ -310,12 +288,18 @@ export function StudioBookingForm({
         fecha: fechaISO,
         start: startSlot,
         horas: hours,
-        con_pack: withPack,
+        con_promo: withPromo,
       });
       toast.success(`Reserva #${res.numero_pedido ?? res.id} enviada`, {
         description: "Te llevamos a tu portal para seguir el estado.",
         duration: 6000,
       });
+      if (res.promo_advertencia) {
+        toast.warning("La promo se reservó incompleta", {
+          description: res.promo_advertencia,
+          duration: 7000,
+        });
+      }
       setReturnedFromLogin(false);
       navigate({ to: "/cliente/portal", search: { nuevo: res.id } });
     } catch (err) {
@@ -342,7 +326,7 @@ export function StudioBookingForm({
       `Hola! Quiero consultar por el estudio.`,
       `📅 ${format(date, "EEEE d 'de' MMMM, yyyy", { locale: es })}`,
       `🕒 ${startSlot} – ${endTime} (${hours} h)`,
-      withPack ? `➕ Con equipos (luces, griperías y modificadores)` : null,
+      withPromo && promo ? `➕ ${promo.nombre}` : null,
       total > 0 ? `💵 Total estimado: ${formatARS(total)}` : null,
     ].filter(Boolean);
     window.open(
@@ -444,7 +428,7 @@ export function StudioBookingForm({
         </div>
 
         {/* ¿Qué reservás? — sin expansión de equipos inline */}
-        {packActivo && (
+        {promo && (
           <fieldset
             className="mt-5 grid gap-2.5 sm:grid-cols-2"
             role="radiogroup"
@@ -456,7 +440,7 @@ export function StudioBookingForm({
             <label
               className={cn(
                 "flex cursor-pointer flex-col gap-1 rounded-xl border p-4 transition",
-                !withPack
+                !withPromo
                   ? "border-[var(--area-accent)] bg-[color-mix(in_oklch,var(--area-accent)_10%,transparent)]"
                   : "hairline hover:border-ink/40",
               )}
@@ -464,8 +448,8 @@ export function StudioBookingForm({
               <input
                 type="radio"
                 name="studio-modalidad"
-                checked={!withPack}
-                onChange={() => onPackChange(false)}
+                checked={!withPromo}
+                onChange={() => onPromoChange(false)}
                 className="sr-only"
               />
               <span className="font-semibold">Solo el estudio</span>
@@ -474,11 +458,11 @@ export function StudioBookingForm({
               </p>
             </label>
 
-            {/* Card B — Estudio + equipos (sin StudioPackKit inline) */}
+            {/* Card B — Estudio + promo de equipos */}
             <label
               className={cn(
                 "flex cursor-pointer flex-col gap-1 rounded-xl border p-4 transition",
-                withPack
+                withPromo
                   ? "border-[var(--area-accent)] bg-[color-mix(in_oklch,var(--area-accent)_10%,transparent)]"
                   : "hairline hover:border-ink/40",
               )}
@@ -486,15 +470,12 @@ export function StudioBookingForm({
               <input
                 type="radio"
                 name="studio-modalidad"
-                checked={withPack}
-                onChange={() => onPackChange(true)}
+                checked={withPromo}
+                onChange={() => onPromoChange(true)}
                 className="sr-only"
               />
-              <span className="font-semibold">Estudio + equipos</span>
-              <p className="text-xs text-muted-foreground">
-                Sumás <span className="text-ink font-medium">luces, griperías y modificadores</span>{" "}
-                durante toda la reserva. Llegás con la cámara y filmás.
-              </p>
+              <span className="font-semibold">Estudio + {promo.nombre}</span>
+              <p className="text-xs text-muted-foreground">{promo.descripcion}</p>
             </label>
           </fieldset>
         )}
@@ -514,11 +495,11 @@ export function StudioBookingForm({
                 {subtotal > 0 ? formatARS(subtotal) : "—"}
               </span>
             </div>
-            {withPack && (
+            {withPromo && promo && (
               <div className="flex justify-between items-baseline text-sm text-muted-foreground">
-                <span>Pack de equipos</span>
+                <span>{promo.nombre}</span>
                 <span className="font-mono tabular text-ink">
-                  {packPrecio > 0 ? formatARS(packPrecio) : "—"}
+                  {promo.precio > 0 ? formatARS(promo.precio) : "—"}
                 </span>
               </div>
             )}
@@ -641,9 +622,9 @@ export function StudioBookingForm({
               </span>{" "}
               · {hours} h
             </div>
-            {withPack && (
+            {withPromo && promo && (
               <div className="mt-1 text-muted-foreground">
-                + <span className="text-ink">Con equipos</span> (luces, griperías y modificadores)
+                + <span className="text-ink">{promo.nombre}</span>
               </div>
             )}
             <div className="mt-2 flex items-baseline justify-between border-t hairline pt-2">

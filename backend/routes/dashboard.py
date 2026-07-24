@@ -90,7 +90,7 @@ def get_calendario(
 ):
     with get_db() as conn:
         rows = conn.execute("""
-            SELECT p.id, p.numero_pedido, p.cliente_nombre, p.estado,
+            SELECT p.id, p.numero_pedido, p.cliente_nombre, p.estado, p.tipo,
                    p.fecha_desde, p.fecha_hasta, p.monto_total,
                    STRING_AGG(e.nombre, ' / ') AS equipos
             FROM alquileres p
@@ -98,7 +98,7 @@ def get_calendario(
             JOIN equipos e ON e.id = pi.equipo_id
             WHERE p.estado IN ('solicitado','confirmado','retirado','devuelto','finalizado')
               AND p.fecha_hasta >= %s AND p.fecha_desde <= %s
-            GROUP BY p.id, p.numero_pedido, p.cliente_nombre, p.estado,
+            GROUP BY p.id, p.numero_pedido, p.cliente_nombre, p.estado, p.tipo,
                      p.fecha_desde, p.fecha_hasta, p.monto_total
             ORDER BY p.fecha_desde
         """, (desde, hasta)).fetchall()

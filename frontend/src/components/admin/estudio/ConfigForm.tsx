@@ -46,10 +46,6 @@ const schema = z.object({
   close_hour: z.coerce.number().int().min(1).max(24),
   buffer_horas: z.coerce.number().int().min(0),
   anticipacion_min_horas: z.coerce.number().int().min(0),
-  pack_activo: z.boolean(),
-  pack_nombre: z.string(),
-  pack_descripcion: z.string(),
-  pack_precio: z.coerce.number().int().min(0),
   features: z.array(featureSchema),
   faq: z.array(faqSchema),
   direccion: z.string(),
@@ -71,10 +67,6 @@ function configToForm(c: EstudioConfig): FormValues {
     close_hour: c.close_hour,
     buffer_horas: c.buffer_horas,
     anticipacion_min_horas: c.anticipacion_min_horas,
-    pack_activo: c.pack_activo,
-    pack_nombre: c.pack_nombre,
-    pack_descripcion: c.pack_descripcion,
-    pack_precio: c.pack_precio,
     features: c.features ?? [],
     faq: c.faq ?? [],
     direccion: c.direccion,
@@ -89,7 +81,6 @@ export function ConfigForm({ config, onSaved }: { config: EstudioConfig; onSaved
     register,
     handleSubmit,
     control,
-    watch,
     formState: { errors, isDirty },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -99,8 +90,6 @@ export function ConfigForm({ config, onSaved }: { config: EstudioConfig; onSaved
   const featuresArr = useFieldArray({ control, name: "features" });
   const faqArr = useFieldArray({ control, name: "faq" });
   const testimoniosArr = useFieldArray({ control, name: "testimonios" });
-
-  const packActivo = watch("pack_activo");
 
   const mutation = useMutation({
     mutationFn: (values: FormValues) => {
@@ -197,28 +186,6 @@ export function ConfigForm({ config, onSaved }: { config: EstudioConfig; onSaved
             <Input type="number" min={1} max={24} {...register("close_hour")} />
           </Field>
         </div>
-      </Section>
-
-      {/* ── Pack ── */}
-      <Section title="Pack Todo Incluido">
-        <label className="flex items-center gap-2 text-sm cursor-pointer">
-          {/* eslint-disable-next-line no-restricted-syntax -- checkbox nativo: el DS Checkbox es Radix (otra API) */}
-          <input type="checkbox" {...register("pack_activo")} className="h-4 w-4 rounded" />
-          Pack activo (se muestra en la página pública)
-        </label>
-        {packActivo && (
-          <div className="space-y-3 mt-3">
-            <Field label="Nombre del pack" error={errors.pack_nombre?.message}>
-              <Input {...register("pack_nombre")} />
-            </Field>
-            <Field label="Descripción del pack" error={errors.pack_descripcion?.message}>
-              <Textarea {...register("pack_descripcion")} rows={2} />
-            </Field>
-            <Field label="Precio del pack ($)" error={errors.pack_precio?.message}>
-              <Input type="number" min={0} {...register("pack_precio")} />
-            </Field>
-          </div>
-        )}
       </Section>
 
       {/* ── Características ── */}

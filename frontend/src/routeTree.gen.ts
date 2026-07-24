@@ -83,6 +83,9 @@ const AdminPedidosIdLazyRouteImport = createFileRoute('/admin/pedidos/$id')()
 const AdminFacturacionEmisoresLazyRouteImport = createFileRoute(
   '/admin/facturacion/emisores',
 )()
+const AdminEstudioReservasLazyRouteImport = createFileRoute(
+  '/admin/estudio/reservas',
+)()
 const AdminEquiposSpecsLazyRouteImport = createFileRoute(
   '/admin/equipos/specs',
 )()
@@ -443,6 +446,14 @@ const AdminFacturacionEmisoresLazyRoute =
   } as any).lazy(() =>
     import('./routes/admin/facturacion.emisores.lazy').then((d) => d.Route),
   )
+const AdminEstudioReservasLazyRoute =
+  AdminEstudioReservasLazyRouteImport.update({
+    id: '/reservas',
+    path: '/reservas',
+    getParentRoute: () => AdminEstudioRoute,
+  } as any).lazy(() =>
+    import('./routes/admin/estudio.reservas.lazy').then((d) => d.Route),
+  )
 const AdminEquiposSpecsLazyRoute = AdminEquiposSpecsLazyRouteImport.update({
   id: '/specs',
   path: '/specs',
@@ -599,6 +610,7 @@ export interface FileRoutesByFullPath {
   '/admin/equipos/marcas': typeof AdminEquiposMarcasLazyRoute
   '/admin/equipos/nuevo': typeof AdminEquiposNuevoLazyRoute
   '/admin/equipos/specs': typeof AdminEquiposSpecsLazyRoute
+  '/admin/estudio/reservas': typeof AdminEstudioReservasLazyRoute
   '/admin/facturacion/emisores': typeof AdminFacturacionEmisoresLazyRoute
   '/admin/pedidos/$id': typeof AdminPedidosIdLazyRoute
   '/admin/pedidos/nuevo': typeof AdminPedidosNuevoLazyRoute
@@ -664,6 +676,7 @@ export interface FileRoutesByTo {
   '/admin/equipos/marcas': typeof AdminEquiposMarcasLazyRoute
   '/admin/equipos/nuevo': typeof AdminEquiposNuevoLazyRoute
   '/admin/equipos/specs': typeof AdminEquiposSpecsLazyRoute
+  '/admin/estudio/reservas': typeof AdminEstudioReservasLazyRoute
   '/admin/facturacion/emisores': typeof AdminFacturacionEmisoresLazyRoute
   '/admin/pedidos/$id': typeof AdminPedidosIdLazyRoute
   '/admin/pedidos/nuevo': typeof AdminPedidosNuevoLazyRoute
@@ -737,6 +750,7 @@ export interface FileRoutesById {
   '/admin/equipos/marcas': typeof AdminEquiposMarcasLazyRoute
   '/admin/equipos/nuevo': typeof AdminEquiposNuevoLazyRoute
   '/admin/equipos/specs': typeof AdminEquiposSpecsLazyRoute
+  '/admin/estudio/reservas': typeof AdminEstudioReservasLazyRoute
   '/admin/facturacion/emisores': typeof AdminFacturacionEmisoresLazyRoute
   '/admin/pedidos/$id': typeof AdminPedidosIdLazyRoute
   '/admin/pedidos/nuevo': typeof AdminPedidosNuevoLazyRoute
@@ -811,6 +825,7 @@ export interface FileRouteTypes {
     | '/admin/equipos/marcas'
     | '/admin/equipos/nuevo'
     | '/admin/equipos/specs'
+    | '/admin/estudio/reservas'
     | '/admin/facturacion/emisores'
     | '/admin/pedidos/$id'
     | '/admin/pedidos/nuevo'
@@ -876,6 +891,7 @@ export interface FileRouteTypes {
     | '/admin/equipos/marcas'
     | '/admin/equipos/nuevo'
     | '/admin/equipos/specs'
+    | '/admin/estudio/reservas'
     | '/admin/facturacion/emisores'
     | '/admin/pedidos/$id'
     | '/admin/pedidos/nuevo'
@@ -948,6 +964,7 @@ export interface FileRouteTypes {
     | '/admin/equipos/marcas'
     | '/admin/equipos/nuevo'
     | '/admin/equipos/specs'
+    | '/admin/estudio/reservas'
     | '/admin/facturacion/emisores'
     | '/admin/pedidos/$id'
     | '/admin/pedidos/nuevo'
@@ -1381,6 +1398,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminFacturacionEmisoresLazyRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/estudio/reservas': {
+      id: '/admin/estudio/reservas'
+      path: '/reservas'
+      fullPath: '/admin/estudio/reservas'
+      preLoaderRoute: typeof AdminEstudioReservasLazyRouteImport
+      parentRoute: typeof AdminEstudioRoute
+    }
     '/admin/equipos/specs': {
       id: '/admin/equipos/specs'
       path: '/specs'
@@ -1500,10 +1524,12 @@ const AdminEquiposRouteWithChildren = AdminEquiposRoute._addFileChildren(
 )
 
 interface AdminEstudioRouteChildren {
+  AdminEstudioReservasLazyRoute: typeof AdminEstudioReservasLazyRoute
   AdminEstudioIndexLazyRoute: typeof AdminEstudioIndexLazyRoute
 }
 
 const AdminEstudioRouteChildren: AdminEstudioRouteChildren = {
+  AdminEstudioReservasLazyRoute: AdminEstudioReservasLazyRoute,
   AdminEstudioIndexLazyRoute: AdminEstudioIndexLazyRoute,
 }
 

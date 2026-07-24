@@ -31,6 +31,7 @@ import { SearchInput } from "@/design-system/ui/search-input";
 import { Skeleton } from "@/design-system/ui/skeleton";
 import { adminApi, ESTADO_LABEL, type Pedido } from "@/lib/admin/api";
 import { nextStep, type EstadoPedido } from "@/lib/pedido-estados";
+import { esPedidoEstudio } from "@/lib/tipos-pedido";
 import { EquipoThumb } from "@/components/admin/pedido/EquipoThumb";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
 import { PagoBadge } from "@/design-system/ui/PagoBadge";
@@ -743,6 +744,7 @@ function PreviewPane({ id, onOpen }: { id: number | null; onOpen: (id: number) =
         pagado={pagado}
         open={openPago}
         onOpenChange={setOpenPago}
+        esEstudio={esPedidoEstudio(p)}
       />
       <EnviarDocsDialog
         pedidoId={p.id}

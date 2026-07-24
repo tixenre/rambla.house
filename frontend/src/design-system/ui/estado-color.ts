@@ -58,6 +58,22 @@ export function estadoClase(estado: EstadoPedido | string): string {
   return (ESTADO_MAP[estado as EstadoPedido] ?? ESTADO_MAP.borrador).cls;
 }
 
+/** Variante del Estudio para `estadoClase`: en vistas donde un turno del
+ *  Estudio conviene distinguirse por marca en vez de por el ciclo de vida
+ *  genérico (calendario admin, agenda del Estudio) — dos baldes nomás,
+ *  "por venir" (suave) vs. "realizado" (fuerte, `finalizado`); `cancelado`
+ *  cae al color universal (no es ninguno de los dos). Usa `--color-estudio`
+ *  (no `--color-naranja`, que es el status `retirado` — semántica distinta
+ *  aunque comparta hex). Excepción acotada a turnos del Estudio, no
+ *  reintroduce theming por área en el resto del back-office. */
+export function estadoClaseEstudio(estado: EstadoPedido | string): string {
+  if (estado === "cancelado") return estadoClase(estado);
+  if (estado === "finalizado") {
+    return "bg-[var(--color-estudio)] text-white border-[var(--color-estudio)]";
+  }
+  return "bg-[var(--color-estudio-soft)] text-[var(--color-estudio)] border-[var(--color-estudio)]/40";
+}
+
 /** Solo el color de TEXTO del estado (sin fondo) — para breadcrumbs/timelines
  *  donde el estado se muestra como texto coloreado, no como pill (ej. FlowStrip
  *  del pedido). Mismo criterio de color que `ESTADO_MAP`, una sola fuente. */

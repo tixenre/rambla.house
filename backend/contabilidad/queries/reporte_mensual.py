@@ -97,6 +97,7 @@ def reporte_mensual(conn, mes: str) -> dict:
         "cobrado": {"por_socio": cobrado, "total": sum(cobrado.values())},
         "gastos": {"total": int(gan["gastos"]), "por_categoria": gan["gastos_por_categoria"]},
         "comisiones_duenos": int(gan["comisiones_duenos"]),
+        "parte_estudio": int(gan["parte_estudio"]),
         "ganancia_neta": int(gan["ganancia_neta"]),
         "socios_mes": _movimientos_socios_mes(conn, desde, hasta),
         "cuenta_corriente": saldos(conn)["socios"],

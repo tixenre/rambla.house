@@ -227,7 +227,9 @@ export type EstudioConfig = {
   close_hour: number;
   buffer_horas: number;
   anticipacion_min_horas: number;
-  pack_activo: boolean;
+  // pack_nombre/pack_precio: defaults de una-vez leídos por
+  // crear_promo_desde_pack, sin UI de edición (Fase 8, #1283). pack_descripcion
+  // SIGUE viva: es la descripción EN VIVO de la promo actual (`_promo_info`).
   pack_nombre: string;
   pack_descripcion: string;
   pack_precio: number;
@@ -243,9 +245,21 @@ export type EstudioConfig = {
   mapa_embed_url: string;
   updated_at: string | null;
   fotos: EstudioFoto[];
-  // Lista curada del pack con cantidades (stock total) para la ficha pública.
-  pack_equipos?: EstudioPackEquipo[];
+  promo_combo_id?: number | null;
+  promo?: EstudioPromo | null;
   trabajos?: EstudioTrabajo[];
+};
+
+/** La promo de equipos (combo real que reemplaza al pack, #1283 Fase 5).
+ *  `disponible` solo viene presente cuando se consultó con una franja
+ *  (fecha/start/horas) — en `GET /api/estudio` sin fechas no viene. */
+export type EstudioPromo = {
+  equipo_id: number;
+  nombre: string;
+  descripcion: string;
+  foto_url: string | null;
+  precio: number;
+  disponible?: boolean;
 };
 
 /** Un medio del carrusel de un trabajo: link externo (YouTube/Instagram) o foto
@@ -332,40 +346,39 @@ export function apiLogSearchClick(queryId: number, equipoId: number | null) {
   });
 }
 
-export type EstudioPackEquipo = {
-  id: number;
-  nombre: string;
-  marca: string | null;
-  foto_url: string | null;
-  cantidad: number;
-};
-
 /** ¿El estudio está libre en [fecha start, +horas]? El backend aplica el buffer
- *  propio del estudio. `pack` = equipos disponibles en la franja (Grip/Luz/Mod). */
+ *  propio del estudio. `promo` = disponibilidad del combo real de equipos. */
 export function apiGetEstudioDisponibilidad(fecha: string, start: string, horas: number) {
-  return get<{ libre: boolean; motivo?: string | null; pack?: EstudioPackEquipo[] }>(
-    "/api/estudio/disponibilidad",
-    { fecha, start, horas: String(horas) },
-  );
+  return get<{
+    libre: boolean;
+    motivo?: string | null;
+    promo?: EstudioPromo | null;
+  }>("/api/estudio/disponibilidad", { fecha, start, horas: String(horas) });
 }
 
 export type EstudioReservaBody = {
   fecha: string;
   start: string;
   horas: number;
-  con_pack?: boolean;
+  con_promo?: boolean;
   // Datos del cliente: NO van en el body, salen de la sesión (login obligatorio).
 };
 
 /** Crea una reserva real del estudio (entra como solicitud, estado='solicitado').
  *  Requiere cliente logueado: usa authedPostJson (manda la cookie de sesión). */
 export async function apiCrearReservaEstudio(body: EstudioReservaBody) {
-  const res = await authedPostJson<{ id: number; numero_pedido: number | null }>(
-    "/api/estudio/reservas",
-    body,
-  );
+  const res = await authedPostJson<{
+    id: number;
+    numero_pedido: number | null;
+    /** Si la promo se reservó con algún componente sin stock (best-effort,
+     *  nunca bloquea) — ver `routes/estudio.py::_crear_pedido_estudio`. */
+    promo_advertencia?: string | null;
+  }>("/api/estudio/reservas", body);
   // Analytics: estudio reservado (no-op si GA no está activo).
-  trackReservarEstudio({ horas: body.horas, conPack: body.con_pack ?? false });
+  trackReservarEstudio({
+    horas: body.horas,
+    conPromo: body.con_promo ?? false,
+  });
   return res;
 }
 
@@ -452,6 +465,16 @@ export type Taller = {
     foto_media_id: number | null;
     // F6: "Trabajó con" — reemplaza el legacy `instructor_proyectos` (1 por taller).
     proyectos: string;
+  }[];
+  // Instituciones co-presentadoras (ej. "Rambla" + "Filmar").
+  instituciones: {
+    id: number;
+    nombre: string;
+    descripcion: string;
+    instagram: string;
+    web: string;
+    logo_url: string;
+    logo_media_id: number | null;
   }[];
   sesiones: Sesion[];
   // F4a: video hero (YouTube) — null si no hay video configurado o la URL no

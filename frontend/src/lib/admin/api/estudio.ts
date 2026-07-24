@@ -5,30 +5,25 @@ import type {
   EstudioFoto,
   EstudioSlotFijo,
   EstudioSlotInput,
-  EstudioPackEquipoCurado,
   EstudioTrabajo,
   EstudioTrabajoInput,
   TrabajoOrdenItem,
   FotoOrdenItem,
   DescuentoJornada,
   CalendarioBloqueo,
+  EstudioReservaListItem,
+  EstudioAgendaBloque,
+  EstudioCotizacion,
+  EstudioReservaCreateInput,
+  EstudioReservaUpdateInput,
+  EstudioSueltoInput,
+  Pedido,
 } from "./types";
 
 // ── Estudio (singleton E1) ───────────────────────────────────────────────────
 
 export const estudioAdminApi = {
   get: () => authedJson<EstudioConfig>("/api/admin/estudio"),
-  listPack: () => authedJson<{ pack: EstudioPackEquipoCurado[] }>("/api/admin/estudio/pack"),
-  addPackEquipo: (equipo_id: number) =>
-    authedPostJson<{ pack: EstudioPackEquipoCurado[] }>("/api/admin/estudio/pack", { equipo_id }),
-  removePackEquipo: (equipo_id: number) =>
-    authedFetch(`/api/admin/estudio/pack/${equipo_id}`, { method: "DELETE" }).then(async (r) => {
-      if (!r.ok) {
-        const d = await r.json().catch(() => ({}));
-        throw new Error(d?.detail ?? `DELETE pack → ${r.status}`);
-      }
-      return r.json() as Promise<{ pack: EstudioPackEquipoCurado[] }>;
-    }),
   // Bloqueos no-pedido en [desde, hasta] (slots fijos + clases de taller) —
   // overlay del calendario del dashboard admin (get_calendario no los ve).
   getOcupacion: (desde: string, hasta: string) => {
@@ -91,6 +86,65 @@ export const estudioAdminApi = {
         throw new Error(d?.detail ?? `PATCH fotos/orden → ${r.status}`);
       }
       return r.json() as Promise<{ fotos: EstudioFoto[] }>;
+    }),
+  // Crea la promo (combo real) desde el pack curado actual — reemplaza al
+  // pack (#1283 Fase 5). 409 si ya existe una promo, 400 si el pack está
+  // vacío o el precio objetivo es inválido.
+  crearPromoDesdePack: (data: { nombre?: string; precio_objetivo: number }) =>
+    authedPostJson<EstudioConfig>("/api/admin/estudio/promo/crear-desde-pack", data),
+
+  // ── Reservas (#1283 Fase 6) ────────────────────────────────────────────────
+  listReservas: (params?: { desde?: string; hasta?: string }) => {
+    const sp = new URLSearchParams();
+    if (params?.desde) sp.set("desde", params.desde);
+    if (params?.hasta) sp.set("hasta", params.hasta);
+    const qs = sp.toString();
+    return authedJson<{ reservas: EstudioReservaListItem[] }>(
+      `/api/admin/estudio/reservas${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getAgenda: (desde: string, hasta: string) => {
+    const sp = new URLSearchParams({ desde, hasta });
+    return authedJson<{ bloques: EstudioAgendaBloque[] }>(
+      `/api/admin/estudio/agenda?${sp.toString()}`,
+    );
+  },
+  // GET (no muta) — el front no calcula plata, pide el desglose server-side
+  // antes de crear/confirmar.
+  cotizarReserva: (params: {
+    fecha: string;
+    start: string;
+    horas: number;
+    con_promo?: boolean;
+    sueltos?: EstudioSueltoInput[];
+    /** Al cotizar la EDICIÓN de un turno ya existente: se excluye a sí mismo
+     *  del chequeo de disponibilidad (si no, siempre se vería "ocupado" por
+     *  su propia franja). Omitir en una reserva nueva. */
+    pedido_id?: number;
+  }) => {
+    const sp = new URLSearchParams({
+      fecha: params.fecha,
+      start: params.start,
+      horas: String(params.horas),
+      con_promo: String(!!params.con_promo),
+      sueltos_json: JSON.stringify(params.sueltos ?? []),
+    });
+    if (params.pedido_id != null) sp.set("pedido_id", String(params.pedido_id));
+    return authedJson<EstudioCotizacion>(`/api/admin/estudio/reservas/cotizar?${sp.toString()}`);
+  },
+  createReserva: (data: EstudioReservaCreateInput) =>
+    authedPostJson<Pedido>("/api/admin/estudio/reservas", data),
+  updateReserva: (id: number, data: EstudioReservaUpdateInput) =>
+    authedFetch(`/api/admin/estudio/reservas/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }).then(async (r) => {
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d?.detail ?? `PATCH reserva → ${r.status}`);
+      }
+      return r.json() as Promise<Pedido>;
     }),
 };
 

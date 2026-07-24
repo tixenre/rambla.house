@@ -21,15 +21,20 @@ export function RegistrarPagoModal({
   pagado,
   open,
   onOpenChange,
+  esEstudio = false,
 }: {
   pedidoId: number;
   total: number;
   pagado: number;
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /** El pedido es un turno/slot del Estudio (economía separada, #1283) — el
+   *  cobro va por defecto a "Estudio", no a "Rambla". */
+  esEstudio?: boolean;
 }) {
   const qc = useQueryClient();
   const saldo = Math.max(0, total - pagado);
+  const destinatarioDefault = esEstudio ? "Estudio" : "Rambla";
 
   // Presets: Seña 50% / Saldo total / Otro
   type Preset = "sena" | "saldo" | "otro";
@@ -38,8 +43,9 @@ export function RegistrarPagoModal({
   const [preset, setPreset] = useState<Preset>("saldo");
   const [montoInput, setMontoInput] = useState<string>(String(saldo));
   const [concepto, setConcepto] = useState("Saldo final");
-  // A quién se cobró y cómo. Default del dueño: Tincho + transferencia.
-  const [destinatario, setDestinatario] = useState<string>("Rambla");
+  // A quién se cobró y cómo. Default del dueño: Rambla + transferencia (Estudio
+  // si el pedido es del Estudio — esa plata no es de Rambla ni de los socios).
+  const [destinatario, setDestinatario] = useState<string>(destinatarioDefault);
   const [metodo, setMetodo] = useState<string>("transferencia");
   const [fecha, setFecha] = useState<string>(() => new Date().toISOString().slice(0, 10));
 
@@ -49,12 +55,13 @@ export function RegistrarPagoModal({
   // editarse desde que se montó el modal → los presets deben reflejar lo vigente).
   useEffect(() => {
     if (!open) return;
-    setDestinatario("Rambla");
+    setDestinatario(destinatarioDefault);
     setMetodo("transferencia");
     setFecha(new Date().toISOString().slice(0, 10));
     setPreset("saldo");
     setMontoInput(String(Math.max(0, total - pagado)));
     setConcepto("Saldo final");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- destinatarioDefault deriva de esEstudio, estable por pedido
   }, [open, total, pagado]);
 
   const selectPreset = (p: Preset) => {

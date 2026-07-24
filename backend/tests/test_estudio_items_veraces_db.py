@@ -47,7 +47,6 @@ import main  # noqa: E402 — importado después del gating, mismo patrón que l
 from auth.session import signer  # noqa: E402
 
 CLIENTE_ID = 9_490_001
-EQ_PACK_ID = 9_490_002
 _COOKIE = f"session={signer.dumps({'email': 'estudioveraz@test.com', 'role': 'cliente', 'cliente_id': CLIENTE_ID, 'jti': 'estudio-veraz'})}"
 
 
@@ -68,8 +67,6 @@ def _limpiar(conn):
         "DELETE FROM alquileres WHERE cliente_id = %s OR tipo = 'estudio_fijo'", (CLIENTE_ID,)
     )
     conn.execute("DELETE FROM estudio_slots_fijos")
-    conn.execute("DELETE FROM estudio_pack_equipos WHERE equipo_id = %s", (EQ_PACK_ID,))
-    conn.execute("DELETE FROM equipos WHERE id = %s", (EQ_PACK_ID,))
     conn.execute("DELETE FROM clientes WHERE id = %s", (CLIENTE_ID,))
 
 
@@ -87,17 +84,7 @@ def setup():
             (CLIENTE_ID,),
         )
         conn.execute(
-            "INSERT INTO equipos (id, nombre, cantidad, precio_jornada, visible_catalogo) "
-            "VALUES (%s,'Equipo pack (items veraces)',3,5000,1)",
-            (EQ_PACK_ID,),
-        )
-        conn.execute(
-            "INSERT INTO estudio_pack_equipos (estudio_id, equipo_id, orden) VALUES (1,%s,0)",
-            (EQ_PACK_ID,),
-        )
-        conn.execute(
-            "UPDATE estudio SET precio_hora=10000, pack_activo=TRUE, pack_precio=30000, "
-            "pack_nombre='Pack Todo Incluido', buffer_horas=0, min_horas=1, "
+            "UPDATE estudio SET precio_hora=10000, buffer_horas=0, min_horas=1, "
             "open_hour=0, close_hour=24, anticipacion_min_horas=0 WHERE id=1"
         )
         conn.commit()
@@ -124,10 +111,10 @@ def client_con_db():
         yield c
 
 
-def _reservar(client, *, fecha, start, horas, con_pack):
+def _reservar(client, *, fecha, start, horas):
     return client.post(
         "/api/estudio/reservas",
-        json={"fecha": fecha, "start": start, "horas": horas, "con_pack": con_pack},
+        json={"fecha": fecha, "start": start, "horas": horas},
         headers={"Cookie": _COOKIE},
     )
 
@@ -144,12 +131,14 @@ def _items_y_pedido(conn, pedido_id):
     return pedido, items
 
 
-def test_reserva_sin_pack_items_veraces(client_con_db, setup):
+def test_reserva_items_veraces(client_con_db, setup):
     """El centinela lleva el monto REAL del espacio (no $0) — Σ subtotal ==
-    monto_total, sin necesitar excepciones en desglose/reconciliación."""
+    monto_total, sin necesitar excepciones en desglose/reconciliación. El pack
+    ⏰ (best-effort, línea personalizada aparte) se retiró en la Fase 8, #1283 —
+    reemplazado por la promo (ver test_promo_combo_estudio_db.py)."""
     from database import get_db
 
-    r = _reservar(client_con_db, fecha="2030-03-01", start="14:00", horas=3, con_pack=False)
+    r = _reservar(client_con_db, fecha="2030-03-01", start="14:00", horas=3)
     assert r.status_code == 201, r.text
     pedido_id = r.json()["id"]
 
@@ -164,36 +153,6 @@ def test_reserva_sin_pack_items_veraces(client_con_db, setup):
     assert items[0]["precio_jornada"] == 30000
     assert items[0]["subtotal"] == 30000
     assert items[0]["cobro_modo"] == "fijo"
-    assert sum(it["subtotal"] for it in items) == pedido["monto_total"]
-
-
-def test_reserva_con_pack_items_veraces(client_con_db, setup):
-    """Con pack: el centinela lleva el espacio, una línea personalizada nueva
-    lleva el precio FIJO del pack (dueño Rambla por default vía
-    `equipo_id=NULL`) — el equipo del pack en sí sigue informativo a $0."""
-    from database import get_db
-
-    r = _reservar(client_con_db, fecha="2030-03-02", start="10:00", horas=2, con_pack=True)
-    assert r.status_code == 201, r.text
-    pedido_id = r.json()["id"]
-
-    conn = get_db()
-    try:
-        pedido, items = _items_y_pedido(conn, pedido_id)
-    finally:
-        conn.close()
-
-    assert pedido["monto_total"] == 20000 + 30000  # espacio(2h×10000) + pack fijo
-    assert len(items) == 3  # centinela + equipo del pack ($0) + línea fija del pack
-    linea_pack = next(it for it in items if it["equipo_id"] is None)
-    assert linea_pack["subtotal"] == 30000
-    assert linea_pack["cobro_modo"] == "fijo"
-    assert linea_pack["nombre_libre"] == "Pack Todo Incluido"
-    equipo_pack = next(it for it in items if it["equipo_id"] == EQ_PACK_ID)
-    assert equipo_pack["subtotal"] == 0  # informativo
-    centinela = next(it for it in items if it["equipo_id"] not in (None, EQ_PACK_ID))
-    assert centinela["subtotal"] == 20000
-    assert centinela["cobro_modo"] == "fijo"
     assert sum(it["subtotal"] for it in items) == pedido["monto_total"]
 
 
