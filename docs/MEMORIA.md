@@ -353,8 +353,12 @@ El accent de marketing de cada sección pública resuelve por `[data-area]` CSS 
 `var(--area-accent)` sin saber el contexto. **`--color-estudio` es token propio** — no reusar
 `--color-naranja` (es status Warning, misma hex, semántica distinta). **Focus rings, estados de UI
 cross-app, badges del kit, back-office y paleta de status → amber/status fijos, nunca por área.**
-El supervisor marca: `bg-naranja` donde debería ir `var(--area-accent)` en marketing del estudio;
-o `--color-naranja` en contexto de marketing de área.
+**Excepción acotada (2026-07-24, confirmada por el dueño):** el Calendario general del Dashboard (mezcla
+TODOS los pedidos, no solo Estudio) SÍ pinta los turnos del Estudio con `--color-estudio`
+(`estadoClaseEstudio`) — ayuda a distinguir de un vistazo qué es del Estudio en una vista mixta. Es la
+ÚNICA excepción: no habilita re-themear otra pantalla de back-office por área. El supervisor marca:
+`estadoClaseEstudio` (u otro color por área) usado fuera del Calendario general y la agenda propia del
+Estudio, o un `bg-naranja` donde debería ir `var(--area-accent)` en marketing del estudio.
 
 ### 2026-06-27 — Medir lo barato-e-incierto; juicio + reversibilidad para el resto (empirismo proporcional)
 
@@ -1159,3 +1163,26 @@ Chromium (ningún test de Rambla lo hace, siempre mockean `pdf._render_pdf`) —
 saltearse por opt-in (`ARCA_FE_PDF_TEST=1`), mismo patrón ya usado por `test_alembic_upgrade_db.py`
 para integration tests que necesitan infra que el job default no provee. Detalle completo en
 `docs/DECISIONES.md` esta fecha.
+
+### 2026-07-24 — `_regenerar_pedidos_taller` = nuevo miembro de la familia motor-único (espejo de `_regenerar_pedidos_slot`)
+
+Talleres (edición → pedido mensual de resumen, `usa_estudio`/`valor_estudio`/`usa_equipos`/
+`valor_equipos` en `ediciones_taller`) reusa el MISMO patrón que `estudio_slots_fijos`: reactivo (corre
+síncrono al crear/editar la edición, dentro de `pg_advisory_xact_lock` con namespace propio
+`_ADVISORY_NS_TALLER=5390423`), conserva pasados/pagados y borra+recrea futuros impagos, atribuye 100%
+genérico vía `equipos.dueno` (el ítem del Estudio usa el centinela real, el de equipos usa
+`equipo_id=NULL` → 'Rambla' — CERO código de atribución nuevo). Fix propio que el slot no necesita:
+también conserva un mes con MÁS ítems que los auto-generados — protege la línea de matrícula que el
+admin tipeó a mano de un borrado silencioso en el próximo recálculo. Cómo →
+`backend/routes/talleres.py::_regenerar_pedidos_taller`. El supervisor marca una regeneración de pedidos
+recurrentes nueva que no siga este mismo patrón (conserva-borra-recrea + atribución vía `equipos.dueno`).
+
+### 2026-07-24 — La promo del Estudio es best-effort; solo los sueltos son stock duro
+
+Confirmado con el dueño (ya cambió de criterio una vez: de duro a best-effort, commit `0a8364a`, fijado
+acá para no re-discutirlo): si un componente de la promo (combo fijo del Estudio) no tiene stock, la
+reserva se crea IGUAL —cobra el precio completo— y devuelve `promo_advertencia` explicando qué faltó,
+nunca un 409. Los equipos SUELTOS (elegidos a mano, fuera de la promo) siguen siendo DURO: sin stock,
+409 y no se crea nada. El gate de validación (`validar_stock_hipotetico`) es el mismo para ambos — lo
+que cambia es si el caller levanta excepción sobre el resultado o solo arma el aviso. El supervisor
+marca un 409 nuevo en la validación de la promo, o un ítem suelto que pase a ser best-effort.
