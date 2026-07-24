@@ -46,6 +46,13 @@ GATE_SYMBOLS = {
 #     (`crear_slot`/`actualizar_slot`, vía `verificar_sesiones_disponibles`)
 #     ANTES de regenerar. Reventar la reserva acá sería doble validación de
 #     algo que el caller ya chequeó.
+#   - _regenerar_pedidos_taller (talleres, economía del taller): mismo
+#     patrón que el slot — los ítems (Estudio y/o equipos) son para que la
+#     plata del taller se atribuya/vea en la liquidación (`equipos.dueno`),
+#     NO reservan stock ni bloquean nada. El bloqueo real del ESPACIO (las
+#     clases del taller) lo sigue validando `verificar_sesiones_disponibles`
+#     en los 3 callers (`admin_create_taller`/`admin_create_edicion`/
+#     `admin_update_edicion`), no esta función.
 # ⏰ `_agregar_items_pack` (estudio) — el delegador del pack — se retiró en la
 # Fase 8 (#1283) junto con el mecanismo que validaba.
 # Clave = path relativo a routes/ (ej. "alquileres/core.py"), así desambigua entre
@@ -53,6 +60,7 @@ GATE_SYMBOLS = {
 ALLOWLIST_DELEGADORES = {
     ("alquileres/core.py", "_apply_pedido_items"),
     ("estudio.py", "_regenerar_pedidos_slot"),
+    ("talleres.py", "_regenerar_pedidos_taller"),
 }
 
 

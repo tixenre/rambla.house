@@ -615,7 +615,14 @@ def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
                 "cantidad": it.cantidad,
                 "precio_jornada": it.precio_jornada,
                 "nombre_libre": None,
-                "cobro_modo": "jornada",
+                # Preserva el modo entrante en vez de hardcodear 'jornada': un
+                # pedido de taller (`_regenerar_pedidos_taller`) tiene un ítem
+                # de catálogo (el centinela del Estudio) en 'fijo' — pisarlo acá
+                # lo rompería en el próximo guardado de CUALQUIER cosa del
+                # pedido (el front reenvía el array completo). Sin efecto en
+                # pedidos normales: sus ítems de catálogo siempre traen
+                # 'jornada' desde que se cargaron.
+                "cobro_modo": it.cobro_modo or "jornada",
             })
 
     # `orden` por posición; subtotal por línea vía `bruto_linea` (respeta cobro_modo).

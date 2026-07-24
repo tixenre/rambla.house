@@ -489,9 +489,12 @@ def _init_db_schema(conn):
     """)
 
     # Estudio E2: tipo de alquiler ('diaria' = pedido normal por jornada;
-    # 'estudio' = reserva del espacio por horas). El DEFAULT 'diaria' es clave:
-    # las reservas existentes y las queries de overlap (que NO filtran por tipo)
-    # quedan idénticas. `estudio_con_pack` se reserva para E3 (pack Grip/Luz).
+    # 'estudio'/'estudio_fijo' = reserva del espacio por horas / slot mensual;
+    # 'taller' = resumen mensual de una edición de taller, ver
+    # `_regenerar_pedidos_taller`). El DEFAULT 'diaria' es clave: las reservas
+    # existentes y las queries de overlap (que NO filtran por tipo) quedan
+    # idénticas. `estudio_con_pack` se reserva para E3 (pack Grip/Luz). Sin
+    # CHECK constraint — cualquier texto es válido, el enum vive en el código.
     conn.execute("ALTER TABLE alquileres ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'diaria'")
     conn.execute("ALTER TABLE alquileres ADD COLUMN IF NOT EXISTS estudio_con_pack BOOLEAN NOT NULL DEFAULT FALSE")
 
@@ -1938,6 +1941,36 @@ def _init_db_schema(conn):
     # idx_ediciones_taller_slug se retiró: `slug` ya es UNIQUE en el CREATE
     # TABLE de arriba — era 100% redundante (ver migración
     # q4r5s6t7u8v9_drop_redundant_plain_indexes).
+
+    # Economía del taller (#1283-adjacent): si la edición usa el espacio del
+    # Estudio y/o equipos de alquiler, con un valor que el admin tipea a mano
+    # (no se deriva de asistencia real) — `_regenerar_pedidos_taller` los
+    # traduce en ítems del pedido mensual, atribuidos automático vía
+    # `equipos.dueno` (Estudio / Rambla), igual que hace el Estudio con sus
+    # slots fijos. La matrícula/curso en sí NO tiene columna — se tipea como
+    # línea personalizada dentro del pedido ya generado.
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS usa_estudio BOOLEAN NOT NULL DEFAULT FALSE")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_estudio INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_estudio_modo TEXT NOT NULL DEFAULT 'mensual'")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS usa_equipos BOOLEAN NOT NULL DEFAULT FALSE")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_equipos INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_equipos_modo TEXT NOT NULL DEFAULT 'mensual'")
+    # Migración idempotente (mismo patrón que spec_propuestas_pendientes_tipo_check):
+    # dropear+re-crear en vez de "ADD CONSTRAINT IF NOT EXISTS" (Postgres no lo soporta para CHECK).
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_estudio_modo_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_estudio_modo_check "
+        "CHECK (valor_estudio_modo IN ('mensual','total'))"
+    )
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_equipos_modo_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_equipos_modo_check "
+        "CHECK (valor_equipos_modo IN ('mensual','total'))"
+    )
+    # Vincula cada pedido mensual generado con su edición, para regenerar
+    # futuros sin tocar pasados/pagados (mismo patrón que `estudio_slot_id`).
+    # NULL en todo pedido normal → cero impacto.
+    conn.execute("ALTER TABLE alquileres ADD COLUMN IF NOT EXISTS taller_edicion_id INTEGER REFERENCES ediciones_taller(id) ON DELETE SET NULL")
 
     # Horas en MINUTOS desde medianoche (0..1440) — soporta medias horas (8:30).
     # El sufijo _min es deliberado: un lector legacy que espere horas enteras

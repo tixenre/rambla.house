@@ -897,9 +897,10 @@ export type CalendarioPedido = {
   numero_pedido: number | null;
   cliente_nombre: string | null;
   estado: PedidoEstado;
-  /** "diaria" (default) | "estudio"/"estudio_fijo" — ver `lib/tipos-pedido.ts`.
-   *  Distingue el color de un turno del Estudio en el calendario general. */
-  tipo?: "diaria" | "estudio" | "estudio_fijo";
+  /** "diaria" (default) | "estudio"/"estudio_fijo" | "taller" — ver
+   *  `lib/tipos-pedido.ts`. Distingue el color de un turno del Estudio en el
+   *  calendario general. */
+  tipo?: "diaria" | "estudio" | "estudio_fijo" | "taller";
   fecha_desde: string;
   fecha_hasta: string;
   monto_total: number;
@@ -1165,9 +1166,11 @@ export type Pedido = {
   notas: string | null;
   created_at?: string;
   /** "diaria" (default, alquiler normal) | "estudio"/"estudio_fijo" (turno o
-   *  slot mensual del Estudio, #1283) — ver `lib/tipos-pedido.ts`. Ítems/
-   *  fechas de un pedido del Estudio se editan desde Estudio → Reservas. */
-  tipo?: "diaria" | "estudio" | "estudio_fijo";
+   *  slot mensual del Estudio, #1283) | "taller" (resumen mensual de una
+   *  edición, ver `_regenerar_pedidos_taller`) — ver `lib/tipos-pedido.ts`.
+   *  Ítems/fechas de un pedido del Estudio se editan desde Estudio → Reservas;
+   *  un pedido de taller queda editable normal. */
+  tipo?: "diaria" | "estudio" | "estudio_fijo" | "taller";
   /** Presente solo en la respuesta de crear/editar un turno del Estudio: si
    *  la promo (combo) se reservó con algún componente sin stock — best-effort,
    *  nunca bloquea la reserva, pero el admin/cliente debe saberlo. `null`/
@@ -1521,6 +1524,16 @@ export type EdicionAdmin = {
   modalidades: ModalidadPagoBody[];
   // F4c: NULL = sin cierre (siempre abierto).
   fecha_cierre_inscripcion: string | null;
+  // Economía del taller (ver `_regenerar_pedidos_taller`, backend): si la
+  // edición usa el espacio del Estudio y/o equipos de alquiler, con un valor
+  // que el admin tipea a mano — 'mensual' (mismo valor cada mes) o 'total'
+  // (se reparte en partes iguales entre los meses de la edición).
+  usa_estudio: boolean;
+  valor_estudio: number;
+  valor_estudio_modo: "mensual" | "total";
+  usa_equipos: boolean;
+  valor_equipos: number;
+  valor_equipos_modo: "mensual" | "total";
 };
 
 // F4c: mini-KPIs de una edición — plata ya resuelta por el backend (el front

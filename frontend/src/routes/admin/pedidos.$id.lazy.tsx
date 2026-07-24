@@ -349,6 +349,8 @@ function PedidoEditorPage() {
   };
 
   // Agregar línea personalizada (#805): ítem de texto libre, fuera del catálogo.
+  // Un pedido de taller cubre ~1 mes: defaultear a "jornada" multiplicaría el
+  // valor tipeado por ~30 (silencioso y caro) — "fijo" es el default correcto acá.
   const addLineaLibre = () =>
     setItems((its) => [
       ...(its ?? []),
@@ -360,7 +362,7 @@ function PedidoEditorPage() {
         nombre: "",
         marca: null,
         nombre_libre: "",
-        cobro_modo: "jornada",
+        cobro_modo: p.tipo === "taller" ? "fijo" : "jornada",
       },
     ]);
 

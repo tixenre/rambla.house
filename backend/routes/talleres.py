@@ -23,7 +23,7 @@ from pydantic import BaseModel, EmailStr, Field
 
 from auth.guards import require_admin
 from config import SITE_URL, settings
-from database import get_db, now_ar
+from database import get_db, now_ar, to_datetime
 from rate_limit import limiter
 from dataio.slug import slugify, slug_unico
 from services.email import send_email
@@ -380,6 +380,12 @@ def _edicion_to_admin_dict(edicion_row, clases=None, modalidades=None) -> dict:
             str(edicion_row["fecha_cierre_inscripcion"])
             if _row_get(edicion_row, "fecha_cierre_inscripcion") else None
         ),
+        "usa_estudio": bool(edicion_row["usa_estudio"]),
+        "valor_estudio": edicion_row["valor_estudio"],
+        "valor_estudio_modo": edicion_row["valor_estudio_modo"],
+        "usa_equipos": bool(edicion_row["usa_equipos"]),
+        "valor_equipos": edicion_row["valor_equipos"],
+        "valor_equipos_modo": edicion_row["valor_equipos_modo"],
     }
 
 
@@ -1083,6 +1089,16 @@ class EdicionCreateBody(BaseModel):
     # re-verifica la disponibilidad del estudio.
     activo: bool = False
     numero_edicion: int = 1
+    # Economía del taller (ver `_regenerar_pedidos_taller`): si la edición usa
+    # el espacio del Estudio y/o equipos de alquiler, con un valor que el
+    # admin tipea a mano — 'mensual' (mismo valor cada mes) o 'total' (se
+    # reparte en partes iguales entre los meses de la edición).
+    usa_estudio: bool = False
+    valor_estudio: int = 0
+    valor_estudio_modo: str = "mensual"
+    usa_equipos: bool = False
+    valor_equipos: int = 0
+    valor_equipos_modo: str = "mensual"
 
 
 class TallerConceptoCreateBody(BaseModel):
@@ -1187,6 +1203,13 @@ class EdicionUpdateBody(BaseModel):
     # fuera de Rambla — nace #1 y hay que pasarlo a la #5 real). NO toca el
     # slug (queda fijo desde la creación, no se re-deriva del número nuevo).
     numero_edicion: int | None = None
+    # Economía del taller — ver comentario gemelo en EdicionCreateBody.
+    usa_estudio: bool | None = None
+    valor_estudio: int | None = None
+    valor_estudio_modo: str | None = None
+    usa_equipos: bool | None = None
+    valor_equipos: int | None = None
+    valor_equipos_modo: str | None = None
 
 
 @router.get("/admin/talleres")
@@ -1235,6 +1258,118 @@ def _find_or_create_instructor(conn, nombre: str) -> int:
     return cur.fetchone()["id"]
 
 
+# Namespace propio del advisory lock que serializa la regeneración de pedidos
+# de una edición — evita una carrera entre 2 escrituras concurrentes a la
+# MISMA edición decidiendo a la vez qué mes conservar/borrar/recrear.
+_ADVISORY_NS_TALLER = 5390423
+
+
+def _regenerar_pedidos_taller(conn, edicion: dict, taller_nombre: str) -> None:
+    """(Re)genera un pedido `tipo='taller'` por mes del rango de la edición.
+    Espeja `_regenerar_pedidos_slot`: preserva pasados/pagados, borra y recrea
+    futuros impagos. Fix propio: también preserva un mes cuyo pedido tiene MÁS
+    ítems que los que este generador crearía — protege la línea de matrícula
+    que el admin tipeó a mano de un borrado silencioso en el próximo recálculo."""
+    from routes.estudio import _get_estudio_row, _iter_meses, _mes_actual_ar
+    from routes.alquileres import _next_numero_pedido
+    import calendar as _cal
+    from datetime import date as _dt_date
+
+    edicion_id = edicion["id"]
+    conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (_ADVISORY_NS_TALLER, edicion_id))
+
+    mes_actual = _mes_actual_ar()
+    n_items_auto = max(1, int(edicion["usa_estudio"]) + int(edicion["usa_equipos"]))
+
+    existentes = conn.execute(
+        """
+        SELECT a.id, a.fecha_desde, a.monto_pagado,
+               (SELECT COUNT(*) FROM alquiler_items i WHERE i.pedido_id = a.id) AS n_items
+        FROM alquileres a WHERE a.taller_edicion_id = %s
+        """,
+        (edicion_id,),
+    ).fetchall()
+
+    conservados: set[str] = set()
+    for e in existentes:
+        fd = to_datetime(e["fecha_desde"])
+        mes_e = f"{fd.year:04d}-{fd.month:02d}"
+        if mes_e < mes_actual or (e["monto_pagado"] or 0) > 0 or e["n_items"] > n_items_auto:
+            conservados.add(mes_e)  # pasado, pagado o con más ítems de los que auto-generamos → intocable
+        else:
+            conn.execute("DELETE FROM alquileres WHERE id = %s", (e["id"],))
+
+    if not edicion["activo"]:
+        return
+
+    fecha_inicio: _dt_date = edicion["fecha_inicio"]
+    fecha_fin: _dt_date = edicion["fecha_fin"]
+    meses = list(_iter_meses(
+        f"{fecha_inicio.year:04d}-{fecha_inicio.month:02d}",
+        f"{fecha_fin.year:04d}-{fecha_fin.month:02d}",
+    ))
+    n_meses = len(meses)
+    ultimo = meses[-1]
+
+    def _partes(total: int, modo: str) -> dict:
+        if modo != "total":
+            return {clave: total for clave in meses}
+        base, resto = divmod(total, n_meses)
+        return {clave: (base + resto if clave == ultimo else base) for clave in meses}
+
+    valores_estudio = _partes(edicion["valor_estudio"], edicion["valor_estudio_modo"]) if edicion["usa_estudio"] else {}
+    valores_equipos = _partes(edicion["valor_equipos"], edicion["valor_equipos_modo"]) if edicion["usa_equipos"] else {}
+    estudio = _get_estudio_row(conn) if edicion["usa_estudio"] else None
+
+    for (y, m) in meses:
+        mes = f"{y:04d}-{m:02d}"
+        if mes < mes_actual or mes in conservados:
+            continue
+        _, last_day = _cal.monthrange(y, m)
+        fd = max(_dt_date(y, m, 1), fecha_inicio)
+        fh = min(_dt_date(y, m, last_day), fecha_fin)
+        mes_label = f"{_MESES_ES[m - 1]} {y}"
+        valor_est = valores_estudio.get((y, m), 0)
+        valor_eq = valores_equipos.get((y, m), 0)
+
+        pedido_id = conn.insert_returning(
+            """
+            INSERT INTO alquileres (cliente_nombre, fecha_desde, fecha_hasta, monto_total,
+                                    estado, fuente, tipo, numero_pedido, taller_edicion_id)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """,
+            (f"Taller {taller_nombre} — {mes_label}", fd, fh, valor_est + valor_eq,
+             "confirmado", "taller", "taller", _next_numero_pedido(conn), edicion_id),
+        )
+        if edicion["usa_estudio"]:
+            conn.execute(
+                """
+                INSERT INTO alquiler_items
+                    (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo)
+                VALUES (%s,%s,1,%s,%s,'fijo')
+                """,
+                (pedido_id, estudio["equipo_id"], valor_est, valor_est),
+            )
+        if edicion["usa_equipos"]:
+            conn.execute(
+                """
+                INSERT INTO alquiler_items
+                    (pedido_id, equipo_id, nombre_libre, cantidad, precio_jornada, subtotal, cobro_modo)
+                VALUES (%s,NULL,%s,1,%s,%s,'fijo')
+                """,
+                (pedido_id, f"Uso de equipos — {taller_nombre}", valor_eq, valor_eq),
+            )
+        if not edicion["usa_estudio"] and not edicion["usa_equipos"]:
+            conn.execute(
+                """
+                INSERT INTO alquiler_items
+                    (pedido_id, equipo_id, nombre_libre, cantidad, precio_jornada, subtotal, cobro_modo)
+                VALUES (%s,NULL,%s,1,0,0,'fijo')
+                """,
+                (pedido_id, f"Taller {taller_nombre} — {mes_label}"),
+            )
+
+
 @router.post("/admin/talleres", status_code=201)
 def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
     """Crea un nuevo concepto de taller con su primera edición."""
@@ -1247,6 +1382,10 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
         raise HTTPException(400, "cupos_total debe ser al menos 1")
     if ed.tipo_taller not in ("intensivo", "semanal"):
         raise HTTPException(400, "tipo_taller debe ser 'intensivo' o 'semanal'")
+    if ed.valor_estudio_modo not in ("mensual", "total"):
+        raise HTTPException(400, "valor_estudio_modo debe ser 'mensual' o 'total'")
+    if ed.valor_equipos_modo not in ("mensual", "total"):
+        raise HTTPException(400, "valor_equipos_modo debe ser 'mensual' o 'total'")
 
     from routes.estudio import verificar_sesiones_disponibles, _get_estudio_row, _ADVISORY_NS_ESTUDIO
 
@@ -1322,8 +1461,10 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
                     fecha_inicio, fecha_fin, horario,
                     cupos_total, precio_total, precio_sena,
                     pago_alias, pago_cbu, pago_banco,
-                    direccion, activo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    direccion, activo,
+                    usa_estudio, valor_estudio, valor_estudio_modo,
+                    usa_equipos, valor_equipos, valor_equipos_modo
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1332,10 +1473,16 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
                     ed.cupos_total, ed.precio_total, ed.precio_sena,
                     ed.pago_alias.strip(), ed.pago_cbu.strip(), ed.pago_banco.strip(),
                     ed.direccion.strip(), ed.activo,
+                    ed.usa_estudio, ed.valor_estudio, ed.valor_estudio_modo,
+                    ed.usa_equipos, ed.valor_equipos, ed.valor_equipos_modo,
                 ),
             )
             edicion_id = cur2.fetchone()["id"]
             _insert_clases(conn, edicion_id, clases)
+            edicion_row = conn.execute(
+                "SELECT * FROM ediciones_taller WHERE id = %s", (edicion_id,)
+            ).fetchone()
+            _regenerar_pedidos_taller(conn, edicion_row, nombre_base)
             conn.commit()
 
             t_row = conn.execute("SELECT * FROM talleres WHERE id = %s", (taller_id,)).fetchone()
@@ -1370,6 +1517,10 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
         raise HTTPException(400, "cupos_total debe ser al menos 1")
     if body.tipo_taller not in ("intensivo", "semanal"):
         raise HTTPException(400, "tipo_taller debe ser 'intensivo' o 'semanal'")
+    if body.valor_estudio_modo not in ("mensual", "total"):
+        raise HTTPException(400, "valor_estudio_modo debe ser 'mensual' o 'total'")
+    if body.valor_equipos_modo not in ("mensual", "total"):
+        raise HTTPException(400, "valor_equipos_modo debe ser 'mensual' o 'total'")
 
     from routes.estudio import verificar_sesiones_disponibles, _get_estudio_row, _ADVISORY_NS_ESTUDIO
 
@@ -1418,8 +1569,10 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
                     fecha_inicio, fecha_fin, horario,
                     cupos_total, precio_total, precio_sena,
                     pago_alias, pago_cbu, pago_banco,
-                    direccion, activo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    direccion, activo,
+                    usa_estudio, valor_estudio, valor_estudio_modo,
+                    usa_equipos, valor_equipos, valor_equipos_modo
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (
@@ -1428,12 +1581,15 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
                     body.cupos_total, body.precio_total, body.precio_sena,
                     body.pago_alias.strip(), body.pago_cbu.strip(), body.pago_banco.strip(),
                     body.direccion.strip(), body.activo,
+                    body.usa_estudio, body.valor_estudio, body.valor_estudio_modo,
+                    body.usa_equipos, body.valor_equipos, body.valor_equipos_modo,
                 ),
             )
             edicion_id = cur.fetchone()["id"]
             _insert_clases(conn, edicion_id, clases)
-            conn.commit()
             e_row = conn.execute("SELECT * FROM ediciones_taller WHERE id = %s", (edicion_id,)).fetchone()
+            _regenerar_pedidos_taller(conn, e_row, t_row["nombre"])
+            conn.commit()
             # Re-leer de la DB: las clases recién insertadas tienen id (el admin
             # lo necesita para subir portadas / upsert sin refetch). DENTRO del
             # `with` — ver comentario gemelo en admin_create_taller.
@@ -1578,6 +1734,22 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
                 raise HTTPException(400, f"Fecha inválida: {body.fecha_cierre_inscripcion}")
             sets.append("fecha_cierre_inscripcion = %s")
             params.append(body.fecha_cierre_inscripcion)
+    if body.usa_estudio is not None:
+        sets.append("usa_estudio = %s"); params.append(body.usa_estudio)
+    if body.valor_estudio is not None:
+        sets.append("valor_estudio = %s"); params.append(body.valor_estudio)
+    if body.valor_estudio_modo is not None:
+        if body.valor_estudio_modo not in ("mensual", "total"):
+            raise HTTPException(400, "valor_estudio_modo debe ser 'mensual' o 'total'")
+        sets.append("valor_estudio_modo = %s"); params.append(body.valor_estudio_modo)
+    if body.usa_equipos is not None:
+        sets.append("usa_equipos = %s"); params.append(body.usa_equipos)
+    if body.valor_equipos is not None:
+        sets.append("valor_equipos = %s"); params.append(body.valor_equipos)
+    if body.valor_equipos_modo is not None:
+        if body.valor_equipos_modo not in ("mensual", "total"):
+            raise HTTPException(400, "valor_equipos_modo debe ser 'mensual' o 'total'")
+        sets.append("valor_equipos_modo = %s"); params.append(body.valor_equipos_modo)
 
     new_clases = None
     if body.clases is not None:
@@ -1593,8 +1765,10 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
     with get_db() as conn:
         try:
             existing = conn.execute(
-                "SELECT taller_id, cupos_total, cupos_confirmados, activo "
-                "FROM ediciones_taller WHERE id = %s FOR UPDATE",
+                "SELECT e.taller_id, e.cupos_total, e.cupos_confirmados, e.activo, "
+                "       t.nombre AS taller_nombre "
+                "FROM ediciones_taller e JOIN talleres t ON t.id = e.taller_id "
+                "WHERE e.id = %s FOR UPDATE",
                 (edicion_id,),
             ).fetchone()
             if existing is None:
@@ -1663,10 +1837,11 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
                     params,
                 )
 
-            conn.commit()
             e_row = conn.execute(
                 "SELECT * FROM ediciones_taller WHERE id = %s", (edicion_id,)
             ).fetchone()
+            _regenerar_pedidos_taller(conn, e_row, existing["taller_nombre"])
+            conn.commit()
             # DENTRO del `with` — ver comentario gemelo en admin_create_taller.
             clases_out = _get_clases(conn, edicion_id)
             modalidades_out = _get_modalidades(conn, edicion_id)

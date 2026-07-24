@@ -33,7 +33,8 @@ _validar_fecha_iso = validar_fecha_iso
 class PedidoItem(BaseModel):
     # equipo_id None = línea personalizada (#805): no es del catálogo, no reserva
     # stock; lleva `nombre_libre`. `cobro_modo`: 'jornada' (× jornadas, default) |
-    # 'fijo' (monto único).
+    # 'fijo' (monto único — normalmente una línea libre, pero un ítem de
+    # catálogo también puede serlo, ver validate_linea_libre).
     equipo_id:      Optional[int] = None
     cantidad:       int
     precio_jornada: int = 0
@@ -70,13 +71,14 @@ class PedidoItem(BaseModel):
 
     @model_validator(mode="after")
     def validate_linea_libre(self):
-        # Una línea personalizada (sin equipo_id) necesita un nombre; una de
-        # catálogo no puede cobrarse 'fijo' (eso es solo para líneas libres).
-        if self.equipo_id is None:
-            if not (self.nombre_libre or "").strip():
-                raise ValueError("una línea personalizada necesita un nombre")
-        elif self.cobro_modo != "jornada":
-            raise ValueError("solo las líneas personalizadas pueden cobrarse 'fijo'")
+        # Una línea personalizada (sin equipo_id) necesita un nombre. Un ítem
+        # de catálogo SÍ puede llevar cobro_modo='fijo' (Talleres,
+        # `_regenerar_pedidos_taller`: el centinela del Estudio se factura a
+        # monto fijo dentro de un pedido editable, no ×jornadas) — el front no
+        # expone el control para elegirlo a mano en una línea de catálogo, así
+        # que esto solo se ve en pedidos que ya lo traían así de fábrica.
+        if self.equipo_id is None and not (self.nombre_libre or "").strip():
+            raise ValueError("una línea personalizada necesita un nombre")
         return self
 
 

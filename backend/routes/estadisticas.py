@@ -55,13 +55,13 @@ def compute_estadisticas(conn) -> dict:
     # tiene ≥1 ítem (invariante de creación, `routes/alquileres/core.py`), así
     # que no hace falta el join para filtrar "tiene ítems".
     #
-    # `tipo NOT IN ('estudio','estudio_fijo')` en TODAS las agregaciones de esta
-    # función (#1283 Fase 7): el Estudio es una economía separada con su propia
-    # sección más abajo — mezclarlo acá inflaba "Top equipos"/"por dueño" con el
-    # centinela (un recurso interno, no un equipo real) y confundía el negocio
-    # de rental con el del Estudio. Los números históricos de estas tarjetas
-    # cambian (bajan) respecto de antes de esta fase — es la separación
-    # intencional, no una regresión.
+    # `tipo NOT IN ('estudio','estudio_fijo','taller')` en TODAS las agregaciones
+    # de esta función (#1283 Fase 7 + Talleres): Estudio y Talleres son economías
+    # separadas (Estudio tiene su propia sección más abajo) — mezclarlas acá
+    # inflaba "Top equipos"/"por dueño" con el centinela y con "clientes" falsos
+    # (`"Taller X — Julio 2026"`), confundiendo el negocio de rental con el de
+    # esas líneas. Los números históricos de estas tarjetas cambian (bajan)
+    # respecto de antes de cada fase — es la separación intencional, no una regresión.
     totales = conn.execute("""
         SELECT
             COUNT(*)                       AS total_pedidos,
@@ -70,7 +70,7 @@ def compute_estadisticas(conn) -> dict:
             MIN(p.fecha_desde)             AS desde,
             MAX(p.fecha_desde)             AS hasta
         FROM alquileres p
-        WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo')
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo', 'taller')
     """).fetchone()
 
     # ── Por mes ───────────────────────────────────────────────────────────────
@@ -80,7 +80,7 @@ def compute_estadisticas(conn) -> dict:
             COUNT(*)                       AS pedidos,
             SUM(p.monto_total)             AS total_ars
         FROM alquileres p
-        WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo')
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo', 'taller')
         GROUP BY to_char(p.fecha_desde, 'YYYY-MM')
         ORDER BY to_char(p.fecha_desde, 'YYYY-MM') DESC
         LIMIT 24
@@ -99,7 +99,7 @@ def compute_estadisticas(conn) -> dict:
         JOIN alquileres p  ON p.id  = pi.pedido_id
         JOIN equipos e  ON e.id  = pi.equipo_id
         JOIN tot t ON t.pedido_id = p.id
-        WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo')
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo', 'taller')
         GROUP BY pi.equipo_id, e.nombre
         ORDER BY total_ars DESC
         LIMIT 15
@@ -113,7 +113,7 @@ def compute_estadisticas(conn) -> dict:
             COUNT(DISTINCT p.id)           AS pedidos
         FROM alquileres p
         LEFT JOIN clientes c ON c.id = p.cliente_id
-        WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo')
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo', 'taller')
         GROUP BY COALESCE(CAST(p.cliente_id AS TEXT), 'txt:' || p.cliente_nombre)
         ORDER BY total_ars DESC
         LIMIT 10
@@ -131,7 +131,7 @@ def compute_estadisticas(conn) -> dict:
         JOIN alquileres p ON p.id = pi.pedido_id
         JOIN equipos e ON e.id = pi.equipo_id
         JOIN tot t ON t.pedido_id = p.id
-        WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo')
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo', 'taller')
         GROUP BY COALESCE(e.dueno, 'Rambla')
         ORDER BY total_ars DESC
     """).fetchall()
@@ -166,7 +166,7 @@ def compute_estadisticas(conn) -> dict:
             SUM(p.monto_total)             AS total_ars
         FROM alquileres p
         LEFT JOIN clientes c ON c.id = p.cliente_id
-        WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo')
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo', 'taller')
         GROUP BY COALESCE(CAST(p.cliente_id AS TEXT), 'txt:' || p.cliente_nombre)
         HAVING COUNT(DISTINCT p.id) > 1
         ORDER BY veces_alquiladas DESC
@@ -183,7 +183,7 @@ def compute_estadisticas(conn) -> dict:
         WITH por_mes_full AS (
             SELECT to_char(p.fecha_desde, 'YYYY-MM') AS mes, SUM(p.monto_total) AS total
             FROM alquileres p
-            WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo')
+            WHERE p.estado = 'finalizado' AND p.tipo NOT IN ('estudio', 'estudio_fijo', 'taller')
             GROUP BY to_char(p.fecha_desde, 'YYYY-MM')
         )
         SELECT
