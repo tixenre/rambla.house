@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { MESES, ymd, mesCells } from "@/lib/calendario-mes";
 import { fmtArs, formatFechaCorta } from "@/lib/format";
 import { Button } from "@/design-system/ui/button";
 import { SegmentedControl } from "@/design-system/ui/segmented-control";
@@ -33,20 +34,6 @@ import {
 
 const PX_POR_HORA_EJE = 48;
 
-const MESES = [
-  "Enero",
-  "Febrero",
-  "Marzo",
-  "Abril",
-  "Mayo",
-  "Junio",
-  "Julio",
-  "Agosto",
-  "Septiembre",
-  "Octubre",
-  "Noviembre",
-  "Diciembre",
-];
 const DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
 /** Estados que se muestran en la leyenda y sirven de filtro clickeable —
@@ -58,13 +45,6 @@ const LEGEND_ESTADOS: PedidoEstado[] = [
   "devuelto",
   "finalizado",
 ];
-
-const ymd = (d: Date) => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-};
 
 type View = "mes" | "semana";
 
@@ -326,7 +306,7 @@ export function CalendarioWidget({
   // Filtro por estado (clic en la leyenda). null = todos.
   const [filtroEstado, setFiltroEstado] = useState<PedidoEstado | null>(null);
 
-  const { cells, rangeStart, rangeEnd, headerLabel } = useMemo(() => {
+  const { cells, rangeStart, rangeEnd, headerLabel, semanas } = useMemo(() => {
     if (view === "semana") {
       // Lunes = 0
       const dow = (cursor.getDay() + 6) % 7;
@@ -342,26 +322,22 @@ export function CalendarioWidget({
       const label = sameMonth
         ? `${start.getDate()}–${end.getDate()} ${MESES[start.getMonth()]} ${start.getFullYear()}`
         : `${start.getDate()} ${MESES[start.getMonth()].slice(0, 3)} – ${end.getDate()} ${MESES[end.getMonth()].slice(0, 3)} ${end.getFullYear()}`;
-      return { cells: days, rangeStart: ymd(start), rangeEnd: ymd(end), headerLabel: label };
+      return {
+        cells: days,
+        rangeStart: ymd(start),
+        rangeEnd: ymd(end),
+        headerLabel: label,
+        semanas: [days],
+      };
     }
-    // Mes
-    const year = cursor.getFullYear();
-    const month = cursor.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const startOffset = (firstDay.getDay() + 6) % 7;
-    const gridStart = new Date(year, month, 1 - startOffset);
-    const totalCells = Math.ceil((startOffset + lastDay.getDate()) / 7) * 7;
-    const days = Array.from({ length: totalCells }, (_, i) => {
-      const d = new Date(gridStart);
-      d.setDate(gridStart.getDate() + i);
-      return d;
-    });
+    // Mes — mismo cálculo de grilla que usa AgendaMensual del Estudio.
+    const m = mesCells(cursor);
     return {
-      cells: days,
-      rangeStart: ymd(days[0]),
-      rangeEnd: ymd(days[days.length - 1]),
-      headerLabel: `${MESES[month]} ${year}`,
+      cells: m.cells,
+      rangeStart: m.rangeStart,
+      rangeEnd: m.rangeEnd,
+      headerLabel: m.headerLabel,
+      semanas: m.weeks,
     };
   }, [cursor, view]);
 
@@ -478,13 +454,6 @@ export function CalendarioWidget({
   // La barra se centra en su carril (self-center) → el sobrante es el aire
   // entre barras apiladas.
   const altoCarril = compact ? 22 : 28;
-
-  // Filas-semana de 7 días — la vista "semana" ya es una sola.
-  const semanas = useMemo(() => {
-    const out: Date[][] = [];
-    for (let i = 0; i < cells.length; i += 7) out.push(cells.slice(i, i + 7));
-    return out;
-  }, [cells]);
 
   const goPrev = () => {
     const d = new Date(cursor);

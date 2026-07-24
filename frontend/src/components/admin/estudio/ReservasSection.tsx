@@ -23,7 +23,7 @@ import { AdminTable, type Column } from "@/components/admin/AdminTable";
 import { formatARS } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { estudioAdminApi, type EstudioConfig, type EstudioReservaListItem } from "@/lib/admin/api";
-import { AgendaSemanal } from "./AgendaSemanal";
+import { Agenda } from "./Agenda";
 import { ReservaDialog } from "./ReservaDialog";
 
 function fmtFechaHora(iso: string): string {
@@ -138,7 +138,7 @@ export function ReservasSection({ estudio }: { estudio: EstudioConfig }) {
       </div>
 
       {vista === "agenda" ? (
-        <AgendaSemanal
+        <Agenda
           openHour={estudio.open_hour}
           closeHour={estudio.close_hour}
           onNavigatePedido={onNavigatePedido}
