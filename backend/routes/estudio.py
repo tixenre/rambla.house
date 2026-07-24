@@ -2242,10 +2242,14 @@ def cotizar_reserva_estudio(
     fecha: str = Query(...), start: str = Query(...), horas: int = Query(...),
     con_pack: bool = False, con_promo: bool = False,
     sueltos_json: str = Query("[]"),
+    pedido_id: Optional[int] = None,
 ):
     """Desglose de plata de una reserva ANTES de crearla — no muta nada (el
     front no calcula plata, MEMORIA 2026-06-29). `sueltos_json` es
-    `[{"equipo_id":N,"cantidad":N}]` codificado."""
+    `[{"equipo_id":N,"cantidad":N}]` codificado. `pedido_id`: al cotizar la
+    EDICIÓN de un turno ya existente, se excluye a sí mismo del chequeo de
+    disponibilidad — si no, un turno siempre se vería "ocupado" por su propia
+    franja (bug real encontrado al verificar el editor: #1283 Fase 6)."""
     require_admin(request)
     try:
         sueltos_raw = json.loads(sueltos_json)
@@ -2281,7 +2285,9 @@ def cotizar_reserva_estudio(
             total += subtotal
         desglose["monto_total"] = total
 
-        libre, motivo = _estudio_disponible(conn, estudio, fecha_desde, fecha_hasta)
+        libre, motivo = _estudio_disponible(
+            conn, estudio, fecha_desde, fecha_hasta, exclude_pedido_id=pedido_id,
+        )
         desglose["espacio_disponible"] = libre
         desglose["espacio_motivo"] = motivo
         return desglose

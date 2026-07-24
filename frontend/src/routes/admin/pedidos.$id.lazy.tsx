@@ -105,6 +105,7 @@ import {
 } from "@/components/admin/pedido/PedidoPageHelpers";
 import { Section } from "@/design-system/composites/Section";
 import { FieldLabel } from "@/design-system/ui/Field";
+import { esPedidoEstudio } from "@/lib/tipos-pedido";
 
 export const Route = createLazyFileRoute("/admin/pedidos/$id")({
   component: PedidoEditorRoute,
@@ -240,6 +241,10 @@ function PedidoEditorPage() {
   const { datos, setDatos, items, setItems, saveStatus, estadoMut } = draft;
   const ns = nextStep(p);
   const otrosDestinosPedido = otrosDestinos(p);
+  // Ítems/fechas de un turno del Estudio se editan desde Estudio → Reservas
+  // (el backend ya los bloquea con 409, Fase 1 #1283) — acá solo se neutralizan
+  // los controles para que el admin no choque con eso.
+  const esEstudio = esPedidoEstudio(p);
 
   const clienteSinVerificar = !!p.cliente_id && !p.cliente_dni_validado_at;
   const ESTADOS_CON_AVISO: PedidoEstado[] = ["confirmado", "retirado"];
@@ -413,6 +418,22 @@ function PedidoEditorPage() {
             </div>
           )}
 
+          {/* Banner turno del Estudio — ítems/fechas se editan en su propia
+              pantalla (Fase 1 #1283 los bloquea server-side con 409). */}
+          {esEstudio && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber/40 bg-amber/5 px-3 py-2.5 text-sm">
+              <Info className="h-4 w-4 text-ink shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <span className="font-medium text-ink">Este pedido es un turno del Estudio.</span>{" "}
+                El horario, el pack/promo y los equipos sueltos se editan desde{" "}
+                <Link to="/admin/estudio/reservas" className="underline text-muted-foreground">
+                  Estudio → Reservas
+                </Link>
+                . Acá se maneja el pago, la facturación y el estado.
+              </div>
+            </div>
+          )}
+
           {/* Cliente */}
           <Section variant="card" tone="elevated" icon={User} title="Cliente">
             {/* Buscar ficha existente: al elegirla, el contacto y el descuento
@@ -555,11 +576,16 @@ function PedidoEditorPage() {
               )
             }
           >
-            {/* Píldora retiro→devolución — abre el selector de fechas+horas */}
+            {/* Píldora retiro→devolución — abre el selector de fechas+horas.
+                Turno del Estudio: se reprograma desde Estudio → Reservas. */}
             <button
               type="button"
+              disabled={esEstudio}
               onClick={() => setOpenDateModal(true)}
-              className="@container flex w-full items-center gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5 text-left transition hover:border-ink min-h-[44px]"
+              className={cn(
+                "@container flex w-full items-center gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5 text-left transition min-h-[44px]",
+                esEstudio ? "cursor-not-allowed opacity-60" : "hover:border-ink",
+              )}
             >
               {startDate && endDate ? (
                 <>
@@ -598,15 +624,19 @@ function PedidoEditorPage() {
             </button>
           </Section>
 
-          {/* Equipos */}
+          {/* Equipos — turno del Estudio: el centinela/pack/promo/sueltos se
+              cargan desde Estudio → Reservas (el buscador y la edición por
+              línea se neutralizan acá, el backend los rechaza con 409). */}
           <Section variant="card" tone="elevated" icon={Box} title={`Equipos · ${items.length}`}>
             {/* Buscador inline: resultados en dropdown debajo (no tapa el form) */}
-            <EquipoComboSearch
-              existing={items}
-              stockMap={stockMap}
-              onAdd={handleAddEquipo}
-              className="mb-2"
-            />
+            {!esEstudio && (
+              <EquipoComboSearch
+                existing={items}
+                stockMap={stockMap}
+                onAdd={handleAddEquipo}
+                className="mb-2"
+              />
+            )}
 
             {items.length === 0 ? (
               <ul className="divide-y hairline">
@@ -618,7 +648,7 @@ function PedidoEditorPage() {
               <DndContext
                 sensors={sensors}
                 collisionDetection={closestCenter}
-                onDragEnd={handleItemsDragEnd}
+                onDragEnd={esEstudio ? undefined : handleItemsDragEnd}
               >
                 <SortableContext
                   items={items.map((it) => it.uid)}
@@ -631,8 +661,8 @@ function PedidoEditorPage() {
                         it={it}
                         stock={it.equipo_id != null ? stockMap[String(it.equipo_id)] : undefined}
                         jornadas={jornadas}
-                        updateItem={updateItem}
-                        removeItem={removeItem}
+                        updateItem={esEstudio ? () => {} : updateItem}
+                        removeItem={esEstudio ? () => {} : removeItem}
                       />
                     ))}
                   </ul>
@@ -641,14 +671,16 @@ function PedidoEditorPage() {
             )}
 
             {/* Agregar línea personalizada (#805): ítem libre fuera del catálogo */}
-            <button
-              type="button"
-              onClick={addLineaLibre}
-              className="mt-2 flex w-full items-center gap-2.5 px-3 py-2.5 rounded-md border border-dashed hairline text-sm text-muted-foreground hover:bg-muted/30 transition"
-            >
-              <Plus className="h-4 w-4 shrink-0" />
-              <span>Agregar línea personalizada (flete, servicio, etc.)</span>
-            </button>
+            {!esEstudio && (
+              <button
+                type="button"
+                onClick={addLineaLibre}
+                className="mt-2 flex w-full items-center gap-2.5 px-3 py-2.5 rounded-md border border-dashed hairline text-sm text-muted-foreground hover:bg-muted/30 transition"
+              >
+                <Plus className="h-4 w-4 shrink-0" />
+                <span>Agregar línea personalizada (flete, servicio, etc.)</span>
+              </button>
+            )}
           </Section>
 
           {/* Notas */}

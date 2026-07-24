@@ -12,6 +12,13 @@ import type {
   FotoOrdenItem,
   DescuentoJornada,
   CalendarioBloqueo,
+  EstudioReservaListItem,
+  EstudioAgendaBloque,
+  EstudioCotizacion,
+  EstudioReservaCreateInput,
+  EstudioReservaUpdateInput,
+  EstudioSueltoInput,
+  Pedido,
 } from "./types";
 
 // ── Estudio (singleton E1) ───────────────────────────────────────────────────
@@ -97,6 +104,62 @@ export const estudioAdminApi = {
   // vacío o el precio objetivo es inválido.
   crearPromoDesdePack: (data: { nombre?: string; precio_objetivo: number }) =>
     authedPostJson<EstudioConfig>("/api/admin/estudio/promo/crear-desde-pack", data),
+
+  // ── Reservas (#1283 Fase 6) ────────────────────────────────────────────────
+  listReservas: (params?: { desde?: string; hasta?: string }) => {
+    const sp = new URLSearchParams();
+    if (params?.desde) sp.set("desde", params.desde);
+    if (params?.hasta) sp.set("hasta", params.hasta);
+    const qs = sp.toString();
+    return authedJson<{ reservas: EstudioReservaListItem[] }>(
+      `/api/admin/estudio/reservas${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getAgenda: (desde: string, hasta: string) => {
+    const sp = new URLSearchParams({ desde, hasta });
+    return authedJson<{ bloques: EstudioAgendaBloque[] }>(
+      `/api/admin/estudio/agenda?${sp.toString()}`,
+    );
+  },
+  // GET (no muta) — el front no calcula plata, pide el desglose server-side
+  // antes de crear/confirmar.
+  cotizarReserva: (params: {
+    fecha: string;
+    start: string;
+    horas: number;
+    con_pack?: boolean;
+    con_promo?: boolean;
+    sueltos?: EstudioSueltoInput[];
+    /** Al cotizar la EDICIÓN de un turno ya existente: se excluye a sí mismo
+     *  del chequeo de disponibilidad (si no, siempre se vería "ocupado" por
+     *  su propia franja). Omitir en una reserva nueva. */
+    pedido_id?: number;
+  }) => {
+    const sp = new URLSearchParams({
+      fecha: params.fecha,
+      start: params.start,
+      horas: String(params.horas),
+      con_pack: String(!!params.con_pack),
+      con_promo: String(!!params.con_promo),
+      sueltos_json: JSON.stringify(params.sueltos ?? []),
+    });
+    if (params.pedido_id != null) sp.set("pedido_id", String(params.pedido_id));
+    return authedJson<EstudioCotizacion>(`/api/admin/estudio/reservas/cotizar?${sp.toString()}`);
+  },
+  createReserva: (data: EstudioReservaCreateInput) =>
+    authedPostJson<Pedido>("/api/admin/estudio/reservas", data),
+  updateReserva: (id: number, data: EstudioReservaUpdateInput) =>
+    authedFetch(`/api/admin/estudio/reservas/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }).then(async (r) => {
+      if (!r.ok) {
+        const d = await r.json().catch(() => ({}));
+        throw new Error(d?.detail ?? `PATCH reserva → ${r.status}`);
+      }
+      return r.json() as Promise<Pedido>;
+    }),
 };
 
 // ── Trabajos / producciones ──────────────────────────────────────────────────

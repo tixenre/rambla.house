@@ -14,6 +14,7 @@ import {
   ShoppingCart,
   Users,
   Clapperboard,
+  CalendarClock,
   GraduationCap,
   Package,
   ShieldCheck,
@@ -78,7 +79,8 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     label: "Estudio y talleres",
     defaultOpen: true,
     items: [
-      { title: "Estudio", url: "/admin/estudio", icon: Clapperboard },
+      { title: "Reservas", url: "/admin/estudio/reservas", icon: CalendarClock },
+      { title: "Estudio", url: "/admin/estudio", icon: Clapperboard, exact: true },
       { title: "Talleres", url: "/admin/talleres", icon: GraduationCap },
     ],
   },

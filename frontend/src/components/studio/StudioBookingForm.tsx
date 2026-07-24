@@ -28,6 +28,7 @@ import {
 } from "@/components/rental/account/VerificacionRequeridaPanel";
 import { STUDIO, STUDIO_PHONE } from "@/data/studio";
 import { apiGetEstudioDisponibilidad, apiCrearReservaEstudio, type EstudioPromo } from "@/lib/api";
+import { pad, buildTimeSlots } from "@/lib/estudio-slots";
 
 export type StudioBookingConfig = {
   pricePerHour: number;
@@ -36,27 +37,6 @@ export type StudioBookingConfig = {
   closeHour: number;
   promo?: EstudioPromo | null;
 };
-
-function pad(n: number) {
-  return n.toString().padStart(2, "0");
-}
-
-function buildTimeSlots(openHour: number, closeHour: number, minHours: number) {
-  const slots: { value: string; label: string; hour: number; minute: 0 | 30 }[] = [];
-  const lastStartMin = closeHour * 60 - minHours * 60;
-  for (let h = openHour; h < closeHour; h++) {
-    for (const m of [0, 30] as const) {
-      if (h * 60 + m > lastStartMin) continue;
-      slots.push({
-        value: `${pad(h)}:${pad(m)}`,
-        label: `${pad(h)}:${pad(m)}`,
-        hour: h,
-        minute: m,
-      });
-    }
-  }
-  return slots;
-}
 
 type Disponibilidad = "idle" | "checking" | "libre" | "ocupado" | "error";
 

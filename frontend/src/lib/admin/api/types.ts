@@ -1161,6 +1161,12 @@ export type Pedido = {
   descuento_origen?: "manual" | "cliente" | "jornadas" | "ninguno" | null;
   notas: string | null;
   created_at?: string;
+  /** "diaria" (default, alquiler normal) | "estudio"/"estudio_fijo" (turno o
+   *  slot mensual del Estudio, #1283) — ver `lib/tipos-pedido.ts`. Ítems/
+   *  fechas de un pedido del Estudio se editan desde Estudio → Reservas. */
+  tipo?: "diaria" | "estudio" | "estudio_fijo";
+  /** Legacy pack incluido (⏰, se retira Fase 8) — solo pedidos tipo estudio. */
+  estudio_con_pack?: boolean;
   items: PedidoItem[];
   pagos?: PedidoPago[];
   /** True si hay una `solicitudes_modificacion` con estado='pendiente' para
@@ -1391,6 +1397,73 @@ export type EstudioPackEquipoCurado = {
   marca: string | null;
   foto_url: string | null;
   orden: number;
+};
+
+// ── Reservas del Estudio (admin, #1283 Fase 6) ───────────────────────────────
+
+/** Fila liviana de `GET /admin/estudio/reservas` — para la lista. El detalle
+ *  completo (tras crear/editar) es un `Pedido` normal (misma puerta,
+ *  `_get_alquiler_detail`). */
+export type EstudioReservaListItem = {
+  id: number;
+  numero_pedido: number | null;
+  cliente_id: number | null;
+  cliente_nombre: string | null;
+  cliente_email?: string | null;
+  cliente_telefono?: string | null;
+  fecha_desde: string;
+  fecha_hasta: string;
+  monto_total: number;
+  monto_pagado: number;
+  estado: PedidoEstado;
+  estudio_con_pack: boolean;
+};
+
+export type EstudioAgendaBloque = {
+  tipo: "turno" | "slot" | "taller";
+  id: number;
+  numero_pedido: number | null;
+  titulo: string;
+  fecha_desde: string;
+  fecha_hasta: string;
+  estado: string;
+};
+
+export type EstudioSueltoInput = { equipo_id: number; cantidad: number };
+
+/** Desglose de `GET /admin/estudio/reservas/cotizar` — el front no calcula
+ *  plata, solo lo muestra (MEMORIA 2026-06-29). No muta nada. */
+export type EstudioCotizacion = {
+  espacio: number;
+  pack: number;
+  promo: number;
+  sueltos: Array<{ equipo_id: number; cantidad: number; precio_jornada: number; subtotal: number }>;
+  monto_total: number;
+  espacio_disponible: boolean;
+  espacio_motivo: string | null;
+};
+
+export type EstudioReservaCreateInput = {
+  fecha: string; // YYYY-MM-DD
+  start: string; // HH:MM
+  horas: number;
+  cliente_id?: number | null;
+  cliente_nombre?: string | null;
+  con_pack?: boolean;
+  con_promo?: boolean;
+  sueltos?: EstudioSueltoInput[];
+  espacio_monto?: number | null;
+  estado?: "solicitado" | "confirmado" | "retirado";
+};
+
+export type EstudioReservaUpdateInput = {
+  fecha?: string;
+  start?: string;
+  horas?: number;
+  con_pack?: boolean;
+  con_promo?: boolean;
+  sueltos?: EstudioSueltoInput[];
+  espacio_monto?: number | null;
 };
 
 // ── Descuentos por jornadas ──────────────────────────────────────────────────

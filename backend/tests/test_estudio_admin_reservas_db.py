@@ -316,6 +316,33 @@ def test_cotizar_no_muta_nada(client_con_db, setup):
     assert despues_items == antes_items
 
 
+def test_cotizar_con_pedido_id_se_excluye_a_si_mismo(client_con_db, setup):
+    """Bug real encontrado al verificar el editor (#1283 Fase 6): cotizar la
+    MISMA franja de un turno ya existente, sin pasar `pedido_id`, lo veía
+    "ocupado" por sí mismo — el editor mostraba el aviso de no-disponible
+    con solo abrir la reserva, sin cambiar nada."""
+    r = client_con_db.post(
+        "/api/admin/estudio/reservas",
+        json={"fecha": "2030-05-15", "start": "10:00", "horas": 2, "cliente_id": CLIENTE_ID},
+    )
+    assert r.status_code == 201, r.text
+    pedido_id = r.json()["id"]
+
+    sin_excluir = client_con_db.get(
+        "/api/admin/estudio/reservas/cotizar",
+        params={"fecha": "2030-05-15", "start": "10:00", "horas": 2},
+    )
+    assert sin_excluir.status_code == 200, sin_excluir.text
+    assert sin_excluir.json()["espacio_disponible"] is False
+
+    con_excluir = client_con_db.get(
+        "/api/admin/estudio/reservas/cotizar",
+        params={"fecha": "2030-05-15", "start": "10:00", "horas": 2, "pedido_id": pedido_id},
+    )
+    assert con_excluir.status_code == 200, con_excluir.text
+    assert con_excluir.json()["espacio_disponible"] is True
+
+
 def test_editar_reserva_reprograma_y_revalida(client_con_db, setup):
     r = client_con_db.post(
         "/api/admin/estudio/reservas",
