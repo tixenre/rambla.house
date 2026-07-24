@@ -7,6 +7,7 @@ import { Button } from "@/design-system/ui/button";
 import { ContenidoSection } from "./ConceptoTabs";
 import { EdicionSubRow } from "./EdicionSubRow";
 import { FaqSection } from "./FaqSection";
+import { InstitucionesSection } from "./InstitucionesSection";
 import { InstructoresSection } from "./InstructoresSection";
 import { InteresadosSection } from "./InteresadosSection";
 import { TrabajosSection } from "./TrabajosSection";
@@ -24,7 +25,7 @@ export function TallerConceptoRow({
 }) {
   const qc = useQueryClient();
   const [activeTab, setActiveTab] = useState<
-    "ediciones" | "taller" | "instructores" | "interesados" | "trabajos" | "faq"
+    "ediciones" | "taller" | "instructores" | "instituciones" | "interesados" | "trabajos" | "faq"
   >("ediciones");
 
   const totalConfirmados = concepto.ediciones.reduce((s, e) => s + e.cupos_confirmados, 0);
@@ -43,7 +44,10 @@ export function TallerConceptoRow({
   return (
     <div
       className={`rounded-xl border transition-colors ${
-        expanded ? "border-ink/30 bg-ink/5" : "border-border/60"
+        // Mismo fix que EdicionSubRow: `surface` (receta del DS para
+        // "cards, panels"), no un wash translúcido de ink que se confunde
+        // con el fondo de página y con lo que anida adentro.
+        expanded ? "border-ink/30 bg-surface" : "border-border/60"
       }`}
     >
       {/* Concept header */}
@@ -92,11 +96,19 @@ export function TallerConceptoRow({
                 { id: "ediciones", label: "Ediciones" },
                 { id: "taller", label: "El taller" },
                 { id: "instructores", label: "Instructores" },
+                { id: "instituciones", label: "Instituciones" },
                 { id: "interesados", label: "Interesados" },
                 { id: "trabajos", label: "Trabajos" },
                 { id: "faq", label: "FAQ" },
               ] as {
-                id: "ediciones" | "taller" | "instructores" | "interesados" | "trabajos" | "faq";
+                id:
+                  | "ediciones"
+                  | "taller"
+                  | "instructores"
+                  | "instituciones"
+                  | "interesados"
+                  | "trabajos"
+                  | "faq";
                 label: string;
               }[]
             ).map((tab) => (
@@ -145,6 +157,7 @@ export function TallerConceptoRow({
             {activeTab === "taller" && <ContenidoSection concepto={concepto} />}
 
             {activeTab === "instructores" && <InstructoresSection concepto={concepto} />}
+            {activeTab === "instituciones" && <InstitucionesSection concepto={concepto} />}
             {activeTab === "interesados" && <InteresadosSection concepto={concepto} />}
             {activeTab === "trabajos" && <TrabajosSection concepto={concepto} />}
             {activeTab === "faq" && <FaqSection concepto={concepto} />}

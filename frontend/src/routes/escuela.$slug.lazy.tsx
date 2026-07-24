@@ -12,6 +12,7 @@ import { TallerHero } from "@/components/talleres/TallerHero";
 import { TallerCalendario } from "@/components/talleres/TallerCalendario";
 import { ProgramaSection } from "@/components/talleres/ProgramaSection";
 import { InstructorCard } from "@/components/talleres/InstructorCard";
+import { InstitucionesRow } from "@/components/talleres/InstitucionesRow";
 import { PrecioCard } from "@/components/talleres/PrecioCard";
 import { TallerTrabajos } from "@/components/talleres/TallerTrabajos";
 import { TallerFAQ } from "@/components/talleres/TallerFAQ";
@@ -286,6 +287,7 @@ function TallerLandingPage() {
                   </section>
                 )}
                 <ProgramaSection clases={clases} />
+                <InstitucionesRow taller={taller} />
                 <InstructorCard taller={taller} />
                 <TallerTrabajos trabajos={taller.trabajos} />
               </div>

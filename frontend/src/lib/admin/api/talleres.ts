@@ -5,6 +5,7 @@ import type {
   EdicionKpis,
   TallerConcepto,
   Inscripcion,
+  Institucion,
   Instructor,
   Interesado,
   Trabajo,
@@ -155,6 +156,46 @@ export const talleresAdminApi = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ instructor_ids: instructorIds }),
     }),
+
+  // Instituciones co-presentadoras (ej. "Rambla" + "Filmar") — mismo patrón
+  // que instructores: mini-CRUD + link N↔N con el taller.
+  listInstituciones: () => authedJson<Institucion[]>("/api/admin/instituciones"),
+
+  createInstitucion: (body: {
+    nombre: string;
+    descripcion?: string;
+    instagram?: string;
+    web?: string;
+  }) => authedPostJson<Institucion>("/api/admin/instituciones", body),
+
+  updateInstitucion: (institucionId: number, body: object) =>
+    authedJson<Institucion>(`/api/admin/instituciones/${institucionId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+
+  deleteInstitucion: (institucionId: number) =>
+    authedJson<{ ok: boolean }>(`/api/admin/instituciones/${institucionId}`, { method: "DELETE" }),
+
+  uploadLogoInstitucion: (institucionId: number, file: File) => {
+    const fd = new FormData();
+    fd.append("file", file);
+    return authedFetch(`/api/admin/instituciones/${institucionId}/upload-logo`, {
+      method: "POST",
+      body: fd,
+    }).then((r) => _ok<{ ok: boolean; url: string; media_id: number }>(r));
+  },
+
+  setTallerInstituciones: (conceptoId: number, institucionIds: number[]) =>
+    authedJson<{ instituciones: Institucion[] }>(
+      `/api/admin/talleres/${conceptoId}/instituciones`,
+      {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ institucion_ids: institucionIds }),
+      },
+    ),
 
   // F4c: trabajos pasados (solo YouTube, sin testimonios).
   crearTrabajo: (conceptoId: number, body: { titulo?: string; youtube_url: string }) =>

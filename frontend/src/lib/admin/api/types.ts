@@ -1572,6 +1572,8 @@ export type TallerConcepto = {
   video_poster_url: string;
   // F3: instructores como entidad (además de instructor_* legacy arriba).
   instructores: Instructor[];
+  // Instituciones co-presentadoras (ej. "Rambla" + "Filmar").
+  instituciones: Institucion[];
   ediciones: EdicionAdmin[];
   // F4c: FAQ del concepto + trabajos pasados (solo YouTube).
   faqs: FaqItem[];
@@ -1591,6 +1593,18 @@ export type Instructor = {
   foto_media_id: number | null;
   // F6: "Trabajó con" — reemplaza el legacy `instructor_proyectos` (1 por taller).
   proyectos: string;
+};
+
+// Institución co-presentadora de un taller (ej. "Rambla" + "Filmar") — mismo
+// patrón que Instructor: entidad propia, N↔N con talleres.
+export type Institucion = {
+  id: number;
+  nombre: string;
+  descripcion: string;
+  instagram: string;
+  web: string;
+  logo_url: string;
+  logo_media_id: number | null;
 };
 
 export type Inscripcion = {

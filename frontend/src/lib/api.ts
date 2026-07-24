@@ -476,6 +476,16 @@ export type Taller = {
     // F6: "Trabajó con" — reemplaza el legacy `instructor_proyectos` (1 por taller).
     proyectos: string;
   }[];
+  // Instituciones co-presentadoras (ej. "Rambla" + "Filmar").
+  instituciones: {
+    id: number;
+    nombre: string;
+    descripcion: string;
+    instagram: string;
+    web: string;
+    logo_url: string;
+    logo_media_id: number | null;
+  }[];
   sesiones: Sesion[];
   // F4a: video hero (YouTube) — null si no hay video configurado o la URL no
   // se pudo interpretar. El embed es siempre youtube-nocookie.com.
