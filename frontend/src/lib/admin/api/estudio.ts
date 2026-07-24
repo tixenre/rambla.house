@@ -92,6 +92,11 @@ export const estudioAdminApi = {
       }
       return r.json() as Promise<{ fotos: EstudioFoto[] }>;
     }),
+  // Crea la promo (combo real) desde el pack curado actual — reemplaza al
+  // pack (#1283 Fase 5). 409 si ya existe una promo, 400 si el pack está
+  // vacío o el precio objetivo es inválido.
+  crearPromoDesdePack: (data: { nombre?: string; precio_objetivo: number }) =>
+    authedPostJson<EstudioConfig>("/api/admin/estudio/promo/crear-desde-pack", data),
 };
 
 // ── Trabajos / producciones ──────────────────────────────────────────────────

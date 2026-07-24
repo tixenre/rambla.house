@@ -1,0 +1,104 @@
+import { useState } from "react";
+import { Link } from "@tanstack/react-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Gift, Pencil } from "lucide-react";
+import { toast } from "sonner";
+
+import { Button } from "@/design-system/ui/button";
+import { Input } from "@/design-system/ui/input";
+import { MoneyInput } from "@/design-system/ui/money-input";
+import { estudioAdminApi } from "@/lib/admin/api";
+import type { EstudioConfig } from "@/lib/admin/api";
+import { formatARS } from "@/lib/format";
+import { Section, Field } from "./shared";
+
+/** Gestión de la promo de equipos (combo real que reemplaza al pack curado,
+ *  #1283 Fase 5). Si ya existe (`config.promo_combo_id`), solo muestra su
+ *  estado — precio/componentes se editan desde Equipos como cualquier otro
+ *  combo, no acá (evita mantener dos formularios para lo mismo). Si no
+ *  existe, ofrece crearla desde el pack curado actual. */
+export function PromoSection({ config }: { config: EstudioConfig }) {
+  const qc = useQueryClient();
+  const [nombre, setNombre] = useState(config.pack_nombre || "");
+  const [precioObjetivo, setPrecioObjetivo] = useState(config.pack_precio || 0);
+
+  const crearMut = useMutation({
+    mutationFn: () =>
+      estudioAdminApi.crearPromoDesdePack({
+        nombre: nombre.trim() || undefined,
+        precio_objetivo: precioObjetivo,
+      }),
+    onSuccess: (res) => {
+      qc.setQueryData(["admin", "estudio"], res);
+      toast.success("Promo creada");
+    },
+    onError: (e) => toast.error("No se pudo crear la promo", { description: (e as Error).message }),
+  });
+
+  if (config.promo_combo_id && config.promo) {
+    return (
+      <Section title="Promo de equipos">
+        <div className="flex items-center gap-3 rounded-lg border hairline px-3 py-2.5">
+          <div className="relative aspect-square w-12 shrink-0 overflow-hidden rounded bg-muted/40">
+            {config.promo.foto_url ? (
+              <img
+                loading="lazy"
+                decoding="async"
+                src={config.promo.foto_url}
+                alt={config.promo.nombre}
+                className="h-full w-full object-cover"
+              />
+            ) : (
+              <div className="grid h-full w-full place-items-center">
+                <Gift className="h-5 w-5 text-muted-foreground" />
+              </div>
+            )}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-medium text-ink">{config.promo.nombre}</div>
+            <div className="text-sm text-muted-foreground">
+              {formatARS(config.promo.precio)} · oculta del catálogo público
+            </div>
+          </div>
+          <Button asChild variant="outline" size="sm">
+            <Link to="/admin/equipos/$id/editar" params={{ id: String(config.promo.equipo_id) }}>
+              <Pencil className="h-4 w-4" /> Editar
+            </Link>
+          </Button>
+        </div>
+        <p className="mt-3 text-sm text-muted-foreground">
+          El precio y los componentes de la promo se editan desde Equipos — es un combo normal,
+          igual que cualquier otro.
+        </p>
+      </Section>
+    );
+  }
+
+  return (
+    <Section title="Promo de equipos">
+      <p className="-mt-2 mb-3 text-sm text-muted-foreground">
+        Creá el combo real a partir del pack curado de abajo, a un precio fijo — reemplaza al pack
+        para la reserva pública.
+      </p>
+      <div className="grid gap-3 sm:grid-cols-[1fr_auto]">
+        <Field label="Nombre">
+          <Input
+            value={nombre}
+            onChange={(e) => setNombre(e.target.value)}
+            placeholder="Pack Todo Incluido"
+          />
+        </Field>
+        <Field label="Precio objetivo">
+          <MoneyInput value={precioObjetivo} onChange={setPrecioObjetivo} />
+        </Field>
+      </div>
+      <Button
+        onClick={() => crearMut.mutate()}
+        disabled={crearMut.isPending || precioObjetivo <= 0}
+        className="mt-3"
+      >
+        Crear promo desde el pack
+      </Button>
+    </Section>
+  );
+}

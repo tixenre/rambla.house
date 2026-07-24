@@ -778,6 +778,8 @@ export interface ReporteMensual {
   gastos: { total: number; por_categoria: { categoria: string; monto: number }[] };
   /** Lo facturado que NO es de Rambla (parte de los dueños): un costo, no ganancia. */
   comisiones_duenos: number;
+  /** Lo facturado que es del Estudio (otra unidad de negocio, no una comisión). */
+  parte_estudio: number;
   ganancia_neta: number;
   socios_mes: {
     cargos: Record<string, number>;
@@ -1003,6 +1005,24 @@ export type EstadisticasData = {
   };
   por_dueno: { dueno: string; total_ars: number; items: number }[];
   favoritos_equipo?: { equipo: string; total_favoritos: number; clientes_unicos: number }[];
+  /** Economía separada del Estudio (#1283 Fase 7) — turnos reales +
+   *  meses de slot fijo, aparte de las tarjetas de rental de arriba. */
+  estudio: {
+    totales: {
+      total_turnos: number;
+      total_meses_slot_fijo: number;
+      total_clientes: number;
+      total_ars: number;
+      horas_vendidas: number;
+    };
+    por_mes: {
+      mes: string;
+      turnos: number;
+      meses_slot_fijo: number;
+      total_ars: number;
+      horas_vendidas: number;
+    }[];
+  };
 };
 
 export type Cliente = {
@@ -1229,10 +1249,13 @@ export type EstudioConfig = {
   close_hour: number;
   buffer_horas: number;
   anticipacion_min_horas: number;
+  // ⏰ LEGACY — reemplazados por promo_combo_id/promo, se retiran en la Fase 8.
   pack_activo: boolean;
   pack_nombre: string;
   pack_descripcion: string;
   pack_precio: number;
+  promo_combo_id: number | null;
+  promo?: EstudioPromo | null;
   features: Array<{ label: string; value: string }> | null;
   faq: Array<{ q: string; a: string }> | null;
   direccion: string;
@@ -1243,6 +1266,16 @@ export type EstudioConfig = {
   updated_at: string | null;
   fotos: EstudioFoto[];
   trabajos: EstudioTrabajo[];
+};
+
+/** La promo de equipos (combo real que reemplaza al pack, #1283 Fase 5). */
+export type EstudioPromo = {
+  equipo_id: number;
+  nombre: string;
+  descripcion: string;
+  foto_url: string | null;
+  precio: number;
+  disponible?: boolean;
 };
 
 export type EstudioTrabajoFoto = {

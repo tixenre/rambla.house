@@ -244,8 +244,23 @@ export type EstudioConfig = {
   updated_at: string | null;
   fotos: EstudioFoto[];
   // Lista curada del pack con cantidades (stock total) para la ficha pública.
+  // ⏰ LEGACY — reemplazada por `promo` (combo real), se retira en la Fase 8.
   pack_equipos?: EstudioPackEquipo[];
+  promo_combo_id?: number | null;
+  promo?: EstudioPromo | null;
   trabajos?: EstudioTrabajo[];
+};
+
+/** La promo de equipos (combo real que reemplaza al pack, #1283 Fase 5).
+ *  `disponible` solo viene presente cuando se consultó con una franja
+ *  (fecha/start/horas) — en `GET /api/estudio` sin fechas no viene. */
+export type EstudioPromo = {
+  equipo_id: number;
+  nombre: string;
+  descripcion: string;
+  foto_url: string | null;
+  precio: number;
+  disponible?: boolean;
 };
 
 /** Un medio del carrusel de un trabajo: link externo (YouTube/Instagram) o foto
@@ -341,19 +356,23 @@ export type EstudioPackEquipo = {
 };
 
 /** ¿El estudio está libre en [fecha start, +horas]? El backend aplica el buffer
- *  propio del estudio. `pack` = equipos disponibles en la franja (Grip/Luz/Mod). */
+ *  propio del estudio. `pack` = equipos disponibles en la franja (Grip/Luz/Mod,
+ *  ⏰ LEGACY). `promo` = disponibilidad del combo real que lo reemplaza. */
 export function apiGetEstudioDisponibilidad(fecha: string, start: string, horas: number) {
-  return get<{ libre: boolean; motivo?: string | null; pack?: EstudioPackEquipo[] }>(
-    "/api/estudio/disponibilidad",
-    { fecha, start, horas: String(horas) },
-  );
+  return get<{
+    libre: boolean;
+    motivo?: string | null;
+    pack?: EstudioPackEquipo[];
+    promo?: EstudioPromo | null;
+  }>("/api/estudio/disponibilidad", { fecha, start, horas: String(horas) });
 }
 
 export type EstudioReservaBody = {
   fecha: string;
   start: string;
   horas: number;
-  con_pack?: boolean;
+  con_pack?: boolean; // ⏰ LEGACY — reemplazado por con_promo, se retira en la Fase 8.
+  con_promo?: boolean;
   // Datos del cliente: NO van en el body, salen de la sesión (login obligatorio).
 };
 
@@ -365,7 +384,11 @@ export async function apiCrearReservaEstudio(body: EstudioReservaBody) {
     body,
   );
   // Analytics: estudio reservado (no-op si GA no está activo).
-  trackReservarEstudio({ horas: body.horas, conPack: body.con_pack ?? false });
+  trackReservarEstudio({
+    horas: body.horas,
+    conPack: body.con_pack ?? false,
+    conPromo: body.con_promo ?? false,
+  });
   return res;
 }
 

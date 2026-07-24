@@ -9,6 +9,7 @@ import { ErrorState } from "@/components/admin/ErrorState";
 import { ConfigForm } from "@/components/admin/estudio/ConfigForm";
 import { GaleriaSection } from "@/components/admin/estudio/GaleriaSection";
 import { PackSection } from "@/components/admin/estudio/PackSection";
+import { PromoSection } from "@/components/admin/estudio/PromoSection";
 import { SlotsSection } from "@/components/admin/estudio/SlotsSection";
 import { TrabajosSection } from "@/components/admin/estudio/TrabajosSection";
 
@@ -50,6 +51,8 @@ function EstudioAdminPage() {
           config={data}
           onSaved={() => qc.invalidateQueries({ queryKey: ["admin", "estudio"] })}
         />
+
+        <PromoSection config={data} />
 
         <PackSection />
 

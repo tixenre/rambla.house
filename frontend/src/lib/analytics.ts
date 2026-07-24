@@ -108,10 +108,15 @@ export function trackSolicitarPedido(args: {
 }
 
 /** Se reservó el estudio (POST a /api/estudio/reservas OK). */
-export function trackReservarEstudio(args: { horas: number; conPack: boolean }): void {
+export function trackReservarEstudio(args: {
+  horas: number;
+  conPack: boolean;
+  conPromo?: boolean;
+}): void {
   trackEvent("reservar_estudio", {
     horas: args.horas,
     con_pack: args.conPack,
+    con_promo: args.conPromo ?? false,
   });
 }
 
