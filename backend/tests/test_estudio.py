@@ -608,7 +608,6 @@ def _patch_post_collaborators(monkeypatch, conn, estudio_row, disp, pack_ids):
     monkeypatch.setattr(estudio_mod, "_next_numero_pedido", lambda c: 999)
     monkeypatch.setattr(estudio_mod, "_pack_equipo_ids", lambda c: pack_ids)
     monkeypatch.setattr(estudio_mod, "get_disponibilidad", lambda fd, fh, excl=None: disp)
-    monkeypatch.setattr(estudio_mod, "_check_stock", lambda c, pid, fd, fh: [])
     monkeypatch.setattr(
         estudio_mod, "_centinela_libre",
         lambda c, eid, fd, fh, buf, exclude_pedido_id=None: True,
