@@ -107,6 +107,10 @@ export const ADMIN_NAV: AdminNavGroup[] = [
       // /admin/pagos sigue accesible como "ver ledger completo" desde ese detalle.
       { title: "Movimientos", url: "/admin/contabilidad/movimientos", icon: ClipboardList },
       { title: "Cuentas", url: "/admin/contabilidad/cuentas", icon: Wallet },
+      // Economía separada del Estudio (caja + movimientos + rendición propia) —
+      // vive en Finanzas, no en "Estudio y talleres": es una vista de plata,
+      // no de operación (mismo criterio que Productoras vs. Clientes, #1251).
+      { title: "Caja Estudio", url: "/admin/contabilidad/estudio", icon: Clapperboard },
       { title: "Reporte mensual", url: "/admin/contabilidad/reporte", icon: BarChart3 },
       { title: "Liquidación", url: "/admin/contabilidad/liquidacion", icon: Calculator },
       { title: "Estadísticas", url: "/admin/estadisticas", icon: TrendingUp },
