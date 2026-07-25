@@ -80,6 +80,23 @@ def _limpiar(conn):
     )
     conn.execute("DELETE FROM alquileres WHERE cliente_id = %s", (CLIENTE_ID,))
     conn.execute("DELETE FROM clientes WHERE id = %s", (CLIENTE_ID,))
+    # `admin_create_edicion` dispara `_regenerar_pedidos_taller`, que crea un
+    # pedido `tipo='taller'` de resumen económico aunque la edición no use
+    # estudio/equipos (ítem placeholder) — hay que limpiarlo ANTES de borrar
+    # `ediciones_taller` (la FK `taller_edicion_id` de `alquileres` es
+    # `ON DELETE SET NULL`, no CASCADE: sin este DELETE explícito la fila
+    # queda huérfana, sin `cliente_id` que la haga elegible al DELETE de arriba).
+    conn.execute(
+        "DELETE FROM alquiler_items WHERE pedido_id IN "
+        "(SELECT id FROM alquileres WHERE taller_edicion_id IN "
+        "(SELECT id FROM ediciones_taller WHERE taller_id = %s))",
+        (TALLER_ID,),
+    )
+    conn.execute(
+        "DELETE FROM alquileres WHERE taller_edicion_id IN "
+        "(SELECT id FROM ediciones_taller WHERE taller_id = %s)",
+        (TALLER_ID,),
+    )
     conn.execute(
         "DELETE FROM clases_taller WHERE edicion_id IN "
         "(SELECT id FROM ediciones_taller WHERE taller_id = %s)",
