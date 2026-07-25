@@ -343,6 +343,67 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export RESERVAS_DB_TEST=1
           python -m pytest tests/test_talleres_f2_db.py -v --tb=short -m integration
+      - name: services/estudio — disponibilidad + reserva pública contra Postgres real
+        run: |
+          cd backend
+          # Split del motor de disponibilidad/reservas del Estudio a services/estudio/
+          # (CQRS-lite): primera cobertura de integración real de GET disponibilidad +
+          # POST reservas del flujo PÚBLICO end-to-end — segunda reserva de la misma
+          # franja rebota 409 sin fila huérfana (garantía dura: re-chequeo de
+          # _centinela_libre bajo FOR UPDATE en _crear_pedido_estudio), y un taller
+          # publicado bloquea tanto el GET como el POST visto desde el lado del Estudio.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_estudio_disponibilidad_publica_db.py -v --tb=short -m integration
+      - name: services/estudio — alta/edición admin de reservas contra Postgres real (#1283 F6)
+        run: |
+          cd backend
+          # Alta/edición manual desde el back-office reusa el mismo núcleo
+          # (_crear_pedido_estudio) que el flujo público — incluida la concurrencia
+          # (dos altas de la misma franja, solo una pasa). Existía antes del split a
+          # services/estudio/ pero no estaba conectado al CI.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_estudio_admin_reservas_db.py -v --tb=short -m integration
+      - name: services/estudio — promo combo (reemplaza al pack) contra Postgres real (#1283 F5)
+        run: |
+          cd backend
+          # La promo es best-effort (nunca 409, arma promo_advertencia); los sueltos
+          # siguen siendo stock duro. Existía antes del split a services/estudio/ pero
+          # no estaba conectado al CI.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_promo_combo_estudio_db.py -v --tb=short -m integration
+      - name: services/estudio — ítems veraces (plata real en alquiler_items) contra Postgres real (#1283 F2)
+        run: |
+          cd backend
+          # Σ subtotal(ítems) == monto_total sin excepciones (liquidación/desglose/PDF
+          # cierran por construcción); editar un slot fijo no se autobloquea contra sus
+          # propios pedidos ya generados (exclude_slot_id en _centinela_libre). Existía
+          # antes del split a services/estudio/ pero no estaba conectado al CI.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_estudio_items_veraces_db.py -v --tb=short -m integration
+      - name: services/estudio — revalidación de disponibilidad al cambiar de estado contra Postgres real
+        run: |
+          cd backend
+          # Confirmar/transicionar un pedido del Estudio usa revalidar_disponibilidad_estudio
+          # (buffer PROPIO del espacio), no el _check_stock genérico (que aplicaría el buffer
+          # GLOBAL de equipos y podía rechazar turnos adyacentes por error). Existía antes del
+          # split a services/estudio/ pero no estaba conectado al CI.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_estudio_transiciones_stock_db.py -v --tb=short -m integration
       - name: Escuela v2 — instructores como entidad contra Postgres real (F3, #1278)
         run: |
           cd backend
