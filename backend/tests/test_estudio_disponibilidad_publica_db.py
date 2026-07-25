@@ -25,8 +25,10 @@ OPT-IN y seguro por defecto (mismo gating que los demás *_db.py):
       python -m pytest tests/test_estudio_disponibilidad_publica_db.py -v -m integration
 """
 import os
+import time
 from urllib.parse import urlparse
 
+import psycopg.errors
 import pytest
 
 _OPT_IN = os.getenv("RESERVAS_DB_TEST") == "1"
@@ -106,14 +108,32 @@ def _limpiar(conn):
     conn.execute("DELETE FROM talleres WHERE id = %s", (TALLER_ID,))
 
 
+def _limpiar_con_retry(conn, intentos: int = 3) -> None:
+    """`_limpiar` con reintento ante `DeadlockDetected` transitorio (mismo
+    patrón de `routes/alquileres/core.py`): FastAPI corre los endpoints sync
+    en threads del pool de Starlette — una limpieza que corre justo cuando un
+    request anterior todavía está liberando su conexión puede pisarse en el
+    orden de locks. Postgres aborta una de las dos transacciones y lo
+    señaliza con esta excepción — reintentar es la respuesta esperada, no
+    una tapa de un bug real."""
+    for intento in range(intentos):
+        try:
+            _limpiar(conn)
+            return
+        except psycopg.errors.DeadlockDetected:
+            conn.rollback()
+            if intento == intentos - 1:
+                raise
+            time.sleep(0.2 * (intento + 1))
+
+
 @pytest.fixture
 def setup():
-    from database import get_db, init_db
+    from database import get_db
 
-    init_db()
     conn = get_db()
     try:
-        _limpiar(conn)
+        _limpiar_con_retry(conn)
         conn.execute(
             "INSERT INTO clientes (id, nombre, apellido, email, dni_validado_at) "
             "VALUES (%s,'Cliente','Disp Publica','estudiopublico@test.com', now())",
@@ -131,7 +151,7 @@ def setup():
 
     conn = get_db()
     try:
-        _limpiar(conn)
+        _limpiar_con_retry(conn)
         conn.commit()
     finally:
         conn.close()
