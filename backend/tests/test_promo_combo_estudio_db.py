@@ -274,7 +274,8 @@ def test_reserva_con_promo_sin_stock_es_best_effort_no_bloquea(client_con_db, se
     assert _crear_promo(client_con_db, precio_objetivo=1200).status_code == 201
 
     from database import get_db
-    from routes.estudio import _franja_estudio, _get_estudio_row
+    from services.estudio.queries.disponibilidad import _franja_estudio
+    from services.estudio.queries.estudio import _get_estudio_row
 
     conn = get_db()
     try:

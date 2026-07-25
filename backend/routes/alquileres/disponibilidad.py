@@ -91,13 +91,15 @@ def get_disponibilidad(
     # Draft "equipo_id:cantidad,..." — resta también esa demanda (expandida por
     # kits como el gate) y devuelve valores CON SIGNO. Default plano (NO
     # `Query(None)`): esta función también se llama DIRECTO como helper
-    # (routes/estudio.py con 3 args posicionales) y un default `Query(None)` es
-    # truthy → entraría al camino draft y rompería el Estudio con 500.
+    # (`routes/cliente_portal/solicitudes.py` con 3 args posicionales) y un
+    # default `Query(None)` es truthy → entraría al camino draft sin querer.
     items: str = None,
 ):
     """Endpoint fino: abre la conexión y delega en la fuente única de lectura
-    `reservas.calcular_disponibilidad`. Lo llaman también `routes.estudio` y
-    `routes.cliente_portal` con esta misma firma.
+    `reservas.calcular_disponibilidad`. Lo llama también `routes.cliente_portal`
+    con esta misma firma. `services/estudio/queries/promo.py` tiene su PROPIO
+    wrapper local sobre `reservas.calcular_disponibilidad` (no llama a este
+    endpoint — evita que un service importe de un route).
 
     Con `items` (el draft del editor de pedidos), delega en
     `calcular_disponibilidad_draft`: descuenta además la demanda del draft con

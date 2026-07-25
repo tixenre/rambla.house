@@ -295,13 +295,13 @@ class EstudioConflictoFakeConn:
 
 class TestFranjaEstudio:
     def test_minimo_de_horas_falla(self):
-        from routes.estudio import _franja_estudio
+        from services.estudio.queries.disponibilidad import _franja_estudio
         with pytest.raises(HTTPException) as exc:
             _franja_estudio(_estudio_row(min_horas=2), "2026-06-01", "14:00", 1)
         assert exc.value.status_code == 400
 
     def test_fuera_de_horario_falla(self):
-        from routes.estudio import _franja_estudio
+        from services.estudio.queries.disponibilidad import _franja_estudio
         # close_hour=22 → terminar a las 23 cae afuera.
         with pytest.raises(HTTPException) as exc:
             _franja_estudio(_estudio_row(), "2026-06-01", "21:00", 2)
@@ -311,7 +311,7 @@ class TestFranjaEstudio:
             _franja_estudio(_estudio_row(), "2026-06-01", "07:00", 2)
 
     def test_franja_valida_devuelve_datetimes(self):
-        from routes.estudio import _franja_estudio
+        from services.estudio.queries.disponibilidad import _franja_estudio
         fd, fh = _franja_estudio(_estudio_row(), "2026-06-01", "14:00", 2)
         assert (fd.hour, fd.minute) == (14, 0)
         assert (fh.hour, fh.minute) == (16, 0)
@@ -366,7 +366,7 @@ class TestEstudioOverlap:
 
     def _libre(self, conn, fd, fh, buffer_horas):
         from datetime import datetime
-        from routes.estudio import _centinela_libre
+        from services.estudio.queries.disponibilidad import _centinela_libre
         return _centinela_libre(
             conn, 99, datetime.fromisoformat(fd), datetime.fromisoformat(fh), buffer_horas
         )
@@ -388,7 +388,7 @@ class TestEstudioBufferPropio:
 
     def _libre(self, conn, fd, fh, buffer_horas):
         from datetime import datetime
-        from routes.estudio import _centinela_libre
+        from services.estudio.queries.disponibilidad import _centinela_libre
         return _centinela_libre(
             conn, 99, datetime.fromisoformat(fd), datetime.fromisoformat(fh), buffer_horas
         )
@@ -423,7 +423,7 @@ class TestAnticipacionMinima:
     def _viola(self, horas_anticipacion, horas_hasta_franja):
         from datetime import timedelta
         from database import now_ar
-        from routes.estudio import _viola_anticipacion
+        from services.estudio.queries.disponibilidad import _viola_anticipacion
         fecha_desde = now_ar() + timedelta(hours=horas_hasta_franja)
         return _viola_anticipacion(
             _estudio_row(anticipacion_min_horas=horas_anticipacion), fecha_desde
@@ -484,6 +484,7 @@ class TestCentinelaNoLeak:
 # `_pack_equipo_ids`, que `crear_promo_desde_pack` sigue leyendo) ──────────────
 
 import routes.estudio as estudio_mod
+import services.estudio.commands.reserva as estudio_reserva_cmd
 
 
 class _CurLastrowid:
@@ -519,11 +520,13 @@ class TestPackEquipoIds:
     """_pack_equipo_ids lee de la tabla curada estudio_pack_equipos (v2-C)."""
 
     def test_lee_de_tabla_curada(self):
+        from services.estudio.queries.promo import _pack_equipo_ids
         conn = _PackTablaConn([7, 3, 9])
-        assert estudio_mod._pack_equipo_ids(conn) == [7, 3, 9]
+        assert _pack_equipo_ids(conn) == [7, 3, 9]
 
     def test_pack_vacio(self):
-        assert estudio_mod._pack_equipo_ids(_PackTablaConn([])) == []
+        from services.estudio.queries.promo import _pack_equipo_ids
+        assert _pack_equipo_ids(_PackTablaConn([])) == []
 
 
 _INSERT_COLS_RE = re.compile(r"\(([^()]+)\)\s*VALUES\s*\(([^()]+)\)", re.IGNORECASE)
@@ -601,15 +604,20 @@ class _RecordingConn(_ConnCM):
         pass
 
 
-def _patch_post_collaborators(monkeypatch, conn, estudio_row, disp, pack_ids):
-    """Patchea los colaboradores pesados del POST para aislar la orquestación."""
+def _patch_post_collaborators(monkeypatch, conn, estudio_row):
+    """Patchea los colaboradores pesados del POST para aislar la orquestación.
+
+    `_centinela_libre` se patchea sobre `services.estudio.commands.reserva`
+    (no sobre `routes.estudio`): `_crear_pedido_estudio` la resuelve desde su
+    propio import (`from services.estudio.queries.disponibilidad import
+    _centinela_libre`), así que patchear el módulo de origen no interceptaría
+    la referencia ya vinculada en `commands.reserva` — "patch where it's
+    used", no donde se define."""
     monkeypatch.setattr(estudio_mod, "get_db", lambda: conn)
     monkeypatch.setattr(estudio_mod, "_get_estudio_row", lambda c: estudio_row)
     monkeypatch.setattr(estudio_mod, "_next_numero_pedido", lambda c: 999)
-    monkeypatch.setattr(estudio_mod, "_pack_equipo_ids", lambda c: pack_ids)
-    monkeypatch.setattr(estudio_mod, "get_disponibilidad", lambda fd, fh, excl=None: disp)
     monkeypatch.setattr(
-        estudio_mod, "_centinela_libre",
+        estudio_reserva_cmd, "_centinela_libre",
         lambda c, eid, fd, fh, buf, exclude_pedido_id=None: True,
     )
     monkeypatch.setattr(estudio_mod, "_get_alquiler_detail", lambda c, pid: {"id": pid})
@@ -629,7 +637,7 @@ class TestCrearReservaSinPack:
         from routes.estudio import crear_reserva_estudio, EstudioReservaCreate
 
         conn = _RecordingConn()
-        _patch_post_collaborators(monkeypatch, conn, _estudio_row(), {}, [])
+        _patch_post_collaborators(monkeypatch, conn, _estudio_row())
 
         manana = (now_ar() + timedelta(days=2)).strftime("%Y-%m-%d")
         body = EstudioReservaCreate(fecha=manana, start="14:00", horas=2)
@@ -696,31 +704,31 @@ class TestSlotBloqueante:
         return (rep.replace(hour=h_desde), rep.replace(hour=h_hasta))
 
     def test_bloquea_su_dia_y_horario_en_rango(self):
-        from routes.estudio import _slot_bloqueante
+        from services.estudio.queries.disponibilidad import _slot_bloqueante
         conn = _SlotBloqueoConn([self.SLOT])
         fd, fh = self._franja(2026, 6, 2, 10, 12)  # miércoles de junio 10-12
         assert _slot_bloqueante(conn, fd, fh) == "Filmar"
 
     def test_no_bloquea_otro_dia(self):
-        from routes.estudio import _slot_bloqueante
+        from services.estudio.queries.disponibilidad import _slot_bloqueante
         conn = _SlotBloqueoConn([self.SLOT])
         fd, fh = self._franja(2026, 6, 1, 10, 12)  # martes
         assert _slot_bloqueante(conn, fd, fh) is None
 
     def test_no_bloquea_fuera_del_rango_de_meses(self):
-        from routes.estudio import _slot_bloqueante
+        from services.estudio.queries.disponibilidad import _slot_bloqueante
         conn = _SlotBloqueoConn([self.SLOT])
         fd, fh = self._franja(2027, 1, 2, 10, 12)  # miércoles de enero 2027 (> mes_hasta)
         assert _slot_bloqueante(conn, fd, fh) is None
 
     def test_no_bloquea_horario_disjunto(self):
-        from routes.estudio import _slot_bloqueante
+        from services.estudio.queries.disponibilidad import _slot_bloqueante
         conn = _SlotBloqueoConn([self.SLOT])
         fd, fh = self._franja(2026, 6, 2, 20, 22)  # arranca cuando el slot termina (half-open)
         assert _slot_bloqueante(conn, fd, fh) is None
 
     def test_slot_inactivo_no_bloquea(self):
-        from routes.estudio import _slot_bloqueante
+        from services.estudio.queries.disponibilidad import _slot_bloqueante
         conn = _SlotBloqueoConn([{**self.SLOT, "activo": False}])
         fd, fh = self._franja(2026, 6, 2, 10, 12)
         assert _slot_bloqueante(conn, fd, fh) is None
@@ -729,7 +737,8 @@ class TestSlotBloqueante:
         # Reserva 22-24: fecha_hasta = 00:00 del día siguiente. Con `.hour` daría
         # fin=0 y no detectaría el solape; con minutos relativos al día da 1440.
         from datetime import timedelta
-        from routes.estudio import _primer_dia_semana, _slot_bloqueante
+        from routes.estudio import _primer_dia_semana
+        from services.estudio.queries.disponibilidad import _slot_bloqueante
         conn = _SlotBloqueoConn([{**self.SLOT, "hora_hasta": 24}])  # slot 8-24
         rep = _primer_dia_semana(2026, 6, 2)  # miércoles (dia_semana=2)
         fd = rep.replace(hour=22)
@@ -881,7 +890,7 @@ class TestReservaLoginObligatorio:
         from routes.estudio import crear_reserva_estudio, EstudioReservaCreate
 
         conn = _RecordingConn()
-        _patch_post_collaborators(monkeypatch, conn, _estudio_row(), {}, [])
+        _patch_post_collaborators(monkeypatch, conn, _estudio_row())
         manana = (now_ar() + timedelta(days=2)).strftime("%Y-%m-%d")
         crear_reserva_estudio(
             EstudioReservaCreate(fecha=manana, start="14:00", horas=2),

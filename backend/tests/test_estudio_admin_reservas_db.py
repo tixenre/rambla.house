@@ -242,7 +242,8 @@ def test_crear_reserva_admin_con_promo_sin_stock_es_best_effort(client_con_db, s
     promo la reserva no se bloquea: se crea igual, cobra el precio fijo
     completo y avisa vía `promo_advertencia`."""
     from database import get_db
-    from routes.estudio import _franja_estudio, _get_estudio_row
+    from services.estudio.queries.disponibilidad import _franja_estudio
+    from services.estudio.queries.estudio import _get_estudio_row
 
     conn = get_db()
     try:
@@ -447,7 +448,8 @@ def test_editar_reserva_agrega_promo_sin_stock_es_best_effort(client_con_db, set
     turno para sumarle la promo cuando su componente no tiene stock tampoco
     bloquea, cobra el precio fijo completo y avisa."""
     from database import get_db
-    from routes.estudio import _franja_estudio, _get_estudio_row
+    from services.estudio.queries.disponibilidad import _franja_estudio
+    from services.estudio.queries.estudio import _get_estudio_row
 
     r = client_con_db.post(
         "/api/admin/estudio/reservas",

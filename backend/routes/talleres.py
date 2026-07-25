@@ -1270,8 +1270,9 @@ def _regenerar_pedidos_taller(conn, edicion: dict, taller_nombre: str) -> None:
     futuros impagos. Fix propio: también preserva un mes cuyo pedido tiene MÁS
     ítems que los que este generador crearía — protege la línea de matrícula
     que el admin tipeó a mano de un borrado silencioso en el próximo recálculo."""
-    from routes.estudio import _get_estudio_row, _iter_meses, _mes_actual_ar
+    from routes.estudio import _iter_meses, _mes_actual_ar
     from routes.alquileres import _next_numero_pedido
+    from services.estudio.queries.estudio import _get_estudio_row
     import calendar as _cal
     from datetime import date as _dt_date
 
@@ -1387,7 +1388,9 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
     if ed.valor_equipos_modo not in ("mensual", "total"):
         raise HTTPException(400, "valor_equipos_modo debe ser 'mensual' o 'total'")
 
-    from routes.estudio import verificar_sesiones_disponibles, _get_estudio_row, _ADVISORY_NS_ESTUDIO
+    from services.estudio.constants import _ADVISORY_NS_ESTUDIO
+    from services.estudio.queries.estudio import _get_estudio_row
+    from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
 
     with get_db() as conn:
         try:
@@ -1522,7 +1525,9 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
     if body.valor_equipos_modo not in ("mensual", "total"):
         raise HTTPException(400, "valor_equipos_modo debe ser 'mensual' o 'total'")
 
-    from routes.estudio import verificar_sesiones_disponibles, _get_estudio_row, _ADVISORY_NS_ESTUDIO
+    from services.estudio.constants import _ADVISORY_NS_ESTUDIO
+    from services.estudio.queries.estudio import _get_estudio_row
+    from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
 
     with get_db() as conn:
         try:
@@ -1693,7 +1698,9 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
 def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Request):
     """Actualiza campos de una edición específica (fechas, precios, cupos, clases)."""
     require_admin(request)
-    from routes.estudio import verificar_sesiones_disponibles, _get_estudio_row, _ADVISORY_NS_ESTUDIO
+    from services.estudio.constants import _ADVISORY_NS_ESTUDIO
+    from services.estudio.queries.estudio import _get_estudio_row
+    from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
 
     sets = []
     params: list = []

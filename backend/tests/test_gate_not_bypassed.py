@@ -10,7 +10,7 @@ Esto es future-proofing: si alguien agrega una nueva función que inserta reserv
 y se olvida de validar stock, este test falla — obligando a llamar al gate o a
 allowlistear conscientemente (decisión visible en el diff).
 
-Se ejecuta contra el código ACTUAL; las dos entradas de la allowlist son los
+Se ejecuta contra el código ACTUAL; las tres entradas de la allowlist son los
 delegadores legítimos de hoy.
 """
 import ast
@@ -21,6 +21,13 @@ import pytest
 pytestmark = pytest.mark.unit
 
 ROUTES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "routes")
+# El motor de disponibilidad/reservas del Estudio se extrajo de
+# `routes/estudio.py` a un paquete propio (CQRS-lite, `services/estudio/`) —
+# sin sumar este árbol al scan, los INSERT que se llevó (antes visibles acá
+# desde siempre) quedarían fuera del guard estructural EN SILENCIO.
+SERVICES_ESTUDIO_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "services", "estudio"
+)
 
 GATE_SYMBOLS = {
     "_check_stock", "_check_stock_hipotetico", "_centinela_libre",
@@ -74,34 +81,48 @@ def _func_envolvente(funcs, lineno):
     return mejor
 
 
-def _funciones_que_insertan_reservas():
-    """Devuelve [(archivo, funcname, referencia_gate?)] por cada sitio que
-    inserta en alquiler_items, en todos los módulos de routes/."""
-    hallazgos = []
-    archivos = []
-    for dirpath, _dirs, files in os.walk(ROUTES_DIR):
+def _archivos_py(root):
+    out = []
+    for dirpath, _dirs, files in os.walk(root):
         for fname in files:
             if fname.endswith(".py"):
-                archivos.append(os.path.join(dirpath, fname))
-    for path in sorted(archivos):
-        # Identificador = path relativo a routes/ (ej. "alquileres/core.py"),
-        # así desambigua entre los varios core.py de los paquetes split (#501).
-        rel = os.path.relpath(path, ROUTES_DIR)
-        with open(path, encoding="utf-8") as fh:
-            tree = ast.parse(fh.read())
-        funcs = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
-        for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.Constant)
-                and isinstance(node.value, str)
-                and "INSERT INTO alquiler_items" in node.value
-            ):
-                fn = _func_envolvente(funcs, node.lineno)
-                if fn is None:
-                    hallazgos.append((rel, "<module>", False))
-                    continue
-                nombres = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
-                hallazgos.append((rel, fn.name, bool(GATE_SYMBOLS & nombres)))
+                out.append(os.path.join(dirpath, fname))
+    return out
+
+
+def _funciones_que_insertan_reservas():
+    """Devuelve [(archivo, funcname, referencia_gate?)] por cada sitio que
+    inserta en alquiler_items, en `routes/` y en `services/estudio/` (el
+    motor de disponibilidad/reservas del Estudio, extraído a CQRS-lite)."""
+    hallazgos = []
+    # (raíz, prefijo del identificador) — el prefijo distingue el árbol de
+    # services/estudio/ sin tocar el formato ya usado para routes/ (así los 3
+    # keys existentes de ALLOWLIST_DELEGADORES no cambian).
+    fuentes = [
+        (ROUTES_DIR, ""),
+        (SERVICES_ESTUDIO_DIR, "services/estudio/"),
+    ]
+    for root, prefijo in fuentes:
+        for path in sorted(_archivos_py(root)):
+            # Identificador = path relativo a la raíz (ej. "alquileres/core.py",
+            # "services/estudio/commands/reserva.py") — desambigua entre los
+            # varios core.py de los paquetes split (#501) y entre árboles.
+            rel = prefijo + os.path.relpath(path, root)
+            with open(path, encoding="utf-8") as fh:
+                tree = ast.parse(fh.read())
+            funcs = [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]
+            for node in ast.walk(tree):
+                if (
+                    isinstance(node, ast.Constant)
+                    and isinstance(node.value, str)
+                    and "INSERT INTO alquiler_items" in node.value
+                ):
+                    fn = _func_envolvente(funcs, node.lineno)
+                    if fn is None:
+                        hallazgos.append((rel, "<module>", False))
+                        continue
+                    nombres = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)}
+                    hallazgos.append((rel, fn.name, bool(GATE_SYMBOLS & nombres)))
     return hallazgos
 
 
