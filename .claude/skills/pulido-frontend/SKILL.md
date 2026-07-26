@@ -1,7 +1,7 @@
 ---
 name: pulido-frontend
 model: opus
-last-reviewed: 2026-06-26
+last-reviewed: 2026-07-26
 version: 1.1
 description: El go-to para AUDITAR y MEJORAR una pantalla/flujo del front que YA EXISTE y funciona, pero "está raro", no se ve bien, o se puede pulir. Flujo completo de calidad de experiencia — diagnosticar (rúbrica front-end, ejes P-U de PROTOCOLO) → rutear por riesgo → mejorar DS-first en 4 lentes (UX · UI/estética · modularización · performance) → verificar (preview_* tools + mobile gate + a11y + perf) → trackear página-por-página. Úsalo cuando el dueño diga "pulí la UX/UI", "esta pantalla está rara / no me cierra", "optimizá el flujo de X", "que se vea perfecto / más lindo", "mejorá la experiencia de X", "está lento el front", "modularizá esta pantalla", "auditá la UI de X con criterios de UX", o cuando detectes fricción/inconsistencia visual mientras trabajás. NO es para diseñar desde cero (eso es Claude Design), ni para salud del repo / código muerto / seguridad (skill `mantenimiento`). Este skill DIAGNOSTICA qué falla en la experiencia y lo PULE de a poco — el corazón NO es una lista de fixes, sino el MÉTODO: recorrer la pantalla en vivo con rúbrica → rutear por riesgo → reusar/extender la librería del DS (nunca one-offs) → verificar contra el render real (preview tools), mobile y accesibilidad → no romper el core de reservas. Método seguro + tests + supervisor en `mantenimiento`.
 ---
@@ -133,6 +133,15 @@ que nunca se rompen") — es la fuente canónica.
 Nada se da por bueno sin verlo:
 
 - **Render-compare** — capturá la **ruta real** (desktop + mobile con `preview_screenshot` + `preview_resize`) y compará contra el antes. Para rutas autenticadas, verificá con screenshots en staging.
+- **Cambios de LAYOUT (grid-column spanning, posicionamiento absoluto/relativo) — medí por JS, no por
+  scroll+screenshot.** Preferí medición estructural (`getComputedStyle`, `getBoundingClientRect`, leer
+  `gridColumn`/`gridRow` computados) por sobre scrollear + comparar capturas; sumá el screenshot solo al
+  final, con el viewport agrandado (`resize_window` a una altura que contenga todo) en vez de scrollear un
+  viewport chico. Caso testigo: verificando el calendario admin (barras multi-día + color por estado),
+  `computer scroll` tiró timeouts falsos repetidos (el scroll SÍ se aplicaba pero la tool reportaba error) y
+  hubo un desfasaje real entre las coordenadas de `getBoundingClientRect()`/clicks y el recorte del
+  screenshot — la medición por JS (`gridColumn` computado + `backgroundColor` reaccionando a un cambio de
+  estado real) confirmó el fix al primer intento, sin necesitar el screenshot para verificar.
 - **Mobile gate (obligatorio, 375×667)** — el checklist de `PROTOCOLO`: sin scroll horizontal, tap
   targets ≥44px, inputs ≥16px, modales en `100dvh`, CTAs primarios en thumb-zone (mitad inferior),
   imágenes `lazy`. El smoke de CI (`mobile-smoke.yml`) corre solo, **no reemplaza** la validación visual.

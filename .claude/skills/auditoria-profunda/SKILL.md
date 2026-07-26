@@ -1,9 +1,9 @@
 ---
 name: auditoria-profunda
 model: opus
-last-reviewed: 2026-06-23
+last-reviewed: 2026-07-26
 version: 1.0
-description: El go-to para AUDITORÍAS PROFUNDAS, exhaustivas y REPETIBLES — cazar fallas (no pulir) en el flujo de reserva y la UI del cliente, anotando todo y abriendo issues. Dos motores con la misma disciplina (1) ROBUSTEZ/SEGURIDAD del backend del flujo de reserva — concurrencia/sobreventa/race, auth/IDOR, integridad de precio, inyección/XSS, descuentos, fechas/horarios, validación de input — probado por API/curl/psql con datos reales; (2) UI MULTI-VIEWPORT — un harness Playwright (Chrome real) que recorre 320→1920, clickea de verdad, mide tap targets/font/contraste/overflow/truncación y GUARDA UN SCREENSHOT por pantalla×tamaño para comparar antes/después. Úsalo cuando el dueño pida "auditá a fondo / profundo", "buscá fallas / bugs", "probá si es seguro", "tocá todos los botones", "probá en varios tamaños", "stress test", "edge cases", "que no se rompa con mucha demanda", o quiera screenshots para comparar. El corazón es el MÉTODO + la LISTA DE CRITERIOS (abajo): verificar antes de reportar, datos reales, etiquetar y limpiar datos de prueba, todo a un test-log + issues, harnesses re-ejecutables. NO es para pulir/arreglar (eso es `pulido-frontend` / `importar-diseno`) ni para salud del repo (`mantenimiento`): este SÓLO encuentra y documenta. El core de reservas es sagrado → read-only sobre la lógica.
+description: El go-to para AUDITORÍAS PROFUNDAS, exhaustivas y REPETIBLES — cazar fallas (no pulir) en el flujo de reserva y la UI del cliente, anotando todo y abriendo issues. Dos motores con la misma disciplina (1) ROBUSTEZ/SEGURIDAD del backend del flujo de reserva — concurrencia/sobreventa/race, auth/IDOR, integridad de precio, inyección/XSS, descuentos, fechas/horarios, validación de input — probado por API/curl/psql con datos reales; (2) UI MULTI-VIEWPORT — un harness Playwright (Chrome real) que recorre 320→1920, clickea de verdad, mide tap targets/font/contraste/overflow/truncación y GUARDA UN SCREENSHOT por pantalla×tamaño para comparar antes/después. Úsalo cuando el dueño pida "auditá a fondo / profundo", "buscá fallas / bugs", "probá si es seguro", "tocá todos los botones", "probá en varios tamaños", "stress test", "edge cases", "que no se rompa con mucha demanda", o quiera screenshots para comparar. El corazón es el MÉTODO + la LISTA DE CRITERIOS (abajo): verificar antes de reportar, datos reales, etiquetar y limpiar datos de prueba, todo a un test-log + issues, harnesses re-ejecutables. NO es para pulir/arreglar (eso es `pulido-frontend`) ni para salud del repo (`mantenimiento`): este SÓLO encuentra y documenta. El core de reservas es sagrado → read-only sobre la lógica.
 ---
 
 # auditoria-profunda — cazar fallas a fondo, repetible, con evidencia
@@ -14,7 +14,7 @@ que **verifica antes de afirmar**, **anota todo** (test-log + GitHub issues) y d
 **buscamos fallas**; el pulido viene después (otra sesión / `pulido-frontend`).
 
 > Pareja con: `pulido-frontend` (rúbrica P-U + arreglar la UI), `mantenimiento` (método
-> seguro + tests + core sagrado), `PROTOCOLO.md` (rúbrica), `importar-diseno` (DS).
+> seguro + tests + core sagrado), `PROTOCOLO.md` (rúbrica).
 > El **core de reservas es sagrado**: todo read-only sobre la lógica; se prueba por
 > API / UI / DB, no se modifica el motor.
 
@@ -69,7 +69,27 @@ LABEL=before node ...ui-audit.mjs   # baseline → docs/audit-ui-screenshots/bef
   texto más oscuro mismo hue/chroma (ej. `--color-verde-ink`, `--color-destructive` a L 0.55).
 - Gotcha del layout: en **mobile** scrollea un **contenedor interno**
   (`div.flex-1.overflow-y-auto`), no el document; el harness lo detecta y screenshotea
-  ese elemento; en desktop usa `fullPage`.
+  ese elemento; en desktop usa `fullPage`. El detector de scroller excluye `nav`/`aside` y
+  prefiere el de **mayor área** (no el primero en orden DOM) — sin esto, en `/admin/*` agarraba el
+  **sidebar** (tiene su propio `overflow-y:auto`) y las ~90 capturas desktop del back-office quedaban
+  recortadas al sidebar en vez del contenido (bug real, 2026-07-25, arreglado en el script).
+- ⚠️ **Degradación acumulativa de Chromium en corridas largas:** correr el harness sobre >~15 pantallas
+  seguidas en el MISMO browser/tab (ej. `GROUP=admin` completo, ~30 pantallas × 5 viewports) empieza a
+  fallar con `Timeout ... waiting for fonts to load` a partir de la captura ~15-16, sin importar qué
+  pantalla es — no es la pantalla, es recurso acumulado (memoria/GPU del proceso), agravado por RAM
+  limitada de un sandbox. Correr en **lotes de ~10 pantallas o menos** (nuevo `chromium.launch()` por
+  lote) — el mismo `LABEL` mergea el `_report.json` entre lotes, no se pierde nada.
+- El path de salida se resuelve contra la **raíz del repo** (`git rev-parse --show-toplevel`), no
+  relativo a `import.meta.url` — si el harness se copia a otro lugar (necesario en algunos sandboxes
+  donde Playwright solo resuelve el módulo ESM dentro de la cadena de `frontend/node_modules`), un path
+  relativo a la ubicación del script apuntaría a un lugar equivocado **sin ningún error** (bug real,
+  2026-07-25, arreglado en el script).
+- ⚠️ **`admin-pedido-nuevo` NO es de solo lectura:** navegar a `/admin/pedidos/nuevo` (aunque sea solo
+  para un screenshot) **crea un pedido real** en la base (`estado:"borrador"`, sin cliente, $0) — hay un
+  `useEffect` en el mount que llama `createPedido` y redirige al editor. Si se visita esta pantalla, sumar
+  su limpieza (`DELETE /api/alquileres/{id}` de los borradores creados) al checklist de limpieza final —
+  no asumir que navegar = solo-lectura. Se identifican por `cliente_id NULL + monto_total 0 +
+  fecha_desde/hasta = hoy/mañana` si no quedaron tageados.
 
 ### Cobertura — TODA la web cliente (registro de pantallas)
 El harness recorre estas pantallas × **10 viewports** (320·360·375·414·640·768·1024·1280·1440·1920),
@@ -203,7 +223,7 @@ snippet del texto visible para juzgar el estado. (Ampliar acá a medida que apar
 - **Veredicto** en lenguaje claro: qué está sólido (no tocar), qué romper-y-pulir después, ruteado por riesgo.
 
 ## Cuándo NO
-- Pulir/arreglar lo encontrado → `pulido-frontend` (UI) / `importar-diseno` (DS) / fix con tests.
+- Pulir/arreglar lo encontrado → `pulido-frontend` (UI) / fix con tests.
 - Salud del repo (código muerto, ramas, deps, split) → `mantenimiento`.
 - Tocar el motor de reservas → sagrado; un bug del motor se reporta con repro + va con Opus + test.
 
