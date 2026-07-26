@@ -23,17 +23,28 @@ from pydantic import BaseModel, EmailStr, Field
 
 from auth.guards import require_admin
 from config import SITE_URL, settings
-from database import get_db, now_ar, to_datetime
+from database import get_db, now_ar
 from rate_limit import limiter
 from dataio.slug import slugify, slug_unico
+from routes.alquileres import _next_numero_pedido
 from services.email import send_email
-from services.fechas import fmt_hhmm as _fmt_hhmm
+from services.fechas import fmt_hhmm as _fmt_hhmm, fmt_fecha_es as _fmt_fecha_es
 from services.email.service import get_admin_to
 from services.media.models import DeriveSpec
 from services.media.errors import MediaError
 from services.media.service import store_upload, store_raw_document
 from services.media.youtube import extract_video_id, youtube_nocookie_url, store_youtube_poster
 from services import telefono as telefono_svc
+# Lógica de decisión duplicada/compartida extraída a services/talleres/
+# (CQRS-lite): gate de conflicto con Estudio, creación de edición, validación
+# de clases/modalidades, economía. Este route queda como transporte fino para
+# esa porción — perfil/lectura/serialización, instructores/instituciones/
+# trabajos/portada e inscripción/seña (Fase 2, diferida) siguen acá. Ver
+# services/talleres/CLAUDE.md.
+from services.talleres.queries.clases import _row_get, _validar_clases, _validar_modalidades
+from services.talleres.commands.clases import _upsert_clases, _upsert_modalidades
+from services.talleres.commands.ediciones import _gate_conflicto_estudio, crear_edicion
+from services.talleres.commands.economia import _regenerar_pedidos_taller
 
 logger = logging.getLogger(__name__)
 
@@ -65,20 +76,6 @@ def _leer_token_cupo(token: str) -> int | None:
     insid = data.get("insid") if isinstance(data, dict) else None
     return insid if isinstance(insid, int) else None
 
-_DIAS_ES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
-_MESES_ES = [
-    "enero", "febrero", "marzo", "abril", "mayo", "junio",
-    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
-]
-
-
-def _fmt_fecha_es(d) -> str:
-    """datetime.date → 'sábado 11 de julio'"""
-    from datetime import date
-    if isinstance(d, str):
-        d = date.fromisoformat(d)
-    return f"{_DIAS_ES[d.weekday()]} {d.day} de {_MESES_ES[d.month - 1]}"
-
 
 def _fmt_pesos(n: int) -> str:
     return "$" + f"{n:,}".replace(",", ".")
@@ -108,15 +105,6 @@ def _get_edicion_row(conn, slug: str, incluir_borrador: bool = False):
     if row is None:
         raise HTTPException(status_code=404, detail="Taller no encontrado")
     return row
-
-
-def _row_get(c, key, default=None):
-    """Lectura tolerante: row de DB o dict normalizado pueden no traer el campo."""
-    try:
-        v = c[key]
-        return default if v is None else v
-    except (KeyError, IndexError):
-        return default
 
 
 def _clase_dict(c) -> dict:
@@ -414,183 +402,6 @@ def _concepto_to_admin_dict(
         "faqs": _row_get(taller_row, "faqs", []) or [],
         "trabajos": trabajos if trabajos is not None else [],
     }
-
-
-def _validar_clases(clases: list) -> list[dict]:
-    """Valida y normaliza una lista de clases (horas en MINUTOS desde medianoche,
-    múltiplo de 15 — la UI ofrece pasos de 30, 15 da margen sin granularidad
-    arbitraria). Devuelve lista de dicts. Lanza 400 si hay errores."""
-    if not clases:
-        raise HTTPException(400, "Debe tener al menos una clase")
-    from datetime import date as _dt_date
-    result = []
-    seen = set()
-    for s in clases:
-        fecha_str = s.fecha if hasattr(s, "fecha") else s["fecha"]
-        h_ini = s.hora_inicio_min if hasattr(s, "hora_inicio_min") else s["hora_inicio_min"]
-        h_fin = s.hora_fin_min if hasattr(s, "hora_fin_min") else s["hora_fin_min"]
-        try:
-            fecha = _dt_date.fromisoformat(fecha_str)
-        except (ValueError, TypeError):
-            raise HTTPException(400, f"Fecha inválida: {fecha_str}")
-        if not (0 <= h_ini < h_fin <= 1440):
-            raise HTTPException(
-                400, f"Horario inválido en {fecha_str}: {_fmt_hhmm(h_ini)}-{_fmt_hhmm(h_fin)}"
-            )
-        if h_ini % 15 or h_fin % 15:
-            raise HTTPException(
-                400, f"El horario debe ser múltiplo de 15 minutos ({fecha_str})"
-            )
-        titulo = str(_row_get(s, "titulo", "") if isinstance(s, dict) else getattr(s, "titulo", "")).strip()
-        # La key de duplicado incluye el título: "Clase 11 y 12 se dictan juntas"
-        # (caso Filmar) = 2 clases con la misma fecha/franja y títulos distintos.
-        key = (fecha, h_ini, h_fin, titulo)
-        if key in seen:
-            raise HTTPException(
-                400, f"Clase duplicada: {fecha_str} {_fmt_hhmm(h_ini)}-{_fmt_hhmm(h_fin)}"
-            )
-        seen.add(key)
-
-        def _campo(nombre: str, default=""):
-            return _row_get(s, nombre, default) if isinstance(s, dict) else getattr(s, nombre, default)
-
-        result.append({
-            "id": _campo("id", None),
-            "fecha": fecha,
-            "hora_inicio_min": h_ini,
-            "hora_fin_min": h_fin,
-            "titulo": titulo,
-            "descripcion": str(_campo("descripcion") or "").strip(),
-            "nota": str(_campo("nota") or "").strip(),
-            "portada_media_id": _campo("portada_media_id", None),
-            "portada_url": str(_campo("portada_url") or ""),
-        })
-    return result
-
-
-def _insert_clases(conn, edicion_id: int, clases: list, start_orden: int = 0) -> None:
-    """`start_orden` corrige la posición cuando `clases` es un sub-tramo (una
-    sola clase nueva en medio de un upsert) — sin esto, cada llamada volvería
-    a numerar desde 0 en vez de respetar su posición real en la lista completa."""
-    for i, c in enumerate(clases, start=start_orden):
-        conn.execute(
-            "INSERT INTO clases_taller (edicion_id, fecha, hora_inicio_min, hora_fin_min, "
-            "titulo, descripcion, nota, portada_media_id, portada_url, orden) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (
-                edicion_id, c["fecha"], c["hora_inicio_min"], c["hora_fin_min"],
-                c.get("titulo", ""), c.get("descripcion", ""), c.get("nota", ""),
-                c.get("portada_media_id"), c.get("portada_url", ""), i,
-            ),
-        )
-
-
-def _upsert_clases(conn, edicion_id: int, clases: list) -> None:
-    """Sincroniza las clases de una edición SIN el delete+insert ciego de antes:
-    - con `id` (y perteneciente a la edición) → UPDATE de fecha/horario/contenido
-      — la PORTADA no se toca (solo cambia vía sus endpoints de upload/delete);
-    - sin `id` → INSERT (acá sí puede traer portada_* — caso "copiar clases");
-    - ids existentes que no vienen en la lista → DELETE.
-    Preserva `portada_media_id` al reordenar/editar (el delete+insert la perdía).
-    `orden` = posición en `clases` (el array que manda el front) — no lo decide
-    el front con un campo explícito, ya viene implícito en el orden de la lista."""
-    existentes = {
-        r["id"]
-        for r in conn.execute(
-            "SELECT id FROM clases_taller WHERE edicion_id = %s", (edicion_id,)
-        ).fetchall()
-    }
-    vistos: set[int] = set()
-    for i, c in enumerate(clases):
-        cid = c.get("id")
-        if cid and cid in existentes:
-            conn.execute(
-                "UPDATE clases_taller SET fecha = %s, hora_inicio_min = %s, "
-                "hora_fin_min = %s, titulo = %s, descripcion = %s, nota = %s, "
-                "orden = %s WHERE id = %s AND edicion_id = %s",
-                (
-                    c["fecha"], c["hora_inicio_min"], c["hora_fin_min"],
-                    c.get("titulo", ""), c.get("descripcion", ""), c.get("nota", ""),
-                    i, cid, edicion_id,
-                ),
-            )
-            vistos.add(cid)
-        else:
-            _insert_clases(conn, edicion_id, [c], start_orden=i)
-    sobrantes = existentes - vistos
-    for cid in sobrantes:
-        conn.execute(
-            "DELETE FROM clases_taller WHERE id = %s AND edicion_id = %s",
-            (cid, edicion_id),
-        )
-
-
-def _validar_modalidades(modalidades: list) -> list[dict]:
-    """Valida y normaliza una lista de modalidades de pago. Sin motor de
-    descuentos: `monto_total` lo carga el admin a mano; los "%" de ahorro son
-    texto libre en `nota`. Lanza 400 si hay errores."""
-    result = []
-    seen_codigos = set()
-    for m in modalidades:
-        def _campo(nombre: str, default=""):
-            return _row_get(m, nombre, default) if isinstance(m, dict) else getattr(m, nombre, default)
-
-        codigo = str(_campo("codigo") or "").strip()
-        label = str(_campo("label") or "").strip()
-        monto = _campo("monto_total", 0)
-        if not codigo:
-            raise HTTPException(400, "Cada modalidad de pago necesita un código")
-        if not label:
-            raise HTTPException(400, f"La modalidad '{codigo}' necesita un label")
-        if not isinstance(monto, int) or monto <= 0:
-            raise HTTPException(400, f"La modalidad '{codigo}' necesita un monto_total > 0")
-        if codigo in seen_codigos:
-            raise HTTPException(400, f"Código de modalidad duplicado: '{codigo}'")
-        seen_codigos.add(codigo)
-        result.append({
-            "id": _campo("id", None),
-            "codigo": codigo,
-            "label": label,
-            "nota": str(_campo("nota") or "").strip(),
-            "monto_total": monto,
-        })
-    return result
-
-
-def _upsert_modalidades(conn, edicion_id: int, modalidades: list) -> None:
-    """Sincroniza las modalidades de pago de una edición (mismo patrón que
-    _upsert_clases): con `id` → UPDATE; sin `id` → INSERT; ids que no vienen
-    en la lista → DELETE. El `orden` es la posición en la lista recibida."""
-    existentes = {
-        r["id"]
-        for r in conn.execute(
-            "SELECT id FROM edicion_modalidades_pago WHERE edicion_id = %s", (edicion_id,)
-        ).fetchall()
-    }
-    vistos: set[int] = set()
-    for orden, m in enumerate(modalidades):
-        mid = m.get("id")
-        if mid and mid in existentes:
-            conn.execute(
-                "UPDATE edicion_modalidades_pago SET orden = %s, codigo = %s, "
-                "label = %s, nota = %s, monto_total = %s "
-                "WHERE id = %s AND edicion_id = %s",
-                (orden, m["codigo"], m["label"], m["nota"], m["monto_total"], mid, edicion_id),
-            )
-            vistos.add(mid)
-        else:
-            conn.execute(
-                "INSERT INTO edicion_modalidades_pago "
-                "(edicion_id, orden, codigo, label, nota, monto_total) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (edicion_id, orden, m["codigo"], m["label"], m["nota"], m["monto_total"]),
-            )
-    sobrantes = existentes - vistos
-    for mid in sobrantes:
-        conn.execute(
-            "DELETE FROM edicion_modalidades_pago WHERE id = %s AND edicion_id = %s",
-            (mid, edicion_id),
-        )
 
 
 # ── Endpoints públicos ────────────────────────────────────────────────────────
@@ -1258,119 +1069,6 @@ def _find_or_create_instructor(conn, nombre: str) -> int:
     return cur.fetchone()["id"]
 
 
-# Namespace propio del advisory lock que serializa la regeneración de pedidos
-# de una edición — evita una carrera entre 2 escrituras concurrentes a la
-# MISMA edición decidiendo a la vez qué mes conservar/borrar/recrear.
-_ADVISORY_NS_TALLER = 5390423
-
-
-def _regenerar_pedidos_taller(conn, edicion: dict, taller_nombre: str) -> None:
-    """(Re)genera un pedido `tipo='taller'` por mes del rango de la edición.
-    Espeja `_regenerar_pedidos_slot`: preserva pasados/pagados, borra y recrea
-    futuros impagos. Fix propio: también preserva un mes cuyo pedido tiene MÁS
-    ítems que los que este generador crearía — protege la línea de matrícula
-    que el admin tipeó a mano de un borrado silencioso en el próximo recálculo."""
-    from routes.estudio import _iter_meses, _mes_actual_ar
-    from routes.alquileres import _next_numero_pedido
-    from services.estudio.queries.estudio import _get_estudio_row
-    import calendar as _cal
-    from datetime import date as _dt_date
-
-    edicion_id = edicion["id"]
-    conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (_ADVISORY_NS_TALLER, edicion_id))
-
-    mes_actual = _mes_actual_ar()
-    n_items_auto = max(1, int(edicion["usa_estudio"]) + int(edicion["usa_equipos"]))
-
-    existentes = conn.execute(
-        """
-        SELECT a.id, a.fecha_desde, a.monto_pagado,
-               (SELECT COUNT(*) FROM alquiler_items i WHERE i.pedido_id = a.id) AS n_items
-        FROM alquileres a WHERE a.taller_edicion_id = %s
-        """,
-        (edicion_id,),
-    ).fetchall()
-
-    conservados: set[str] = set()
-    for e in existentes:
-        fd = to_datetime(e["fecha_desde"])
-        mes_e = f"{fd.year:04d}-{fd.month:02d}"
-        if mes_e < mes_actual or (e["monto_pagado"] or 0) > 0 or e["n_items"] > n_items_auto:
-            conservados.add(mes_e)  # pasado, pagado o con más ítems de los que auto-generamos → intocable
-        else:
-            conn.execute("DELETE FROM alquileres WHERE id = %s", (e["id"],))
-
-    if not edicion["activo"]:
-        return
-
-    fecha_inicio: _dt_date = edicion["fecha_inicio"]
-    fecha_fin: _dt_date = edicion["fecha_fin"]
-    meses = list(_iter_meses(
-        f"{fecha_inicio.year:04d}-{fecha_inicio.month:02d}",
-        f"{fecha_fin.year:04d}-{fecha_fin.month:02d}",
-    ))
-    n_meses = len(meses)
-    ultimo = meses[-1]
-
-    def _partes(total: int, modo: str) -> dict:
-        if modo != "total":
-            return {clave: total for clave in meses}
-        base, resto = divmod(total, n_meses)
-        return {clave: (base + resto if clave == ultimo else base) for clave in meses}
-
-    valores_estudio = _partes(edicion["valor_estudio"], edicion["valor_estudio_modo"]) if edicion["usa_estudio"] else {}
-    valores_equipos = _partes(edicion["valor_equipos"], edicion["valor_equipos_modo"]) if edicion["usa_equipos"] else {}
-    estudio = _get_estudio_row(conn) if edicion["usa_estudio"] else None
-
-    for (y, m) in meses:
-        mes = f"{y:04d}-{m:02d}"
-        if mes < mes_actual or mes in conservados:
-            continue
-        _, last_day = _cal.monthrange(y, m)
-        fd = max(_dt_date(y, m, 1), fecha_inicio)
-        fh = min(_dt_date(y, m, last_day), fecha_fin)
-        mes_label = f"{_MESES_ES[m - 1]} {y}"
-        valor_est = valores_estudio.get((y, m), 0)
-        valor_eq = valores_equipos.get((y, m), 0)
-
-        pedido_id = conn.insert_returning(
-            """
-            INSERT INTO alquileres (cliente_nombre, fecha_desde, fecha_hasta, monto_total,
-                                    estado, fuente, tipo, numero_pedido, taller_edicion_id)
-            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-            """,
-            (f"Taller {taller_nombre} — {mes_label}", fd, fh, valor_est + valor_eq,
-             "confirmado", "taller", "taller", _next_numero_pedido(conn), edicion_id),
-        )
-        if edicion["usa_estudio"]:
-            conn.execute(
-                """
-                INSERT INTO alquiler_items
-                    (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo)
-                VALUES (%s,%s,1,%s,%s,'fijo')
-                """,
-                (pedido_id, estudio["equipo_id"], valor_est, valor_est),
-            )
-        if edicion["usa_equipos"]:
-            conn.execute(
-                """
-                INSERT INTO alquiler_items
-                    (pedido_id, equipo_id, nombre_libre, cantidad, precio_jornada, subtotal, cobro_modo)
-                VALUES (%s,NULL,%s,1,%s,%s,'fijo')
-                """,
-                (pedido_id, f"Uso de equipos — {taller_nombre}", valor_eq, valor_eq),
-            )
-        if not edicion["usa_estudio"] and not edicion["usa_equipos"]:
-            conn.execute(
-                """
-                INSERT INTO alquiler_items
-                    (pedido_id, equipo_id, nombre_libre, cantidad, precio_jornada, subtotal, cobro_modo)
-                VALUES (%s,NULL,%s,1,0,0,'fijo')
-                """,
-                (pedido_id, f"Taller {taller_nombre} — {mes_label}"),
-            )
-
-
 @router.post("/admin/talleres", status_code=201)
 def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
     """Crea un nuevo concepto de taller con su primera edición."""
@@ -1387,10 +1085,6 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
         raise HTTPException(400, "valor_estudio_modo debe ser 'mensual' o 'total'")
     if ed.valor_equipos_modo not in ("mensual", "total"):
         raise HTTPException(400, "valor_equipos_modo debe ser 'mensual' o 'total'")
-
-    from services.estudio.constants import _ADVISORY_NS_ESTUDIO
-    from services.estudio.queries.estudio import _get_estudio_row
-    from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
 
     with get_db() as conn:
         try:
@@ -1410,14 +1104,7 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
             # F1), así que solo se verifica disponibilidad si nace PUBLICADA.
             # El chequeo de un borrador corre al publicarlo (PATCH activo=true).
             if ed.activo:
-                estudio = _get_estudio_row(conn)
-                if estudio["equipo_id"]:
-                    conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (_ADVISORY_NS_ESTUDIO, 1))
-                    verificar_sesiones_disponibles(conn, estudio, clases)
-
-            fechas = [c["fecha"] for c in clases]
-            fecha_inicio = min(fechas)
-            fecha_fin = max(fechas)
+                _gate_conflicto_estudio(conn, clases)
 
             # Crear concepto en talleres. OJO: `activo` del CONCEPTO queda TRUE
             # (kill-switch general, no la puerta de publicación) — la puerta es
@@ -1456,40 +1143,26 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
                     (taller_id, instructor_id),
                 )
 
-            # Crear primera edición en ediciones_taller
-            cur2 = conn.execute(
-                """
-                INSERT INTO ediciones_taller (
-                    taller_id, numero_edicion, slug, tipo_taller,
-                    fecha_inicio, fecha_fin, horario,
-                    cupos_total, precio_total, precio_sena,
-                    pago_alias, pago_cbu, pago_banco,
-                    direccion, activo,
-                    usa_estudio, valor_estudio, valor_estudio_modo,
-                    usa_equipos, valor_equipos, valor_equipos_modo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-                """,
-                (
-                    taller_id, ed_numero, slug_edicion, ed.tipo_taller,
-                    fecha_inicio, fecha_fin, ed.horario.strip(),
-                    ed.cupos_total, ed.precio_total, ed.precio_sena,
-                    ed.pago_alias.strip(), ed.pago_cbu.strip(), ed.pago_banco.strip(),
-                    ed.direccion.strip(), ed.activo,
-                    ed.usa_estudio, ed.valor_estudio, ed.valor_estudio_modo,
-                    ed.usa_equipos, ed.valor_equipos, ed.valor_equipos_modo,
-                ),
+            # Crear primera edición — núcleo compartido con admin_create_edicion.
+            e_row = crear_edicion(
+                conn, taller_id=taller_id, ed_numero=ed_numero, slug_edicion=slug_edicion,
+                clases=clases, taller_nombre=nombre_base, numero_pedido_fn=_next_numero_pedido,
+                campos={
+                    "tipo_taller": ed.tipo_taller, "horario": ed.horario.strip(),
+                    "cupos_total": ed.cupos_total, "precio_total": ed.precio_total,
+                    "precio_sena": ed.precio_sena,
+                    "pago_alias": ed.pago_alias.strip(), "pago_cbu": ed.pago_cbu.strip(),
+                    "pago_banco": ed.pago_banco.strip(), "direccion": ed.direccion.strip(),
+                    "activo": ed.activo,
+                    "usa_estudio": ed.usa_estudio, "valor_estudio": ed.valor_estudio,
+                    "valor_estudio_modo": ed.valor_estudio_modo,
+                    "usa_equipos": ed.usa_equipos, "valor_equipos": ed.valor_equipos,
+                    "valor_equipos_modo": ed.valor_equipos_modo,
+                },
             )
-            edicion_id = cur2.fetchone()["id"]
-            _insert_clases(conn, edicion_id, clases)
-            edicion_row = conn.execute(
-                "SELECT * FROM ediciones_taller WHERE id = %s", (edicion_id,)
-            ).fetchone()
-            _regenerar_pedidos_taller(conn, edicion_row, nombre_base)
             conn.commit()
 
             t_row = conn.execute("SELECT * FROM talleres WHERE id = %s", (taller_id,)).fetchone()
-            e_row = conn.execute("SELECT * FROM ediciones_taller WHERE id = %s", (edicion_id,)).fetchone()
             # Re-leer de la DB: las clases recién insertadas tienen id (el admin
             # lo necesita para subir portadas / upsert sin refetch). DEBE ir
             # DENTRO del `with` — usar `conn` después de que el context manager
@@ -1525,10 +1198,6 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
     if body.valor_equipos_modo not in ("mensual", "total"):
         raise HTTPException(400, "valor_equipos_modo debe ser 'mensual' o 'total'")
 
-    from services.estudio.constants import _ADVISORY_NS_ESTUDIO
-    from services.estudio.queries.estudio import _get_estudio_row
-    from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
-
     with get_db() as conn:
         try:
             t_row = conn.execute(
@@ -1558,47 +1227,29 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
             # F2 borradores: solo verificar el estudio si nace PUBLICADA (el
             # chequeo de un borrador corre al publicar).
             if body.activo:
-                estudio = _get_estudio_row(conn)
-                if estudio["equipo_id"]:
-                    conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (_ADVISORY_NS_ESTUDIO, 1))
-                    verificar_sesiones_disponibles(conn, estudio, clases)
+                _gate_conflicto_estudio(conn, clases)
 
-            fechas = [c["fecha"] for c in clases]
-            fecha_inicio = min(fechas)
-            fecha_fin = max(fechas)
-
-            cur = conn.execute(
-                """
-                INSERT INTO ediciones_taller (
-                    taller_id, numero_edicion, slug, tipo_taller,
-                    fecha_inicio, fecha_fin, horario,
-                    cupos_total, precio_total, precio_sena,
-                    pago_alias, pago_cbu, pago_banco,
-                    direccion, activo,
-                    usa_estudio, valor_estudio, valor_estudio_modo,
-                    usa_equipos, valor_equipos, valor_equipos_modo
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING id
-                """,
-                (
-                    taller_id, ed_numero, slug_edicion, body.tipo_taller,
-                    fecha_inicio, fecha_fin, body.horario.strip(),
-                    body.cupos_total, body.precio_total, body.precio_sena,
-                    body.pago_alias.strip(), body.pago_cbu.strip(), body.pago_banco.strip(),
-                    body.direccion.strip(), body.activo,
-                    body.usa_estudio, body.valor_estudio, body.valor_estudio_modo,
-                    body.usa_equipos, body.valor_equipos, body.valor_equipos_modo,
-                ),
+            e_row = crear_edicion(
+                conn, taller_id=taller_id, ed_numero=ed_numero, slug_edicion=slug_edicion,
+                clases=clases, taller_nombre=t_row["nombre"], numero_pedido_fn=_next_numero_pedido,
+                campos={
+                    "tipo_taller": body.tipo_taller, "horario": body.horario.strip(),
+                    "cupos_total": body.cupos_total, "precio_total": body.precio_total,
+                    "precio_sena": body.precio_sena,
+                    "pago_alias": body.pago_alias.strip(), "pago_cbu": body.pago_cbu.strip(),
+                    "pago_banco": body.pago_banco.strip(), "direccion": body.direccion.strip(),
+                    "activo": body.activo,
+                    "usa_estudio": body.usa_estudio, "valor_estudio": body.valor_estudio,
+                    "valor_estudio_modo": body.valor_estudio_modo,
+                    "usa_equipos": body.usa_equipos, "valor_equipos": body.valor_equipos,
+                    "valor_equipos_modo": body.valor_equipos_modo,
+                },
             )
-            edicion_id = cur.fetchone()["id"]
-            _insert_clases(conn, edicion_id, clases)
-            e_row = conn.execute("SELECT * FROM ediciones_taller WHERE id = %s", (edicion_id,)).fetchone()
-            _regenerar_pedidos_taller(conn, e_row, t_row["nombre"])
             conn.commit()
             # Re-leer de la DB: las clases recién insertadas tienen id (el admin
             # lo necesita para subir portadas / upsert sin refetch). DENTRO del
             # `with` — ver comentario gemelo en admin_create_taller.
-            clases_out = _get_clases(conn, edicion_id)
+            clases_out = _get_clases(conn, e_row["id"])
         except Exception:
             conn.rollback()
             raise
@@ -1698,9 +1349,6 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
 def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Request):
     """Actualiza campos de una edición específica (fechas, precios, cupos, clases)."""
     require_admin(request)
-    from services.estudio.constants import _ADVISORY_NS_ESTUDIO
-    from services.estudio.queries.estudio import _get_estudio_row
-    from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
 
     sets = []
     params: list = []
@@ -1816,14 +1464,10 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
                     for c in _get_clases(conn, edicion_id)
                 ]
             if resultara_activa and clases_a_verificar and (new_clases is not None or publicando):
-                estudio = _get_estudio_row(conn)
-                if estudio["equipo_id"]:
-                    conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (_ADVISORY_NS_ESTUDIO, 1))
-                    # Excluir este taller del chequeo (sus propias clases activas)
-                    verificar_sesiones_disponibles(
-                        conn, estudio, clases_a_verificar,
-                        exclude_taller_id=existing["taller_id"],
-                    )
+                # Excluir este taller del chequeo (sus propias clases activas)
+                _gate_conflicto_estudio(
+                    conn, clases_a_verificar, exclude_taller_id=existing["taller_id"],
+                )
 
             if new_clases is not None:
                 fechas = [c["fecha"] for c in new_clases]
@@ -1847,7 +1491,9 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
             e_row = conn.execute(
                 "SELECT * FROM ediciones_taller WHERE id = %s", (edicion_id,)
             ).fetchone()
-            _regenerar_pedidos_taller(conn, e_row, existing["taller_nombre"])
+            _regenerar_pedidos_taller(
+                conn, e_row, existing["taller_nombre"], numero_pedido_fn=_next_numero_pedido,
+            )
             conn.commit()
             # DENTRO del `with` — ver comentario gemelo en admin_create_taller.
             clases_out = _get_clases(conn, edicion_id)

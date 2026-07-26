@@ -1186,3 +1186,29 @@ nunca un 409. Los equipos SUELTOS (elegidos a mano, fuera de la promo) siguen si
 409 y no se crea nada. El gate de validación (`validar_stock_hipotetico`) es el mismo para ambos — lo
 que cambia es si el caller levanta excepción sobre el resultado o solo arma el aviso. El supervisor
 marca un 409 nuevo en la validación de la promo, o un ítem suelto que pase a ser best-effort.
+
+### 2026-07-25 — `backend/services/estudio/` = motor de disponibilidad/reserva del Estudio (split de `routes/estudio.py`, CQRS-lite)
+
+El motor de disponibilidad (franja/anticipación/centinela/slot/taller/`verificar_sesiones_disponibles`/
+`revalidar_disponibilidad_estudio`), la promo combo y el núcleo compartido de creación/edición de
+reservas (cliente+admin, `_crear_pedido_estudio`/`editar_reserva`) salieron de `routes/estudio.py`
+a `services/estudio/` (`queries/`+`commands/`, molde `descuentos/`/`contabilidad/`), move-verbatim.
+El route quedó como transporte (auth, conn/commit, HTTP) y conserva perfil/fotos/trabajos/slots/
+agenda. El paquete no importa de `routes.*`: `queries/promo.py::get_disponibilidad` es un wrapper
+local sobre `reservas.calcular_disponibilidad` (conexión propia, committed-only). El supervisor
+marca: lógica de disponibilidad/reserva del Estudio reimplementada fuera del paquete, un import de
+`routes.*` dentro de `services/estudio/`, o la promo vuelta dura / un suelto vuelto best-effort.
+
+### 2026-07-26 — `backend/services/talleres/` = dedup del gate de Estudio + economía de talleres (split de `routes/talleres.py`, CQRS-lite)
+
+El gate de conflicto con Estudio (copiado inline 3×), el INSERT de `ediciones_taller` (copiado 2×)
+y la economía (`_regenerar_pedidos_taller`) salieron de `routes/talleres.py` a
+`services/talleres/` (`queries/`+`commands/`, molde `services/estudio/`), move-verbatim. El route
+quedó como transporte; endpoints, lectura/serialización, instructores/trabajos e inscripción/seña
+(Fase 2 diferida) se quedaron sin tocar. El paquete no importa de `routes.*`:
+`_regenerar_pedidos_taller` recibe `numero_pedido_fn` inyectado en vez de importar
+`routes.alquileres._next_numero_pedido`. Desviación documentada respecto a `services/estudio/`: acá
+sí hay imports `commands/`→`commands/` (`ediciones.py` importa de `commands/clases.py` y
+`commands/economia.py`) — no viola la regla dura (`queries/` nunca importa de `commands/`). El
+supervisor marca: lógica de gate/economía reimplementada fuera del paquete, un import de
+`routes.*` dentro de `services/talleres/`, o el gate re-inlineado en un call-site nuevo.

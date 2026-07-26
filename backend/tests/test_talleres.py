@@ -1,4 +1,5 @@
-"""Tests unitarios para `_regenerar_pedidos_taller` (routes/talleres.py).
+"""Tests unitarios para `_regenerar_pedidos_taller`
+(services/talleres/commands/economia.py).
 
 Espeja `test_estudio.py::TestRegenerarPedidosSlot` (mismo patrón: fake conn
 que graba INSERT/DELETE, sin Postgres real) — con un caso propio que el slot
@@ -61,10 +62,17 @@ def _parse_insert(sql: str, params: tuple) -> dict:
     return out
 
 
+def _numero_pedido_fn(conn) -> int:
+    """Stub de `numero_pedido_fn` inyectado — mismo SQL que
+    `routes/alquileres/detalle.py::_next_numero_pedido`, matcheado por el
+    `_TallerRegenConn` fake vía `"NEXTVAL" in su`."""
+    return conn.execute("SELECT nextval('numero_pedido_seq')").fetchone()[0]
+
+
 def _mes_offset_ym(n: int) -> tuple[int, int]:
     """(year, month) del mes actual + n meses — relativo a `hoy`, no hardcodeado."""
-    from routes.estudio import _mes_actual_ar
-    y, m = (int(x) for x in _mes_actual_ar().split("-"))
+    from services.fechas import mes_actual_ar
+    y, m = (int(x) for x in mes_actual_ar().split("-"))
     total = (y * 12 + (m - 1)) + n
     return total // 12, total % 12 + 1
 
@@ -141,10 +149,10 @@ class _TallerRegenConn(_ConnCM):
 
 class TestRegenerarPedidosTaller:
     def test_genera_un_pedido_por_mes_modo_mensual(self):
-        from routes.talleres import _regenerar_pedidos_taller
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
         conn = _TallerRegenConn(existing=[])
         edicion = _edicion_full(usa_estudio=True, valor_estudio=30000, valor_estudio_modo="mensual")
-        _regenerar_pedidos_taller(conn, edicion, "Fotografía Básica")
+        _regenerar_pedidos_taller(conn, edicion, "Fotografía Básica", numero_pedido_fn=_numero_pedido_fn)
         assert len(conn.inserted) == 3
         for p in conn.inserted:
             # (cliente_nombre, fd, fh, monto_total, estado, fuente, tipo, numero_pedido, taller_edicion_id)
@@ -161,23 +169,23 @@ class TestRegenerarPedidosTaller:
             assert it["cobro_modo"] == "fijo"
 
     def test_modo_total_reparte_en_partes_iguales(self):
-        from routes.talleres import _regenerar_pedidos_taller
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
         conn = _TallerRegenConn(existing=[])
         edicion = _edicion_full(usa_estudio=True, valor_estudio=100000, valor_estudio_modo="total")
-        _regenerar_pedidos_taller(conn, edicion, "Taller X")
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
         montos = sorted(p[3] for p in conn.inserted)
         assert montos == [33333, 33333, 33334]
         assert sum(montos) == 100000
 
     def test_remainder_pinned_al_mes_calendario_no_al_ultimo_regenerado(self):
-        from routes.talleres import _regenerar_pedidos_taller
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
         y2, m2 = _mes_offset_ym(2)  # el ÚLTIMO mes real del rango — ya pagado, se conserva
         existing = [
             {"id": 701, "fecha_desde": datetime(y2, m2, 20, 0), "monto_pagado": 40000, "n_items": 1},
         ]
         conn = _TallerRegenConn(existing=existing)
         edicion = _edicion_full(usa_estudio=True, valor_estudio=100000, valor_estudio_modo="total")
-        _regenerar_pedidos_taller(conn, edicion, "Taller X")
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
         assert 701 not in conn.deleted
         assert len(conn.inserted) == 2  # meses 0 y 1 (el 2, pagado, queda intocable)
         # Si el remanente se recalculara sobre "el último mes que SÍ se
@@ -186,12 +194,12 @@ class TestRegenerarPedidosTaller:
         assert sorted(p[3] for p in conn.inserted) == [33333, 33333]
 
     def test_conserva_pedido_pagado_no_lo_borra(self):
-        from routes.talleres import _regenerar_pedidos_taller
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
         y0, m0 = _mes_offset_ym(0)
         existing = [{"id": 800, "fecha_desde": datetime(y0, m0, 5, 0), "monto_pagado": 5000, "n_items": 1}]
         conn = _TallerRegenConn(existing=existing)
         edicion = _edicion_full()  # ambos flags off -> n_items_auto = 1, igual al existente
-        _regenerar_pedidos_taller(conn, edicion, "Taller X")
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
         assert 800 not in conn.deleted
         assert len(conn.inserted) == 2  # meses 1 y 2 (el 0, pagado, se conserva)
 
@@ -199,39 +207,39 @@ class TestRegenerarPedidosTaller:
         # El fix propio de Talleres (el slot no lo necesita): el admin tipeó a
         # mano la línea de matrícula -> el pedido tiene MÁS ítems de los que
         # el generador crearía -> se conserva aunque no esté pagado.
-        from routes.talleres import _regenerar_pedidos_taller
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
         y0, m0 = _mes_offset_ym(0)
         existing = [{"id": 801, "fecha_desde": datetime(y0, m0, 5, 0), "monto_pagado": 0, "n_items": 2}]
         conn = _TallerRegenConn(existing=existing)
         edicion = _edicion_full(usa_estudio=True, valor_estudio=20000)  # n_items_auto = 1
-        _regenerar_pedidos_taller(conn, edicion, "Taller X")
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
         assert 801 not in conn.deleted
         assert len(conn.inserted) == 2  # meses 1 y 2
 
     def test_no_conserva_si_no_hay_pagos_ni_items_extra(self):
-        from routes.talleres import _regenerar_pedidos_taller
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
         y0, m0 = _mes_offset_ym(0)
         existing = [{"id": 802, "fecha_desde": datetime(y0, m0, 5, 0), "monto_pagado": 0, "n_items": 1}]
         conn = _TallerRegenConn(existing=existing)
         edicion = _edicion_full(usa_estudio=True, valor_estudio=20000)  # n_items_auto = 1 == existente
-        _regenerar_pedidos_taller(conn, edicion, "Taller X")
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
         assert 802 in conn.deleted
         assert len(conn.inserted) == 3  # se regeneran los 3 meses, incluido el actual
 
     def test_edicion_inactiva_no_genera_pedidos(self):
-        from routes.talleres import _regenerar_pedidos_taller
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
         conn = _TallerRegenConn(existing=[])
         edicion = _edicion_full(activo=False, usa_estudio=True, valor_estudio=20000)
-        _regenerar_pedidos_taller(conn, edicion, "Taller X")
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
         assert conn.inserted == []
         assert conn.item_inserts == []
 
     def test_sin_estudio_ni_equipos_crea_item_placeholder(self):
         # Ni pedido vacío (estadisticas.py asume ≥1 ítem por pedido) ni 0 ítems.
-        from routes.talleres import _regenerar_pedidos_taller
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
         conn = _TallerRegenConn(existing=[])
         edicion = _edicion_full()
-        _regenerar_pedidos_taller(conn, edicion, "Taller X")
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
         assert len(conn.inserted) == 3
         assert len(conn.item_inserts) == 3
         for it in conn.item_inserts:
@@ -242,13 +250,13 @@ class TestRegenerarPedidosTaller:
             assert p[3] == 0
 
     def test_usa_estudio_y_equipos_crea_2_items_por_pedido(self):
-        from routes.talleres import _regenerar_pedidos_taller
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
         conn = _TallerRegenConn(existing=[])
         edicion = _edicion_full(
             usa_estudio=True, valor_estudio=15000, valor_estudio_modo="mensual",
             usa_equipos=True, valor_equipos=5000, valor_equipos_modo="mensual",
         )
-        _regenerar_pedidos_taller(conn, edicion, "Taller Y")
+        _regenerar_pedidos_taller(conn, edicion, "Taller Y", numero_pedido_fn=_numero_pedido_fn)
         assert len(conn.inserted) == 3
         for p in conn.inserted:
             assert p[3] == 20000  # 15000 (Estudio) + 5000 (equipos)

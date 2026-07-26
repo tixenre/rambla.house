@@ -168,9 +168,9 @@ def test_slot_items_veraces_y_edicion_no_se_autobloquea(client_con_db, setup, mo
     `exclude_slot_id` en `_centinela_libre`."""
     monkeypatch.setenv("ADMIN_BYPASS_AUTH", "1")
     from database import get_db
-    from routes.estudio import _mes_actual_ar
+    from services.fechas import mes_actual_ar
 
-    mes = _mes_actual_ar()
+    mes = mes_actual_ar()
     y, m = (int(x) for x in mes.split("-"))
     mes_hasta = f"{y:04d}-{(m % 12) + 1:02d}" if m < 12 else f"{y + 1:04d}-01"
 

@@ -28,6 +28,12 @@ ROUTES_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "routes")
 SERVICES_ESTUDIO_DIR = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "services", "estudio"
 )
+# Mismo motivo: la economía de talleres (_regenerar_pedidos_taller) se
+# extrajo de `routes/talleres.py` a `services/talleres/commands/economia.py`
+# (CQRS-lite) — sin sumar este árbol, ese INSERT quedaría fuera del scan.
+SERVICES_TALLERES_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "services", "talleres"
+)
 
 GATE_SYMBOLS = {
     "_check_stock", "_check_stock_hipotetico", "_centinela_libre",
@@ -53,21 +59,25 @@ GATE_SYMBOLS = {
 #     (`crear_slot`/`actualizar_slot`, vía `verificar_sesiones_disponibles`)
 #     ANTES de regenerar. Reventar la reserva acá sería doble validación de
 #     algo que el caller ya chequeó.
-#   - _regenerar_pedidos_taller (talleres, economía del taller): mismo
-#     patrón que el slot — los ítems (Estudio y/o equipos) son para que la
-#     plata del taller se atribuya/vea en la liquidación (`equipos.dueno`),
-#     NO reservan stock ni bloquean nada. El bloqueo real del ESPACIO (las
-#     clases del taller) lo sigue validando `verificar_sesiones_disponibles`
+#   - _regenerar_pedidos_taller (services/talleres/commands/economia.py,
+#     economía del taller — extraído de routes/talleres.py en el split
+#     CQRS-lite): mismo patrón que el slot — los ítems (Estudio y/o equipos)
+#     son para que la plata del taller se atribuya/vea en la liquidación
+#     (`equipos.dueno`), NO reservan stock ni bloquean nada. El bloqueo real
+#     del ESPACIO (las clases del taller) lo sigue validando
+#     `verificar_sesiones_disponibles`, ahora vía el helper deduplicado
+#     `_gate_conflicto_estudio` (`services/talleres/commands/ediciones.py`)
 #     en los 3 callers (`admin_create_taller`/`admin_create_edicion`/
-#     `admin_update_edicion`), no esta función.
+#     `admin_update_edicion`, en `routes/talleres.py`), no esta función.
 # ⏰ `_agregar_items_pack` (estudio) — el delegador del pack — se retiró en la
 # Fase 8 (#1283) junto con el mecanismo que validaba.
-# Clave = path relativo a routes/ (ej. "alquileres/core.py"), así desambigua entre
-# los varios core.py de los paquetes split (#501).
+# Clave = path relativo a routes/ (ej. "alquileres/core.py") o al árbol
+# services/estudio|talleres/ con su prefijo (ver `fuentes` abajo), así
+# desambigua entre los varios core.py de los paquetes split (#501) y entre árboles.
 ALLOWLIST_DELEGADORES = {
     ("alquileres/core.py", "_apply_pedido_items"),
     ("estudio.py", "_regenerar_pedidos_slot"),
-    ("talleres.py", "_regenerar_pedidos_taller"),
+    ("services/talleres/commands/economia.py", "_regenerar_pedidos_taller"),
 }
 
 
@@ -92,15 +102,17 @@ def _archivos_py(root):
 
 def _funciones_que_insertan_reservas():
     """Devuelve [(archivo, funcname, referencia_gate?)] por cada sitio que
-    inserta en alquiler_items, en `routes/` y en `services/estudio/` (el
-    motor de disponibilidad/reservas del Estudio, extraído a CQRS-lite)."""
+    inserta en alquiler_items, en `routes/` y en `services/estudio/` +
+    `services/talleres/` (los motores de disponibilidad/reservas del Estudio
+    y la economía de talleres, ambos extraídos a CQRS-lite)."""
     hallazgos = []
-    # (raíz, prefijo del identificador) — el prefijo distingue el árbol de
-    # services/estudio/ sin tocar el formato ya usado para routes/ (así los 3
-    # keys existentes de ALLOWLIST_DELEGADORES no cambian).
+    # (raíz, prefijo del identificador) — el prefijo distingue cada árbol de
+    # services/ sin tocar el formato ya usado para routes/ (así las keys
+    # existentes de ALLOWLIST_DELEGADORES no cambian).
     fuentes = [
         (ROUTES_DIR, ""),
         (SERVICES_ESTUDIO_DIR, "services/estudio/"),
+        (SERVICES_TALLERES_DIR, "services/talleres/"),
     ]
     for root, prefijo in fuentes:
         for path in sorted(_archivos_py(root)):

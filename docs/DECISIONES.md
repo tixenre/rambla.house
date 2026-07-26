@@ -3344,3 +3344,90 @@ PDF/imagen", "Qué NO cubre").
   best-effort explícito) — se fija por escrito acá para que una futura sesión no lo "corrija" de vuelta a
   duro pensando que es un bug. El supervisor lo hace cumplir: un 409 nuevo en la validación de la promo
   es la señal de que alguien reintrodujo el comportamiento viejo.
+
+### 2026-07-25 — `backend/services/estudio/` = motor de disponibilidad/reserva del Estudio (split de `routes/estudio.py`, CQRS-lite)
+
+- **Contexto.** `backend/routes/estudio.py` (2577 líneas) mezclaba 5 responsabilidades en un solo route
+  file: perfil/fotos, trabajos/portfolio, disponibilidad+reservas (con promo combo), slots fijos, y las
+  vistas de agenda/ocupación del dashboard. A diferencia de los otros motores del repo
+  (`backend/reservas/`, `backend/contabilidad/`, `backend/services/carrito/`), la lógica de negocio de
+  disponibilidad/reserva vivía directo en el route. Disparador: al chequear overbooking talleres↔reservas
+  de estudio se encontró que `GET /estudio/disponibilidad` y `POST /estudio/reservas` reimplementaban la
+  secuencia slot→taller→centinela por separado.
+- **Qué se movió.** Las 8 primitivas de disponibilidad (`_get_estudio_row`, `_franja_estudio`,
+  `_viola_anticipacion`, `_slot_bloqueante`, `_taller_bloqueante`, `_estudio_disponible`,
+  `verificar_sesiones_disponibles`, `_ADVISORY_NS_ESTUDIO`) + `revalidar_disponibilidad_estudio`
+  (consumida por `routes/alquileres/transiciones.py`); el núcleo compartido `_crear_pedido_estudio`
+  (cliente+admin); el flujo de alta/edición/cotización admin (#1283 F6); promo combo (#1283 F5). Quedaron
+  afuera: perfil/fotos, trabajos/portfolio, slots fijos (CRUD), agenda/ocupación del dashboard (lectura
+  agregada de display, sin decisión de negocio).
+- **El paquete no importa de `routes.*`.** `queries/promo.py::get_disponibilidad` es un wrapper LOCAL de
+  3 líneas sobre `reservas.calcular_disponibilidad`, con conexión PROPIA (deliberado: es un snapshot
+  committed-only, nunca la conn del caller); `commands/`/`queries/` reciben `estudio`,
+  `cliente_id`/`cliente_nombre`/etc. ya resueltos como parámetros — la resolución de sesión/cliente/Didit
+  queda en el route.
+- **Deliberadamente NO resuelto en el split** (documentado en `services/estudio/CLAUDE.md`): 2
+  duplicaciones preexistentes (predicado de taller copiado 3×; cálculo de precio promo+sueltos copiado 3×
+  — este último se resolvió después, en una pasada separada dentro del mismo PR) y la inconsistencia de
+  locking conocida (advisory lock vs. `FOR UPDATE`).
+- **Verificación.** Suite completa corrida contra Postgres 16 real (unit + integración) — 0 regresiones;
+  2 fallos preexistentes y no relacionados (`test_auth_purge_expired_db.py`, `test_catalogo_motor_shape.py`)
+  confirmados independientes del diff. El agente `supervisor` corrió su propia verificación completa y
+  devolvió APROBADO CON OBSERVACIONES (resueltas en el mismo PR). Gap colateral cerrado de paso: ninguno
+  de los 9 archivos `test_*_db.py` de Estudio/Talleres que trajo #1283 estaba conectado al CI — se
+  conectaron los que ejercitan directo el paquete nuevo.
+- **Why.** Mismo criterio que ya motivó `contabilidad`/`descuentos`: cuando la lógica de decisión de un
+  dominio vive enterrada en un archivo de transporte, el riesgo de reimplementaciones divergentes (como
+  el overbooking que disparó esta pasada) crece con cada endpoint nuevo. Tracking: #1296. PR: #1297.
+
+### 2026-07-26 — `backend/services/talleres/` = dedup del gate de Estudio + economía de talleres (split de `routes/talleres.py`, CQRS-lite)
+
+- **Contexto.** `backend/routes/talleres.py` (2856 líneas) pasó a ser, tras el split de estudio, el
+  archivo de route más grande del repo. Se encontraron (y verificaron línea por línea) dos duplicaciones
+  reales: el gate de conflicto con Estudio (`_get_estudio_row` + `pg_advisory_xact_lock` +
+  `verificar_sesiones_disponibles`) copiado inline 3 veces (`admin_create_taller`, `admin_create_edicion`,
+  `admin_update_edicion`); y el INSERT de `ediciones_taller` (20 columnas, mismo orden de parámetros)
+  copiado byte a byte entre `admin_create_taller` y `admin_create_edicion`. Además,
+  `_regenerar_pedidos_taller` (la economía del taller) importaba de `routes.estudio`/`routes.alquileres`
+  dentro de la función — un movimiento tal cual a `services/` hubiera violado el invariante "el paquete no
+  importa de `routes.*`".
+- **Qué se movió.** El gate deduplicado en `_gate_conflicto_estudio` (encapsula el CÓMO; cada caller sigue
+  decidiendo su propio CUÁNDO — el trigger difiere entre "nace publicada" y "transición a publicada"); el
+  INSERT deduplicado en `crear_edicion` (también hace `_insert_clases` + regenerar-pedidos); validación de
+  clases/modalidades (`_validar_clases`/`_validar_modalidades`, puras) + sus commands
+  (`_insert_clases`/`_upsert_clases`/`_upsert_modalidades`); la economía (`_regenerar_pedidos_taller` +
+  `_ADVISORY_NS_TALLER`). Prerrequisito: se promovió `iter_meses` a `services/fechas.py` y se retiró un
+  duplicado muerto de `mes_actual_ar` en `routes/estudio.py`. Los endpoints HTTP en sí, la lectura/
+  serialización, instructores/instituciones/trabajos/portada, y la inscripción/seña (Fase 2 diferida)
+  quedaron sin tocar; `_regenerar_pedidos_taller` recibe `numero_pedido_fn` inyectado en vez de importar
+  `routes.alquileres._next_numero_pedido` (mismo patrón "valor ya resuelto como parámetro" de
+  `services/estudio/CLAUDE.md`, extendido acá a una función).
+- **Desviación documentada respecto a `services/estudio/`.** Acá SÍ hay imports `commands/`→`commands/`
+  (`ediciones.py` importa de `commands/clases.py` y `commands/economia.py`) — no viola la única regla dura
+  (`queries/` nunca importa de `commands/`), pero es distinto del molde de estudio; documentado en el
+  `CLAUDE.md` del paquete para que no se marque por comparación automática.
+- **No se extrajo** un `_borrar_pedidos_futuros_impagos_taller` (a diferencia de estudio) — no existe un
+  segundo call-site real que lo justifique (`admin_delete_edicion` no limpia pedidos futuros, confía en
+  `ON DELETE SET NULL`). Asimetría preexistente, documentada, no resuelta.
+- **2 bugs reales encontrados y arreglados en el camino** (ninguno por ruff/compileall — ambos corriendo
+  la suite de integración contra Postgres real): (1) un call-site de `_regenerar_pedidos_taller` que el
+  plan original no había identificado (`admin_update_edicion` también la llama, no solo los 2 endpoints de
+  creación) — lo cazó `ruff` (F821) al remover la función vieja del route; (2) un monkeypatch stale en
+  `test_talleres_f2_db.py` — `_gate_conflicto_estudio` importa `_get_estudio_row`/
+  `verificar_sesiones_disponibles` a nivel de módulo (mismo estilo que
+  `services/estudio/commands/reserva.py`), así que 2 tests que parcheaban los módulos de ORIGEN
+  (`services.estudio.queries.*`) dejaron de interceptar — "patch where it's used", mismo criterio ya
+  documentado en `test_estudio.py::_patch_post_collaborators`.
+- **Verificación.** Suite unit completa (2680 tests) verde; 201 tests unit+integración del dominio
+  taller/estudio corridos juntos contra Postgres 16 real (47s) sin regresiones; `ruff`+`compileall`
+  limpios. Gap de CI cerrado de paso: `test_talleres_liquidacion_db.py` (integración real, ya existía,
+  nunca corría en CI) conectado al job `db-migrations`. El agente `supervisor` devolvió APROBADO CON
+  OBSERVACIONES — confirmó de forma independiente los 2 bugs arreglados, que no hay ningún `import
+  routes.*` en `services/talleres/`, y que el YAML del CI nuevo corre bien.
+- **Rama apilada.** La rama de este split salió de la rama del PR de estudio (#1297), no de `dev`, porque
+  el paquete nuevo consume `services/estudio/queries/*` (el gate), que solo existía ahí hasta que #1297
+  mergeó. El PR (#1299) apuntó a esa rama hasta que #1297 mergeó a `dev`, momento en el que se retargeteó
+  a `dev` — mismo patrón "PR como hoja de ruta" (2026-06-27) aplicado a una dependencia entre dos splits
+  consecutivos del mismo dominio.
+- **Why.** Mismo motivo que motivó el split de estudio: lógica de decisión duplicada en un archivo de
+  transporte es una fuente de drift silencioso. Tracking: #1298. PR: #1299.
