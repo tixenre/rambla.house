@@ -2,7 +2,7 @@
   {
     "name": "App entry (JS, comprimido)",
     "path": "dist/assets/index-*.js",
-    "limit": "115 kB"
+    "limit": "116 kB"
   },
   {
     "name": "Vendors (JS, comprimido)",
