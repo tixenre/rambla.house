@@ -41,6 +41,7 @@ from services.media_fastapi import media_http
 # quedan acá. Ver services/estudio/CLAUDE.md.
 from services.estudio.constants import _ADVISORY_NS_ESTUDIO
 from services.estudio.queries.estudio import _get_estudio_row
+from services.estudio.queries.agenda_publica import bloques_ocupados_estudio
 from services.estudio.queries.disponibilidad import (
     _estudio_disponible,
     _franja_estudio,
@@ -1275,6 +1276,37 @@ def estudio_disponibilidad(
         # (compuesto genérico) — misma franja.
         promo = _promo_info(conn, estudio, fecha_desde, fecha_hasta)
         return {"libre": True, "motivo": None, "promo": promo}
+
+
+@router.get("/estudio/ocupacion-publica")
+def estudio_ocupacion_publica(
+    desde: str = Query(..., description="YYYY-MM-DD"),
+    hasta: str = Query(..., description="YYYY-MM-DD"),
+):
+    """Bloques ocupados del estudio en [desde, hasta] para la grilla semanal
+    pública (`/estudio`, paso "¿Cuándo?"). ANÓNIMO — a diferencia de
+    `/admin/estudio/ocupacion`, nunca incluye cliente/nombre/número de
+    pedido (ver `bloques_ocupados_estudio`). Es un atajo visual para elegir
+    franja, no el gate — `/estudio/disponibilidad` sigue siendo la única
+    fuente de verdad antes de confirmar una reserva."""
+    try:
+        d0 = datetime.strptime(desde, "%Y-%m-%d").date()
+        d1 = datetime.strptime(hasta, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(400, "Fecha inválida (esperado YYYY-MM-DD)")
+    if d1 < d0:
+        raise HTTPException(400, "hasta no puede ser anterior a desde")
+    with get_db() as conn:
+        estudio = _get_estudio_row(conn)
+        if not estudio["equipo_id"]:
+            raise HTTPException(409, "El estudio todavía no tiene un recurso asociado")
+        bloques = bloques_ocupados_estudio(conn, estudio, d0, d1)
+        return {
+            "bloques": [
+                {"fecha_desde": b["fecha_desde"].isoformat(), "fecha_hasta": b["fecha_hasta"].isoformat()}
+                for b in bloques
+            ]
+        }
 
 
 class EstudioReservaCreate(BaseModel):
