@@ -76,9 +76,13 @@ def _limpiar(conn):
 
 @pytest.fixture
 def setup():
-    from database import get_db, init_db
+    # NO llama a init_db() acá: `client_con_db` (module-scoped) ya lo hace, y
+    # duplicarlo corre en paralelo con el `db_init_thread` que dispara el
+    # `startup` de `TestClient(main.app)` — mismo `ALTER TABLE ... ADD
+    # CONSTRAINT` sin lock, carrera real que rompió CI (DuplicateObject en
+    # `spec_propuestas_pendientes_tipo_check`, 2026-07-26).
+    from database import get_db
 
-    init_db()
     conn = get_db()
     try:
         _limpiar(conn)
