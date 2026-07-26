@@ -658,8 +658,8 @@ class TestCrearReservaSinPack:
 
 class TestIterMesesYPrimerDia:
     def test_iter_meses_inclusive_cruza_anio(self):
-        from routes.estudio import _iter_meses
-        out = list(_iter_meses("2026-11", "2027-02"))
+        from services.fechas import iter_meses
+        out = list(iter_meses("2026-11", "2027-02"))
         assert out == [(2026, 11), (2026, 12), (2027, 1), (2027, 2)]
 
     def test_primer_dia_semana(self):
@@ -784,8 +784,8 @@ class _SlotRegenConn(_ConnCM):
 def _mes_offset_ym(n: int) -> tuple[int, int]:
     """(year, month) del mes actual + n meses — relativo a `hoy`, no hardcodeado
     (un `mes_desde`/`mes_hasta` fijo se pudre apenas el reloj cruza ese mes)."""
-    from routes.estudio import _mes_actual_ar
-    y, m = (int(x) for x in _mes_actual_ar().split("-"))
+    from services.fechas import mes_actual_ar
+    y, m = (int(x) for x in mes_actual_ar().split("-"))
     total = (y * 12 + (m - 1)) + n
     return total // 12, total % 12 + 1
 

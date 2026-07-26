@@ -34,6 +34,7 @@ from services.media import (
     store_upload,
 )
 from services.media_fastapi import media_http
+from services.fechas import iter_meses, mes_actual_ar
 # Motor de disponibilidad/reservas/promo de El Estudio — extraído a
 # services/estudio/ (CQRS-lite, #1283 + issue de tracking). Este route queda
 # como transporte fino: auth, conn/commit/rollback, HTTP. Perfil/fotos/
@@ -1148,22 +1149,6 @@ def _slot_to_dict(row) -> dict:
     }
 
 
-def _mes_actual_ar() -> str:
-    n = now_ar()
-    return f"{n.year:04d}-{n.month:02d}"
-
-
-def _iter_meses(mes_desde: str, mes_hasta: str):
-    """Itera (year, month) inclusive entre dos 'YYYY-MM'."""
-    y0, m0 = int(mes_desde[:4]), int(mes_desde[5:7])
-    y1, m1 = int(mes_hasta[:4]), int(mes_hasta[5:7])
-    cur = (y0, m0)
-    while cur <= (y1, m1):
-        yield cur
-        y, m = cur
-        cur = (y + 1, 1) if m == 12 else (y, m + 1)
-
-
 def _primer_dia_semana(year: int, month: int, dia_semana: int) -> datetime:
     """Primera fecha del mes cuyo weekday() == dia_semana (0=Lun..6=Dom)."""
     base = datetime(year, month, 1)
@@ -1212,7 +1197,7 @@ def _regenerar_pedidos_slot(conn, estudio, slot: dict) -> None:
     `_slot_bloqueante` (la regla, no el ítem) — el ítem acá es solo para que
     la plata se vea y se atribuya (dueño del centinela = 'Estudio')."""
     slot_id = slot["id"]
-    mes_actual = _mes_actual_ar()
+    mes_actual = mes_actual_ar()
     existentes = conn.execute(
         "SELECT id, fecha_desde, monto_pagado FROM alquileres WHERE estudio_slot_id = %s",
         (slot_id,),
@@ -1230,7 +1215,7 @@ def _regenerar_pedidos_slot(conn, estudio, slot: dict) -> None:
     if not slot["activo"]:
         return
 
-    for (y, m) in _iter_meses(slot["mes_desde"], slot["mes_hasta"]):
+    for (y, m) in iter_meses(slot["mes_desde"], slot["mes_hasta"]):
         mes = f"{y:04d}-{m:02d}"
         if mes < mes_actual or mes in conservados:
             continue
@@ -1265,7 +1250,7 @@ def _borrar_pedidos_futuros_impagos(conn, slot_id: int) -> None:
     """Borra los pedidos del slot que son de un mes actual-o-futuro y no tienen
     pagos. Los pasados/pagados quedan (su estudio_slot_id se va a NULL al borrar
     el slot, vía FK ON DELETE SET NULL)."""
-    mes_actual = _mes_actual_ar()
+    mes_actual = mes_actual_ar()
     rows = conn.execute(
         "SELECT id, fecha_desde, monto_pagado FROM alquileres WHERE estudio_slot_id = %s",
         (slot_id,),
