@@ -101,6 +101,7 @@ perdidos antes de confirmar el fix por JS (`gridColumn` computado + `backgroundC
 estado real, cambiando un estado de prueba y viendo el color reaccionar) y recién después un
 screenshot limpio agrandando la ventana a 1280×1400. La medición por JS hubiera confirmado el fix en
 el primer intento.
+✅ aplicada — cierre de gobernanza 2026-07-26 (gotcha sumado a `pulido-frontend/SKILL.md` §4 VERIFICAR)
 
 2026-07-25 · auditoria-profunda · **Bug real en `ui-audit.mjs`**: el detector de "scroller interno"
 (`[...document.querySelectorAll("*")].find(el => overflow-y auto/scroll && scrollHeight>clientHeight+200)`)
@@ -114,6 +115,9 @@ Proponer: excluir contenedores de navegación (`nav`, `aside`, o un contenedor c
 al viewport) del detector, o preferir el scroller de MAYOR área en vez del primero en orden DOM. · Por
 qué: sin este fix, cualquier auditoría de `/admin/*` en desktop cree tener evidencia visual y en
 realidad audita el sidebar 30 veces.
+✅ aplicada — cierre de gobernanza 2026-07-26 (detector unificado en `ui-audit.mjs`: excluye
+`nav`/`aside`/`[role=navigation]` y prefiere el de mayor área, vía `window.__findAuditScroller`
+inyectado una sola vez con `page.addInitScript` — antes duplicado en `scrollLoad` y `main`)
 
 2026-07-25 · auditoria-profunda · **Degradación acumulativa real**: correr el harness sobre >~15
 pantallas seguidas en el MISMO browser/tab (`GROUP=admin` completo, ~30 pantallas × 5 viewports = 150
@@ -128,6 +132,7 @@ por invocación (nuevo `chromium.launch()` por lote), no la matriz completa de u
 `LABEL` mergea el `_report.json` entre lotes, así que no se pierde nada. · Por qué: sin saberlo, una
 corrida completa de `GROUP=admin` pierde ~80% de las capturas por este techo, y el primer intento se
 reportaría como "la mayoría de las pantallas admin rotas" cuando en realidad es un límite de la corrida.
+✅ aplicada — cierre de gobernanza 2026-07-26 (nota de método sumada a `auditoria-profunda/SKILL.md`)
 
 2026-07-25 · auditoria-profunda · El harness asume su propia ubicación en disco para resolver la carpeta
 de salida (relativo tipo `../../../docs/audit-ui-screenshots` desde `.claude/skills/auditoria-profunda/`).
@@ -140,6 +145,8 @@ contra la raíz del repo (`git rev-parse --show-toplevel`) en vez de relativo a 
 qué: se pudo recuperar moviendo los archivos a mano porque se revisó explícitamente, pero es un modo de
 falla silencioso — alguien que no revise podría reportar "no generó nada" cuando en realidad generó todo
 en otro lado.
+✅ aplicada — cierre de gobernanza 2026-07-26 (`REPO` resuelto vía `git rev-parse --show-toplevel` en
+`ui-audit.mjs`, con fallback al método relativo si git no está disponible)
 
 2026-07-25 · auditoria-profunda · Gotcha de método: navegar a `/admin/pedidos/nuevo` (aunque sea solo
 para un screenshot, sin tocar nada) **crea un pedido real en la base** (`estado:"borrador"`, sin cliente,
@@ -151,6 +158,7 @@ del skill — si se visita esta pantalla, sumar su limpieza (`DELETE /api/alquil
 borradores creados) al checklist de limpieza final, no asumir que navegar = solo-lectura. · Por qué: es
 un side-effect real de UNA visita a una pantalla que en cualquier otra parte del sitio sería inocua —
 fácil de perder en la limpieza si no se sabe de antemano.
+✅ aplicada — cierre de gobernanza 2026-07-26 (gotcha sumado al Motor 2 de `auditoria-profunda/SKILL.md`)
 
 2026-07-25 · mantenimiento · La nota de Frente A ("no hay linter de Python en CI") está stale —
 `backend/ruff.toml` existe y `ruff` corre pineado (0.15.18) como gate de CI. (Nota: el agente de Frente A
@@ -159,3 +167,5 @@ este archivo dice que la sesión **deposita** libremente acá y el dueño aprueb
 corrigiendo ese malentendido de paso.) · Por qué: la sección "Inventario con herramientas" del skill
 sigue recomendando instalar ruff manualmente como si no estuviera ya en el pipeline — desactualiza el
 paso 1 del Frente A.
+✅ aplicada — cierre de gobernanza 2026-07-26 (nota corregida en `mantenimiento/SKILL.md` Frente A ·
+paso 1: `ruff` ya corre en CI con ruleset conservador, este barrido usa un ruleset más amplio)

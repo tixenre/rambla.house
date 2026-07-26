@@ -20,11 +20,25 @@ import { chromium } from "playwright";
 import { mkdirSync, writeFileSync, existsSync, readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { execSync } from "node:child_process";
 
 const BASE = process.env.BASE || "http://localhost:3000";
 const SECRET = process.env.STAGING_LOGIN_SECRET || "dev-local-secret";
 const CLIENTE_ID = Number(process.env.CLIENTE_ID || 209);
-const REPO = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+// Resuelto contra la raíz del repo (no relativo a este archivo): si el script se copia a otro
+// lugar (necesario en sandboxes donde Playwright solo resuelve el módulo ESM dentro de la cadena
+// de `frontend/node_modules`), un path relativo a `import.meta.url` apuntaba a un lugar
+// equivocado SIN error (bug real, 2026-07-25) — `git rev-parse` sigue siendo correcto porque el
+// script, dondequiera que se copie, sigue viviendo DENTRO del mismo working tree.
+const REPO = (() => {
+  try {
+    return execSync("git rev-parse --show-toplevel", {
+      cwd: dirname(fileURLToPath(import.meta.url)),
+    }).toString().trim();
+  } catch {
+    return resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  }
+})();
 const LABEL = process.env.LABEL || "run";
 const OUT = resolve(REPO, "docs/audit-ui-screenshots", LABEL);
 mkdirSync(OUT, { recursive: true });
@@ -132,9 +146,29 @@ export const MEASURE = () => {
   };
 };
 
+// Detector de scroller inyectado en cada página (window.__findAuditScroller) — UNA sola
+// implementación, no una copiada en `scrollLoad` y otra en `main` (así se coló el bug real:
+// arreglar una copia y no la otra). Excluye `nav`/`aside`/`[role=navigation]` y prefiere el de
+// MAYOR área en vez del primero en orden DOM: en `/admin/*` el sidebar aparece antes que el
+// contenido en el DOM y tiene su propio `overflow-y:auto` para su lista de nav — sin esto, las
+// capturas desktop de TODO el back-office quedaban recortadas al sidebar (bug real, 2026-07-25).
+async function installScrollerDetector(page) {
+  await page.addInitScript(() => {
+    window.__findAuditScroller = () => {
+      const candidates = [...document.querySelectorAll("*")].filter((el) => {
+        const c = getComputedStyle(el);
+        return /(auto|scroll)/.test(c.overflowY) && el.scrollHeight > el.clientHeight + 200;
+      });
+      const content = candidates.filter((el) => !el.closest("nav, aside, [role='navigation']"));
+      const pool = content.length ? content : candidates;
+      return pool.sort((a, b) => b.clientWidth * b.clientHeight - a.clientWidth * a.clientHeight)[0] || null;
+    };
+  });
+}
+
 export async function scrollLoad(page) {
   await page.evaluate(async () => {
-    const sc = [...document.querySelectorAll("*")].find(el=>{ const c=getComputedStyle(el); return /(auto|scroll)/.test(c.overflowY) && el.scrollHeight>el.clientHeight+200; });
+    const sc = window.__findAuditScroller();
     const max = sc ? sc.scrollHeight : document.body.scrollHeight;
     const step = (sc?sc.clientHeight:innerHeight) * 0.8;
     for (let y=0; y<=max; y+=step){ if(sc) sc.scrollTop=y; else window.scrollTo(0,y); await new Promise(r=>setTimeout(r,250)); }
@@ -148,6 +182,7 @@ const main = async () => {
   const browser = await chromium.launch({ channel: "chrome", headless: true });
   const ctx = await browser.newContext({ deviceScaleFactor: 1 });
   const page = await ctx.newPage();
+  await installScrollerDetector(page);
   await page.goto(BASE + "/rental", { waitUntil: "domcontentloaded" });
   let login = "skipped (NOLOGIN)";
   if (!process.env.NOLOGIN) {
@@ -173,7 +208,7 @@ const main = async () => {
         await page.waitForTimeout(700);
         await scrollLoad(page);
         const m = await page.evaluate(MEASURE);
-        const innerSel = await page.evaluate(() => { const sc=[...document.querySelectorAll("*")].find(el=>{const c=getComputedStyle(el);return /(auto|scroll)/.test(c.overflowY)&&el.scrollHeight>el.clientHeight+200;}); if(!sc)return null; sc.setAttribute("data-audit-scroller",""); return true; });
+        const innerSel = await page.evaluate(() => { const sc=window.__findAuditScroller(); if(!sc)return null; sc.setAttribute("data-audit-scroller",""); return true; });
         try { if (innerSel) await page.locator("[data-audit-scroller]").first().screenshot({ path: resolve(OUT, tag+".png") }); else await page.screenshot({ path: resolve(OUT, tag+".png"), fullPage: true }); }
         catch { await page.screenshot({ path: resolve(OUT, tag+".png") }); }
         const flags = (m.hScroll?1:0)+m.tap_lt44.length+m.font_lt_min.length+m.contrast_lt_AA.length+m.h_overflow.length;
