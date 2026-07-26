@@ -25,7 +25,14 @@ services/estudio/
                             # propio del espacio), _slot_bloqueante, _taller_bloqueante,
                             # _estudio_disponible (engine unificado: slot→taller→centinela),
                             # verificar_sesiones_disponibles (409, la usan slots + talleres),
-                            # revalidar_disponibilidad_estudio (la usa transiciones.cambiar_estado)
+                            # revalidar_disponibilidad_estudio (la usa transiciones.cambiar_estado),
+                            # _primer_dia_semana/_sesiones_de_slot (expansión de un slot fijo a
+                            # sesiones — move-verbatim desde routes/estudio.py, la necesitan tanto
+                            # el gate de slots como agenda_publica.py sin importar de routes.*)
+    agenda_publica.py       # bloques_ocupados_estudio + _centinela_ocupado_en_rango — vista
+                            # PÚBLICA y ANÓNIMA de ocupación por rango (slot+taller+centinela,
+                            # nunca cliente/nombre/número de pedido), para la grilla semanal del
+                            # selector de fechas de /estudio. No es el gate — solo lectura/display.
     promo.py              # get_disponibilidad (wrapper LOCAL sobre reservas.calcular_disponibilidad,
                            # conexión propia — ver "Reglas" abajo), _pack_equipo_ids (sobrevive
                            # como semilla de componentes), _promo_info

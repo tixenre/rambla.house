@@ -1152,8 +1152,6 @@ def _slot_to_dict(row) -> dict:
     }
 
 
-
-
 def _regenerar_pedidos_slot(conn, estudio, slot: dict) -> None:
     """(Re)genera un pedido `estudio_fijo` por mes del rango del slot. Preserva
     los pasados y los que ya tienen pagos; borra y recrea los futuros impagos.
