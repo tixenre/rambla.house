@@ -151,7 +151,7 @@ def _mes_de_fecha(fecha) -> str:
 # crear/editar/anular movimiento (y actualizar_comprobante) del mismo mes
 # contable. Arbitrario y privado de este flujo — mismo patrón que
 # _ADVISORY_NS_PEDIDO (routes/alquileres/core.py, 5390412) y
-# _ADVISORY_NS_ESTUDIO (routes/estudio.py, 5390413); siguiente número libre.
+# _ADVISORY_NS_ESTUDIO (services/estudio/constants.py, 5390413); siguiente número libre.
 _ADVISORY_NS_CONTAB_MES = 5390420
 
 

@@ -73,9 +73,13 @@ def _limpiar(conn):
 @pytest.fixture
 def setup(monkeypatch):
     monkeypatch.setenv("ADMIN_BYPASS_AUTH", "1")
-    from database import get_db, init_db
+    # NO llama a init_db() acá: `client_con_db` (module-scoped) ya lo hace, y
+    # duplicarlo corre en paralelo con el `db_init_thread` que dispara el
+    # `startup` de `TestClient(main.app)` — carrera real que rompió CI en un
+    # archivo hermano (DuplicateObject en `spec_propuestas_pendientes_tipo_check`,
+    # 2026-07-26).
+    from database import get_db
 
-    init_db()
     conn = get_db()
     try:
         _limpiar(conn)
@@ -242,7 +246,8 @@ def test_crear_reserva_admin_con_promo_sin_stock_es_best_effort(client_con_db, s
     promo la reserva no se bloquea: se crea igual, cobra el precio fijo
     completo y avisa vía `promo_advertencia`."""
     from database import get_db
-    from routes.estudio import _franja_estudio, _get_estudio_row
+    from services.estudio.queries.disponibilidad import _franja_estudio
+    from services.estudio.queries.estudio import _get_estudio_row
 
     conn = get_db()
     try:
@@ -447,7 +452,8 @@ def test_editar_reserva_agrega_promo_sin_stock_es_best_effort(client_con_db, set
     turno para sumarle la promo cuando su componente no tiene stock tampoco
     bloquea, cobra el precio fijo completo y avisa."""
     from database import get_db
-    from routes.estudio import _franja_estudio, _get_estudio_row
+    from services.estudio.queries.disponibilidad import _franja_estudio
+    from services.estudio.queries.estudio import _get_estudio_row
 
     r = client_con_db.post(
         "/api/admin/estudio/reservas",
