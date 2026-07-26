@@ -42,9 +42,12 @@ from services.fechas import iter_meses, mes_actual_ar
 # quedan acá. Ver services/estudio/CLAUDE.md.
 from services.estudio.constants import _ADVISORY_NS_ESTUDIO
 from services.estudio.queries.estudio import _get_estudio_row
+from services.estudio.queries.agenda_publica import bloques_ocupados_estudio
 from services.estudio.queries.disponibilidad import (
     _estudio_disponible,
     _franja_estudio,
+    _primer_dia_semana,
+    _sesiones_de_slot,
     _viola_anticipacion,
     verificar_sesiones_disponibles,
 )
@@ -1149,41 +1152,6 @@ def _slot_to_dict(row) -> dict:
     }
 
 
-def _primer_dia_semana(year: int, month: int, dia_semana: int) -> datetime:
-    """Primera fecha del mes cuyo weekday() == dia_semana (0=Lun..6=Dom)."""
-    base = datetime(year, month, 1)
-    offset = (dia_semana - base.weekday()) % 7
-    return base + timedelta(days=offset)
-
-
-def _sesiones_de_slot(slot: dict) -> list:
-    """Genera todas las fechas con `dia_semana` en el rango de meses del slot,
-    como lista de dicts {fecha, hora_inicio_min, hora_fin_min}. Usada para validar
-    disponibilidad antes de crear o editar un slot.
-
-    OJO unidades: `estudio_slots_fijos.hora_desde/hasta` siguen en HORAS enteras
-    (su tabla no cambió); las sesiones se emiten en MINUTOS (contrato de
-    `verificar_sesiones_disponibles` desde Escuela v2 F1) → conversión ×60 acá."""
-    y0, m0 = int(slot["mes_desde"][:4]), int(slot["mes_desde"][5:7])
-    y1, m1 = int(slot["mes_hasta"][:4]), int(slot["mes_hasta"][5:7])
-    import calendar as _cal
-    sesiones = []
-    cur = (y0, m0)
-    while cur <= (y1, m1):
-        y, m = cur
-        _, last_day = _cal.monthrange(y, m)
-        d = _primer_dia_semana(y, m, slot["dia_semana"]).date()
-        while d.month == m:
-            sesiones.append({
-                "fecha": d,
-                "hora_inicio_min": slot["hora_desde"] * 60,
-                "hora_fin_min": slot["hora_hasta"] * 60,
-            })
-            d = d + timedelta(weeks=1)
-        cur = (y + 1, 1) if m == 12 else (y, m + 1)
-    return sesiones
-
-
 def _regenerar_pedidos_slot(conn, estudio, slot: dict) -> None:
     """(Re)genera un pedido `estudio_fijo` por mes del rango del slot. Preserva
     los pasados y los que ya tienen pagos; borra y recrea los futuros impagos.
@@ -1293,6 +1261,37 @@ def estudio_disponibilidad(
         # (compuesto genérico) — misma franja.
         promo = _promo_info(conn, estudio, fecha_desde, fecha_hasta)
         return {"libre": True, "motivo": None, "promo": promo}
+
+
+@router.get("/estudio/ocupacion-publica")
+def estudio_ocupacion_publica(
+    desde: str = Query(..., description="YYYY-MM-DD"),
+    hasta: str = Query(..., description="YYYY-MM-DD"),
+):
+    """Bloques ocupados del estudio en [desde, hasta] para la grilla semanal
+    pública (`/estudio`, paso "¿Cuándo?"). ANÓNIMO — a diferencia de
+    `/admin/estudio/ocupacion`, nunca incluye cliente/nombre/número de
+    pedido (ver `bloques_ocupados_estudio`). Es un atajo visual para elegir
+    franja, no el gate — `/estudio/disponibilidad` sigue siendo la única
+    fuente de verdad antes de confirmar una reserva."""
+    try:
+        d0 = datetime.strptime(desde, "%Y-%m-%d").date()
+        d1 = datetime.strptime(hasta, "%Y-%m-%d").date()
+    except ValueError:
+        raise HTTPException(400, "Fecha inválida (esperado YYYY-MM-DD)")
+    if d1 < d0:
+        raise HTTPException(400, "hasta no puede ser anterior a desde")
+    with get_db() as conn:
+        estudio = _get_estudio_row(conn)
+        if not estudio["equipo_id"]:
+            raise HTTPException(409, "El estudio todavía no tiene un recurso asociado")
+        bloques = bloques_ocupados_estudio(conn, estudio, d0, d1)
+        return {
+            "bloques": [
+                {"fecha_desde": b["fecha_desde"].isoformat(), "fecha_hasta": b["fecha_hasta"].isoformat()}
+                for b in bloques
+            ]
+        }
 
 
 class EstudioReservaCreate(BaseModel):

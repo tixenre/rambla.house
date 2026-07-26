@@ -356,6 +356,17 @@ export function apiGetEstudioDisponibilidad(fecha: string, start: string, horas:
   }>("/api/estudio/disponibilidad", { fecha, start, horas: String(horas) });
 }
 
+/** Bloques ocupados del estudio en [desde, hasta] (YYYY-MM-DD, inclusive) —
+ *  vista pública y anónima (sin cliente/nombre/número de pedido) para la
+ *  grilla semanal del selector de fechas. Es un atajo visual: la franja
+ *  elegida igual se re-valida con `apiGetEstudioDisponibilidad` antes de
+ *  confirmar la reserva. */
+export function apiGetEstudioOcupacionPublica(desde: string, hasta: string) {
+  return get<{
+    bloques: { fecha_desde: string; fecha_hasta: string }[];
+  }>("/api/estudio/ocupacion-publica", { desde, hasta });
+}
+
 export type EstudioReservaBody = {
   fecha: string;
   start: string;

@@ -29,6 +29,7 @@ import {
 import { STUDIO, STUDIO_PHONE } from "@/data/studio";
 import { apiGetEstudioDisponibilidad, apiCrearReservaEstudio, type EstudioPromo } from "@/lib/api";
 import { pad, buildTimeSlots } from "@/lib/estudio-slots";
+import { EstudioWeekGrid } from "@/components/studio/EstudioWeekGrid";
 
 export type StudioBookingConfig = {
   pricePerHour: number;
@@ -348,6 +349,17 @@ export function StudioBookingForm({
 
       {/* ── 1. ¿Cuándo? ─────────────────────────────────────────────── */}
       <Section step={1} title="¿Cuándo?">
+        <EstudioWeekGrid
+          openHour={openHour}
+          closeHour={closeHour}
+          hours={hours}
+          selected={date ? { date, startSlot } : null}
+          onSelectSlot={(d, slot) => {
+            setDate(d);
+            setStartSlot(slot);
+          }}
+          className="mb-4"
+        />
         <div className="grid gap-3 sm:grid-cols-[1.4fr_1fr_1fr]">
           {/* Fecha */}
           <div>
