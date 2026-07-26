@@ -185,6 +185,24 @@ def iter_meses(mes_desde: str, mes_hasta: str):
         cur = (y + 1, 1) if m == 12 else (y, m + 1)
 
 
+# ── Nombres de días/meses en español (display) ──────────────────────────────
+
+DIAS_ES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+MESES_ES = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+]
+
+
+def fmt_fecha_es(d) -> str:
+    """datetime.date → 'sábado 11 de julio' — promovido desde `routes/talleres.py`
+    (lo necesita también `services.talleres.commands.economia`, que evitaba así
+    importar de `routes.*`)."""
+    if isinstance(d, str):
+        d = datetime.date.fromisoformat(d)
+    return f"{DIAS_ES[d.weekday()]} {d.day} de {MESES_ES[d.month - 1]}"
+
+
 # ── Horarios habilitados de retiro/devolución (setting `horarios_retiro`) ────────
 
 _DIAS_HORARIO = ["lun", "mar", "mie", "jue", "vie", "sab", "dom"]
