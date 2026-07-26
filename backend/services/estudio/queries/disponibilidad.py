@@ -135,6 +135,47 @@ def _slot_bloqueante(conn, fecha_desde, fecha_hasta,
     return None
 
 
+def _primer_dia_semana(year: int, month: int, dia_semana: int) -> datetime:
+    """Primera fecha del mes cuyo weekday() == dia_semana (0=Lun..6=Dom).
+    Move-verbatim desde `routes/estudio.py` — helper puro de `_sesiones_de_slot`."""
+    base = datetime(year, month, 1)
+    offset = (dia_semana - base.weekday()) % 7
+    return base + timedelta(days=offset)
+
+
+def _sesiones_de_slot(slot: dict) -> list:
+    """Genera todas las fechas con `dia_semana` en el rango de meses del slot,
+    como lista de dicts {fecha, hora_inicio_min, hora_fin_min}. Usada para validar
+    disponibilidad antes de crear o editar un slot, y para listar la ocupación de
+    slots fijos en un rango (agenda/ocupación admin, ocupación pública).
+
+    OJO unidades: `estudio_slots_fijos.hora_desde/hasta` siguen en HORAS enteras
+    (su tabla no cambió); las sesiones se emiten en MINUTOS (contrato de
+    `verificar_sesiones_disponibles` desde Escuela v2 F1) → conversión ×60 acá.
+
+    Move-verbatim desde `routes/estudio.py` — vivía ahí desde antes de que
+    existiera este paquete; se mueve para que `services/estudio/queries/` pueda
+    consumirla sin importar de `routes.*` (regla dura del paquete)."""
+    y0, m0 = int(slot["mes_desde"][:4]), int(slot["mes_desde"][5:7])
+    y1, m1 = int(slot["mes_hasta"][:4]), int(slot["mes_hasta"][5:7])
+    import calendar as _cal
+    sesiones = []
+    cur = (y0, m0)
+    while cur <= (y1, m1):
+        y, m = cur
+        _, last_day = _cal.monthrange(y, m)
+        d = _primer_dia_semana(y, m, slot["dia_semana"]).date()
+        while d.month == m:
+            sesiones.append({
+                "fecha": d,
+                "hora_inicio_min": slot["hora_desde"] * 60,
+                "hora_fin_min": slot["hora_hasta"] * 60,
+            })
+            d = d + timedelta(weeks=1)
+        cur = (y + 1, 1) if m == 12 else (y, m + 1)
+    return sesiones
+
+
 def _taller_bloqueante(conn, fecha_desde, fecha_hasta,
                        exclude_taller_id: Optional[int] = None) -> Optional[str]:
     """Si la franja solapa una clase de un taller PUBLICADO (concepto Y edición
