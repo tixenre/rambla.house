@@ -18,7 +18,7 @@
  */
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { addDays, format, startOfWeek } from "date-fns";
+import { addDays, format } from "date-fns";
 import { es } from "date-fns/locale";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -74,8 +74,10 @@ export function EstudioWeekGrid({
     d.setHours(0, 0, 0, 0);
     return d;
   }, []);
-  const semanaActual = useMemo(() => startOfWeek(today, { weekStartsOn: 1 }), [today]);
-  const [weekStart, setWeekStart] = useState(semanaActual);
+  // Ventana ROLLING de 7 días desde hoy — no la semana calendario (Lun-Dom).
+  // Con semana calendario, un domingo mostraba Lun-Sáb ya pasados (grises) y
+  // solo hoy útil: casi toda la grilla se veía vacía/gris sin sentido.
+  const [weekStart, setWeekStart] = useState(today);
   const [mobileDayIdx, setMobileDayIdx] = useState(0);
   const [hoverCell, setHoverCell] = useState<{ dayIdx: number; slot: string } | null>(null);
 
@@ -131,7 +133,7 @@ export function EstudioWeekGrid({
   const estaSeleccionado = (day: Date, slot: string): boolean =>
     !!selected && ymd(selected.date) === ymd(day) && selected.startSlot === slot;
 
-  const puedeIrAtras = weekStart.getTime() > semanaActual.getTime();
+  const puedeIrAtras = weekStart.getTime() > today.getTime();
 
   const cabeceraSemana = `${format(weekStart, "d MMM", { locale: es })} – ${format(dias[6], "d MMM", { locale: es })}`;
 
@@ -141,6 +143,7 @@ export function EstudioWeekGrid({
     const disabled = ocupado || pasado;
     const seleccionado = estaSeleccionado(day, slot);
     const highlight = !disabled && enHighlight(dayIdx, slot);
+    const horaEnPunto = slot.endsWith(":00");
 
     return (
       <button
@@ -154,13 +157,15 @@ export function EstudioWeekGrid({
           setHoverCell((c) => (c?.dayIdx === dayIdx && c.slot === slot ? null : c))
         }
         className={cn(
-          "h-6 w-full rounded-[3px] border border-transparent transition-colors",
-          disabled && "cursor-not-allowed bg-muted/60",
+          "h-7 w-full rounded-[3px] border transition-colors",
+          // Línea de hora — ancla visual para no perderse escaneando el scroll.
+          horaEnPunto ? "border-t-ink/10" : "border-t-transparent",
+          disabled && "cursor-not-allowed border-x-transparent border-b-transparent bg-muted/60",
           !disabled &&
             !seleccionado &&
-            "cursor-pointer bg-verde/10 hover:border-[var(--area-accent)]",
+            "cursor-pointer border-x-verde/25 border-b-verde/25 bg-verde/10 hover:border-[var(--area-accent)]",
           highlight && !seleccionado && "border-[var(--area-accent)] bg-[var(--area-accent-soft)]",
-          seleccionado && "bg-[var(--area-accent)]",
+          seleccionado && "border-[var(--area-accent)] bg-[var(--area-accent)]",
         )}
       />
     );
@@ -191,7 +196,7 @@ export function EstudioWeekGrid({
 
       {/* ── Desktop/tablet (≥640px): grid 7 columnas × N filas ────────── */}
       <div className="hidden overflow-hidden rounded-xl border hairline sm:block">
-        <div className="max-h-96 overflow-y-auto">
+        <div className="max-h-[28rem] overflow-y-auto">
           <div
             className="grid sticky top-0 z-10 bg-surface border-b hairline text-2xs text-muted-foreground"
             style={{ gridTemplateColumns: "3rem repeat(7, 1fr)" }}
@@ -207,12 +212,17 @@ export function EstudioWeekGrid({
             ))}
           </div>
           <div
-            className="grid gap-y-0.5 p-1.5"
+            className="grid gap-y-1 p-1.5"
             style={{ gridTemplateColumns: "3rem repeat(7, 1fr)" }}
           >
             {slots.map((slot) => (
               <div key={slot} className="contents">
-                <div className="tabular pr-2 text-right text-2xs leading-6 text-muted-foreground">
+                <div
+                  className={cn(
+                    "tabular pr-2 text-right leading-7 text-muted-foreground",
+                    slot.endsWith(":00") ? "text-xs font-medium text-ink/70" : "text-2xs",
+                  )}
+                >
                   {slot.endsWith(":00") ? slot : ""}
                 </div>
                 {dias.map((d, dayIdx) => (
