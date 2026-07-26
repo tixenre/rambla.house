@@ -76,6 +76,7 @@ export function EstudioWeekGrid({
   }, []);
   const semanaActual = useMemo(() => startOfWeek(today, { weekStartsOn: 1 }), [today]);
   const [weekStart, setWeekStart] = useState(semanaActual);
+  const [mobileDayIdx, setMobileDayIdx] = useState(0);
   const [hoverCell, setHoverCell] = useState<{ dayIdx: number; slot: string } | null>(null);
 
   const dias = useMemo(
@@ -222,6 +223,67 @@ export function EstudioWeekGrid({
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* ── Mobile (<640px): un día a la vez — carrusel de día + lista ──
+          vertical de franjas. 7 columnas angostas son ilegibles/imposibles
+          de tocar en 375px; acá la densidad se reparte en un eje por vez:
+          horizontal para elegir día, vertical para elegir hora. */}
+      <div className="sm:hidden">
+        <div className="flex snap-x snap-mandatory gap-1.5 overflow-x-auto pb-1">
+          {dias.map((d, dayIdx) => {
+            const activo = dayIdx === mobileDayIdx;
+            return (
+              <button
+                key={ymd(d)}
+                type="button"
+                onClick={() => setMobileDayIdx(dayIdx)}
+                aria-pressed={activo}
+                className={cn(
+                  "hit-area-44 flex shrink-0 snap-start flex-col items-center justify-center rounded-lg border px-3",
+                  activo
+                    ? "border-[var(--area-accent)] bg-[var(--area-accent-soft)]"
+                    : "hairline bg-surface text-muted-foreground",
+                )}
+              >
+                <span className="text-2xs capitalize">
+                  {DIAS_CORTOS[d.getDay() === 0 ? 6 : d.getDay() - 1]}
+                </span>
+                <span className={cn("tabular text-sm font-medium", activo && "text-ink")}>
+                  {format(d, "d")}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="mt-2 max-h-80 space-y-1 overflow-y-auto rounded-xl border hairline p-1.5">
+          {slots.map((slot) => {
+            const day = dias[mobileDayIdx];
+            const ocupado = estaOcupado(day, slot);
+            const pasado = yaPaso(day, slot);
+            const disabled = ocupado || pasado;
+            const seleccionado = estaSeleccionado(day, slot);
+            return (
+              <button
+                key={slot}
+                type="button"
+                disabled={disabled}
+                onClick={() => !disabled && onSelectSlot(day, slot)}
+                aria-pressed={seleccionado}
+                className={cn(
+                  "min-h-11 flex w-full items-center justify-between rounded-md border border-transparent px-3 text-sm",
+                  disabled && "cursor-not-allowed text-muted-foreground/50",
+                  !disabled && !seleccionado && "bg-verde/10 text-ink",
+                  seleccionado && "bg-[var(--area-accent)] text-ink",
+                )}
+              >
+                <span className="tabular">{slot}</span>
+                {disabled && !pasado && <span className="text-2xs">Ocupado</span>}
+              </button>
+            );
+          })}
         </div>
       </div>
     </div>
