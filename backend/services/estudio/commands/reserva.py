@@ -46,6 +46,92 @@ class SueltoItem(BaseModel):
     cantidad: int = Field(default=1, ge=1, le=9999)
 
 
+def _precio_promo_y_sueltos(
+    conn, estudio, con_promo: bool, sueltos: list,
+) -> tuple[int, int, dict[int, int]]:
+    """Resuelve el precio de la promo + de cada suelto vía la fuente única
+    `precio_jornada_efectivo` (MEMORIA 2026-06-29 — el front no calcula
+    plata; esto tampoco calcula nada propio, solo suma lo que esa fuente
+    devuelve). Puro cálculo de lectura, sin validar stock ni insertar nada —
+    compartido por `_crear_pedido_estudio` (necesita el total ANTES de
+    insertar el pedido), `editar_reserva` y `cotizar_reserva_estudio`
+    (`routes/estudio.py`, preview sin pedido_id). Devuelve `(promo_precio,
+    monto_extra, precios_sueltos)`: `monto_extra` ya suma promo + sueltos×cantidad."""
+    promo_precio = precio_jornada_efectivo(conn, estudio["promo_combo_id"]) or 0 if con_promo else 0
+    monto_extra = promo_precio
+    precios_sueltos: dict[int, int] = {}
+    for s in sueltos:
+        precio = precio_jornada_efectivo(conn, s.equipo_id) or 0
+        precios_sueltos[s.equipo_id] = precio
+        monto_extra += precio * s.cantidad
+    return promo_precio, monto_extra, precios_sueltos
+
+
+def _validar_e_insertar_promo_sueltos(
+    conn, pedido_id: int, fecha_desde, fecha_hasta, *,
+    estudio, con_promo: bool, sueltos: list,
+    promo_precio: int, precios_sueltos: dict[int, int],
+) -> Optional[str]:
+    """Valida stock e inserta los `alquiler_items` de promo/sueltos de una
+    reserva del Estudio YA con `pedido_id` (fila de `alquileres` insertada) —
+    compartido por `_crear_pedido_estudio` (alta) y `editar_reserva` (edición),
+    antes duplicado byte a byte entre ambos.
+
+    Promo (combo): BEST-EFFORT, nunca bloquea — mismo criterio que tenía el
+    pack ⏰ retirado: lo que no hay no frena la reserva, se cobra el precio
+    fijo igual (ya sumado al `monto_total` del caller vía
+    `_precio_promo_y_sueltos`) y se devuelve qué faltó. Sueltos: requisito
+    DURO — un equipo elegido por su nombre, ya comprometido con el cliente;
+    si no hay stock, 409 y nada se inserta.
+
+    Se valida ANTES de insertar (`validar_stock_hipotetico` toma sus propios
+    `FOR UPDATE`, expandiendo combos con `_expandir_mult`): si el INSERT fuera
+    antes, el lock implícito FOR KEY SHARE del propio insert quedaría en el
+    camino del FOR UPDATE del gate — mismo motivo que el orden lock-antes-de-
+    insertar del centinela (ver `_crear_pedido_estudio`). Devuelve
+    `promo_advertencia` (o `None`); no commitea (responsabilidad del caller)."""
+    promo_advertencia: Optional[str] = None
+    if con_promo:
+        errores_promo = validar_stock_hipotetico(
+            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
+            [_Item(estudio["promo_combo_id"], 1)],
+        )
+        if errores_promo:
+            promo_advertencia = (
+                f"La promo se reservó igual, pero sin stock de: {'; '.join(errores_promo)}"
+            )
+
+    if sueltos:
+        errores_sueltos = validar_stock_hipotetico(
+            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
+            [_Item(s.equipo_id, s.cantidad) for s in sueltos],
+        )
+        if errores_sueltos:
+            raise HTTPException(409, f"Sin stock suficiente: {'; '.join(errores_sueltos)}")
+
+    if con_promo:
+        conn.execute(
+            """
+            INSERT INTO alquiler_items
+                (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo)
+            VALUES (%s,%s,1,%s,%s,'fijo')
+            """,
+            (pedido_id, estudio["promo_combo_id"], promo_precio, promo_precio),
+        )
+    for s in sueltos:
+        precio = precios_sueltos[s.equipo_id]
+        conn.execute(
+            """
+            INSERT INTO alquiler_items
+                (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo)
+            VALUES (%s,%s,%s,%s,%s,'fijo')
+            """,
+            (pedido_id, s.equipo_id, s.cantidad, precio, precio * s.cantidad),
+        )
+
+    return promo_advertencia
+
+
 def _crear_pedido_estudio(
     conn, *, estudio, fecha_desde, fecha_hasta,
     cliente_id, cliente_nombre, cliente_email, cliente_telefono,
@@ -90,15 +176,10 @@ def _crear_pedido_estudio(
     espacio_monto_final = (
         espacio_monto if espacio_monto is not None else (estudio["precio_hora"] or 0) * horas
     )
-    monto_total = espacio_monto_final
-    promo_precio = precio_jornada_efectivo(conn, estudio["promo_combo_id"]) or 0 if con_promo else 0
-    if con_promo:
-        monto_total += promo_precio
-    precios_sueltos: dict[int, int] = {}
-    for s in sueltos:
-        precio = precio_jornada_efectivo(conn, s.equipo_id) or 0
-        precios_sueltos[s.equipo_id] = precio
-        monto_total += precio * s.cantidad
+    promo_precio, monto_extra, precios_sueltos = _precio_promo_y_sueltos(
+        conn, estudio, con_promo, sueltos,
+    )
+    monto_total = espacio_monto_final + monto_extra
 
     pedido_id = conn.insert_returning(
         """
@@ -114,67 +195,15 @@ def _crear_pedido_estudio(
         ),
     )
 
-    # Se valida ANTES de insertar (`validar_stock_hipotetico`, como en
-    # `revalidar_disponibilidad_estudio`) — NO insertar-y-recién-chequear: el
-    # gate toma sus propios `FOR UPDATE` (expande combos con la MISMA pieza
-    # que cualquier compuesto, `_expandir_mult`), y si el INSERT fuera antes,
-    # el lock implícito FOR KEY SHARE del propio insert quedaría en el camino
-    # del FOR UPDATE del gate — mismo deadlock que el centinela (ver
-    # comentario abajo), aplicado acá por las dudas.
-
-    # ── Promo (combo): BEST-EFFORT, nunca bloquea ───────────────────────────
-    # Mismo criterio que tenía el pack ⏰ retirado: la promo es un bundle a
-    # precio fijo — lo que no hay no bloquea la reserva, se cobra el precio
-    # fijo igual (`monto_total` ya sumó `promo_precio` arriba) y se avisa qué
-    # faltó (`promo_advertencia`, lo muestra el caller). Sigue siendo UNA sola
-    # línea (`equipo_id=promo_combo_id`, ítems veraces Fase 5) — no hay líneas
-    # parciales del combo; el motor sigue expandiendo su demanda completa y
-    # recursiva para cualquier chequeo FUTURO (`validar_stock_hipotetico`
-    # queda sagrado, sin excepción) — acá solo se decide NO reventar el 409
-    # con lo que ya devolvió. Corre igual (toma sus locks, sirve para el
-    # mensaje) aunque no bloquee.
-    promo_advertencia: Optional[str] = None
-    if con_promo:
-        errores_promo = validar_stock_hipotetico(
-            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
-            [_Item(estudio["promo_combo_id"], 1)],
-        )
-        if errores_promo:
-            promo_advertencia = (
-                f"La promo se reservó igual, pero sin stock de: {'; '.join(errores_promo)}"
-            )
-
-    # ── Sueltos: requisito DURO, sin best-effort ────────────────────────────
-    # A diferencia de la promo (arriba), un suelto es un equipo elegido por su
-    # nombre, ya comprometido con el cliente: si no hay stock, la reserva
-    # entera falla (409) en vez de servir una versión parcial silenciosa.
-    if sueltos:
-        errores_sueltos = validar_stock_hipotetico(
-            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
-            [_Item(s.equipo_id, s.cantidad) for s in sueltos],
-        )
-        if errores_sueltos:
-            raise HTTPException(409, f"Sin stock suficiente: {'; '.join(errores_sueltos)}")
-
-    if con_promo:
-        conn.execute(
-            """
-            INSERT INTO alquiler_items
-                (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo)
-            VALUES (%s,%s,1,%s,%s,'fijo')
-            """,
-            (pedido_id, estudio["promo_combo_id"], promo_precio, promo_precio),
-        )
-    for s in sueltos:
-        precio = precios_sueltos[s.equipo_id]
-        conn.execute(
-            """
-            INSERT INTO alquiler_items
-                (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo)
-            VALUES (%s,%s,%s,%s,%s,'fijo')
-            """,
-            (pedido_id, s.equipo_id, s.cantidad, precio, precio * s.cantidad),
-        )
+    # Promo (BEST-EFFORT, nunca bloquea) + sueltos (DURO, 409 si falta stock):
+    # valida e inserta sus `alquiler_items` — ver el docstring de
+    # `_validar_e_insertar_promo_sueltos` para el porqué del orden
+    # validar-antes-de-insertar (mismo motivo que el centinela, abajo).
+    promo_advertencia = _validar_e_insertar_promo_sueltos(
+        conn, pedido_id, fecha_desde, fecha_hasta,
+        estudio=estudio, con_promo=con_promo, sueltos=sueltos,
+        promo_precio=promo_precio, precios_sueltos=precios_sueltos,
+    )
 
     # ── Espacio (centinela): requisito DURO ─────────────────────────────────
     # Lock PRIMERO, INSERT después — a propósito, en ese orden. Un INSERT que
@@ -300,52 +329,20 @@ def editar_reserva(
     )
 
     con_promo = bool(con_promo) and bool(estudio["promo_combo_id"])
-    monto_total = espacio_monto_final
-    # Validar ANTES de insertar (mismo motivo que `_crear_pedido_estudio`:
-    # insertar primero dejaría el lock implícito FOR KEY SHARE del
-    # propio insert en el camino del FOR UPDATE que toma el gate).
 
-    # Promo: BEST-EFFORT, nunca bloquea (mismo criterio que
-    # `_crear_pedido_estudio` — ver ese docstring para el porqué).
-    promo_advertencia: Optional[str] = None
-    if con_promo:
-        errores_promo = validar_stock_hipotetico(
-            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
-            [_Item(estudio["promo_combo_id"], 1)],
-        )
-        if errores_promo:
-            promo_advertencia = (
-                f"La promo se reservó igual, pero sin stock de: {'; '.join(errores_promo)}"
-            )
-
-    # Sueltos: requisito DURO, sin best-effort.
-    if sueltos_finales:
-        errores_sueltos = validar_stock_hipotetico(
-            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
-            [_Item(s.equipo_id, s.cantidad) for s in sueltos_finales],
-        )
-        if errores_sueltos:
-            raise HTTPException(409, f"Sin stock suficiente: {'; '.join(errores_sueltos)}")
-
-    if con_promo:
-        promo_precio = precio_jornada_efectivo(conn, estudio["promo_combo_id"]) or 0
-        monto_total += promo_precio
-        conn.execute(
-            """INSERT INTO alquiler_items
-                   (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo)
-               VALUES (%s,%s,1,%s,%s,'fijo')""",
-            (pedido_id, estudio["promo_combo_id"], promo_precio, promo_precio),
-        )
-    for s in sueltos_finales:
-        precio = precio_jornada_efectivo(conn, s.equipo_id) or 0
-        subtotal = precio * s.cantidad
-        monto_total += subtotal
-        conn.execute(
-            """INSERT INTO alquiler_items
-                   (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo)
-               VALUES (%s,%s,%s,%s,%s,'fijo')""",
-            (pedido_id, s.equipo_id, s.cantidad, precio, subtotal),
-        )
+    # Promo (BEST-EFFORT, nunca bloquea) + sueltos (DURO, 409 si falta stock):
+    # mismos dos helpers que `_crear_pedido_estudio` — ver
+    # `_validar_e_insertar_promo_sueltos` para el porqué del orden
+    # validar-antes-de-insertar.
+    promo_precio, monto_extra, precios_sueltos = _precio_promo_y_sueltos(
+        conn, estudio, con_promo, sueltos_finales,
+    )
+    monto_total = espacio_monto_final + monto_extra
+    promo_advertencia = _validar_e_insertar_promo_sueltos(
+        conn, pedido_id, fecha_desde, fecha_hasta,
+        estudio=estudio, con_promo=con_promo, sueltos=sueltos_finales,
+        promo_precio=promo_precio, precios_sueltos=precios_sueltos,
+    )
 
     conn.execute(
         "UPDATE alquiler_items SET precio_jornada = %s, subtotal = %s "

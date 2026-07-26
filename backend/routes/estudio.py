@@ -34,7 +34,6 @@ from services.media import (
     store_upload,
 )
 from services.media_fastapi import media_http
-from services.precios import precio_jornada_efectivo
 # Motor de disponibilidad/reservas/promo de El Estudio — extraído a
 # services/estudio/ (CQRS-lite, #1283 + issue de tracking). Este route queda
 # como transporte fino: auth, conn/commit/rollback, HTTP. Perfil/fotos/
@@ -53,6 +52,7 @@ from services.estudio.commands.reserva import (
     SueltoItem,
     _crear_pedido_estudio,
     _ESTADOS_ADMIN_CREACION,
+    _precio_promo_y_sueltos,
     editar_reserva as _editar_reserva_estudio,
 )
 from services.estudio.commands.promo import crear_promo as _crear_promo
@@ -1564,21 +1564,25 @@ def cotizar_reserva_estudio(
 
         con_promo = bool(con_promo) and bool(estudio["promo_combo_id"])
         espacio_monto = (estudio["precio_hora"] or 0) * horas
-        desglose = {"espacio": espacio_monto, "promo": 0, "sueltos": []}
-        total = espacio_monto
-        if con_promo:
-            promo_precio = precio_jornada_efectivo(conn, estudio["promo_combo_id"]) or 0
-            desglose["promo"] = promo_precio
-            total += promo_precio
-        for s in sueltos:
-            precio = precio_jornada_efectivo(conn, s.equipo_id) or 0
-            subtotal = precio * s.cantidad
-            desglose["sueltos"].append(
-                {"equipo_id": s.equipo_id, "cantidad": s.cantidad, "precio_jornada": precio,
-                 "subtotal": subtotal}
-            )
-            total += subtotal
-        desglose["monto_total"] = total
+        # Mismo resolutor de precios que `_crear_pedido_estudio`/`editar_reserva`
+        # (services.estudio.commands.reserva) — acá sin validar stock ni insertar
+        # nada (preview puro, sin pedido_id todavía).
+        promo_precio, monto_extra, precios_sueltos = _precio_promo_y_sueltos(
+            conn, estudio, con_promo, sueltos,
+        )
+        desglose = {
+            "espacio": espacio_monto,
+            "promo": promo_precio,
+            "sueltos": [
+                {
+                    "equipo_id": s.equipo_id, "cantidad": s.cantidad,
+                    "precio_jornada": precios_sueltos[s.equipo_id],
+                    "subtotal": precios_sueltos[s.equipo_id] * s.cantidad,
+                }
+                for s in sueltos
+            ],
+            "monto_total": espacio_monto + monto_extra,
+        }
 
         libre, motivo = _estudio_disponible(
             conn, estudio, fecha_desde, fecha_hasta, exclude_pedido_id=pedido_id,

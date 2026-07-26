@@ -30,8 +30,10 @@ services/estudio/
                            # conexión propia — ver "Reglas" abajo), _pack_equipo_ids (sobrevive
                            # como semilla de componentes), _promo_info
   commands/           # ESCRITURA — única puerta de mutación
-    reserva.py           # SueltoItem, _ESTADOS_ADMIN_CREACION, _crear_pedido_estudio (núcleo
-                          # compartido cliente+admin), editar_reserva (PATCH admin)
+    reserva.py           # SueltoItem, _ESTADOS_ADMIN_CREACION, _precio_promo_y_sueltos +
+                          # _validar_e_insertar_promo_sueltos (compartidos, ver abajo),
+                          # _crear_pedido_estudio (núcleo compartido cliente+admin),
+                          # editar_reserva (PATCH admin)
     promo.py              # crear_promo (crea el combo desde el pack curado)
 ```
 
@@ -58,13 +60,19 @@ de `queries/`; `queries/` **nunca** de `commands/`.
   committed-only; nunca pasarle la conn del caller); `commands/`/`queries/` reciben `estudio`,
   `cliente_id`/`cliente_nombre`/etc. ya resueltos como parámetros — la resolución de sesión/cliente/
   Didit queda en el route (`crear_reserva_estudio`, `_resolver_cliente_admin`).
-- **Duplicación conocida, no resuelta en este split (documentada a propósito):** (1) el predicado
+- **Precio + validación de promo/sueltos: unificado en 2 helpers** (`_precio_promo_y_sueltos` +
+  `_validar_e_insertar_promo_sueltos`, `commands/reserva.py`) — antes copiado byte a byte en
+  `_crear_pedido_estudio`, `editar_reserva` y (solo el cálculo) `cotizar_reserva_estudio` (route).
+  Cualquier consumidor nuevo de precio/validación/inserción de promo+sueltos usa estos dos, no
+  reimplementa el bloque. Único cambio de orden real (no de resultado): `editar_reserva` ahora
+  resuelve los precios ANTES de validar stock (antes: después) — si la validación de sueltos
+  rechaza, se hizo una lectura de precio de más (sin efecto, misma transacción que el caller
+  rollbackea igual).
+- **Duplicación conocida, no resuelta (documentada a propósito, fuera de alcance):** el predicado
   SQL "taller activo con clase en la fecha" está copiado en `_taller_bloqueante` (acá) y en las
   vistas de agenda/ocupación del route (`agenda_estudio`/`_ocupacion_estudio_rango`, ambas fuera de
-  este paquete — son vistas agregadas de display, no gates); (2) el cálculo de precio
-  promo+sueltos está copiado en `_crear_pedido_estudio`, `editar_reserva` y `cotizar_reserva_estudio`
-  (route). Ninguna es un problema de concurrencia — el lock de creación está unificado en un solo
-  lugar (`_crear_pedido_estudio`). Si aparece de nuevo, evaluar unificar; no es alcance de este split.
+  este paquete — son vistas agregadas de display, no gates). No es un problema de concurrencia. Si
+  aparece de nuevo, evaluar unificar.
 - **Inconsistencia de locking conocida, NO resuelta (documentar y avisar, no tocar sin chequear
   primero):** publicar un taller/slot usa `pg_advisory_xact_lock(_ADVISORY_NS_ESTUDIO, 1)`
   (namespace de este paquete, tomado desde `routes/estudio.py` y `routes/talleres.py`); crear una
