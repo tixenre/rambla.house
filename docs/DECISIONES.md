@@ -3496,3 +3496,40 @@ PDF/imagen", "Qué NO cubre").
   ya dependía solo del emisor (`tipo_comprobante` en `arca_fe`, correcto desde el día uno); esto extiende
   el mismo criterio al IMPORTE — depende solo de si el EMISOR discrimina IVA, nunca de si el receptor
   es RI. El supervisor marca cualquier cálculo de importe de Factura C que sume IVA del receptor.
+
+### 2026-07-27 — El Desglose/Cobranza del pedido apaga el IVA si ya hay una Factura C emitida
+
+- **Contexto.** El dueño probó en staging el fix anterior (Factura C sin IVA): la factura real quedó
+  bien ($296.611, CAE real emitido), pero al volver a la página del pedido, el "Desglose" seguía
+  mostrando "IVA 21% $75.600, Total $435.600" y "Cobranza: resta $435.600" — el pedido seguía
+  reclamando el 21% que la factura real, deliberadamente, ya no cobra. Pedido explícito: "deberíamos
+  actualizar el pedido, porque va a ser pago sin el IVA".
+- **Decisión de alcance.** Solo se corrige la vista del editor admin (`/api/cotizar`, consumida por
+  `pedidos.$id.lazy.tsx` para "Desglose" Y "Cobranza" — ambas leen `totales.total`/`totales.conIva`
+  del mismo response, así que un solo fix del lado backend arregla las dos secciones a la vez). NO se
+  tocó `services/finanzas_flujo/pedido.py::desglose_de_pedido` (PDF/mail/facturación) ni `monto_total`
+  persistido — el Presupuesto/PDF normalmente se genera ANTES de que exista una factura, así que el
+  caso "ya hay Factura C" casi no aplica ahí; si aparece, es un refinamiento aparte, no pedido todavía.
+- **Fix.** `services/facturacion/repo.py::factura_c_vigente(pedido_id, conn) -> bool` — nueva función
+  puerta: llama a `get_factura_principal_emitida` (ya existía, usada por el portal cliente) y chequea
+  `cbte_tipo == int(CbteTipo.FACTURA_C)`. `routes/alquileres/cotizacion.py::cotizar`, después de calcular
+  el `desglose` normal, si hay `pedido_congelado` (pedido no-presupuesto) y `factura_c_vigente` da
+  `True`, fuerza `con_iva=False`/`iva_monto=0`/`total_final=neto` — pisando lo que el perfil fiscal del
+  cliente hubiera sugerido. `pedido_congelado` pasó a inicializarse SIEMPRE (no solo dentro de
+  `if tiene_fechas:`) para que este chequeo no reviente con `UnboundLocalError` en el modo estimado
+  (sin fechas) — bug real encontrado por la suite existente al agregar el chequeo, no en producción.
+- **Por qué no reventar la NC.** Si más adelante se anula la Factura C con una Nota de Crédito, la
+  original pasa a `estado='anulada'` (motor de facturación, sin cambios) — `get_factura_principal_emitida`
+  ya filtra `estado='emitida'`, así que `factura_c_vigente` vuelve a dar `False` sola: el Desglose
+  vuelve a mostrar el IVA del perfil fiscal sin necesitar lógica extra acá.
+- **Tests.** `test_facturacion_engine.py`: 3 tests directos de `factura_c_vigente` (true con Factura C,
+  false con Factura A, false sin factura). `test_cotizar_endpoint.py::TestPedidoConFacturaCVigente`
+  (monkeypatchea `factura_c_vigente` en vez de fabricar una fila completa de `facturas` en el FakeConn —
+  su propia lógica de query ya está cubierta en `test_facturacion_engine.py`): Factura C vigente apaga
+  el IVA aunque el cliente sea RI; sin ella sigue sumando; un presupuesto ni siquiera llama a la
+  función (se verifica con un monkeypatch que explota si se invoca).
+- **Why.** Cierra el círculo de la iniciativa del día: letra del comprobante (solo el emisor decide) →
+  importe facturado (solo el emisor decide, PR anterior) → lo que el PEDIDO muestra que falta cobrar
+  (tiene que reflejar lo que la factura real ya resolvió, no re-litigar el perfil fiscal del cliente
+  una vez que ya hay un documento fiscal emitido). El supervisor marca un consumidor nuevo del total de
+  un pedido que no chequee `factura_c_vigente` antes de asumir el IVA del perfil fiscal.

@@ -463,6 +463,49 @@ def test_emisor_ri_sigue_sumando_iva_del_receptor_ri():
     assert req.alicuota == IVA_21
 
 
+def _fake_factura(**overrides) -> Factura:
+    base = dict(
+        id=1, pedido_id=5, emisor="santini", ambiente="produccion",
+        cbte_tipo=11, pto_vta=2, cbte_nro=10, cae="86261839900001", cae_vto=None,
+        doc_tipo=80, doc_nro="20372380099", condicion_iva_receptor=1,
+        concepto=2, imp_neto=Decimal(296611), imp_iva=Decimal(0), imp_total=Decimal(296611),
+        moneda="PES", cliente_cuit="20372380099", razon_social=None, qr_payload=None,
+        pdf_key=None, estado="emitida", nota_credito_de=None, raw_request=None,
+        raw_response=None, errores=None, fecha_emision=None, created_at=None, created_by=None,
+    )
+    base.update(overrides)
+    return Factura(**base)
+
+
+def test_factura_c_vigente_true_si_hay_factura_c_emitida(monkeypatch):
+    from services.facturacion import repo
+
+    monkeypatch.setattr(repo, "get_factura_principal_emitida", lambda pedido_id, conn: _fake_factura())
+
+    assert repo.factura_c_vigente(5, conn=object()) is True
+
+
+def test_factura_c_vigente_false_si_la_factura_es_a(monkeypatch):
+    """Una Factura A (emisor RI, `cbte_tipo=1`) SÍ discrimina IVA — no cuenta."""
+    from services.facturacion import repo
+
+    monkeypatch.setattr(
+        repo, "get_factura_principal_emitida",
+        lambda pedido_id, conn: _fake_factura(cbte_tipo=1, emisor="pablo",
+                                               imp_iva=Decimal(62288), imp_total=Decimal(358899)),
+    )
+
+    assert repo.factura_c_vigente(5, conn=object()) is False
+
+
+def test_factura_c_vigente_false_si_no_hay_factura(monkeypatch):
+    from services.facturacion import repo
+
+    monkeypatch.setattr(repo, "get_factura_principal_emitida", lambda pedido_id, conn: None)
+
+    assert repo.factura_c_vigente(5, conn=object()) is False
+
+
 def test_construir_comprobante_pedido_estudio_mismo_dia_no_rompe():
     """Chequeo de compatibilidad ARCA para el Estudio (#1283 Fase 6): un turno
     del estudio dura HORAS, no días — `fecha_desde`/`fecha_hasta` caen en el
