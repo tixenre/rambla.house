@@ -1046,6 +1046,21 @@ Gotcha: `get_disponibilidad` se llama DIRECTO desde `routes/estudio.py` → el d
 plano, NUNCA `Query(None)` (truthy → rompía el Estudio con 500). El supervisor marca una resta de
 disponibilidad recalculada en el front, o un editor/buscador de pedido que no consuma el hook único.
 
+### 2026-07-27 — `/api/cotizar` para un pedido existente ignoraba el perfil fiscal/productora elegido para ESE pedido
+
+El editor admin de un pedido ya creado cotizaba el IVA con el perfil default de la cuenta
+(`clientes.perfil_impuestos`), ignorando si ESE pedido quedó atado a un perfil fiscal alternativo o
+productora (`alquileres.perfil_fiscal_id`/`productora_id`, selector "Facturar a nombre de" del
+checkout, #1240) — el mismo target que sí resuelve `services.finanzas_flujo.pedido.desglose_de_pedido`
+(la facturación real). El "Desglose"/"Cobranza" de la página del pedido podía mostrar "sin IVA"
+mientras la Factura emitida para el mismo pedido sí incluía el 21% — dos totales del mismo pedido que
+no coincidían. Fix: `routes/alquileres/cotizacion.py::cotizar` también resuelve, para un pedido
+congelado (no-presupuesto), el `perfil_fiscal_id`/`productora_id` YA PERSISTIDO en `alquileres` (mismo
+helper `_resolver_datos_fiscales_pedido`, no una copia) — nunca el de `data.perfil_fiscal_id`/
+`data.productora_id` del body (eso sigue siendo solo para una sesión cliente cotizando su propio
+carrito). El supervisor marca un consumidor nuevo del perfil fiscal de un pedido existente que no pase
+por `_resolver_datos_fiscales_pedido` con el target DEL PEDIDO.
+
 ---
 
 ## Preferencias (cómo quiero que se hagan las cosas)

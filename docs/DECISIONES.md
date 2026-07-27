@@ -3431,3 +3431,37 @@ PDF/imagen", "Qué NO cubre").
   consecutivos del mismo dominio.
 - **Why.** Mismo motivo que motivó el split de estudio: lógica de decisión duplicada en un archivo de
   transporte es una fuente de drift silencioso. Tracking: #1298. PR: #1299.
+
+### 2026-07-27 — `/api/cotizar` para un pedido existente ignoraba el perfil fiscal/productora elegido para ESE pedido
+
+- **Contexto.** Al revisar el override de emisor (Factura C para un cliente RI, PR #1301), el dueño
+  notó que el preview de una factura mostraba $358.899 (neto + 21% de IVA) mientras la propia página
+  del pedido mostraba "Desglose: IVA — sin IVA, Total $296.611" para el MISMO pedido — dos totales
+  incompatibles del mismo pedido.
+- **Root cause.** `services.finanzas_flujo.pedido.desglose_de_pedido` (usado por la facturación real,
+  el PDF y el mail) resuelve el perfil fiscal vía `_resolver_datos_fiscales_pedido(conn, cliente_id,
+  pedido["perfil_fiscal_id"], pedido["productora_id"])` — el target que el cliente eligió para ESE
+  pedido puntual en el checkout ("Facturar a nombre de", #1240), con prioridad sobre el default de la
+  cuenta. `routes/alquileres/cotizacion.py::cotizar` (el endpoint que arma el "Desglose"/"Cobranza" en
+  vivo del editor admin) nunca daba ese segundo paso: su `SELECT` sobre `alquileres` para el pedido
+  congelado ni siquiera traía las columnas `perfil_fiscal_id`/`productora_id`, y la única resolución de
+  target fiscal alternativo que sí tenía (`data.perfil_fiscal_id`/`data.productora_id`, del body)
+  estaba gateada a `es_sesion_cliente` — nunca corría para un admin mirando el pedido de otro cliente.
+  Por diseño, `alquileres.monto_total` siempre persiste el NETO puro (`_recalcular_total_pedido` llama
+  `calcular_total(..., perfil_impuestos=None)` — "IVA es derivado al mostrar") — cualquier vista que no
+  resuelva el target fiscal correcto simplemente no muestra el IVA que corresponde, sin que nada la
+  marque como inconsistente con la que sí lo resuelve bien.
+- **Fix.** El `SELECT` de `pedido_congelado` en `cotizar()` suma `perfil_fiscal_id, productora_id`.
+  Cuando el pedido tiene alguno seteado, se llama a `_resolver_datos_fiscales_pedido` con esos valores
+  — los del PEDIDO, ya persistidos y ya validados al guardarse (no hace falta re-chequear membership de
+  productora, a diferencia del bloque de `data.productora_id`, que viene de un body no confiable).
+  Mismo helper que ya usan `desglose_de_pedido`/`_enriquecer_pedido_con_cliente_fiscal` — no una copia.
+- **Tests.** `test_cotizar_endpoint.py::TestPedidoCongeladoUsaTargetFiscalDelPedido` (3 casos): perfil
+  fiscal personal RI del pedido gana sobre el default `consumidor_final` de la cuenta; productora RI
+  del pedido ídem; sin target en el pedido (ambos `None`, el caso común) sigue el comportamiento de
+  siempre. `FakeConnConPedido` pasa a defaultear `perfil_fiscal_id`/`productora_id` a `None` para no
+  romper los 6 tests preexistentes de `TestPedidoCongeladoRespetaSnapshot` que no los declaraban.
+- **Why.** No se tocó `_recalcular_total_pedido`/`monto_total` (la plata persistida sigue siendo neto
+  puro, por diseño — "el front no calcula plata" tampoco aplica acá, el backend sigue siendo quien
+  decide) — el fix es puramente de qué target fiscal se usa para DERIVAR el IVA al mostrar, para que el
+  editor admin y la facturación real de un mismo pedido no puedan volver a divergir.
