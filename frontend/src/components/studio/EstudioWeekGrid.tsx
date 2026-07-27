@@ -3,12 +3,15 @@
  * "elegís a ciegas y recién después te digo si se puede" por "ves de
  * entrada qué hay libre". Consume `GET /api/estudio/ocupacion-publica`
  * (vista pública y anónima — nunca cliente/nombre/número de pedido) para
- * pintar 7 días × las franjas de 30 min del horario del estudio.
+ * pintar 7 días × las HORAS (no medias horas — ver `slotsDelDia`) del
+ * horario del estudio.
  *
- * Es un ATAJO VISUAL, nunca el gate: `StudioBookingForm` sigue validando la
- * franja elegida con `apiGetEstudioDisponibilidad` antes de habilitar
- * "Reservar" — esta grilla solo ayuda a elegir sobre datos frescos (30s de
- * staleTime), no reemplaza esa verificación final.
+ * Es un ATAJO VISUAL, nunca el gate ni el picker de precisión:
+ * `StudioBookingForm` sigue validando la franja elegida con
+ * `apiGetEstudioDisponibilidad` antes de habilitar "Reservar" (no reemplaza
+ * esa verificación final), y el `<select>` de Hora sigue siendo quien
+ * ofrece arrancar a media hora si hace falta — clickear acá selecciona la
+ * hora en punto.
  *
  * Variante desktop (`sm:` en adelante): grid real de 7 columnas × N filas.
  * La variante mobile (un día a la vez + lista vertical) vive en el mismo
@@ -47,14 +50,18 @@ function ymd(d: Date): string {
   return format(d, "yyyy-MM-dd");
 }
 
-/** Todas las medias horas de [openHour, closeHour) — a diferencia de
- *  `buildTimeSlots` (estudio-slots.ts), acá NO se recorta por duración: la
- *  grilla muestra el horario completo del estudio, el stepper de duración
- *  sigue siendo quien decide cuánto dura la reserva. */
+/** Una fila por HORA (no media hora) de [openHour, closeHour) — la grilla es
+ *  un atajo visual para elegir el día/hora aproximada, no el picker de
+ *  precisión (eso lo sigue siendo el `<select>` de Hora en
+ *  `StudioBookingForm`, que sí ofrece las medias horas vía `buildTimeSlots`).
+ *  Duplicar la mitad de las filas (28→56 en un horario típico 8-22hs) hacía
+ *  que la grilla ocupara una altura excesiva incluso ya compactada (pedido
+ *  directo del dueño) — la precisión de 30 min se resuelve con el dropdown,
+ *  no clickeando dos filas casi idénticas en la grilla. */
 function slotsDelDia(openHour: number, closeHour: number): string[] {
   const out: string[] = [];
   for (let h = openHour; h < closeHour; h++) {
-    out.push(`${pad(h)}:00`, `${pad(h)}:30`);
+    out.push(`${pad(h)}:00`);
   }
   return out;
 }
@@ -98,7 +105,6 @@ function Celda({
   highlight,
   onSelectSlot,
 }: CeldaProps) {
-  const horaEnPunto = slot.endsWith(":00");
   const motivo = ocupado ? " — ocupado" : sinTiempo ? " — no alcanza para la duración mínima" : "";
 
   return (
@@ -111,9 +117,7 @@ function Celda({
       aria-pressed={seleccionado}
       onClick={() => !disabled && onSelectSlot(day, slot)}
       className={cn(
-        "h-4 w-full rounded-[2px] border transition-colors",
-        // Línea de hora — ancla visual para no perderse escaneando el scroll.
-        horaEnPunto ? "border-t-ink/10" : "border-t-transparent",
+        "h-6 w-full rounded-[3px] border border-t-ink/10 transition-colors",
         disabled && "cursor-not-allowed border-x-transparent border-b-transparent bg-muted/60",
         !disabled &&
           !seleccionado &&
@@ -171,11 +175,14 @@ export function EstudioWeekGrid({
   const slots = useMemo(() => slotsDelDia(openHour, closeHour), [openHour, closeHour]);
   const ahora = useMemo(() => new Date(), []);
 
+  // Ventana de 60 min (una fila = una hora completa): si CUALQUIER mitad de
+  // la hora está tomada, la fila se muestra ocupada — conservador a
+  // propósito, evita una UI de "media celda ocupada" para un atajo visual.
   const estaOcupado = (day: Date, slot: string): boolean => {
     const [h, m] = slot.split(":").map(Number);
     const inicio = new Date(day);
     inicio.setHours(h, m, 0, 0);
-    const fin = new Date(inicio.getTime() + 30 * 60_000);
+    const fin = new Date(inicio.getTime() + 60 * 60_000);
     return bloques.some((b) => inicio < b.hasta && fin > b.desde);
   };
 
@@ -283,13 +290,8 @@ export function EstudioWeekGrid({
         >
           {slots.map((slot) => (
             <div key={slot} className="contents">
-              <div
-                className={cn(
-                  "tabular pr-1.5 text-right leading-4 text-muted-foreground",
-                  slot.endsWith(":00") ? "text-3xs font-medium text-ink/70" : "text-3xs opacity-0",
-                )}
-              >
-                {slot.endsWith(":00") ? slot : "·"}
+              <div className="tabular pr-1.5 text-right text-2xs font-medium leading-6 text-ink/70">
+                {slot}
               </div>
               {dias.map((d, dayIdx) => {
                 const ocupado = estaOcupado(d, slot);
