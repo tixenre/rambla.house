@@ -69,7 +69,14 @@ def construir_comprobante(
 
     La plata que se usa:
     - Para RI (Factura A): `neto = pedido['monto_total']`, alicuota=IVA_21 (21%)
-    - Para Mono/CF (Factura C): `neto = total_con_iva` (incluye IVA si lo hay; no se discrimina)
+    - Para emisor Monotributo (Factura C): `neto = pedido['monto_total']`, SIN alícuota — un
+      monotributista no le agrega el 21% a NADIE (regla legal fija, no depende de si el
+      receptor es RI). Antes de este fix se plegaba `iva_monto` del receptor adentro del
+      "neto" facturado (`neto_int + iva_int`) — vestigio de cuando el emisor Monotributo
+      solo se resolvía automáticamente para receptores no-RI (`iva_monto` siempre 0 en ese
+      caso, así que el pliegue nunca hacía nada distinto); el override de emisor (permite
+      facturar Factura C a un cliente RI) expuso el caso real donde `iva_monto` > 0 —
+      confirmado con el dueño: la Factura C tiene que facturar el neto solo, sin el 21%.
     """
     perfil_receptor = (pedido.get("cliente_perfil_impuestos") or "").strip().lower()
     cond_receptor = _condicion_iva_receptor(perfil_receptor)
@@ -92,14 +99,13 @@ def construir_comprobante(
     # `monto_total` es SIEMPRE el neto (sin IVA), persistido por calcular_total.
     neto_int = int(pedido.get("monto_total") or 0)
     iva_int = int(pedido.get("iva_monto") or 0)
+    importe_neto = Decimal(neto_int)
 
-    # Emisor Monotributo → no discrimina IVA; el total va como "neto"
-    if emisor_cond == CondicionIva.MONOTRIBUTO:
-        importe_neto = Decimal(neto_int + iva_int)
-        alicuota = None
-    else:
-        importe_neto = Decimal(neto_int)
-        alicuota = IVA_21 if iva_int > 0 else None
+    # Emisor Monotributo → Factura C, nunca discrimina IVA — y nunca lo suma tampoco,
+    # sea cual sea la condición del receptor (un monotributista no le agrega el 21% a
+    # NADIE, es una regla legal fija, no una preferencia). `iva_int` solo se usa para
+    # el emisor RI (Factura A/B), que sí discrimina IVA cuando corresponde.
+    alicuota = None if emisor_cond == CondicionIva.MONOTRIBUTO else (IVA_21 if iva_int > 0 else None)
 
     # --- fechas de servicio ---
     # Concepto = SERVICIOS (2) → requiere FchServDesde/Hasta/VtoPago

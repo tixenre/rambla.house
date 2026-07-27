@@ -202,6 +202,12 @@ emisor configurado cuando la resolución automática pide uno DISTINTO que no ex
 como cualquier factura: `facturas.emisor` guarda el `nombre` del emisor que realmente facturó,
 override o no.
 
+**El importe también depende SOLO del emisor, no del receptor.** `comprobante_pedido.construir_comprobante`
+factura siempre `pedido['monto_total']` (el neto) — con emisor Monotributo (Factura C) nunca suma
+`iva_monto` del receptor ni discrimina alícuota, sea el cliente RI o no (un monotributista no le
+agrega el 21% a NADIE, regla legal fija). Solo el emisor RESPONSABLE_INSCRIPTO discrimina el 21%
+cuando `iva_monto > 0`. Confirmado por el dueño (2026-07-27): ver `MEMORIA.md` esa fecha.
+
 Fuente única: `services/facturacion/emisores.py::emisor_para`. Mismo resolver que usa el
 motor de contratos (`#1138`). No duplicar esta lógica.
 
