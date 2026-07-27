@@ -408,6 +408,61 @@ def test_vto_pago_con_fecha_hasta_como_datetime_no_string():
     assert req.fecha_serv_hasta == date(2026, 7, 1)
 
 
+def test_emisor_monotributo_nunca_suma_iva_aunque_el_receptor_sea_ri():
+    """Bug real (encontrado por el dueño probando el override de emisor,
+    #1301/#1302): un cliente Responsable Inscripto tiene `iva_monto` > 0
+    (`cliente_perfil_impuestos='responsable_inscripto'`) pero se factura con
+    un emisor MONOTRIBUTO (Factura C, vía `emisor_id` override). Un
+    monotributista no le agrega el 21% a NADIE — regla legal fija, no
+    depende de la condición del receptor — así que el importe facturado
+    tiene que ser el NETO solo, con `alicuota=None` (sin discriminar).
+    Antes de este fix, `construir_comprobante` plegaba `iva_monto` adentro
+    del "neto" facturado (`neto_int + iva_int`), inflando la Factura C con
+    IVA que un monotributista no puede cobrar."""
+    from services.facturacion.comprobante_pedido import construir_comprobante
+    from arca_fe import Emisor, CondicionIva
+
+    pedido = {
+        **_fake_pedido(),
+        "monto_total": 296611,
+        "iva_monto": 62288,  # 21% de 296611 — lo que cobraría una Factura A
+        "cliente_perfil_impuestos": "responsable_inscripto",
+        "cliente_cuit": "20372380099",
+    }
+    emisor_obj = Emisor(cuit=20300000003, punto_venta=2, condicion_iva=CondicionIva.MONOTRIBUTO)
+
+    req = construir_comprobante(
+        pedido, emisor_obj, CondicionIva.MONOTRIBUTO, fecha=date(2026, 7, 27),
+    )
+
+    assert req.importe_neto == Decimal(296611)
+    assert req.alicuota is None
+
+
+def test_emisor_ri_sigue_sumando_iva_del_receptor_ri():
+    """Control: el emisor RESPONSABLE_INSCRIPTO (Factura A) sigue discriminando
+    el 21% cuando corresponde — el fix de arriba solo afecta al emisor
+    Monotributo, no toca este camino."""
+    from services.facturacion.comprobante_pedido import construir_comprobante
+    from arca_fe import Emisor, CondicionIva, IVA_21
+
+    pedido = {
+        **_fake_pedido(),
+        "monto_total": 296611,
+        "iva_monto": 62288,
+        "cliente_perfil_impuestos": "responsable_inscripto",
+        "cliente_cuit": "20372380099",
+    }
+    emisor_obj = Emisor(cuit=20300000003, punto_venta=1, condicion_iva=CondicionIva.RESPONSABLE_INSCRIPTO)
+
+    req = construir_comprobante(
+        pedido, emisor_obj, CondicionIva.RESPONSABLE_INSCRIPTO, fecha=date(2026, 7, 27),
+    )
+
+    assert req.importe_neto == Decimal(296611)
+    assert req.alicuota == IVA_21
+
+
 def test_construir_comprobante_pedido_estudio_mismo_dia_no_rompe():
     """Chequeo de compatibilidad ARCA para el Estudio (#1283 Fase 6): un turno
     del estudio dura HORAS, no días — `fecha_desde`/`fecha_hasta` caen en el

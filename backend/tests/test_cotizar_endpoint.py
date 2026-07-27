@@ -570,10 +570,35 @@ class FakeConnConPedido(FakeConn):
     def __init__(self, *args, pedido=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.pedido = pedido  # {estado, cliente_id, descuento_jornadas_pct, descuento_cliente_pct}
+        # `perfil_fiscal_id`/`productora_id` — columnas reales de `alquileres` que el
+        # SELECT del endpoint trae siempre; default None para no forzar a cada test
+        # existente a declararlas (equivale a un pedido sin target fiscal alternativo).
+        if self.pedido is not None:
+            self.pedido.setdefault("perfil_fiscal_id", None)
+            self.pedido.setdefault("productora_id", None)
 
     def fetchone(self):
         if "FROM alquileres" in self._sql:
             return self.pedido
+        return super().fetchone()
+
+
+class FakeConnPedidoConPerfilFiscal(FakeConnConPedido):
+    """FakeConn + `cliente_perfiles_fiscales`/`productoras` (para resolver el
+    target fiscal YA PERSISTIDO en el pedido, no el que manda el body) — misma
+    idea que `FakeConnProductora`, pero resuelta desde `alquileres`, no desde
+    `data.perfil_fiscal_id`/`data.productora_id`."""
+
+    def __init__(self, *args, perfil_fiscal=None, productora=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.perfil_fiscal = perfil_fiscal  # {"id", "perfil_impuestos", ...} o None
+        self.productora = productora
+
+    def fetchone(self):
+        if "FROM cliente_perfiles_fiscales" in self._sql:
+            return self.perfil_fiscal
+        if "FROM productoras" in self._sql:
+            return self.productora
         return super().fetchone()
 
 
@@ -704,3 +729,84 @@ class TestPedidoCongeladoRespetaSnapshot:
         assert out["descuento_pct"] == 25
         assert out["neto"] == 7500
         assert out["descuento_origen"] == "manual"
+
+
+class TestPedidoCongeladoUsaTargetFiscalDelPedido:
+    """Bug real (encontrado comparando el 'Desglose' del admin contra la Factura
+    ARCA de un pedido ya facturado): el editor de un pedido EXISTENTE cotizaba
+    el IVA con el perfil DEFAULT de la cuenta (`clientes.perfil_impuestos`),
+    ignorando que ESE pedido puntual quedó atado a un perfil fiscal alternativo
+    o productora (selector "Facturar a nombre de" del checkout, #1240,
+    `alquileres.perfil_fiscal_id`/`productora_id`) — mismo target que SÍ resuelve
+    `services.finanzas_flujo.pedido.desglose_de_pedido` (el que usa la
+    facturación real). Antes de este fix, la página del pedido mostraba "sin
+    IVA" mientras la Factura C/A emitida para el mismo pedido sí incluía el 21%
+    — dos totales del mismo pedido que no podían coincidir."""
+
+    def _data(self, pedido_id=5):
+        return CotizarRequest(
+            items=[CotizarItem(equipo_id=7, cantidad=1)],
+            fecha_desde="2026-06-01T10:00:00",
+            fecha_hasta="2026-06-02T10:00:00",  # 1 jornada
+            cliente_id=99,
+            pedido_id=pedido_id,
+        )
+
+    def test_perfil_fiscal_del_pedido_gana_sobre_default_de_la_cuenta(self, patch_db, monkeypatch):
+        # Cuenta default: consumidor_final (sin IVA). El PEDIDO quedó atado a un
+        # perfil fiscal personal RI (`perfil_fiscal_id=7`) — tiene que ganar ese.
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        patch_db(
+            FakeConnPedidoConPerfilFiscal(
+                precios={7: 10000}, perfil="consumidor_final", descuento=0,
+                pedido={"estado": "confirmado", "cliente_id": 99,
+                        "descuento_jornadas_pct": 0, "descuento_cliente_pct": 0,
+                        "perfil_fiscal_id": 7, "productora_id": None},
+                perfil_fiscal={"perfil_impuestos": "responsable_inscripto",
+                               "razon_social": "Bruno D'Onofrio", "domicilio_fiscal": None,
+                               "email_facturacion": None, "cuit": "20372380099"},
+            ),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(self._data(), FakeReq())
+        # 10000 neto + 21% = 12100 — NO 10000 "sin IVA" (el bug mostraba esto último).
+        assert out["neto"] == 10000
+        assert out["con_iva"] is True
+        assert out["iva_monto"] == 2100
+        assert out["total_final"] == 12100
+
+    def test_productora_del_pedido_gana_sobre_default_de_la_cuenta(self, patch_db, monkeypatch):
+        # Mismo caso, pero el pedido se facturó a nombre de una productora RI.
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        patch_db(
+            FakeConnPedidoConPerfilFiscal(
+                precios={7: 10000}, perfil="consumidor_final", descuento=0,
+                pedido={"estado": "confirmado", "cliente_id": 99,
+                        "descuento_jornadas_pct": 0, "descuento_cliente_pct": 0,
+                        "perfil_fiscal_id": None, "productora_id": 5},
+                productora={"perfil_impuestos": "responsable_inscripto",
+                            "razon_social": "Productora SA", "domicilio_fiscal": None,
+                            "email_facturacion": None, "cuit": "30500000000"},
+            ),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(self._data(), FakeReq())
+        assert out["con_iva"] is True
+        assert out["iva_monto"] == 2100
+        assert out["total_final"] == 12100
+
+    def test_sin_target_fiscal_en_el_pedido_sigue_el_default_de_la_cuenta(self, patch_db, monkeypatch):
+        # El pedido NO eligió perfil/productora alternativo (ambos None, el caso
+        # común) → sigue el comportamiento de siempre: perfil default de la cuenta.
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        patch_db(
+            FakeConnPedidoConPerfilFiscal(
+                precios={7: 10000}, perfil="consumidor_final", descuento=0,
+                pedido={"estado": "confirmado", "cliente_id": 99,
+                        "descuento_jornadas_pct": 0, "descuento_cliente_pct": 0},
+            ),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(self._data(), FakeReq())
+        assert out["con_iva"] is False
+        assert out["total_final"] == 10000

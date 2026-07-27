@@ -3431,3 +3431,68 @@ PDF/imagen", "Qué NO cubre").
   consecutivos del mismo dominio.
 - **Why.** Mismo motivo que motivó el split de estudio: lógica de decisión duplicada en un archivo de
   transporte es una fuente de drift silencioso. Tracking: #1298. PR: #1299.
+
+### 2026-07-27 — `/api/cotizar` para un pedido existente ignoraba el perfil fiscal/productora elegido para ESE pedido
+
+- **Contexto.** Al revisar el override de emisor (Factura C para un cliente RI, PR #1301), el dueño
+  notó que el preview de una factura mostraba $358.899 (neto + 21% de IVA) mientras la propia página
+  del pedido mostraba "Desglose: IVA — sin IVA, Total $296.611" para el MISMO pedido — dos totales
+  incompatibles del mismo pedido.
+- **Root cause.** `services.finanzas_flujo.pedido.desglose_de_pedido` (usado por la facturación real,
+  el PDF y el mail) resuelve el perfil fiscal vía `_resolver_datos_fiscales_pedido(conn, cliente_id,
+  pedido["perfil_fiscal_id"], pedido["productora_id"])` — el target que el cliente eligió para ESE
+  pedido puntual en el checkout ("Facturar a nombre de", #1240), con prioridad sobre el default de la
+  cuenta. `routes/alquileres/cotizacion.py::cotizar` (el endpoint que arma el "Desglose"/"Cobranza" en
+  vivo del editor admin) nunca daba ese segundo paso: su `SELECT` sobre `alquileres` para el pedido
+  congelado ni siquiera traía las columnas `perfil_fiscal_id`/`productora_id`, y la única resolución de
+  target fiscal alternativo que sí tenía (`data.perfil_fiscal_id`/`data.productora_id`, del body)
+  estaba gateada a `es_sesion_cliente` — nunca corría para un admin mirando el pedido de otro cliente.
+  Por diseño, `alquileres.monto_total` siempre persiste el NETO puro (`_recalcular_total_pedido` llama
+  `calcular_total(..., perfil_impuestos=None)` — "IVA es derivado al mostrar") — cualquier vista que no
+  resuelva el target fiscal correcto simplemente no muestra el IVA que corresponde, sin que nada la
+  marque como inconsistente con la que sí lo resuelve bien.
+- **Fix.** El `SELECT` de `pedido_congelado` en `cotizar()` suma `perfil_fiscal_id, productora_id`.
+  Cuando el pedido tiene alguno seteado, se llama a `_resolver_datos_fiscales_pedido` con esos valores
+  — los del PEDIDO, ya persistidos y ya validados al guardarse (no hace falta re-chequear membership de
+  productora, a diferencia del bloque de `data.productora_id`, que viene de un body no confiable).
+  Mismo helper que ya usan `desglose_de_pedido`/`_enriquecer_pedido_con_cliente_fiscal` — no una copia.
+- **Tests.** `test_cotizar_endpoint.py::TestPedidoCongeladoUsaTargetFiscalDelPedido` (3 casos): perfil
+  fiscal personal RI del pedido gana sobre el default `consumidor_final` de la cuenta; productora RI
+  del pedido ídem; sin target en el pedido (ambos `None`, el caso común) sigue el comportamiento de
+  siempre. `FakeConnConPedido` pasa a defaultear `perfil_fiscal_id`/`productora_id` a `None` para no
+  romper los 6 tests preexistentes de `TestPedidoCongeladoRespetaSnapshot` que no los declaraban.
+- **Why.** No se tocó `_recalcular_total_pedido`/`monto_total` (la plata persistida sigue siendo neto
+  puro, por diseño — "el front no calcula plata" tampoco aplica acá, el backend sigue siendo quien
+  decide) — el fix es puramente de qué target fiscal se usa para DERIVAR el IVA al mostrar, para que el
+  editor admin y la facturación real de un mismo pedido no puedan volver a divergir.
+
+### 2026-07-27 — Factura C (emisor Monotributo) nunca suma IVA, sea RI o no el receptor
+
+- **Contexto.** Tras el fix de arriba (`/api/cotizar` resolviendo el target fiscal del pedido), el
+  dueño vio en staging que el "Desglose" del pedido 439 pasó a mostrar "IVA 21% $62.288, Total
+  $358.899" — coincidiendo con el preview de la Factura C real (override de emisor, PR #1301). Al
+  revisarlo, el dueño aclaró: el cliente ES Responsable Inscripto, pero si se le factura con una
+  Factura C (emisor Monotributo), **no debería llevar IVA** — ni siquiera para un receptor RI.
+- **Root cause.** `comprobante_pedido.construir_comprobante` tenía, para el emisor Monotributo:
+  `importe_neto = Decimal(neto_int + iva_int)` — plegaba el `iva_monto` del RECEPTOR adentro del
+  importe facturado. Esa lógica nunca había hecho nada distinto en la práctica: antes del override de
+  emisor (PR #1301), el emisor Monotributo SOLO se resolvía automáticamente para receptores no-RI, y
+  para esos `iva_monto` siempre es 0 (`con_iva = es_responsable_inscripto(perfil_impuestos)` en
+  `services/precios.py`) — así que `neto_int + 0 == neto_int` de cualquier forma. El override expuso el
+  primer caso real donde `iva_monto > 0` mientras el emisor es Monotributo, y ahí el pliegue empezó a
+  inflar la Factura C con un 21% que un monotributista LEGALMENTE no puede cobrar (no está en el
+  régimen de IVA, cobre lo que cobre y a quien sea).
+- **Fix.** `importe_neto` pasa a ser siempre `Decimal(neto_int)` (nunca más `+ iva_int`); `alicuota` se
+  resuelve `None` incondicionalmente para emisor Monotributo, y solo se calcula `IVA_21 if iva_int > 0`
+  para emisor RESPONSABLE_INSCRIPTO. Cero cambio de comportamiento para el camino default (emisor
+  Monotributo automático + receptor no-RI, donde `iva_int` ya era 0) — el fix solo cambia el caso nuevo
+  (override + receptor RI).
+- **Tests.** `test_facturacion_engine.py::test_emisor_monotributo_nunca_suma_iva_aunque_el_receptor_sea_ri`
+  (el caso real: RI + Monotributo → `importe_neto` = solo neto, `alicuota is None`) +
+  `test_emisor_ri_sigue_sumando_iva_del_receptor_ri` (control: el emisor RI no se tocó, sigue sumando
+  el 21%). Gap real: `construir_comprobante` no tenía NINGÚN test sobre `importe_neto`/`alicuota` antes
+  de esta pasada — el bug original tampoco lo hubiera cazado un test viejo.
+- **Why.** Refina el override de emisor (PR #1301) el mismo día que se activó: la letra del comprobante
+  ya dependía solo del emisor (`tipo_comprobante` en `arca_fe`, correcto desde el día uno); esto extiende
+  el mismo criterio al IMPORTE — depende solo de si el EMISOR discrimina IVA, nunca de si el receptor
+  es RI. El supervisor marca cualquier cálculo de importe de Factura C que sume IVA del receptor.

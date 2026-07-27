@@ -1046,6 +1046,34 @@ Gotcha: `get_disponibilidad` se llama DIRECTO desde `routes/estudio.py` → el d
 plano, NUNCA `Query(None)` (truthy → rompía el Estudio con 500). El supervisor marca una resta de
 disponibilidad recalculada en el front, o un editor/buscador de pedido que no consuma el hook único.
 
+### 2026-07-27 — `/api/cotizar` para un pedido existente ignoraba el perfil fiscal/productora elegido para ESE pedido
+
+El editor admin de un pedido ya creado cotizaba el IVA con el perfil default de la cuenta
+(`clientes.perfil_impuestos`), ignorando si ESE pedido quedó atado a un perfil fiscal alternativo o
+productora (`alquileres.perfil_fiscal_id`/`productora_id`, selector "Facturar a nombre de" del
+checkout, #1240) — el mismo target que sí resuelve `services.finanzas_flujo.pedido.desglose_de_pedido`
+(la facturación real). El "Desglose"/"Cobranza" de la página del pedido podía mostrar "sin IVA"
+mientras la Factura emitida para el mismo pedido sí incluía el 21% — dos totales del mismo pedido que
+no coincidían. Fix: `routes/alquileres/cotizacion.py::cotizar` también resuelve, para un pedido
+congelado (no-presupuesto), el `perfil_fiscal_id`/`productora_id` YA PERSISTIDO en `alquileres` (mismo
+helper `_resolver_datos_fiscales_pedido`, no una copia) — nunca el de `data.perfil_fiscal_id`/
+`data.productora_id` del body (eso sigue siendo solo para una sesión cliente cotizando su propio
+carrito). El supervisor marca un consumidor nuevo del perfil fiscal de un pedido existente que no pase
+por `_resolver_datos_fiscales_pedido` con el target DEL PEDIDO.
+
+### 2026-07-27 — Factura C (emisor Monotributo) nunca suma IVA, sea RI o no el receptor
+
+El override de emisor (facturar Factura C a un cliente RI, PR #1301) heredó una lógica vieja de
+`construir_comprobante` que plegaba `iva_monto` del receptor adentro del "neto" facturado
+(`neto_int + iva_int`) para un emisor Monotributo — vestigio de cuando ese emisor solo se resolvía
+automáticamente para receptores no-RI (`iva_monto` siempre 0 en ese caso, el pliegue nunca hacía nada
+distinto). El override expuso el caso real (receptor RI + emisor Monotributo) y el dueño confirmó: un
+monotributista **no le agrega el 21% a nadie**, sea RI o no — regla legal fija, no una preferencia.
+Fix: para emisor Monotributo, el importe facturado es SIEMPRE `pedido['monto_total']` (el neto),
+`alicuota=None` — nunca se suma `iva_monto`. Solo el emisor RESPONSABLE_INSCRIPTO (Factura A/B) sigue
+discriminando el 21% cuando corresponde. El supervisor marca cualquier cálculo de importe de Factura C
+que sume IVA del receptor, sea cual sea su condición.
+
 ---
 
 ## Preferencias (cómo quiero que se hagan las cosas)
