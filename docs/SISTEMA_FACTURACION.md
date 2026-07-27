@@ -196,9 +196,11 @@ automática de arriba (valida que exista y esté activo, nada más) — sigue si
 decide "qué emisor factura", no un bypass paralelo. Threading completo: `emitir_factura`/
 `previsualizar_factura`/`previsualizar_factura_html` (`emisor_id: Optional[int]`) →
 `POST /alquileres/{id}/facturar` (`body.emisor_id`) / `GET .../preview[-html]` (`?emisor_id=`) → el
-selector "Emisor" en `FacturaPreviewDialog` (solo visible con más de un emisor activo+con cert, mismo
-criterio que "Facturar a nombre de" en checkout). Queda auditado como cualquier factura:
-`facturas.emisor` guarda el `nombre` del emisor que realmente facturó, override o no.
+selector "Emisor" en `FacturaPreviewDialog` (visible con al menos un emisor activo+con cert —
+a diferencia de "Facturar a nombre de" en checkout, acá el caso motivador es justo tener un solo
+emisor configurado cuando la resolución automática pide uno DISTINTO que no existe). Queda auditado
+como cualquier factura: `facturas.emisor` guarda el `nombre` del emisor que realmente facturó,
+override o no.
 
 Fuente única: `services/facturacion/emisores.py::emisor_para`. Mismo resolver que usa el
 motor de contratos (`#1138`). No duplicar esta lógica.
@@ -330,10 +332,12 @@ Componente `FacturacionRailSection` en `src/routes/admin/pedidos.$id.lazy.tsx`.
 - Botón **"Anular con NC"** si la factura está emitida y no tiene NC.
 - Link de descarga del PDF (cuando `pdf_key` está presente).
 - Badge **"TEST"** si `ambiente == 'homologacion'`.
-- **Selector "Emisor"** en el modal `FacturaPreviewDialog` (`PedidoPageHelpers.tsx`) — solo visible
-  cuando hay más de un emisor activo+con cert (`useFacturacionArca.emisoresElegibles`). Default
-  "Automático" (mismo comportamiento de siempre); elegir otro re-arma el preview y la factura real
-  con `override_emisor_id` (§6). Caso de uso: un cliente RI que pide igual Factura C.
+- **Selector "Emisor"** en el modal `FacturaPreviewDialog` (`PedidoPageHelpers.tsx`) — visible con al
+  menos un emisor activo+con cert (`useFacturacionArca.emisoresElegibles`; gate en `>= 1`, no `> 1` —
+  el caso motivador es justo tener un solo emisor configurado cuando la resolución automática pide
+  uno distinto que no existe). Default "Automático" (mismo comportamiento de siempre); elegir otro
+  re-arma el preview y la factura real con `override_emisor_id` (§6). Caso de uso: un cliente RI que
+  pide igual Factura C.
 
 ### Componente `FacturaBadge`
 

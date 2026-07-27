@@ -519,10 +519,13 @@ export function FacturaPreviewDialog({ f }: { f: FacturacionArca }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
 
-          {/* Solo se muestra si hay más de un emisor activo elegible — mismo criterio que el
-              selector "Facturar a nombre de" de CheckoutResumen. Caso de uso: un cliente RI
-              que pide igual Factura C (legal — la letra depende del EMISOR, no del receptor). */}
-          {f.emisoresElegibles.length > 1 && (
+          {/* Se muestra apenas hay UN emisor elegible además de "Automático" — a diferencia del
+              selector "Facturar a nombre de" de CheckoutResumen (que sí exige 2+ opciones), acá
+              el caso motivador es justo tener un solo emisor configurado (ej. el monotributista)
+              cuando la resolución automática pide uno DISTINTO que no existe (cliente RI sin
+              emisor RI activo): con el gate en ">1" el override quedaría inalcanzable desde la UI
+              exactamente en el caso que lo necesita. */}
+          {f.emisoresElegibles.length >= 1 && (
             <div className="space-y-1.5 border-b hairline px-5 py-3">
               <div className="font-mono text-2xs uppercase tracking-widest text-muted-foreground">
                 Emisor
