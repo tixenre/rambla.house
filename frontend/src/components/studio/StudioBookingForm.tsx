@@ -8,7 +8,6 @@ import { Button } from "@/design-system/ui/button";
 import { Pill } from "@/design-system/ui/Pill";
 import { Spinner } from "@/design-system/ui/spinner";
 import { GoogleIcon } from "@/design-system/ui/GoogleIcon";
-import { Calendar } from "@/design-system/ui/calendar";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +15,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/design-system/ui/dialog";
-import { Popover, PopoverContent, PopoverTrigger } from "@/design-system/ui/popover";
 import { FieldLabel } from "@/design-system/ui/Field";
 import { cn } from "@/lib/utils";
 import { formatARS } from "@/lib/format";
@@ -168,7 +166,6 @@ export function StudioBookingForm({
   const [motivo, setMotivo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [calendarOpen, setCalendarOpen] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [needsVerif, setNeedsVerif] = useState(false);
   const [iniciandoVerif, setIniciandoVerif] = useState(false);
@@ -177,11 +174,6 @@ export function StudioBookingForm({
     () => buildTimeSlots(openHour, closeHour, minHours),
     [openHour, closeHour, minHours],
   );
-  const today = useMemo(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }, []);
 
   const slot = useMemo(
     () =>
@@ -349,49 +341,20 @@ export function StudioBookingForm({
 
       {/* ── 1. ¿Cuándo? ─────────────────────────────────────────────── */}
       <Section step={1} title="¿Cuándo?">
-        <EstudioWeekGrid
-          openHour={openHour}
-          closeHour={closeHour}
-          hours={hours}
-          selected={date ? { date, startSlot } : null}
-          onSelectSlot={(d, slot) => {
-            setDate(d);
-            setStartSlot(slot);
-          }}
-          className="mb-4"
-        />
-        <div className="grid gap-3 sm:grid-cols-[1.4fr_1fr_1fr]">
-          {/* Fecha */}
+        <div className="mb-4 grid gap-3 sm:grid-cols-[1.4fr_1fr_1fr]">
+          {/* Fecha — solo lectura: se elige clickeando la grilla de abajo,
+              no tiene sentido un segundo selector (calendario) en paralelo. */}
           <div>
             <FieldLabel>Fecha</FieldLabel>
-            <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={cn(
-                    "mt-1.5 h-11 w-full justify-start text-left font-normal",
-                    !date && "text-muted-foreground",
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
-                  <span className="truncate">{dateLabel}</span>
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={date}
-                  onSelect={(d) => {
-                    setDate(d);
-                    if (d) setCalendarOpen(false);
-                  }}
-                  disabled={{ before: today }}
-                  initialFocus
-                  locale={es}
-                  className="p-3 pointer-events-auto"
-                />
-              </PopoverContent>
-            </Popover>
+            <div
+              className={cn(
+                "mt-1.5 flex h-11 w-full items-center rounded-md border hairline bg-muted/20 px-3 text-sm text-ink",
+                !date && "text-muted-foreground",
+              )}
+            >
+              <CalendarIcon className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">{date ? dateLabel : "Elegí un día en la grilla"}</span>
+            </div>
           </div>
 
           {/* Hora inicio */}
@@ -438,6 +401,17 @@ export function StudioBookingForm({
             </div>
           </div>
         </div>
+
+        <EstudioWeekGrid
+          openHour={openHour}
+          closeHour={closeHour}
+          hours={hours}
+          selected={date ? { date, startSlot } : null}
+          onSelectSlot={(d, slot) => {
+            setDate(d);
+            setStartSlot(slot);
+          }}
+        />
 
         {/* ¿Qué reservás? — sin expansión de equipos inline */}
         {promo && (
