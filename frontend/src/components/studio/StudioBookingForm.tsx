@@ -35,6 +35,9 @@ export type StudioBookingConfig = {
   openHour: number;
   closeHour: number;
   promo?: EstudioPromo | null;
+  /** Add-on independiente "recién pintado" — cargo fijo opcional, se suma
+   *  sea cual sea la elección de con_promo (no la reemplaza). */
+  precioPinturaReciente?: number;
 };
 
 type Disponibilidad = "idle" | "checking" | "libre" | "ocupado" | "error";
@@ -61,7 +64,7 @@ function Section({
   );
 }
 
-const QUERY_KEYS = { d: "d", h: "h", dur: "dur", promo: "promo" } as const;
+const QUERY_KEYS = { d: "d", h: "h", dur: "dur", promo: "promo", pintura: "pintura" } as const;
 
 function readBookingFromQuery() {
   if (typeof window === "undefined") return null;
@@ -70,7 +73,8 @@ function readBookingFromQuery() {
   const h = sp.get(QUERY_KEYS.h);
   const dur = sp.get(QUERY_KEYS.dur);
   const promo = sp.get(QUERY_KEYS.promo);
-  if (!d && !h && !dur && !promo) return null;
+  const pintura = sp.get(QUERY_KEYS.pintura);
+  if (!d && !h && !dur && !promo && !pintura) return null;
   let parsedDate: Date | undefined;
   if (d) {
     const [y, mo, da] = d.split("-").map((n) => parseInt(n, 10));
@@ -84,6 +88,7 @@ function readBookingFromQuery() {
     start: h && /^\d{2}:\d{2}$/.test(h) ? h : null,
     hours: dur && /^\d+$/.test(dur) ? parseInt(dur, 10) : null,
     withPromo: promo === "1",
+    pinturaReciente: pintura === "1",
   };
 }
 
@@ -110,11 +115,15 @@ export function StudioBookingForm({
   const openHour = config?.openHour ?? STUDIO.openHour;
   const closeHour = config?.closeHour ?? STUDIO.closeHour;
   const promo = config?.promo ?? null;
+  const precioPintura = config?.precioPinturaReciente ?? 0;
 
   const initial = useMemo(() => readBookingFromQuery(), []);
   const [date, setDate] = useState<Date | undefined>(initial?.date);
   const [startSlot, setStartSlot] = useState<string>(initial?.start ?? `${pad(openHour)}:00`);
   const [hours, setHours] = useState<number>(initial?.hours ?? minHours);
+  const [pinturaReciente, setPinturaReciente] = useState<boolean>(
+    initial?.pinturaReciente ?? false,
+  );
   const [returnedFromLogin, setReturnedFromLogin] = useState<boolean>(!!initial);
 
   useEffect(() => {
@@ -201,7 +210,8 @@ export function StudioBookingForm({
 
   const subtotal = pricePerHour * hours;
   const promoTotal = withPromo ? (promo?.precio ?? 0) : 0;
-  const total = subtotal + promoTotal;
+  const pinturaTotal = pinturaReciente ? precioPintura : 0;
+  const total = subtotal + promoTotal + pinturaTotal;
 
   const fechaISO = date ? format(date, "yyyy-MM-dd") : null;
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -246,6 +256,7 @@ export function StudioBookingForm({
       [QUERY_KEYS.h]: startSlot,
       [QUERY_KEYS.dur]: String(hours),
       [QUERY_KEYS.promo]: withPromo ? "1" : "0",
+      [QUERY_KEYS.pintura]: pinturaReciente ? "1" : "0",
     }).toString();
 
   const handleVerificar = async () => {
@@ -282,6 +293,7 @@ export function StudioBookingForm({
         start: startSlot,
         horas: hours,
         con_promo: withPromo,
+        pintura_reciente: pinturaReciente,
       });
       toast.success(`Reserva #${res.numero_pedido ?? res.id} enviada`, {
         description: "Te llevamos a tu portal para seguir el estado.",
@@ -320,6 +332,7 @@ export function StudioBookingForm({
       `📅 ${format(date, "EEEE d 'de' MMMM, yyyy", { locale: es })}`,
       `🕒 ${startSlot} – ${endTime} (${hours} h)`,
       withPromo && promo ? `➕ ${promo.nombre}` : null,
+      pinturaReciente ? `🎨 Recién pintado` : null,
       total > 0 ? `💵 Total estimado: ${formatARS(total)}` : null,
     ].filter(Boolean);
     window.open(
@@ -466,6 +479,44 @@ export function StudioBookingForm({
             </label>
           </fieldset>
         )}
+
+        {/* Add-on independiente "recién pintado" — se suma a cualquiera de
+            las dos opciones de arriba, no las reemplaza. Oculto hasta que el
+            dueño cargue un precio real (evita mostrar "+$0" en producción). */}
+        {precioPintura > 0 && (
+          <label
+            className={cn(
+              "mt-3 flex cursor-pointer items-center gap-3 rounded-xl border p-3.5 transition",
+              pinturaReciente
+                ? "border-[var(--area-accent)] bg-[color-mix(in_oklch,var(--area-accent)_10%,transparent)]"
+                : "hairline hover:border-ink/40",
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={pinturaReciente}
+              onChange={(e) => setPinturaReciente(e.target.checked)}
+              className="sr-only"
+            />
+            <span
+              className={cn(
+                "grid h-5 w-5 shrink-0 place-items-center rounded border transition",
+                pinturaReciente
+                  ? "border-[var(--area-accent)] bg-[var(--area-accent)]"
+                  : "border-ink/30",
+              )}
+            >
+              {pinturaReciente && <Check className="h-3.5 w-3.5 text-ink" />}
+            </span>
+            <span className="flex-1">
+              <span className="block font-semibold">Estudio recién pintado</span>
+              <span className="block text-xs text-muted-foreground">
+                Ciclorama repintado antes de tu sesión
+              </span>
+            </span>
+            <span className="font-mono tabular text-sm text-ink">+{formatARS(precioPintura)}</span>
+          </label>
+        )}
       </Section>
 
       {/* ── 2. Confirmar y reservar ──────────────────────────────────── */}
@@ -488,6 +539,12 @@ export function StudioBookingForm({
                 <span className="font-mono tabular text-ink">
                   {promo.precio > 0 ? formatARS(promo.precio) : "—"}
                 </span>
+              </div>
+            )}
+            {pinturaReciente && (
+              <div className="flex justify-between items-baseline text-sm text-muted-foreground">
+                <span>Recién pintado</span>
+                <span className="font-mono tabular text-ink">{formatARS(pinturaTotal)}</span>
               </div>
             )}
           </div>
@@ -612,6 +669,11 @@ export function StudioBookingForm({
             {withPromo && promo && (
               <div className="mt-1 text-muted-foreground">
                 + <span className="text-ink">{promo.nombre}</span>
+              </div>
+            )}
+            {pinturaReciente && (
+              <div className="mt-1 text-muted-foreground">
+                + <span className="text-ink">Recién pintado</span>
               </div>
             )}
             <div className="mt-2 flex items-baseline justify-between border-t hairline pt-2">

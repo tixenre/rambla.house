@@ -116,6 +116,7 @@ export const estudioAdminApi = {
     start: string;
     horas: number;
     con_promo?: boolean;
+    pintura_reciente?: boolean;
     sueltos?: EstudioSueltoInput[];
     /** Al cotizar la EDICIÓN de un turno ya existente: se excluye a sí mismo
      *  del chequeo de disponibilidad (si no, siempre se vería "ocupado" por
@@ -127,6 +128,7 @@ export const estudioAdminApi = {
       start: params.start,
       horas: String(params.horas),
       con_promo: String(!!params.con_promo),
+      pintura_reciente: String(!!params.pintura_reciente),
       sueltos_json: JSON.stringify(params.sueltos ?? []),
     });
     if (params.pedido_id != null) sp.set("pedido_id", String(params.pedido_id));

@@ -40,7 +40,9 @@ services/estudio/
     reserva.py           # SueltoItem, _ESTADOS_ADMIN_CREACION, _precio_promo_y_sueltos +
                           # _validar_e_insertar_promo_sueltos (compartidos, ver abajo),
                           # _crear_pedido_estudio (núcleo compartido cliente+admin),
-                          # editar_reserva (PATCH admin)
+                          # editar_reserva (PATCH admin), NOMBRE_ITEM_PINTURA_RECIENTE +
+                          # _insertar_item_pintura (add-on "recién pintado" #1300 seguimiento —
+                          # cargo fijo opcional, ver "Reglas" abajo)
     promo.py              # crear_promo (crea el combo desde el pack curado)
 ```
 
@@ -90,6 +92,14 @@ de `queries/`; `queries/` **nunca** de `commands/`.
 - **Un `estudio_fijo` (pedido de slot) no se edita acá** (`editar_reserva` lo rechaza con 409) — lo
   gobierna su slot (`routes/estudio.py::_regenerar_pedidos_slot`, fuera de este paquete a propósito:
   dominio "slots", no "disponibilidad/reserva por hora").
+- **"Recién pintado" (`estudio.precio_pintura_reciente`) es un add-on INDEPENDIENTE, no un tercer
+  camino de promo/sueltos.** Se inserta como línea libre (`equipo_id=NULL`, `cobro_modo='fijo'`,
+  mismo patrón que flete/limpieza #805) vía `_insertar_item_pintura`, SIN pasar por
+  `_validar_e_insertar_promo_sueltos` — no tiene stock que validar, por eso está en la allowlist de
+  `test_gate_not_bypassed.py` en vez de referenciar el gate. El guard legacy-pack de `editar_reserva`
+  (detecta `equipo_id IS NULL` para exigir que el pedido no use el pack retirado) excluye
+  explícitamente `NOMBRE_ITEM_PINTURA_RECIENTE` — si se renombra la constante, actualizar ese guard
+  a la vez.
 
 El supervisor marca: lógica de disponibilidad/reserva del Estudio reimplementada fuera de este
 paquete; un import de `routes.*` dentro de `services/estudio/`; un `queries/` importando de

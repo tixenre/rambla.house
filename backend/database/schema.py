@@ -1665,6 +1665,10 @@ def _init_db_schema(conn):
     # ⏰ LEGACY hasta que la Fase 8 lo retire). ON DELETE SET NULL: si el combo
     # se borra, el estudio no rompe — vuelve al estado "sin promo".
     conn.execute("ALTER TABLE estudio ADD COLUMN IF NOT EXISTS promo_combo_id INTEGER REFERENCES equipos(id) ON DELETE SET NULL")
+    # Add-on "recién pintado" (#1300 seguimiento): cargo fijo opcional, independiente
+    # de la promo/sueltos — el cliente lo tilda aparte, no reemplaza ninguna opción.
+    # 0 = todavía no lo cargó el dueño (el checkbox sigue disponible, sin costo).
+    conn.execute("ALTER TABLE estudio ADD COLUMN IF NOT EXISTS precio_pintura_reciente INTEGER NOT NULL DEFAULT 0")
 
     # Registro de búsquedas del catálogo público (analítica interna). Acompaña a
     # la migración i1c2d3e4f5a6 — acá garantizamos su creación en cada boot

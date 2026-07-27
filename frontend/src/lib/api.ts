@@ -247,6 +247,9 @@ export type EstudioConfig = {
   fotos: EstudioFoto[];
   promo_combo_id?: number | null;
   promo?: EstudioPromo | null;
+  /** Add-on independiente "recién pintado" — cargo fijo opcional, se suma a
+   *  cualquier elección de con_promo (no la reemplaza). 0 = sin cargar todavía. */
+  precio_pintura_reciente: number;
   trabajos?: EstudioTrabajo[];
 };
 
@@ -372,6 +375,8 @@ export type EstudioReservaBody = {
   start: string;
   horas: number;
   con_promo?: boolean;
+  /** Add-on independiente "recién pintado" — se suma sea cual sea con_promo. */
+  pintura_reciente?: boolean;
   // Datos del cliente: NO van en el body, salen de la sesión (login obligatorio).
 };
 

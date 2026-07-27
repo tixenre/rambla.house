@@ -10,7 +10,7 @@ Esto es future-proofing: si alguien agrega una nueva función que inserta reserv
 y se olvida de validar stock, este test falla — obligando a llamar al gate o a
 allowlistear conscientemente (decisión visible en el diff).
 
-Se ejecuta contra el código ACTUAL; las tres entradas de la allowlist son los
+Se ejecuta contra el código ACTUAL; las entradas de la allowlist son los
 delegadores legítimos de hoy.
 """
 import ast
@@ -71,6 +71,13 @@ GATE_SYMBOLS = {
 #     `admin_update_edicion`, en `routes/talleres.py`), no esta función.
 # ⏰ `_agregar_items_pack` (estudio) — el delegador del pack — se retiró en la
 # Fase 8 (#1283) junto con el mecanismo que validaba.
+#   - _insertar_item_pintura (services/estudio/commands/reserva.py, add-on
+#     "recién pintado" #1300 seguimiento): NO es un recurso con stock — es un
+#     cargo fijo opcional (equipo_id NULL, cobro_modo='fijo', mismo patrón que
+#     flete/limpieza #805), nunca necesita `validar_stock_hipotetico`/
+#     `_centinela_libre`. Se inserta directo desde `_crear_pedido_estudio`/
+#     `editar_reserva`, DESPUÉS de que esas funciones ya validaron
+#     espacio/promo/sueltos vía el gate real.
 # Clave = path relativo a routes/ (ej. "alquileres/core.py") o al árbol
 # services/estudio|talleres/ con su prefijo (ver `fuentes` abajo), así
 # desambigua entre los varios core.py de los paquetes split (#501) y entre árboles.
@@ -78,6 +85,7 @@ ALLOWLIST_DELEGADORES = {
     ("alquileres/core.py", "_apply_pedido_items"),
     ("estudio.py", "_regenerar_pedidos_slot"),
     ("services/talleres/commands/economia.py", "_regenerar_pedidos_taller"),
+    ("services/estudio/commands/reserva.py", "_insertar_item_pintura"),
 }
 
 

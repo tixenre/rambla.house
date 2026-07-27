@@ -137,6 +137,7 @@ def _build_response(row, fotos: list) -> dict:
         "pack_descripcion": row["pack_descripcion"],
         "pack_precio": row["pack_precio"],
         "promo_combo_id": row["promo_combo_id"],
+        "precio_pintura_reciente": row["precio_pintura_reciente"],
         "features": _parse_json_field(row["features_json"]),
         "faq": _parse_json_field(row["faq_json"]),
         "direccion": row["direccion"],
@@ -535,6 +536,7 @@ class EstudioUpdate(BaseModel):
     close_hour: Optional[int] = None
     buffer_horas: Optional[int] = None
     anticipacion_min_horas: Optional[int] = None
+    precio_pintura_reciente: Optional[int] = None
     # ⏰ pack_activo/pack_nombre/pack_precio retirados (Fase 8, #1283) — el pack
     # ya no existe como mecanismo editable. `pack_descripcion` queda: es la
     # descripción EN VIVO de la promo actual (ver `_build_response`).
@@ -1299,6 +1301,9 @@ class EstudioReservaCreate(BaseModel):
     start: str
     horas: int
     con_promo: bool = False
+    # Add-on independiente "recién pintado" (#1300 seguimiento) — cargo fijo
+    # opcional, se suma sea cual sea la elección de con_promo (no la reemplaza).
+    pintura_reciente: bool = False
     # Los datos del cliente NO vienen del body: salen de la sesión + tabla clientes
     # (reserva con login obligatorio, igual que el portal /api/cliente/pedidos).
 
@@ -1358,6 +1363,7 @@ def crear_reserva_estudio(body: EstudioReservaCreate, request: Request, backgrou
                 cliente_id=cliente_id, cliente_nombre=cliente_nombre,
                 cliente_email=cliente_email, cliente_telefono=cliente_telefono,
                 con_promo=body.con_promo, sueltos=None,
+                pintura_reciente=body.pintura_reciente,
                 espacio_monto=None, estado="solicitado",
                 numero_pedido=_next_numero_pedido(conn),
             )
@@ -1524,6 +1530,7 @@ def cotizar_reserva_estudio(
     request: Request,
     fecha: str = Query(...), start: str = Query(...), horas: int = Query(...),
     con_promo: bool = False,
+    pintura_reciente: bool = False,
     sueltos_json: str = Query("[]"),
     pedido_id: Optional[int] = None,
 ):
@@ -1554,6 +1561,7 @@ def cotizar_reserva_estudio(
         promo_precio, monto_extra, precios_sueltos = _precio_promo_y_sueltos(
             conn, estudio, con_promo, sueltos,
         )
+        pintura_precio = (estudio["precio_pintura_reciente"] or 0) if pintura_reciente else 0
         desglose = {
             "espacio": espacio_monto,
             "promo": promo_precio,
@@ -1565,7 +1573,8 @@ def cotizar_reserva_estudio(
                 }
                 for s in sueltos
             ],
-            "monto_total": espacio_monto + monto_extra,
+            "pintura_reciente": pintura_precio,
+            "monto_total": espacio_monto + monto_extra + pintura_precio,
         }
 
         libre, motivo = _estudio_disponible(
@@ -1583,6 +1592,7 @@ class EstudioReservaAdminCreate(BaseModel):
     cliente_id: Optional[int] = None
     cliente_nombre: Optional[str] = None
     con_promo: bool = False
+    pintura_reciente: bool = False
     sueltos: list[SueltoItem] = []
     espacio_monto: Optional[int] = None
     estado: str = "confirmado"
@@ -1618,6 +1628,7 @@ def crear_reserva_estudio_admin(body: EstudioReservaAdminCreate, request: Reques
                 cliente_id=cliente_id, cliente_nombre=cliente_nombre,
                 cliente_email=cliente_email, cliente_telefono=cliente_telefono,
                 con_promo=body.con_promo, sueltos=body.sueltos,
+                pintura_reciente=body.pintura_reciente,
                 espacio_monto=body.espacio_monto, estado=body.estado,
                 numero_pedido=_next_numero_pedido(conn),
             )
@@ -1635,6 +1646,7 @@ class EstudioReservaAdminUpdate(BaseModel):
     start: Optional[str] = None
     horas: Optional[int] = None
     con_promo: Optional[bool] = None
+    pintura_reciente: Optional[bool] = None
     sueltos: Optional[list[SueltoItem]] = None
     espacio_monto: Optional[int] = None
 
@@ -1643,11 +1655,12 @@ class EstudioReservaAdminUpdate(BaseModel):
 @limiter.limit(ADMIN_WRITE_LIMIT)
 def editar_reserva_estudio_admin(pedido_id: int, body: EstudioReservaAdminUpdate, request: Request):
     """Reprograma/edita una reserva del estudio YA EXISTENTE. Reemplaza TODOS
-    los ítems no-centinela (promo/sueltos) según el payload — mismo
-    criterio "reemplazo completo" que el PUT de ítems del editor genérico,
-    adaptado al Estudio (que el editor genérico bloquea, Fase 1: #1283).
-    Un `estudio_fijo` no se edita acá — lo gobierna su slot (editar el slot
-    regenera sus pedidos). Núcleo en `services.estudio.commands.reserva.editar_reserva`."""
+    los ítems no-centinela (promo/sueltos/pintura reciente) según el
+    payload — mismo criterio "reemplazo completo" que el PUT de ítems del
+    editor genérico, adaptado al Estudio (que el editor genérico bloquea,
+    Fase 1: #1283). Un `estudio_fijo` no se edita acá — lo gobierna su slot
+    (editar el slot regenera sus pedidos). Núcleo en
+    `services.estudio.commands.reserva.editar_reserva`."""
     require_admin(request)
     with get_db() as conn:
         try:
@@ -1655,6 +1668,7 @@ def editar_reserva_estudio_admin(pedido_id: int, body: EstudioReservaAdminUpdate
                 conn, pedido_id,
                 fecha=body.fecha, start=body.start, horas=body.horas,
                 con_promo=body.con_promo, sueltos=body.sueltos,
+                pintura_reciente=body.pintura_reciente,
                 espacio_monto=body.espacio_monto,
             )
             conn.commit()

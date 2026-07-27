@@ -1273,6 +1273,9 @@ export type EstudioConfig = {
   pack_precio: number;
   promo_combo_id: number | null;
   promo?: EstudioPromo | null;
+  /** Add-on independiente "recién pintado" — cargo fijo opcional, se suma a
+   *  cualquier elección de con_promo (no la reemplaza). 0 = sin cargar todavía. */
+  precio_pintura_reciente: number;
   features: Array<{ label: string; value: string }> | null;
   faq: Array<{ q: string; a: string }> | null;
   direccion: string;
@@ -1374,6 +1377,7 @@ export type EstudioInput = {
   close_hour?: number;
   buffer_horas?: number;
   anticipacion_min_horas?: number;
+  precio_pintura_reciente?: number;
   pack_descripcion?: string;
   features_json?: string;
   faq_json?: string;
@@ -1436,6 +1440,7 @@ export type EstudioCotizacion = {
   espacio: number;
   promo: number;
   sueltos: Array<{ equipo_id: number; cantidad: number; precio_jornada: number; subtotal: number }>;
+  pintura_reciente: number;
   monto_total: number;
   espacio_disponible: boolean;
   espacio_motivo: string | null;
@@ -1448,6 +1453,7 @@ export type EstudioReservaCreateInput = {
   cliente_id?: number | null;
   cliente_nombre?: string | null;
   con_promo?: boolean;
+  pintura_reciente?: boolean;
   sueltos?: EstudioSueltoInput[];
   espacio_monto?: number | null;
   estado?: "solicitado" | "confirmado" | "retirado";
@@ -1458,6 +1464,7 @@ export type EstudioReservaUpdateInput = {
   start?: string;
   horas?: number;
   con_promo?: boolean;
+  pintura_reciente?: boolean;
   sueltos?: EstudioSueltoInput[];
   espacio_monto?: number | null;
 };

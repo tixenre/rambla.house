@@ -57,6 +57,11 @@ type SueltoLocal = {
   cantidad: number;
 };
 
+// Debe coincidir con `NOMBRE_ITEM_PINTURA_RECIENTE`
+// (backend/services/estudio/commands/reserva.py) — así se detecta la línea al
+// hidratar la edición de un turno existente.
+const NOMBRE_ITEM_PINTURA_RECIENTE = "Recién pintado";
+
 function todayYmd(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -94,6 +99,7 @@ export function ReservaDialog({
   const [clienteNombreElegido, setClienteNombreElegido] = useState<string | null>(null);
   const [clienteNombreLibre, setClienteNombreLibre] = useState("");
   const [conPromo, setConPromo] = useState(false);
+  const [pinturaReciente, setPinturaReciente] = useState(false);
   const [sueltos, setSueltos] = useState<SueltoLocal[]>([]);
   const [espacioOverride, setEspacioOverride] = useState<string>("");
   const [estadoAlta, setEstadoAlta] = useState<"solicitado" | "confirmado" | "retirado">(
@@ -116,6 +122,7 @@ export function ReservaDialog({
       setClienteNombreElegido(null);
       setClienteNombreLibre("");
       setConPromo(false);
+      setPinturaReciente(false);
       setSueltos([]);
       setEspacioOverride("");
       setEstadoAlta("confirmado");
@@ -137,6 +144,9 @@ export function ReservaDialog({
     const promoId = estudio.promo_combo_id;
     const otros = p.items.filter((it) => it.equipo_id !== centinela);
     setConPromo(!!promoId && otros.some((it) => it.equipo_id === promoId));
+    setPinturaReciente(
+      otros.some((it) => it.equipo_id === null && it.nombre_libre === NOMBRE_ITEM_PINTURA_RECIENTE),
+    );
     setSueltos(
       otros
         .filter((it) => it.equipo_id !== null && it.equipo_id !== promoId)
@@ -165,12 +175,13 @@ export function ReservaDialog({
       start,
       horas,
       con_promo: conPromo,
+      pintura_reciente: pinturaReciente,
       sueltos: sueltosInput,
       // Excluye el propio turno del chequeo de disponibilidad al editar —
       // si no, siempre se vería "ocupado" por su propia franja.
       pedido_id: reserva?.id,
     }),
-    [fecha, start, horas, conPromo, sueltosInput, reserva?.id],
+    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput, reserva?.id],
   );
   const cotizarDebounced = useDebouncedValue(cotizarParams, 400);
 
@@ -188,6 +199,7 @@ export function ReservaDialog({
           start,
           horas,
           con_promo: conPromo,
+          pintura_reciente: pinturaReciente,
           sueltos: sueltosInput,
           espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
         });
@@ -199,6 +211,7 @@ export function ReservaDialog({
         cliente_id: clienteId,
         cliente_nombre: clienteId ? null : clienteNombreLibre.trim() || null,
         con_promo: conPromo,
+        pintura_reciente: pinturaReciente,
         sueltos: sueltosInput,
         espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
         estado: estadoAlta,
@@ -332,14 +345,18 @@ export function ReservaDialog({
               </Field>
             )}
 
-            {estudio.promo_combo_id && (
-              <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              {estudio.promo_combo_id && (
                 <label className="flex items-center gap-2 text-sm">
                   <Switch checked={conPromo} onCheckedChange={setConPromo} />
                   {estudio.promo?.nombre || "Promo"}
                 </label>
-              </div>
-            )}
+              )}
+              <label className="flex items-center gap-2 text-sm">
+                <Switch checked={pinturaReciente} onCheckedChange={setPinturaReciente} />
+                Recién pintado
+              </label>
+            </div>
 
             <Field label="Equipos sueltos (opcional)">
               <EquipoComboSearch
@@ -435,6 +452,12 @@ export function ReservaDialog({
                       <span>{formatARS(s.subtotal)}</span>
                     </div>
                   ))}
+                  {cotiz.pintura_reciente > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">Recién pintado</span>
+                      <span>{formatARS(cotiz.pintura_reciente)}</span>
+                    </div>
+                  )}
                   <div className="flex justify-between border-t hairline pt-1 font-semibold text-ink">
                     <span>Total</span>
                     <span>{formatARS(cotiz.monto_total)}</span>

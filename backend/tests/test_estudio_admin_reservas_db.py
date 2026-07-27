@@ -115,7 +115,8 @@ def setup(monkeypatch):
         )
         conn.execute(
             "UPDATE estudio SET precio_hora=10000, promo_combo_id=%s, pack_activo=FALSE, "
-            "buffer_horas=0, min_horas=1, open_hour=0, close_hour=24, anticipacion_min_horas=48 "
+            "buffer_horas=0, min_horas=1, open_hour=0, close_hour=24, anticipacion_min_horas=48, "
+            "precio_pintura_reciente=1500 "
             "WHERE id=1",
             (PROMO_COMBO_ID,),
         )
@@ -283,6 +284,79 @@ def test_crear_reserva_admin_con_promo_sin_stock_es_best_effort(client_con_db, s
     assert "Componente promo admin test" in data["promo_advertencia"]
     # 10000/h × 2h (espacio) + 1000 (promo, precio FIJO completo) = 21000.
     assert data["monto_total"] == 21000
+
+
+def test_crear_reserva_admin_con_pintura_reciente(client_con_db, setup):
+    r = client_con_db.post(
+        "/api/admin/estudio/reservas",
+        json={
+            "fecha": "2030-05-16", "start": "10:00", "horas": 2,
+            "cliente_nombre": "Reserva admin test — pintura",
+            "pintura_reciente": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    data = r.json()
+    # 10000/h × 2h (espacio) + 1500 (pintura reciente) = 21500.
+    assert data["monto_total"] == 21500
+
+    from database import get_db
+    conn = get_db()
+    try:
+        item = conn.execute(
+            "SELECT equipo_id, nombre_libre, cobro_modo, subtotal "
+            "FROM alquiler_items WHERE pedido_id=%s AND equipo_id IS NULL",
+            (data["id"],),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert item is not None
+    assert item["nombre_libre"] == "Recién pintado"
+    assert item["cobro_modo"] == "fijo"
+    assert item["subtotal"] == 1500
+
+
+def test_editar_reserva_agrega_y_luego_quita_pintura_reciente(client_con_db, setup):
+    """Bug real encontrado al verificar en vivo (#1300 seguimiento): el
+    "reemplazo completo" de `editar_reserva` borraba los ítems no-centinela
+    con `equipo_id != %s`, que en SQL NUNCA matchea `equipo_id IS NULL` (la
+    fila de pintura reciente) — la línea sobrevivía para siempre a una
+    edición que la sacaba, dejando `alquiler_items` desincronizado de
+    `monto_total`. Fix: `equipo_id IS DISTINCT FROM %s`."""
+    r = client_con_db.post(
+        "/api/admin/estudio/reservas",
+        json={
+            "fecha": "2030-05-17", "start": "10:00", "horas": 2,
+            "cliente_nombre": "Reserva admin test — pintura toggle",
+            "pintura_reciente": True,
+        },
+    )
+    assert r.status_code == 201, r.text
+    pedido_id = r.json()["id"]
+    assert r.json()["monto_total"] == 21500
+
+    r2 = client_con_db.patch(
+        f"/api/admin/estudio/reservas/{pedido_id}",
+        json={"pintura_reciente": False},
+    )
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["monto_total"] == 20000  # solo espacio, sin la pintura
+
+    from database import get_db
+    conn = get_db()
+    try:
+        item = conn.execute(
+            "SELECT id FROM alquiler_items WHERE pedido_id=%s AND equipo_id IS NULL",
+            (pedido_id,),
+        ).fetchone()
+        suma_items = conn.execute(
+            "SELECT COALESCE(SUM(subtotal), 0) AS s FROM alquiler_items WHERE pedido_id=%s",
+            (pedido_id,),
+        ).fetchone()["s"]
+    finally:
+        conn.close()
+    assert item is None, "la línea de pintura reciente debería haberse borrado al editar"
+    assert suma_items == 20000  # coincide con monto_total — sin ítems huérfanos
 
 
 def test_crear_reserva_admin_sueltos_sin_stock_da_409_y_no_persiste(client_con_db, setup):

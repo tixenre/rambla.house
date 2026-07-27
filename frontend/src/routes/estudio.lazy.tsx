@@ -869,6 +869,7 @@ function EstudioPage() {
         openHour: data.open_hour,
         closeHour: data.close_hour,
         promo: data.promo,
+        precioPinturaReciente: data.precio_pintura_reciente,
       }
     : undefined;
 

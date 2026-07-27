@@ -41,6 +41,7 @@ const schema = z.object({
   tagline: z.string(),
   descripcion: z.string(),
   precio_hora: z.coerce.number().int().min(0),
+  precio_pintura_reciente: z.coerce.number().int().min(0),
   min_horas: z.coerce.number().int().min(1),
   open_hour: z.coerce.number().int().min(0).max(23),
   close_hour: z.coerce.number().int().min(1).max(24),
@@ -62,6 +63,7 @@ function configToForm(c: EstudioConfig): FormValues {
     tagline: c.tagline,
     descripcion: c.descripcion,
     precio_hora: c.precio_hora,
+    precio_pintura_reciente: c.precio_pintura_reciente,
     min_horas: c.min_horas,
     open_hour: c.open_hour,
     close_hour: c.close_hour,
@@ -169,6 +171,13 @@ export function ConfigForm({ config, onSaved }: { config: EstudioConfig; onSaved
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-3">
           <Field label="Precio por hora ($)" error={errors.precio_hora?.message}>
             <Input type="number" min={0} {...register("precio_hora")} />
+          </Field>
+          <Field
+            label="Precio recién pintado ($)"
+            error={errors.precio_pintura_reciente?.message}
+            hint="Add-on opcional que el cliente tilda en el checkout. 0 = todavía sin cargar."
+          >
+            <Input type="number" min={0} {...register("precio_pintura_reciente")} />
           </Field>
           <Field label="Mínimo de horas" error={errors.min_horas?.message}>
             <Input type="number" min={1} {...register("min_horas")} />

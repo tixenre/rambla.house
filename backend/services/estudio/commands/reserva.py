@@ -36,6 +36,14 @@ _Item = namedtuple("_Item", ["equipo_id", "cantidad"])
 # Python para validar el body; 'cancelado' no aplica a una alta).
 _ESTADOS_ADMIN_CREACION = ("solicitado", "confirmado", "retirado")
 
+# Nombre canónico del ítem "recién pintado" (add-on independiente, #1300
+# seguimiento) — línea libre (equipo_id=NULL, como el flete/#805), NUNCA
+# equipo real: no es un recurso con stock, es un cargo fijo opcional. Se
+# distingue de la línea del pack ⏰ LEGACY (mismo `equipo_id IS NULL`, ver
+# `editar_reserva`) por este nombre exacto — no cambiarlo sin actualizar
+# ese chequeo.
+NOMBRE_ITEM_PINTURA_RECIENTE = "Recién pintado"
+
 
 class SueltoItem(BaseModel):
     """Equipo suelto agregado a mano a una reserva del Estudio — solo desde el
@@ -132,20 +140,39 @@ def _validar_e_insertar_promo_sueltos(
     return promo_advertencia
 
 
+def _insertar_item_pintura(conn, pedido_id: int, precio: int) -> None:
+    """Inserta la línea libre del add-on "recién pintado" (#1300 seguimiento) —
+    mismo patrón que el flete/#805: `equipo_id=NULL` + `nombre_libre`, NUNCA
+    un equipo real (no es un recurso con stock, es un cargo fijo opcional).
+    El caller decide si corresponde llamarla (`pintura_reciente=True`);
+    inserta aunque `precio` sea 0 (el dueño todavía no cargó un valor en
+    `estudio.precio_pintura_reciente`) — deja registro de que se pidió,
+    mismo criterio "ítems veraces" que el resto del paquete."""
+    conn.execute(
+        """
+        INSERT INTO alquiler_items
+            (pedido_id, equipo_id, nombre_libre, cantidad, precio_jornada, subtotal, cobro_modo)
+        VALUES (%s, NULL, %s, 1, %s, %s, 'fijo')
+        """,
+        (pedido_id, NOMBRE_ITEM_PINTURA_RECIENTE, precio, precio),
+    )
+
+
 def _crear_pedido_estudio(
     conn, *, estudio, fecha_desde, fecha_hasta,
     cliente_id, cliente_nombre, cliente_email, cliente_telefono,
-    con_promo: bool, sueltos: list | None,
+    con_promo: bool, sueltos: list | None, pintura_reciente: bool = False,
     espacio_monto: int | None, estado: str, numero_pedido: int,
 ) -> tuple[int, Optional[str]]:
     """Núcleo de creación de un pedido del Estudio (#1283 Fase 6 — extraído de
     `crear_reserva_estudio`, que ahora es un wrapper: sesión+Didit+anticipación
     +'solicitado'). Arma los ítems (promo BEST-EFFORT / sueltos DUROS /
-    centinela DURO) y el pedido, todo en la transacción del `conn` del caller
-    (no commitea — eso es responsabilidad del caller). Devuelve
-    `(pedido_id, promo_advertencia)` — el segundo es `None` salvo que la
-    promo se haya reservado con algún componente sin stock (ver abajo). El
-    pack (⏰ mecanismo legacy anterior a la promo) se retiró en la Fase 8, #1283.
+    centinela DURO / pintura reciente sin stock, ver `_insertar_item_pintura`)
+    y el pedido, todo en la transacción del `conn` del caller (no commitea —
+    eso es responsabilidad del caller). Devuelve `(pedido_id,
+    promo_advertencia)` — el segundo es `None` salvo que la promo se haya
+    reservado con algún componente sin stock (ver abajo). El pack (⏰
+    mecanismo legacy anterior a la promo) se retiró en la Fase 8, #1283.
 
     NO valida identidad ni anticipación — son gates del CALLER, distintos entre
     el flujo público y el admin. SÍ valida slot/taller (conflicto estructural,
@@ -179,7 +206,8 @@ def _crear_pedido_estudio(
     promo_precio, monto_extra, precios_sueltos = _precio_promo_y_sueltos(
         conn, estudio, con_promo, sueltos,
     )
-    monto_total = espacio_monto_final + monto_extra
+    pintura_precio = (estudio["precio_pintura_reciente"] or 0) if pintura_reciente else 0
+    monto_total = espacio_monto_final + monto_extra + pintura_precio
 
     pedido_id = conn.insert_returning(
         """
@@ -204,6 +232,11 @@ def _crear_pedido_estudio(
         estudio=estudio, con_promo=con_promo, sueltos=sueltos,
         promo_precio=promo_precio, precios_sueltos=precios_sueltos,
     )
+
+    # Pintura reciente: add-on independiente, sin stock que validar — se
+    # inserta directo, no pasa por `_validar_e_insertar_promo_sueltos`.
+    if pintura_reciente:
+        _insertar_item_pintura(conn, pedido_id, pintura_precio)
 
     # ── Espacio (centinela): requisito DURO ─────────────────────────────────
     # Lock PRIMERO, INSERT después — a propósito, en ese orden. Un INSERT que
@@ -239,15 +272,16 @@ def editar_reserva(
     conn, pedido_id: int, *,
     fecha: str | None = None, start: str | None = None, horas: int | None = None,
     con_promo: bool | None = None, sueltos: list | None = None,
+    pintura_reciente: bool | None = None,
     espacio_monto: int | None = None,
 ) -> Optional[str]:
     """Reprograma/edita una reserva del estudio YA EXISTENTE (extraído de
     `PATCH /admin/estudio/reservas/{id}`, #1283 Fase 6). Reemplaza TODOS los
-    ítems no-centinela (promo/sueltos) según el payload — mismo criterio
-    "reemplazo completo" que el PUT de ítems del editor genérico, adaptado al
-    Estudio (que el editor genérico bloquea, Fase 1: #1283). Un `estudio_fijo`
-    no se edita acá — lo gobierna su slot (editar el slot regenera sus
-    pedidos, `routes/estudio.py::_regenerar_pedidos_slot`).
+    ítems no-centinela (promo/sueltos/pintura reciente) según el payload —
+    mismo criterio "reemplazo completo" que el PUT de ítems del editor
+    genérico, adaptado al Estudio (que el editor genérico bloquea, Fase 1:
+    #1283). Un `estudio_fijo` no se edita acá — lo gobierna su slot (editar
+    el slot regenera sus pedidos, `routes/estudio.py::_regenerar_pedidos_slot`).
 
     Toma `FOR UPDATE` sobre el pedido (lock de fila, mismo mecanismo que
     `_crear_pedido_estudio` usa sobre el centinela). No commitea — eso es
@@ -285,9 +319,14 @@ def editar_reserva(
     if not libre:
         raise HTTPException(409, f"El espacio no está disponible: {motivo}")
 
+    # `IS DISTINCT FROM` (no `!=`): un ítem libre (pintura reciente, o el pack
+    # legacy) tiene `equipo_id IS NULL` — `NULL != %s` es NULL (ni true ni
+    # false) en SQL, así que `!=` los excluye EN SILENCIO de este SELECT (y
+    # del DELETE de abajo). Bug real encontrado en vivo: el ítem de pintura
+    # sobrevivía para siempre a un "reemplazo completo" de la edición.
     items_actuales = conn.execute(
         "SELECT equipo_id, cantidad, precio_jornada, subtotal, nombre_libre, cobro_modo "
-        "FROM alquiler_items WHERE pedido_id = %s AND equipo_id != %s",
+        "FROM alquiler_items WHERE pedido_id = %s AND equipo_id IS DISTINCT FROM %s",
         (pedido_id, estudio["equipo_id"]),
     ).fetchall()
     # El pack ⏰ se retiró (Fase 8, #1283): ya no hay forma de RE-crear su
@@ -296,15 +335,28 @@ def editar_reserva(
     # perder plata en silencio. Vacío en la práctica desde que existe la
     # promo (`crear_promo_desde_pack` apaga `pack_activo`); solo puede
     # dispararse en un turno viejo creado ANTES de esta migración.
-    if any(it["equipo_id"] is None for it in items_actuales):
+    #
+    # Distinguir de la línea NUEVA de pintura reciente (#1300 seguimiento,
+    # `NOMBRE_ITEM_PINTURA_RECIENTE`) — también `equipo_id IS NULL` pero NO
+    # es el pack: sin este exclude, cualquier turno con pintura reciente
+    # rebotaría acá con el mensaje equivocado.
+    if any(
+        it["equipo_id"] is None and it["nombre_libre"] != NOMBRE_ITEM_PINTURA_RECIENTE
+        for it in items_actuales
+    ):
         raise HTTPException(
             409,
             "Este turno todavía usa el pack (mecanismo retirado) — no se puede "
             "editar desde acá. Contactá a soporte para migrarlo a la promo.",
         )
     promo_actual = any(it["equipo_id"] == estudio["promo_combo_id"] for it in items_actuales)
+    pintura_actual = any(
+        it["equipo_id"] is None and it["nombre_libre"] == NOMBRE_ITEM_PINTURA_RECIENTE
+        for it in items_actuales
+    )
 
     con_promo = con_promo if con_promo is not None else promo_actual
+    pintura_reciente = pintura_reciente if pintura_reciente is not None else pintura_actual
     if sueltos is not None:
         sueltos_finales = sueltos
     else:
@@ -324,7 +376,7 @@ def editar_reserva(
     # desde cero contra la franja (nueva o la misma) en vez de parchear
     # fila por fila — más simple y sin estado intermedio inconsistente.
     conn.execute(
-        "DELETE FROM alquiler_items WHERE pedido_id = %s AND equipo_id != %s",
+        "DELETE FROM alquiler_items WHERE pedido_id = %s AND equipo_id IS DISTINCT FROM %s",
         (pedido_id, estudio["equipo_id"]),
     )
 
@@ -337,12 +389,15 @@ def editar_reserva(
     promo_precio, monto_extra, precios_sueltos = _precio_promo_y_sueltos(
         conn, estudio, con_promo, sueltos_finales,
     )
-    monto_total = espacio_monto_final + monto_extra
+    pintura_precio = (estudio["precio_pintura_reciente"] or 0) if pintura_reciente else 0
+    monto_total = espacio_monto_final + monto_extra + pintura_precio
     promo_advertencia = _validar_e_insertar_promo_sueltos(
         conn, pedido_id, fecha_desde, fecha_hasta,
         estudio=estudio, con_promo=con_promo, sueltos=sueltos_finales,
         promo_precio=promo_precio, precios_sueltos=precios_sueltos,
     )
+    if pintura_reciente:
+        _insertar_item_pintura(conn, pedido_id, pintura_precio)
 
     conn.execute(
         "UPDATE alquiler_items SET precio_jornada = %s, subtotal = %s "
