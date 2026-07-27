@@ -1074,6 +1074,21 @@ Fix: para emisor Monotributo, el importe facturado es SIEMPRE `pedido['monto_tot
 discriminando el 21% cuando corresponde. El supervisor marca cualquier cálculo de importe de Factura C
 que sume IVA del receptor, sea cual sea su condición.
 
+### 2026-07-27 — El Desglose/Cobranza del pedido apaga el IVA si ya hay una Factura C emitida
+
+Refina el fix anterior (mismo día): una vez que un pedido tiene una Factura C **ya emitida** (emisor
+Monotributo, nunca suma IVA), el "Desglose"/"Cobranza" en vivo del editor admin (`/api/cotizar`) tiene
+que dejar de mostrar el 21% que el perfil RI del cliente sugeriría — sin esto, la página seguía
+diciendo "resta $X + IVA" después de facturarse sin IVA, un desfasaje real entre lo que el pedido dice
+que falta cobrar y lo que la factura real ya cobró. Fuente única: `services/facturacion/repo.py::
+factura_c_vigente(pedido_id, conn)` (consulta `get_factura_principal_emitida` + chequea
+`cbte_tipo == CbteTipo.FACTURA_C`); `routes/alquileres/cotizacion.py::cotizar` la llama solo para un
+pedido congelado (no-presupuesto) y, si da `True`, fuerza `con_iva=False`/`iva_monto=0`/
+`total_final=neto`. Se anula por Nota de Crédito → la original pasa a `estado='anulada'` y
+`factura_c_vigente` vuelve a dar `False` sola (no hace falta lógica extra). El supervisor marca un
+consumidor nuevo del total de un pedido que no chequee `factura_c_vigente` antes de asumir el IVA del
+perfil fiscal.
+
 ---
 
 ## Preferencias (cómo quiero que se hagan las cosas)
