@@ -130,6 +130,17 @@ export function EstudioWeekGrid({
     return actual >= base && actual < base + cantidadFranjas * 30;
   };
 
+  // Igual que `enHighlight`, pero contra la SELECCIÓN actual (no el hover) —
+  // sin esto, la duración solo se veía marcada mientras el mouse seguía
+  // encima; al alejar el mouse (o en touch, que no tiene hover) la franja de
+  // más de un bloque quedaba sin ninguna marca más allá de la celda inicial.
+  const enSeleccionActual = (dayIdx: number, slot: string): boolean => {
+    if (!selected || ymd(selected.date) !== ymd(dias[dayIdx])) return false;
+    const base = slotToMinutes(selected.startSlot);
+    const actual = slotToMinutes(slot);
+    return actual >= base && actual < base + cantidadFranjas * 30;
+  };
+
   const estaSeleccionado = (day: Date, slot: string): boolean =>
     !!selected && ymd(selected.date) === ymd(day) && selected.startSlot === slot;
 
@@ -142,7 +153,7 @@ export function EstudioWeekGrid({
     const pasado = yaPaso(day, slot);
     const disabled = ocupado || pasado;
     const seleccionado = estaSeleccionado(day, slot);
-    const highlight = !disabled && enHighlight(dayIdx, slot);
+    const highlight = !disabled && (enHighlight(dayIdx, slot) || enSeleccionActual(dayIdx, slot));
     const horaEnPunto = slot.endsWith(":00");
 
     return (
