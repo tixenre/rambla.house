@@ -405,6 +405,7 @@ export function StudioBookingForm({
         <EstudioWeekGrid
           openHour={openHour}
           closeHour={closeHour}
+          minHours={minHours}
           hours={hours}
           selected={date ? { date, startSlot } : null}
           onSelectSlot={(d, slot) => {

@@ -30,6 +30,11 @@ type Seleccion = { date: Date; startSlot: string };
 type EstudioWeekGridProps = {
   openHour: number;
   closeHour: number;
+  /** Mínimo de horas que exige el estudio (`estudio.min_horas`) — a
+   *  diferencia de `hours`, ESTO SÍ deshabilita celdas: un inicio que no
+   *  deja lugar para el mínimo antes de `closeHour` no es una franja
+   *  reservable de verdad, aunque esté libre (ver bug de abajo). */
+  minHours: number;
   /** Duración actual elegida (horas) — solo para el highlight de hover, no
    *  filtra ni bloquea ninguna celda (ver docstring del módulo). */
   hours: number;
@@ -61,9 +66,69 @@ function slotToMinutes(slot: string): number {
 
 const DIAS_CORTOS = ["lun", "mar", "mié", "jue", "vie", "sáb", "dom"];
 
+type CeldaProps = {
+  day: Date;
+  dayIdx: number;
+  slot: string;
+  disabled: boolean;
+  ocupado: boolean;
+  sinTiempo: boolean;
+  seleccionado: boolean;
+  highlight: boolean;
+  onSelectSlot: (date: Date, startSlot: string) => void;
+};
+
+/** Hoisteado a nivel de módulo a propósito — declararlo DENTRO de
+ *  `EstudioWeekGrid` (como estaba) hace que React vea un componente "nuevo"
+ *  en cada render del padre (nueva identidad de función), así que cualquier
+ *  cambio de estado durante un hover — incluido el hover delegado del
+ *  contenedor — remontaba TODOS los botones. Si el remount caía entre el
+ *  mousedown y el mouseup de un click real, el navegador perdía el click
+ *  (reproducido con un mouse.move+down+up realista, no con `.click()` que
+ *  lo teletransporta). Acá recibe todo por props: misma identidad de
+ *  función siempre, un re-render solo actualiza props sobre el MISMO nodo. */
+function Celda({
+  day,
+  dayIdx,
+  slot,
+  disabled,
+  ocupado,
+  sinTiempo,
+  seleccionado,
+  highlight,
+  onSelectSlot,
+}: CeldaProps) {
+  const horaEnPunto = slot.endsWith(":00");
+  const motivo = ocupado ? " — ocupado" : sinTiempo ? " — no alcanza para la duración mínima" : "";
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      data-day-idx={dayIdx}
+      data-slot={slot}
+      aria-label={`${format(day, "EEEE d", { locale: es })} ${slot}${motivo}`}
+      aria-pressed={seleccionado}
+      onClick={() => !disabled && onSelectSlot(day, slot)}
+      className={cn(
+        "h-4 w-full rounded-[2px] border transition-colors",
+        // Línea de hora — ancla visual para no perderse escaneando el scroll.
+        horaEnPunto ? "border-t-ink/10" : "border-t-transparent",
+        disabled && "cursor-not-allowed border-x-transparent border-b-transparent bg-muted/60",
+        !disabled &&
+          !seleccionado &&
+          "cursor-pointer border-x-verde/25 border-b-verde/25 bg-verde/10 hover:border-[var(--area-accent)]",
+        highlight && !seleccionado && "border-[var(--area-accent)] bg-[var(--area-accent-soft)]",
+        seleccionado && "border-[var(--area-accent)] bg-[var(--area-accent)]",
+      )}
+    />
+  );
+}
+
 export function EstudioWeekGrid({
   openHour,
   closeHour,
+  minHours,
   hours,
   selected,
   onSelectSlot,
@@ -121,6 +186,16 @@ export function EstudioWeekGrid({
     return inicio < ahora;
   };
 
+  // Un inicio que no deja lugar para `minHours` antes de `closeHour` no es
+  // una franja reservable — mismo criterio que `buildTimeSlots` (el <select>
+  // de Hora ya los excluye). Sin este chequeo, la grilla dejaba clickear un
+  // horario tarde-en-el-día (libre, no pasado) que igual era inválido: el
+  // `useEffect` de `StudioBookingForm` que corrige un `startSlot` inválido
+  // lo revertía al toque a `slots[0]` — la selección "no se quedaba
+  // seleccionada" (bug real reportado en vivo).
+  const noAlcanzaDuracionMinima = (slot: string): boolean =>
+    slotToMinutes(slot) + minHours * 60 > closeHour * 60;
+
   const cantidadFranjas = Math.max(1, Math.ceil(hours * 2));
 
   const enHighlight = (dayIdx: number, slot: string): boolean => {
@@ -147,38 +222,6 @@ export function EstudioWeekGrid({
   const puedeIrAtras = weekStart.getTime() > today.getTime();
 
   const cabeceraSemana = `${format(weekStart, "d MMM", { locale: es })} – ${format(dias[6], "d MMM", { locale: es })}`;
-
-  const Celda = ({ day, dayIdx, slot }: { day: Date; dayIdx: number; slot: string }) => {
-    const ocupado = estaOcupado(day, slot);
-    const pasado = yaPaso(day, slot);
-    const disabled = ocupado || pasado;
-    const seleccionado = estaSeleccionado(day, slot);
-    const highlight = !disabled && (enHighlight(dayIdx, slot) || enSeleccionActual(dayIdx, slot));
-    const horaEnPunto = slot.endsWith(":00");
-
-    return (
-      <button
-        type="button"
-        disabled={disabled}
-        data-day-idx={dayIdx}
-        data-slot={slot}
-        aria-label={`${format(day, "EEEE d", { locale: es })} ${slot}${ocupado ? " — ocupado" : ""}`}
-        aria-pressed={seleccionado}
-        onClick={() => !disabled && onSelectSlot(day, slot)}
-        className={cn(
-          "h-4 w-full rounded-[2px] border transition-colors",
-          // Línea de hora — ancla visual para no perderse escaneando el scroll.
-          horaEnPunto ? "border-t-ink/10" : "border-t-transparent",
-          disabled && "cursor-not-allowed border-x-transparent border-b-transparent bg-muted/60",
-          !disabled &&
-            !seleccionado &&
-            "cursor-pointer border-x-verde/25 border-b-verde/25 bg-verde/10 hover:border-[var(--area-accent)]",
-          highlight && !seleccionado && "border-[var(--area-accent)] bg-[var(--area-accent-soft)]",
-          seleccionado && "border-[var(--area-accent)] bg-[var(--area-accent)]",
-        )}
-      />
-    );
-  };
 
   return (
     <div className={cn("space-y-2", className)}>
@@ -248,11 +291,30 @@ export function EstudioWeekGrid({
               >
                 {slot.endsWith(":00") ? slot : "·"}
               </div>
-              {dias.map((d, dayIdx) => (
-                <div key={`${ymd(d)}-${slot}`} className="px-0.5">
-                  <Celda day={d} dayIdx={dayIdx} slot={slot} />
-                </div>
-              ))}
+              {dias.map((d, dayIdx) => {
+                const ocupado = estaOcupado(d, slot);
+                const pasado = yaPaso(d, slot);
+                const sinTiempo = noAlcanzaDuracionMinima(slot);
+                const disabled = ocupado || pasado || sinTiempo;
+                const seleccionado = estaSeleccionado(d, slot);
+                const highlight =
+                  !disabled && (enHighlight(dayIdx, slot) || enSeleccionActual(dayIdx, slot));
+                return (
+                  <div key={`${ymd(d)}-${slot}`} className="px-0.5">
+                    <Celda
+                      day={d}
+                      dayIdx={dayIdx}
+                      slot={slot}
+                      disabled={disabled}
+                      ocupado={ocupado}
+                      sinTiempo={sinTiempo}
+                      seleccionado={seleccionado}
+                      highlight={highlight}
+                      onSelectSlot={onSelectSlot}
+                    />
+                  </div>
+                );
+              })}
             </div>
           ))}
         </div>
@@ -295,7 +357,8 @@ export function EstudioWeekGrid({
             const day = dias[mobileDayIdx];
             const ocupado = estaOcupado(day, slot);
             const pasado = yaPaso(day, slot);
-            const disabled = ocupado || pasado;
+            const sinTiempo = noAlcanzaDuracionMinima(slot);
+            const disabled = ocupado || pasado || sinTiempo;
             const seleccionado = estaSeleccionado(day, slot);
             return (
               <button
@@ -312,7 +375,7 @@ export function EstudioWeekGrid({
                 )}
               >
                 <span className="tabular">{slot}</span>
-                {disabled && !pasado && <span className="text-2xs">Ocupado</span>}
+                {ocupado && <span className="text-2xs">Ocupado</span>}
               </button>
             );
           })}
