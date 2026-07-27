@@ -69,10 +69,32 @@ export function useFacturacionArca(
 
   const [showPreview, setShowPreview] = useState(false);
 
+  // Emisor a usar para ESTE pedido puntual — default `null` (automático, vía
+  // `emisor_para`). Caso excepcional: un cliente marcado Responsable Inscripto puede pedir
+  // igual una Factura C (es legal — la letra depende solo de que el EMISOR sea
+  // monotributista, nunca del receptor), y el default de Rambla nunca la elegiría solo. Solo
+  // tiene sentido ofrecerlo cuando hay más de un emisor activo — `emisoresElegibles` abajo.
+  const [emisorOverrideId, setEmisorOverrideIdState] = useState<number | null>(null);
+
+  // Se pide recién al abrir el modal (no en cada fila del listado, donde este hook también
+  // se monta) — cacheado por React Query, así que abrir varios pedidos no repite el pedido.
+  const emisoresQ = useQuery({
+    queryKey: ["admin", "emisores-arca"],
+    queryFn: () => facturacionApi.listEmisores(),
+    enabled: enabled && showPreview,
+    staleTime: 60_000,
+  });
+  const emisoresElegibles = (emisoresQ.data ?? []).filter((e) => e.activo && e.cert_cargado);
+
   const preview = useMutation({
-    mutationFn: () => facturacionApi.previewFactura(pedidoId),
+    mutationFn: (emisorId?: number) => facturacionApi.previewFactura(pedidoId, emisorId),
     onError: (e: Error) => toast.error(e.message),
   });
+
+  function setEmisorOverrideId(id: number | null) {
+    setEmisorOverrideIdState(id);
+    preview.mutate(id ?? undefined);
+  }
 
   // Factura completa (mismo layout real, CAE/QR placeholder) embebida en el propio modal — pedido
   // del dueño de ir directo a la vista real en vez de un resumen en texto + un link aparte. Mismo
@@ -83,13 +105,17 @@ export function useFacturacionArca(
   const [facturaIframeReady, setFacturaIframeReady] = useState(false);
 
   useEffect(() => {
-    if (!showPreview) return;
+    if (!showPreview) {
+      // Vuelve a "automático" al cerrar — no arrastrar el override a otro pedido u otra apertura.
+      setEmisorOverrideIdState(null);
+      return;
+    }
     let alive = true;
     let url: string | null = null;
     setFacturaIframeReady(false);
     setFacturaHtmlError(null);
     facturacionApi
-      .previewFacturaHtml(pedidoId, layout)
+      .previewFacturaHtml(pedidoId, layout, emisorOverrideId ?? undefined)
       .then((html) => {
         if (!alive) return;
         url = URL.createObjectURL(new Blob([html], { type: "text/html" }));
@@ -107,10 +133,10 @@ export function useFacturacionArca(
       setFacturaBlobUrl(null);
       if (url) URL.revokeObjectURL(url);
     };
-  }, [showPreview, pedidoId, layout]);
+  }, [showPreview, pedidoId, layout, emisorOverrideId]);
 
   const facturar = useMutation({
-    mutationFn: () => facturacionApi.facturarPedido(pedidoId),
+    mutationFn: () => facturacionApi.facturarPedido(pedidoId, emisorOverrideId ?? undefined),
     onSuccess: () => {
       toast.success("Factura emitida");
       qc.invalidateQueries({ queryKey: ["admin", "facturas", pedidoId] });
@@ -161,6 +187,9 @@ export function useFacturacionArca(
     showPreview,
     setShowPreview,
     preview,
+    emisoresElegibles,
+    emisorOverrideId,
+    setEmisorOverrideId,
     facturaBlobUrl,
     facturaHtmlError,
     facturaIframeReady,
