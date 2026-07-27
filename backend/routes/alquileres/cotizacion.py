@@ -208,7 +208,8 @@ def cotizar(data: CotizarRequest, request: Request):
             if es_admin and data.pedido_id:
                 pedido_congelado = conn.execute(
                     "SELECT estado, cliente_id, descuento_jornadas_pct, "
-                    "descuento_cliente_pct FROM alquileres WHERE id=%s",
+                    "descuento_cliente_pct, perfil_fiscal_id, productora_id "
+                    "FROM alquileres WHERE id=%s",
                     (data.pedido_id,),
                 ).fetchone()
                 if pedido_congelado and pedido_congelado["estado"] == "solicitado":
@@ -269,6 +270,32 @@ def cotizar(data: CotizarRequest, request: Request):
                     )
                     if fiscal.get("perfil_impuestos"):
                         perfil = fiscal["perfil_impuestos"]
+            # Pedido YA EXISTENTE que quedó atado a un perfil fiscal alternativo o
+            # productora (selector "Facturar a nombre de" del checkout, #1240,
+            # columnas `perfil_fiscal_id`/`productora_id` de `alquileres`) — a
+            # diferencia del bloque de arriba (que solo confía en `data.perfil_fiscal_id`/
+            # `data.productora_id` cuando los manda una SESIÓN DE CLIENTE, nunca un admin
+            # cotizando para el cliente de otro), acá se lee lo que el PROPIO PEDIDO ya
+            # tiene persistido — no hay nada que validar de membership, ya se validó
+            # cuando se guardó. Sin esto, el admin editando un pedido ya facturado contra
+            # un perfil RI seguía viendo el perfil default de la cuenta (a menudo
+            # Consumidor Final / sin perfil) → "Desglose"/"Cobranza" mostraban un total
+            # SIN IVA mientras la factura real (`services.finanzas_flujo.pedido.
+            # desglose_de_pedido`, que sí resuelve esto) facturaba con IVA — dos totales
+            # del mismo pedido que no podían coincidir. Mismo helper, misma fuente única.
+            if pedido_congelado and (
+                pedido_congelado["perfil_fiscal_id"] or pedido_congelado["productora_id"]
+            ):
+                from services.pedidos_enriquecimiento import _resolver_datos_fiscales_pedido
+
+                fiscal_pedido = _resolver_datos_fiscales_pedido(
+                    conn,
+                    pedido_congelado["cliente_id"],
+                    pedido_congelado["perfil_fiscal_id"],
+                    pedido_congelado["productora_id"],
+                )
+                if fiscal_pedido.get("perfil_impuestos"):
+                    perfil = fiscal_pedido["perfil_impuestos"]
             # Override MANUAL del admin (lo edita en vivo en el builder del
             # pedido) — jerarquía (Fase C-1, #1219): gana OUTRIGHT sobre
             # cliente/jornadas, ya NO reemplaza el descuento del cliente para
