@@ -53,7 +53,7 @@ el mapa de responsabilidad.
 | `comprobante_pedido.py` | Mapea un pedido + emisor → `ComprobanteRequest` (receptor, importe, concepto) |
 | `signing_cert.py` | Certificado autofirmado para la firma digital del PDF (`seguridad.asegurar_pdf`) |
 | `engine.py` | `emitir_factura`, `emitir_nota_credito`, `previsualizar_factura`/`previsualizar_factura_html` |
-| `repo.py` | DAL: `insert_factura`, `update_cae`, `update_error`, `marcar_anulada`, `list_facturas`, etc. |
+| `repo.py` | DAL: `insert_factura`, `update_cae`, `update_error`, `marcar_anulada`, `list_facturas`, etc. + `factura_c_vigente(pedido_id, conn)` — True si ya hay una Factura C emitida (consumido por `cotizacion.py` para apagar el IVA del Desglose/Cobranza, §6) |
 | `comprobante_render.py` | `factura_html`/`factura_filename` — arma el `ComprobanteFiscal` del pedido y llama a `arca_fe.render` (reemplazó al viejo `pdf.py`, adapter delgado) |
 
 ### Routes HTTP
@@ -207,6 +207,12 @@ factura siempre `pedido['monto_total']` (el neto) — con emisor Monotributo (Fa
 `iva_monto` del receptor ni discrimina alícuota, sea el cliente RI o no (un monotributista no le
 agrega el 21% a NADIE, regla legal fija). Solo el emisor RESPONSABLE_INSCRIPTO discrimina el 21%
 cuando `iva_monto > 0`. Confirmado por el dueño (2026-07-27): ver `MEMORIA.md` esa fecha.
+
+**Una vez emitida, la Factura C también apaga el IVA del pedido.** `repo.py::factura_c_vigente` deja
+que `routes/alquileres/cotizacion.py::cotizar` (el "Desglose"/"Cobranza" en vivo del editor admin)
+deje de mostrar el 21% del perfil fiscal del cliente cuando el pedido ya tiene una Factura C real —
+sin esto, el pedido seguía reclamando plata que la factura real, deliberadamente, ya no cobra.
+Detalle → `MEMORIA.md`/`DECISIONES.md` misma fecha.
 
 Fuente única: `services/facturacion/emisores.py::emisor_para`. Mismo resolver que usa el
 motor de contratos (`#1138`). No duplicar esta lógica.
