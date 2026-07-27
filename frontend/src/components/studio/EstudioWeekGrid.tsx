@@ -157,7 +157,7 @@ export function EstudioWeekGrid({
           setHoverCell((c) => (c?.dayIdx === dayIdx && c.slot === slot ? null : c))
         }
         className={cn(
-          "h-7 w-full rounded-[3px] border transition-colors",
+          "h-4 w-full rounded-[2px] border transition-colors",
           // Línea de hora — ancla visual para no perderse escaneando el scroll.
           horaEnPunto ? "border-t-ink/10" : "border-t-transparent",
           disabled && "cursor-not-allowed border-x-transparent border-b-transparent bg-muted/60",
@@ -201,26 +201,29 @@ export function EstudioWeekGrid({
       <div className="hidden overflow-hidden rounded-xl border hairline sm:block">
         <div
           className="grid bg-surface border-b hairline text-2xs text-muted-foreground"
-          style={{ gridTemplateColumns: "3rem repeat(7, 1fr)" }}
+          style={{ gridTemplateColumns: "2.75rem repeat(7, 1fr)" }}
         >
           <div />
           {dias.map((d) => (
-            <div key={ymd(d)} className="px-1 py-1.5 text-center">
+            <div key={ymd(d)} className="px-1 py-1 text-center">
               <div className="capitalize">{DIAS_CORTOS[d.getDay() === 0 ? 6 : d.getDay() - 1]}</div>
               <div className="tabular font-medium text-ink">{format(d, "d")}</div>
             </div>
           ))}
         </div>
-        <div className="grid gap-y-1 p-1.5" style={{ gridTemplateColumns: "3rem repeat(7, 1fr)" }}>
+        <div
+          className="grid gap-y-px p-1"
+          style={{ gridTemplateColumns: "2.75rem repeat(7, 1fr)" }}
+        >
           {slots.map((slot) => (
             <div key={slot} className="contents">
               <div
                 className={cn(
-                  "tabular pr-2 text-right leading-7 text-muted-foreground",
-                  slot.endsWith(":00") ? "text-xs font-medium text-ink/70" : "text-2xs",
+                  "tabular pr-1.5 text-right leading-4 text-muted-foreground",
+                  slot.endsWith(":00") ? "text-3xs font-medium text-ink/70" : "text-3xs opacity-0",
                 )}
               >
-                {slot.endsWith(":00") ? slot : ""}
+                {slot.endsWith(":00") ? slot : "·"}
               </div>
               {dias.map((d, dayIdx) => (
                 <div key={`${ymd(d)}-${slot}`} className="px-0.5">
