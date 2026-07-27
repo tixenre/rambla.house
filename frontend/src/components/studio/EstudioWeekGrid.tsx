@@ -3,15 +3,16 @@
  * "elegís a ciegas y recién después te digo si se puede" por "ves de
  * entrada qué hay libre". Consume `GET /api/estudio/ocupacion-publica`
  * (vista pública y anónima — nunca cliente/nombre/número de pedido) para
- * pintar 7 días × las HORAS (no medias horas — ver `slotsDelDia`) del
- * horario del estudio.
+ * pintar 7 días × las franjas de 30 min del horario del estudio — cada hora
+ * son 2 filas ANGOSTAS pegadas (`:00`/`:30`), no una fila por hora: eso
+ * lo probamos (menos filas, más altas) y perdía la precisión de media hora
+ * al clickear; acá se recupera esa precisión sin volver a la altura total
+ * de antes (ver `slotsDelDia`).
  *
- * Es un ATAJO VISUAL, nunca el gate ni el picker de precisión:
- * `StudioBookingForm` sigue validando la franja elegida con
- * `apiGetEstudioDisponibilidad` antes de habilitar "Reservar" (no reemplaza
- * esa verificación final), y el `<select>` de Hora sigue siendo quien
- * ofrece arrancar a media hora si hace falta — clickear acá selecciona la
- * hora en punto.
+ * Es un ATAJO VISUAL, nunca el gate: `StudioBookingForm` sigue validando la
+ * franja elegida con `apiGetEstudioDisponibilidad` antes de habilitar
+ * "Reservar" — esta grilla solo ayuda a elegir sobre datos frescos (30s de
+ * staleTime), no reemplaza esa verificación final.
  *
  * Variante desktop (`sm:` en adelante): grid real de 7 columnas × N filas.
  * La variante mobile (un día a la vez + lista vertical) vive en el mismo
@@ -50,18 +51,17 @@ function ymd(d: Date): string {
   return format(d, "yyyy-MM-dd");
 }
 
-/** Una fila por HORA (no media hora) de [openHour, closeHour) — la grilla es
- *  un atajo visual para elegir el día/hora aproximada, no el picker de
- *  precisión (eso lo sigue siendo el `<select>` de Hora en
- *  `StudioBookingForm`, que sí ofrece las medias horas vía `buildTimeSlots`).
- *  Duplicar la mitad de las filas (28→56 en un horario típico 8-22hs) hacía
- *  que la grilla ocupara una altura excesiva incluso ya compactada (pedido
- *  directo del dueño) — la precisión de 30 min se resuelve con el dropdown,
- *  no clickeando dos filas casi idénticas en la grilla. */
+/** Todas las medias horas de [openHour, closeHour) — a diferencia de
+ *  `buildTimeSlots` (estudio-slots.ts), acá NO se recorta por duración: la
+ *  grilla muestra el horario completo del estudio, el stepper de duración
+ *  sigue siendo quien decide cuánto dura la reserva. Filas ANGOSTAS (ver
+ *  `Celda`, h-3) + el divisor de hora solo en `:00` para que las dos mitades
+ *  de una hora se lean pegadas — la altura total queda cerca de la versión
+ *  "solo horas" que probamos, pero sin perder el clic directo a media hora. */
 function slotsDelDia(openHour: number, closeHour: number): string[] {
   const out: string[] = [];
   for (let h = openHour; h < closeHour; h++) {
-    out.push(`${pad(h)}:00`);
+    out.push(`${pad(h)}:00`, `${pad(h)}:30`);
   }
   return out;
 }
@@ -106,6 +106,7 @@ function Celda({
   onSelectSlot,
 }: CeldaProps) {
   const motivo = ocupado ? " — ocupado" : sinTiempo ? " — no alcanza para la duración mínima" : "";
+  const horaEnPunto = slot.endsWith(":00");
 
   return (
     <button
@@ -117,7 +118,10 @@ function Celda({
       aria-pressed={seleccionado}
       onClick={() => !disabled && onSelectSlot(day, slot)}
       className={cn(
-        "h-6 w-full rounded-[3px] border border-t-ink/10 transition-colors",
+        "h-3 w-full rounded-[2px] border transition-colors",
+        // Línea de hora — separa un grupo de hora del siguiente; entre :00 y
+        // :30 de la MISMA hora no hay línea, para que se lean pegados.
+        horaEnPunto ? "border-t-ink/10" : "border-t-transparent",
         disabled && "cursor-not-allowed border-x-transparent border-b-transparent bg-muted/60",
         !disabled &&
           !seleccionado &&
@@ -175,14 +179,11 @@ export function EstudioWeekGrid({
   const slots = useMemo(() => slotsDelDia(openHour, closeHour), [openHour, closeHour]);
   const ahora = useMemo(() => new Date(), []);
 
-  // Ventana de 60 min (una fila = una hora completa): si CUALQUIER mitad de
-  // la hora está tomada, la fila se muestra ocupada — conservador a
-  // propósito, evita una UI de "media celda ocupada" para un atajo visual.
   const estaOcupado = (day: Date, slot: string): boolean => {
     const [h, m] = slot.split(":").map(Number);
     const inicio = new Date(day);
     inicio.setHours(h, m, 0, 0);
-    const fin = new Date(inicio.getTime() + 60 * 60_000);
+    const fin = new Date(inicio.getTime() + 30 * 60_000);
     return bloques.some((b) => inicio < b.hasta && fin > b.desde);
   };
 
@@ -272,7 +273,14 @@ export function EstudioWeekGrid({
         </div>
         <div
           className="grid gap-y-px p-1"
-          style={{ gridTemplateColumns: "2.75rem repeat(7, 1fr)" }}
+          // `gridAutoRows` explícito (no dejar que el browser infiera del
+          // contenido): con los `<div className="contents">` que agrupan
+          // label+celdas de una fila, Chrome calculaba el alto de cada
+          // track de grid MAL — 24px en vez de los 12px reales de cada
+          // celda (`h-3`), confirmado con align-self:start (que debería
+          // mostrar el alto natural) y seguía en 24px. Fijar el track a
+          // mano es más robusto que perseguir el bug de auto-sizing.
+          style={{ gridTemplateColumns: "2.75rem repeat(7, 1fr)", gridAutoRows: "0.75rem" }}
           // Hover DELEGADO al contenedor (en vez de onMouseEnter/onMouseLeave
           // por celda): con ~decenas de <button> chicos, un mouse rápido podía
           // saltarse el mouseleave de la última celda hovereada — quedaba un
@@ -290,8 +298,20 @@ export function EstudioWeekGrid({
         >
           {slots.map((slot) => (
             <div key={slot} className="contents">
-              <div className="tabular pr-1.5 text-right text-2xs font-medium leading-6 text-ink/70">
-                {slot}
+              <div
+                className={cn(
+                  // text-3xs/3 (no `leading-3` aparte): `cn()` usa tailwind-merge
+                  // con text-3xs registrado en el grupo "font-size" (utils.ts) —
+                  // por las reglas default de esa librería, cualquier `leading-*`
+                  // agregado aparte SIEMPRE se descarta al mergear con un
+                  // integrante de ese grupo (confirmado con un test aislado de
+                  // twMerge). El shorthand `size/leading` es UN solo token —
+                  // sobrevive el merge porque no hay nada que pueda pisarlo.
+                  "tabular pr-1.5 text-right text-3xs/3 text-muted-foreground",
+                  slot.endsWith(":00") ? "font-medium text-ink/70" : "opacity-0",
+                )}
+              >
+                {slot.endsWith(":00") ? slot : "·"}
               </div>
               {dias.map((d, dayIdx) => {
                 const ocupado = estaOcupado(d, slot);
