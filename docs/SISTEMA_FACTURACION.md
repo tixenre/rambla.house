@@ -42,7 +42,7 @@ el mapa de responsabilidad.
 | Módulo | Responsabilidad |
 |---|---|
 | `config.py` | Lee CUIT/PtoVta de `app_settings` + cert/clave de ENV → `CredARCA`. **Gating aquí.** |
-| `emisores.py` | `emisor_para(perfil_impuestos, conn)` → resuelve DINÁMICAMENTE contra `emisores_arca` (ver §4) |
+| `emisores.py` | `emisor_para(perfil_impuestos, conn, *, override_emisor_id=None)` → resuelve DINÁMICAMENTE contra `emisores_arca`, con override excepcional (ver §6) |
 | `emisores_repo.py` | DAL de `emisores_arca` (CRUD, `get_activo_para_condicion`, cert cifrado) |
 | `crypto.py` | Fernet encrypt/decrypt de cert/clave (`ARCA_MASTER_KEY`) |
 | `wsaa_cache.py` | Caché de TA en tabla `afip_ta` (evita llamar WSAA en cada factura) |
@@ -187,6 +187,21 @@ tocar código — no hay nombres de emisor fijos en la lógica (los `'pablo'`/`'
 anteriores de este doc eran datos de un momento dado, no una regla). Sin un emisor activo para la
 condición → `ValueError` descriptivo antes de tocar ARCA.
 
+**Override excepcional (`override_emisor_id`):** la tabla de arriba es un DEFAULT de Rambla, no una
+regla de ARCA — la letra del comprobante depende solo de la `condicion_iva` del EMISOR, nunca del
+receptor (un emisor Monotributo siempre factura C, sea quien sea el cliente). Caso real: un cliente
+Responsable Inscripto que pide igual una Factura C. `emisor_para(perfil_impuestos, conn, *,
+override_emisor_id=None)` acepta un id de emisor puntual que, si se pasa, IGNORA la resolución
+automática de arriba (valida que exista y esté activo, nada más) — sigue siendo la única función que
+decide "qué emisor factura", no un bypass paralelo. Threading completo: `emitir_factura`/
+`previsualizar_factura`/`previsualizar_factura_html` (`emisor_id: Optional[int]`) →
+`POST /alquileres/{id}/facturar` (`body.emisor_id`) / `GET .../preview[-html]` (`?emisor_id=`) → el
+selector "Emisor" en `FacturaPreviewDialog` (visible con al menos un emisor activo+con cert —
+a diferencia de "Facturar a nombre de" en checkout, acá el caso motivador es justo tener un solo
+emisor configurado cuando la resolución automática pide uno DISTINTO que no existe). Queda auditado
+como cualquier factura: `facturas.emisor` guarda el `nombre` del emisor que realmente facturó,
+override o no.
+
 Fuente única: `services/facturacion/emisores.py::emisor_para`. Mismo resolver que usa el
 motor de contratos (`#1138`). No duplicar esta lógica.
 
@@ -317,6 +332,12 @@ Componente `FacturacionRailSection` en `src/routes/admin/pedidos.$id.lazy.tsx`.
 - Botón **"Anular con NC"** si la factura está emitida y no tiene NC.
 - Link de descarga del PDF (cuando `pdf_key` está presente).
 - Badge **"TEST"** si `ambiente == 'homologacion'`.
+- **Selector "Emisor"** en el modal `FacturaPreviewDialog` (`PedidoPageHelpers.tsx`) — visible con al
+  menos un emisor activo+con cert (`useFacturacionArca.emisoresElegibles`; gate en `>= 1`, no `> 1` —
+  el caso motivador es justo tener un solo emisor configurado cuando la resolución automática pide
+  uno distinto que no existe). Default "Automático" (mismo comportamiento de siempre); elegir otro
+  re-arma el preview y la factura real con `override_emisor_id` (§6). Caso de uso: un cliente RI que
+  pide igual Factura C.
 
 ### Componente `FacturaBadge`
 
@@ -368,8 +389,10 @@ lectura de perfiles/productoras en la ficha de cliente (`clientes.lazy.tsx`). Ve
    Esta tabla es la ÚNICA excepción a la convención de "enteros ARS" de la plata interna
    (`backend/contabilidad/`, 2026-06-07): es un documento fiscal, no plata interna — redondear acá
    dejaba el comprobante impreso por debajo de lo que el CAE/QR autorizaron ante ARCA (bug #1209).
-6. **Emisor resuelto por `emisor_para`** → fuente única, dinámico contra `emisores_arca` (§4); no
-   hardcodear nombres de emisor ni duplicar la regla de routing.
+6. **Emisor resuelto por `emisor_para`** → fuente única, dinámico contra `emisores_arca` (§6); no
+   hardcodear nombres de emisor ni duplicar la regla de routing. El único desvío sancionado del
+   routing automático es `override_emisor_id` (§6) — un id de emisor explícito, nunca un bypass
+   que reimplemente la elección en otro lugar.
 7. **AFIP verificado gana, siempre** → razón social/domicilio/condición IVA del receptor se
    resuelven contra el padrón para el CUIT usado, nunca desde lo guardado en la cuenta (§4).
 8. **Datos fiscales de un pedido: un único punto de palanca** → `_resolver_datos_fiscales_pedido`

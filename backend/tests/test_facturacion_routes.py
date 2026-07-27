@@ -150,7 +150,9 @@ def test_facturar_pedido_value_error_es_400(monkeypatch):
     monkeypatch.setattr("routes.facturacion.require_admin", lambda request: None)
     monkeypatch.setattr(
         "services.facturacion.engine.emitir_factura",
-        lambda pedido_id, emitido_por=None: (_ for _ in ()).throw(ValueError("no confirmado")),
+        lambda pedido_id, emitido_por=None, emisor_id=None: (_ for _ in ()).throw(
+            ValueError("no confirmado")
+        ),
     )
     with pytest.raises(HTTPException) as ei:
         facturacion_routes.facturar_pedido(1, _fake_request())
@@ -161,7 +163,9 @@ def test_facturar_pedido_runtime_error_es_503_nunca_500(monkeypatch):
     monkeypatch.setattr("routes.facturacion.require_admin", lambda request: None)
     monkeypatch.setattr(
         "services.facturacion.engine.emitir_factura",
-        lambda pedido_id, emitido_por=None: (_ for _ in ()).throw(RuntimeError("ARCA caída")),
+        lambda pedido_id, emitido_por=None, emisor_id=None: (_ for _ in ()).throw(
+            RuntimeError("ARCA caída")
+        ),
     )
     with pytest.raises(HTTPException) as ei:
         facturacion_routes.facturar_pedido(1, _fake_request())
@@ -196,7 +200,7 @@ def test_facturar_pedido_arca_error_status_por_subtipo(monkeypatch, excepcion, s
     monkeypatch.setattr("routes.facturacion.require_admin", lambda request: None)
     monkeypatch.setattr(
         "services.facturacion.engine.emitir_factura",
-        lambda pedido_id, emitido_por=None: (_ for _ in ()).throw(
+        lambda pedido_id, emitido_por=None, emisor_id=None: (_ for _ in ()).throw(
             exc_cls("motivo real de AFIP")
         ),
     )
@@ -214,7 +218,7 @@ def test_preview_factura_devuelve_el_armado(monkeypatch):
     monkeypatch.setattr("routes.facturacion.get_db", lambda: _FakeConn())
     monkeypatch.setattr(
         "services.facturacion.engine.previsualizar_factura",
-        lambda pedido_id, conn: {"comprobante": {"letra": "C"}},
+        lambda pedido_id, conn, emisor_id=None: {"comprobante": {"letra": "C"}},
     )
 
     result = facturacion_routes.preview_factura(1, _fake_request())
@@ -226,7 +230,7 @@ def test_preview_factura_value_error_es_400(monkeypatch):
     monkeypatch.setattr("routes.facturacion.get_db", lambda: _FakeConn())
     monkeypatch.setattr(
         "services.facturacion.engine.previsualizar_factura",
-        lambda pedido_id, conn: (_ for _ in ()).throw(ValueError("no confirmado")),
+        lambda pedido_id, conn, emisor_id=None: (_ for _ in ()).throw(ValueError("no confirmado")),
     )
     with pytest.raises(HTTPException) as ei:
         facturacion_routes.preview_factura(1, _fake_request())
@@ -240,7 +244,7 @@ def test_preview_factura_runtime_error_es_503_nunca_500(monkeypatch):
     monkeypatch.setattr("routes.facturacion.get_db", lambda: _FakeConn())
     monkeypatch.setattr(
         "services.facturacion.engine.previsualizar_factura",
-        lambda pedido_id, conn: (_ for _ in ()).throw(RuntimeError("ARCA caída")),
+        lambda pedido_id, conn, emisor_id=None: (_ for _ in ()).throw(RuntimeError("ARCA caída")),
     )
     with pytest.raises(HTTPException) as ei:
         facturacion_routes.preview_factura(1, _fake_request())
@@ -254,7 +258,7 @@ def test_preview_factura_arca_business_error_es_422(monkeypatch):
     monkeypatch.setattr("routes.facturacion.get_db", lambda: _FakeConn())
     monkeypatch.setattr(
         "services.facturacion.engine.previsualizar_factura",
-        lambda pedido_id, conn: (_ for _ in ()).throw(
+        lambda pedido_id, conn, emisor_id=None: (_ for _ in ()).throw(
             ArcaBusinessError("CUIT bloqueado por RG 3990-E")
         ),
     )
@@ -272,7 +276,7 @@ def test_preview_factura_html_devuelve_html(monkeypatch):
     monkeypatch.setattr("routes.facturacion.get_db", lambda: _FakeConn())
     monkeypatch.setattr(
         "services.facturacion.engine.previsualizar_factura_html",
-        lambda pedido_id, conn, layout="simplificada": f"<html>factura {layout}</html>",
+        lambda pedido_id, conn, layout="simplificada", emisor_id=None: f"<html>factura {layout}</html>",
     )
 
     resp = facturacion_routes.preview_factura_html(1, _fake_request())
@@ -285,7 +289,7 @@ def test_preview_factura_html_value_error_es_400(monkeypatch):
     monkeypatch.setattr("routes.facturacion.get_db", lambda: _FakeConn())
     monkeypatch.setattr(
         "services.facturacion.engine.previsualizar_factura_html",
-        lambda pedido_id, conn, layout="simplificada": (_ for _ in ()).throw(
+        lambda pedido_id, conn, layout="simplificada", emisor_id=None: (_ for _ in ()).throw(
             ValueError("CUIT inválido")
         ),
     )

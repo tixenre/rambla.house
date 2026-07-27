@@ -493,6 +493,14 @@ export function BdRow({
   );
 }
 
+// Copy corto para el selector de emisor del preview — mismo trío de condiciones que
+// `CONDICIONES` en facturacion.emisores.lazy.tsx, acortado para que entre en un <SelectItem>.
+const CONDICION_IVA_CORTA: Record<string, string> = {
+  responsable_inscripto: "RI, Factura A",
+  monotributo: "Monotributo, Factura C",
+  exento: "Exento, Factura B",
+};
+
 /** Modal de preview + confirmación — compartido por el detalle y el listado. */
 export function FacturaPreviewDialog({ f }: { f: FacturacionArca }) {
   return (
@@ -510,6 +518,40 @@ export function FacturaPreviewDialog({ f }: { f: FacturacionArca }) {
               corregir con una Nota de Crédito.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          {/* Se muestra apenas hay UN emisor elegible además de "Automático" — a diferencia del
+              selector "Facturar a nombre de" de CheckoutResumen (que sí exige 2+ opciones), acá
+              el caso motivador es justo tener un solo emisor configurado (ej. el monotributista)
+              cuando la resolución automática pide uno DISTINTO que no existe (cliente RI sin
+              emisor RI activo): con el gate en ">1" el override quedaría inalcanzable desde la UI
+              exactamente en el caso que lo necesita. */}
+          {f.emisoresElegibles.length >= 1 && (
+            <div className="space-y-1.5 border-b hairline px-5 py-3">
+              <div className="font-mono text-2xs uppercase tracking-widest text-muted-foreground">
+                Emisor
+              </div>
+              <Select
+                value={f.emisorOverrideId ? String(f.emisorOverrideId) : "auto"}
+                onValueChange={(v) => f.setEmisorOverrideId(v === "auto" ? null : Number(v))}
+              >
+                <SelectTrigger className="h-8 text-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Automático (según el cliente)</SelectItem>
+                  {f.emisoresElegibles.map((e) => (
+                    <SelectItem key={e.id} value={String(e.id)}>
+                      {e.nombre} — {CONDICION_IVA_CORTA[e.condicion_iva] ?? e.condicion_iva}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-2xs text-muted-foreground leading-snug">
+                Fuerza la letra del comprobante a la que corresponda por la condición IVA de ese
+                emisor, sin importar la del cliente.
+              </p>
+            </div>
+          )}
 
           <div className="flex-1 px-5">
             {f.preview.isPending && (
@@ -601,7 +643,7 @@ export function FacturarButton({
       title={!f.puedeFacturar ? "No se puede facturar en este estado" : undefined}
       onClick={() => {
         f.setShowPreview(true);
-        f.preview.mutate();
+        f.preview.mutate(undefined);
       }}
     >
       <Receipt className="h-3.5 w-3.5 mr-1" />
