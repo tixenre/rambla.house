@@ -195,44 +195,40 @@ export function EstudioWeekGrid({
       </div>
 
       {/* ── Desktop/tablet (≥640px): grid 7 columnas × N filas ────────── */}
+      {/* Sin scroll interno a propósito (pedido del dueño) — el día completo
+          se ve entero, la página scrollea como un todo en vez de un scroll
+          anidado adentro de otro. */}
       <div className="hidden overflow-hidden rounded-xl border hairline sm:block">
-        <div className="max-h-[28rem] overflow-y-auto">
-          <div
-            className="grid sticky top-0 z-10 bg-surface border-b hairline text-2xs text-muted-foreground"
-            style={{ gridTemplateColumns: "3rem repeat(7, 1fr)" }}
-          >
-            <div />
-            {dias.map((d) => (
-              <div key={ymd(d)} className="px-1 py-1.5 text-center">
-                <div className="capitalize">
-                  {DIAS_CORTOS[d.getDay() === 0 ? 6 : d.getDay() - 1]}
-                </div>
-                <div className="tabular font-medium text-ink">{format(d, "d")}</div>
+        <div
+          className="grid bg-surface border-b hairline text-2xs text-muted-foreground"
+          style={{ gridTemplateColumns: "3rem repeat(7, 1fr)" }}
+        >
+          <div />
+          {dias.map((d) => (
+            <div key={ymd(d)} className="px-1 py-1.5 text-center">
+              <div className="capitalize">{DIAS_CORTOS[d.getDay() === 0 ? 6 : d.getDay() - 1]}</div>
+              <div className="tabular font-medium text-ink">{format(d, "d")}</div>
+            </div>
+          ))}
+        </div>
+        <div className="grid gap-y-1 p-1.5" style={{ gridTemplateColumns: "3rem repeat(7, 1fr)" }}>
+          {slots.map((slot) => (
+            <div key={slot} className="contents">
+              <div
+                className={cn(
+                  "tabular pr-2 text-right leading-7 text-muted-foreground",
+                  slot.endsWith(":00") ? "text-xs font-medium text-ink/70" : "text-2xs",
+                )}
+              >
+                {slot.endsWith(":00") ? slot : ""}
               </div>
-            ))}
-          </div>
-          <div
-            className="grid gap-y-1 p-1.5"
-            style={{ gridTemplateColumns: "3rem repeat(7, 1fr)" }}
-          >
-            {slots.map((slot) => (
-              <div key={slot} className="contents">
-                <div
-                  className={cn(
-                    "tabular pr-2 text-right leading-7 text-muted-foreground",
-                    slot.endsWith(":00") ? "text-xs font-medium text-ink/70" : "text-2xs",
-                  )}
-                >
-                  {slot.endsWith(":00") ? slot : ""}
+              {dias.map((d, dayIdx) => (
+                <div key={`${ymd(d)}-${slot}`} className="px-0.5">
+                  <Celda day={d} dayIdx={dayIdx} slot={slot} />
                 </div>
-                {dias.map((d, dayIdx) => (
-                  <div key={`${ymd(d)}-${slot}`} className="px-0.5">
-                    <Celda day={d} dayIdx={dayIdx} slot={slot} />
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -268,7 +264,7 @@ export function EstudioWeekGrid({
           })}
         </div>
 
-        <div className="mt-2 max-h-80 space-y-1 overflow-y-auto rounded-xl border hairline p-1.5">
+        <div className="mt-2 space-y-1 rounded-xl border hairline p-1.5">
           {slots.map((slot) => {
             const day = dias[mobileDayIdx];
             const ocupado = estaOcupado(day, slot);
