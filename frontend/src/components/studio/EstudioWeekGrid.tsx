@@ -160,13 +160,11 @@ export function EstudioWeekGrid({
       <button
         type="button"
         disabled={disabled}
+        data-day-idx={dayIdx}
+        data-slot={slot}
         aria-label={`${format(day, "EEEE d", { locale: es })} ${slot}${ocupado ? " — ocupado" : ""}`}
         aria-pressed={seleccionado}
         onClick={() => !disabled && onSelectSlot(day, slot)}
-        onMouseEnter={() => !disabled && setHoverCell({ dayIdx, slot })}
-        onMouseLeave={() =>
-          setHoverCell((c) => (c?.dayIdx === dayIdx && c.slot === slot ? null : c))
-        }
         className={cn(
           "h-4 w-full rounded-[2px] border transition-colors",
           // Línea de hora — ancla visual para no perderse escaneando el scroll.
@@ -225,6 +223,20 @@ export function EstudioWeekGrid({
         <div
           className="grid gap-y-px p-1"
           style={{ gridTemplateColumns: "2.75rem repeat(7, 1fr)" }}
+          // Hover DELEGADO al contenedor (en vez de onMouseEnter/onMouseLeave
+          // por celda): con ~decenas de <button> chicos, un mouse rápido podía
+          // saltarse el mouseleave de la última celda hovereada — quedaba un
+          // preview de duración pegado aunque el mouse ya estuviera afuera de
+          // la grilla. Una sola fuente de verdad por movimiento elimina la raza.
+          onMouseOver={(e) => {
+            const btn = (e.target as HTMLElement).closest("button[data-slot]");
+            if (!(btn instanceof HTMLButtonElement) || btn.disabled) {
+              setHoverCell(null);
+              return;
+            }
+            setHoverCell({ dayIdx: Number(btn.dataset.dayIdx), slot: btn.dataset.slot! });
+          }}
+          onMouseLeave={() => setHoverCell(null)}
         >
           {slots.map((slot) => (
             <div key={slot} className="contents">
