@@ -41,6 +41,13 @@ function todayYmd(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+// Estados con los que se puede CREAR una reserva — mismo universo que el
+// backend (`_ESTADOS_ADMIN_CREACION`, services/estudio/commands/reserva.py).
+// Un pedido vinculado ya más avanzado (entregado/devuelto/finalizado/
+// cancelado) no tiene un análogo válido acá — el turno arranca "confirmado".
+const ESTADOS_ADMIN_CREACION = ["solicitado", "confirmado", "retirado"] as const;
+type EstadoAlta = (typeof ESTADOS_ADMIN_CREACION)[number];
+
 export function NuevoTurnoEstudioForm({
   estudio,
   pedidoVinculado,
@@ -50,12 +57,21 @@ export function NuevoTurnoEstudioForm({
   estudio: EstudioConfig;
   /** Alta DESDE la página de un pedido de alquiler normal (#1308): el
    *  cliente se hereda de ese pedido — oculta el picker y manda
-   *  `pedido_principal_id` en vez de cliente_id/nombre. Ausente = alta
-   *  suelta desde la agenda del Estudio, con picker de cliente propio. */
-  pedidoVinculado?: { id: number; clienteNombre: string | null };
+   *  `pedido_principal_id` en vez de cliente_id/nombre. También hereda el
+   *  ESTADO inicial del pedido principal (oculta el selector — el pedido ya
+   *  tiene su propio control de estado, no hace falta uno redundante acá).
+   *  Ausente = alta suelta desde la agenda del Estudio, con picker de
+   *  cliente y selector de estado propios. */
+  pedidoVinculado?: { id: number; clienteNombre: string | null; estado: string };
   onCreated: (pedido: Pedido) => void;
   onCancel: () => void;
 }) {
+  const estadoHeredado: EstadoAlta =
+    pedidoVinculado &&
+    (ESTADOS_ADMIN_CREACION as readonly string[]).includes(pedidoVinculado.estado)
+      ? (pedidoVinculado.estado as EstadoAlta)
+      : "confirmado";
+
   const slots = useMemo(
     () => buildTimeSlots(estudio.open_hour, estudio.close_hour, estudio.min_horas || 1),
     [estudio.open_hour, estudio.close_hour, estudio.min_horas],
@@ -71,9 +87,7 @@ export function NuevoTurnoEstudioForm({
   const [pinturaReciente, setPinturaReciente] = useState(false);
   const [sueltos, setSueltos] = useState<SueltoLocal[]>([]);
   const [espacioOverride, setEspacioOverride] = useState("");
-  const [estadoAlta, setEstadoAlta] = useState<"solicitado" | "confirmado" | "retirado">(
-    "confirmado",
-  );
+  const [estadoAlta, setEstadoAlta] = useState<EstadoAlta>("confirmado");
 
   const sueltosInput = useMemo(
     () => sueltos.map((s) => ({ equipo_id: s.equipo_id, cantidad: s.cantidad })),
@@ -118,7 +132,7 @@ export function NuevoTurnoEstudioForm({
         pintura_reciente: pinturaReciente,
         sueltos: sueltosInput,
         espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
-        estado: estadoAlta,
+        estado: pedidoVinculado ? estadoHeredado : estadoAlta,
       }),
     onSuccess: (pedido) => {
       toast.success("Turno creado");
@@ -246,17 +260,19 @@ export function NuevoTurnoEstudioForm({
         cotiz={cotiz}
       />
 
-      <Field label="Estado inicial">
-        <select
-          value={estadoAlta}
-          onChange={(e) => setEstadoAlta(e.target.value as typeof estadoAlta)}
-          className="h-9 w-full rounded-md border hairline bg-background px-2 text-sm"
-        >
-          <option value="solicitado">Solicitado</option>
-          <option value="confirmado">Confirmado</option>
-          <option value="retirado">Retirado</option>
-        </select>
-      </Field>
+      {!pedidoVinculado && (
+        <Field label="Estado inicial">
+          <select
+            value={estadoAlta}
+            onChange={(e) => setEstadoAlta(e.target.value as EstadoAlta)}
+            className="h-9 w-full rounded-md border hairline bg-background px-2 text-sm"
+          >
+            <option value="solicitado">Solicitado</option>
+            <option value="confirmado">Confirmado</option>
+            <option value="retirado">Retirado</option>
+          </select>
+        </Field>
+      )}
 
       {/* Total en vivo — el front no calcula, solo muestra (2026-06-29). */}
       <div className="rounded-lg border hairline bg-muted/20 p-3 text-sm">

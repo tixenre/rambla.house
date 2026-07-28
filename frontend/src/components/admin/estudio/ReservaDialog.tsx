@@ -43,12 +43,12 @@ export function ReservaDialog({
   estudio: EstudioConfig;
   onSaved: () => void;
   /** Alta de un turno DESDE la página de un pedido de alquiler normal
-   *  (#1308, sección "Turnos del Estudio"): el cliente se hereda de ese
-   *  pedido. Solo aplica al modo alta (`reserva == null`) — hoy este caso
-   *  ya no pasa por acá (`TurnosEstudioSection` monta `NuevoTurnoEstudioForm`
-   *  directo), pero el prop se conserva por si otro caller futuro sí
-   *  necesita el alta vinculada dentro de un Dialog. */
-  pedidoVinculado?: { id: number; clienteNombre: string | null };
+   *  (#1308, sección "Turnos del Estudio"): el cliente Y el estado inicial
+   *  se heredan de ese pedido. Solo aplica al modo alta (`reserva == null`)
+   *  — hoy este caso ya no pasa por acá (`TurnosEstudioSection` monta
+   *  `NuevoTurnoEstudioForm` directo), pero el prop se conserva por si otro
+   *  caller futuro sí necesita el alta vinculada dentro de un Dialog. */
+  pedidoVinculado?: { id: number; clienteNombre: string | null; estado: string };
 }) {
   const editando = !!reserva;
 

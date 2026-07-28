@@ -91,7 +91,11 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
           <div className="rounded-lg border hairline p-3">
             <NuevoTurnoEstudioForm
               estudio={estudioQ.data}
-              pedidoVinculado={{ id: pedido.id, clienteNombre: pedido.cliente_nombre }}
+              pedidoVinculado={{
+                id: pedido.id,
+                clienteNombre: pedido.cliente_nombre,
+                estado: pedido.estado,
+              }}
               onCreated={() => {
                 qc.invalidateQueries({ queryKey: ["admin", "pedido", pedido.id] });
                 setMostrarAlta(false);
