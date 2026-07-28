@@ -23,6 +23,23 @@
 
 Un único dueño/operador maneja el back-office. Inventario chico-mediano (cientos de equipos), volumen de alquileres mensual moderado.
 
+### Líneas de negocio (todas en el mismo pedido)
+
+3 líneas de negocio conviven en la misma tabla `alquileres` — **un pedido, no un sistema por línea**
+(decisión _2026-05-27 — El Estudio: producto aparte que reusa el motor de reservas_, extendida a Talleres):
+
+- **Rental** (`tipo='diaria'`) — alquiler de equipos por jornada. La línea original.
+- **Estudio** (`tipo='estudio'` / `'estudio_fijo'`) — alquiler del espacio físico por franja horaria
+  (turno puntual o slot fijo recurrente), con o sin equipos sueltos. Motor →
+  `backend/services/estudio/` ([`CLAUDE.md`](backend/services/estudio/CLAUDE.md)).
+- **Talleres** (`tipo='taller'`) — cursos con clases fechadas; el pedido es un **resumen contable
+  mensual** de la edición, no un evento puntual. Motor → `backend/services/talleres/`
+  ([`CLAUDE.md`](backend/services/talleres/CLAUDE.md)).
+
+Qué significan las fechas de cada tipo, qué se edita dónde, y por qué "un pedido con 4 significados
+de fecha" es a propósito y no drift → [`docs/FLUJO_PEDIDOS.md`](docs/FLUJO_PEDIDOS.md) §5 "Familias
+de pedido" (fuente única del predicado: `backend/tipos_pedido.py`).
+
 ---
 
 ## 2. Stack
@@ -165,6 +182,9 @@ Puntos de entrada para no grepear:
 | Lógica reusable / utilities UI | `src/lib/` |
 | Endpoints backend | `backend/routes/` (`equipos.py`, `clientes.py`, `dashboard.py`, etc.) |
 | **Motor de reservas (sagrado)** | `backend/reservas/` (`estados.py`, `semantics.py`, `disponibilidad.py`, `gate.py`) — disponibilidad + gate `_check_stock`. Ver MEMORIA 2026-05-30 |
+| Familias de pedido (fuente única) | `backend/tipos_pedido.py` — `TIPOS_DERIVADOS`/`TIPOS_SIN_RETIRO`, predicados `es_pedido_derivado()`/`es_pedido_taller()`; espejo `frontend/src/lib/tipos-pedido.ts` |
+| Motor del Estudio | `backend/services/estudio/` (`queries/`+`commands/`) — disponibilidad, promo, reserva. Ver su `CLAUDE.md` |
+| Motor de Talleres | `backend/services/talleres/` (`queries/`+`commands/`) — gate de conflicto con Estudio, economía. Ver su `CLAUDE.md` |
 | Configuración (Settings) | `backend/config.py` (fuente de `ADMIN_EMAILS`, etc.) |
 | Procesamiento/upload de imágenes + anti-SSRF | `backend/services/image_upload.py` |
 | Schema base + pool DB | `backend/database.py` |

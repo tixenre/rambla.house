@@ -3600,3 +3600,81 @@ PDF/imagen", "Qué NO cubre").
   arriba. El supervisor marca: un query nuevo de "pedidos reales" (salen/vuelven/ocupan/bloquean) que
   no excluya `('taller','estudio_fijo')`, o un caller nuevo de `editar_reserva`/`_crear_pedido_estudio`
   que pase `espacio_monto=None` sin haber resuelto explícitamente si hay una tarifa que preservar.
+
+### 2026-07-28 — Fase 1 de "integrar rental/Estudio/Talleres en el pedido sin que mienta": fuente única de familias, blindaje del taller, UI honesta y puente a Talleres
+
+- **Contexto.** Segunda tanda de la iniciativa #1308 (la primera fue la Fase 0 de arriba). El
+  veredicto del `consejo` había puesto como condición para avanzar a semántica/UI que la Fase 1
+  empezara por la **fuente única de familias de pedido** — sin eso, el riesgo señalado era que cada
+  branch nuevo por tipo se desincronizara igual que ya le había pasado a `TIPOS_ESTUDIO` (cubría 2 de
+  4 tipos, dejando a `taller` afuera de todos los blindajes — la raíz de la Fase 0).
+- **F1.1 — Fuente única de tipos.** `backend/tipos_pedido.py` gana `TIPOS_DERIVADOS = TIPOS_ESTUDIO +
+  ("taller",)`, `TIPOS_SIN_RETIRO = ("taller", "estudio_fijo")` (`estudio` se queda afuera: puede
+  tener un retiro real de equipos sueltos), sus versiones `_SQL` pre-formateadas para interpolar, y
+  los predicados `es_pedido_derivado(p)`/`es_pedido_taller(p)` — chequean `p.keys()` antes de indexar
+  (seguros contra un dict/FakeConn parcial sin columna `tipo`, a diferencia de un `p["tipo"] == "x"`
+  crudo, que rompía un test existente con `KeyError`). Reemplazaron los literales `NOT IN (...)`/
+  `IN (...)` dispersos: 9 sitios en `routes/estadisticas.py` (7 queries con `TIPOS_DERIVADOS_SQL` +
+  2 con `TIPOS_ESTUDIO_SQL`), el `_TIPOS_NO_RETIRO` local de `routes/dashboard.py`, uno en
+  `jobs/recordatorios.py`, y uno en `services/estudio/queries/disponibilidad.py::_centinela_libre`.
+  Guard nuevo `test_tipos_pedido_source_scan.py` (18 tests, molde
+  `test_finanzas_flujo_source_scan.py`): prohíbe un literal de tipos nuevo en esos módulos y asegura
+  que las funciones puntuales usen el predicado compartido. Espejo TS en
+  `frontend/src/lib/tipos-pedido.ts` (`TIPOS_DERIVADOS`, `esPedidoDerivado`/`esPedidoTaller`).
+- **F1.2 — Blindar el pedido de taller (backend).** Extendido el guard de fechas (409) de
+  `_apply_pedido_datos` de `es_pedido_estudio` a `es_pedido_derivado` (cubre taller también), con el
+  mensaje brancheado por tipo. Ítems: `_apply_pedido_items` gana `_validar_reemplazo_items_taller` —
+  compara el set de ítems auto (centinela del Estudio / líneas "Uso de equipos — …") ANTES vs.
+  DESPUÉS del PATCH propuesto; si el reemplazo pierde alguno, 409 ("se administra desde Talleres, no
+  acá"). Agregar una línea nueva (matrícula) SIGUE permitido — el guard solo protege lo
+  auto-generado, no bloquea el PATCH entero como hace `estudio`. `transiciones.py::_revalidar_stock`
+  gana un tercer branch: taller no revalida contra el motor genérico (su disponibilidad la garantiza
+  el gate de la edición en `services/talleres/`, no `backend/reservas/`). **2 bugs de plata reales
+  encontrados en el camino:** (a) `_recalcular_total_pedido` solo saltaba el recálculo para
+  `es_pedido_estudio` — un pedido de taller SÍ pasaba por el resolutor de descuentos por
+  jornadas/cliente, aplicando un porcentaje sobre un total sin jornadas reales; (b)
+  `_apply_pedido_items` tenía su PROPIO cálculo de descuento inline (no pasaba por
+  `_recalcular_total_pedido`) con el mismo problema — un PATCH de ítems sobre un pedido de taller
+  también podía aplicar descuento indebido. Ambos branchean ahora con `es_pedido_taller(p)`: si es
+  taller, `monto_total = sum(subtotales)` sin descuento; sino, el camino de siempre.
+- **F1.3 — UI honesta por tipo.** Backend: el detalle de un pedido (`_get_alquiler_detail`) enriquece
+  con `clases_taller` (lista de clases reales de la edición, vía `taller_edicion_id` →
+  `services/talleres/queries/clases.py::clases_de_edicion`, extraída move-verbatim de
+  `routes/talleres.py` para evitar un ciclo de imports: `routes/talleres.py` ya importa de
+  `routes.alquileres`, así que el sentido inverso necesitaba un módulo compartido sin depender de
+  ningún route). **Bug de plata serio encontrado en vivo** (verificación real en navegador — no
+  estaba en el plan): `routes/alquileres/cotizacion.py::cotizar` hardcodeaba
+  `"cobro_modo": "jornada"` para todo ítem de catálogo — el Desglose/Cobranza de un pedido de taller
+  con precio fijo (`cobro_modo='fijo'`) se multiplicaba igual por los "31 días" del rango contable:
+  los $1.200.000 reales del pedido #445 se mostraban como $37.200.000. Fix de una línea:
+  `it.cobro_modo or "jornada"` (mismo patrón que ya usaba la rama de líneas libres, un `if` más
+  arriba — confirmado con `git stash` que el código viejo reproduce exactamente 37200000). Frontend:
+  la card de Fechas de `pedidos.$id.lazy.tsx` renderiza la lista de `clases_taller` (día + franja) en
+  vez del selector de fechas para taller/derivados (`fechaNoEditable`); el sufijo de precio en
+  `PedidoPageHelpers.tsx`/`PedidoPageCards.tsx` muestra "fijo" en vez de "/día" cuando
+  `cobro_modo === 'fijo'`; el label "Bruto" del Desglose omite "· N jornadas" para taller.
+- **F1.4 — Puente Talleres → Pedidos.** Nuevo endpoint `GET /admin/ediciones/{id}/pedidos` (lee
+  `alquileres WHERE taller_edicion_id = %s ORDER BY fecha_desde`, proyección mínima: número, estado,
+  fechas, montos). La pestaña "Precios y pago" de `EdicionSubRow.tsx` gana una sección "Pedidos
+  generados" (`PedidosGeneradosSection` en `EdicionTabs.tsx`) — lista cada pedido mensual con su mes
+  (`fmtMesAno`, helper nuevo en `lib/format.ts`), badge de estado y `cobrado / total`, cada fila
+  linkeando a `/admin/pedidos/$id`.
+- **Tests.** `test_tipos_pedido_source_scan.py` (18), `test_taller_pedidos_blindaje_db.py` (6,
+  Postgres real — incluye `PEDIDO_TURNO_REAL_ID`, una reserva de estudio real conflictiva en el rango,
+  para que el test del skip de `_revalidar_stock` discrimine de verdad: sin ella, no había ninguna
+  reserva conflictiva en el rango para que el chequeo genérico rechazara, así que el test pasaba
+  incluso contra el código viejo), `test_pedido_taller_clases_enriquecido_db.py` (2),
+  `test_cotizar_endpoint.py::TestRespetarPrecioItemCobroModo` (3, con control positivo
+  `cobro_modo='jornada'` que sí multiplica), `test_talleres_pedidos_generados_db.py` (3).
+  Verificación visual real (backend+frontend+Postgres local, Playwright headless): banner de taller,
+  lista de clases reales, tag "fijo", Desglose correcto, sección "Pedidos generados" con
+  orden/badges/montos/link correctos. Suite completa, ruff, tsc, eslint y prettier en verde antes de
+  cada push; CI en verde en `dev` para las 5 tandas de esta fase.
+- **Alcance y qué NO se tocó.** `backend/reservas/` (sagrado) intacto; la granularidad mensual del
+  pedido de taller no cambió (sigue siendo Fase 3 diferida); no se agregaron tablas de tiempo a
+  `alquileres`; la atribución de plata vía `equipos.dueno` no se tocó. Docs actualizados en el mismo
+  cambio: `FLUJO_PEDIDOS.md` gana §5 "Familias de pedido" (nueva); `MANIFIESTO.md` suma "líneas de
+  negocio" en §1 (gap real — Estudio/Talleres no estaban mencionados como líneas de negocio en
+  ningún lado) y 3 filas nuevas en el mapa de código de §5. Fase 2 (sección "Reserva del Estudio" en
+  la página del pedido, pedido explícito del dueño) queda para la próxima tanda de la misma
+  iniciativa (issue de tracking #1308).

@@ -1110,6 +1110,32 @@ misma iniciativa (issue de tracking #1308). El supervisor marca: un query nuevo 
 `('taller','estudio_fijo')`, o un caller nuevo de `editar_reserva`/`_crear_pedido_estudio` con
 `espacio_monto=None` sin resolver explícitamente si hay una tarifa que preservar.
 
+### 2026-07-28 — Fase 1 de "integrar rental/Estudio/Talleres en el pedido sin que mienta": fuente única de familias, blindaje del taller, UI honesta y puente a Talleres
+
+`backend/tipos_pedido.py` es ahora la fuente única de las 4 familias de pedido: `TIPOS_DERIVADOS`
+(`estudio`/`estudio_fijo`/`taller`), `TIPOS_SIN_RETIRO` (`taller`/`estudio_fijo` — `estudio` se queda
+afuera, puede tener retiro real de sueltos), predicados `es_pedido_derivado()`/`es_pedido_taller()` +
+sus constantes `_SQL` listas para interpolar — reemplazan los literales `NOT IN (...)`/`IN (...)`
+dispersos en `estadisticas.py`, `dashboard.py`, `jobs/recordatorios.py` y
+`services/estudio/queries/disponibilidad.py::_centinela_libre`, con guard mecánico
+(`test_tipos_pedido_source_scan.py`) que impide reintroducirlos; espejo TS en
+`frontend/src/lib/tipos-pedido.ts`. El pedido de **taller** queda blindado como los de Estudio (409 al
+tocar fechas; el ítem auto-generado no se puede quitar/reemplazar por PATCH) pero conservando la vía
+de agregar una línea manual (matrícula) — `_validar_reemplazo_items_taller` es el guard nuevo;
+`_revalidar_stock` lo saltea (su disponibilidad la garantiza el gate de la edición del taller, no el
+motor genérico). **2 bugs de plata reales encontrados en el camino:** el descuento por jornadas/
+cliente se aplicaba indebidamente a un pedido de taller en 2 paths (`_recalcular_total_pedido` y el
+cálculo inline de `_apply_pedido_items`, que no pasaba por el primero); y `/api/cotizar` hardcodeaba
+`cobro_modo='jornada'` para todo ítem de catálogo — el pedido #445 (precio fijo real $1.200.000)
+mostraba $37.200.000 en el Desglose, multiplicado por los 31 días del rango contable. La card de
+Fechas de un pedido de taller ahora muestra sus **clases reales** (`clases_taller`, enriquecida vía
+`taller_edicion_id`) en vez de "7 jornadas", y el precio lleva el sufijo "fijo" en vez de "/día"
+cuando corresponde. La pestaña "Precios y pago" de una edición de taller lista los pedidos mensuales
+que generó, cada uno linkeando a su página real (`GET /admin/ediciones/{id}/pedidos`). El supervisor
+marca: un literal de tipos reimplementado fuera de `tipos_pedido.py`; un query/branch nuevo de
+"pedido real" que no use `es_pedido_derivado()`/`es_pedido_taller()`; o un consumidor nuevo del total
+de un ítem de catálogo que no respete su `cobro_modo` real.
+
 ---
 
 ## Preferencias (cómo quiero que se hagan las cosas)

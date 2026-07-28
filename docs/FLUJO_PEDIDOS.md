@@ -118,3 +118,39 @@ bug: es el identificador interno vs el comercial.
 `numero_pedido` es `NULL`-able en el esquema y el código cae a mostrar el `id` cuando falta
 (`numero_pedido or id`). Eso es solo una red de seguridad para filas viejas/legacy; los pedidos
 nuevos siempre reciben su `numero_pedido` al crearse.
+
+## 5. Familias de pedido — mismo modelo, 4 significados de fecha (Fase 1, #1308)
+
+Un pedido vive siempre en la misma tabla `alquileres`, pero la columna `tipo` separa **4 familias**
+con semántica de fecha distinta. Fuente única del predicado: `backend/tipos_pedido.py`
+(`TIPOS_DERIVADOS`, `TIPOS_SIN_RETIRO`, `es_pedido_derivado()` / `es_pedido_taller()` + su espejo TS
+`frontend/src/lib/tipos-pedido.ts`) — ningún consumidor nuevo debería reimplementar la lista de tipos
+inline (guard: `test_tipos_pedido_source_scan.py`).
+
+| `tipo` | Qué son `fecha_desde`/`fecha_hasta` | Se edita desde | Motor |
+|---|---|---|---|
+| `diaria` | Rango real de jornadas del alquiler (el caso rental clásico). | La página del pedido, libremente. | — |
+| `estudio` | Franja horaria real de un turno (mismo día, hora de inicio/fin dentro del rango). | La agenda del Estudio (franja + tarifa + ítems); el pedido muestra pero no re-edita la franja. | `backend/services/estudio/` |
+| `estudio_fijo` | Una muestra de una recurrencia semanal (el slot gobierna, el pedido es un reflejo). | El slot fijo, no el pedido. | `backend/services/estudio/` |
+| `taller` | **Mes calendario contable** de la edición — NO un evento puntual (la verdad temporal real vive en `clases_taller`, con fecha + franja de cada clase). | La edición del taller (economía); el pedido solo admite **agregar** líneas manuales (ej. una matrícula) — no puede editar fechas ni borrar el ítem que generó la edición. | `backend/services/talleres/` |
+
+**Por qué el pedido de taller "impone días" que no son reales:** `_regenerar_pedidos_taller`
+(`services/talleres/commands/economia.py`) arma un pedido de resumen por mes con
+`fecha_desde`/`fecha_hasta` clampeados al rango de la edición dentro de ese mes — es la unidad de
+cobro (una línea de crédito al mes), no un compromiso de "el cliente tiene el equipo estos 7 días".
+La UI del pedido lo refleja **honestamente**: en vez de "7 jornadas", la card de Fechas muestra la
+lista de clases reales (`clases_taller`, enriquecida vía `taller_edicion_id` en el detalle del
+pedido) con su día y franja — nunca el rango contable ni un conteo de jornadas.
+
+**Blindaje:** `estudio` / `estudio_fijo` / `taller` son pedidos **derivados** (`es_pedido_derivado()`)
+— sus fechas no se editan desde el pedido (409 si se intenta) y su(s) ítem(s) auto-generados
+(centinela del Estudio / "Uso de equipos" de la edición) no se pueden quitar ni reemplazar por PATCH
+genérico, aunque sí se puede **agregar** una línea nueva (matrícula, extra) sobre un pedido de
+taller. `_revalidar_stock` salta taller (su disponibilidad ya la garantiza el gate de la edición, no
+el motor de reservas genérico), y ningún derivado sin retiro real (`TIPOS_SIN_RETIRO`) dispara
+"salió"/"volvió" ni recordatorios de retiro (`estudio` sí, porque puede tener un retiro físico real
+de equipos sueltos).
+
+**Puente Talleres → Pedidos:** la pestaña "Precios y pago" de una edición de taller lista los
+pedidos mensuales que generó (`GET /admin/ediciones/{id}/pedidos`), cada uno linkeando de vuelta a
+su página real — para administrar el cobro sin salir de Talleres.
