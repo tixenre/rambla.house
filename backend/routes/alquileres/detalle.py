@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from database import row_to_dict, MARCA_SUBQUERY
 from services.contenido import contenido_de_batch
 from services.pedidos_enriquecimiento import _enriquecer_pedido_con_cliente
+from services.talleres.queries.clases import clases_de_edicion
 
 
 def _es_historico(fuente: str | None) -> bool:
@@ -95,9 +96,24 @@ def _get_alquiler_detail(conn, id: int) -> dict:
     pedido["items"] = _get_alquiler_items(conn, id)
     pedido["pagos"] = _get_alquiler_pagos(conn, id)
     pedido["historial_modificaciones"] = _get_historial_modificaciones(conn, id)
+    pedido["clases_taller"] = (
+        _clases_del_taller(conn, pedido["taller_edicion_id"])
+        if pedido.get("taller_edicion_id") else []
+    )
     _enriquecer_pedido_con_cliente(conn, pedido)
     _enriquecer_pedido_con_total(conn, pedido)
     return pedido
+
+
+def _clases_del_taller(conn, edicion_id: int) -> list[dict]:
+    """Clases reales (fecha + franja horaria) de la edición de taller que
+    generó este pedido — la verdad temporal que `_regenerar_pedidos_taller`
+    NO pone en `fecha_desde`/`fecha_hasta` (esas son el mes contable
+    completo, ver `services/talleres/commands/economia.py`). El front las usa
+    para mostrar "sáb 15 · 10:00-14:00" en vez de "N jornadas" (bug real
+    #445). Fuente única `services.talleres.queries.clases.clases_de_edicion`
+    — mismo dato que ve el admin en Talleres → la edición."""
+    return clases_de_edicion(conn, edicion_id)
 
 
 def _enriquecer_pedido_con_total(conn, pedido: dict) -> dict:

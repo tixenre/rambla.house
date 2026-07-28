@@ -458,6 +458,18 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export RESERVAS_DB_TEST=1
           python -m pytest tests/test_taller_pedidos_blindaje_db.py -v --tb=short -m integration
+      - name: Detalle del pedido de taller trae las clases reales de la edición contra Postgres real
+        run: |
+          cd backend
+          # Fase 1 (#1308): GET /alquileres/{id} de un taller ahora suma
+          # clases_taller (fecha + franja horaria reales, vía taller_edicion_id)
+          # — la pieza de datos que le permite al front mostrar la verdad en
+          # vez del rango contable ("7 jornadas", bug real #445).
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_pedido_taller_clases_enriquecido_db.py -v --tb=short -m integration
       - name: Escuela v2 — instructores como entidad contra Postgres real (F3, #1278)
         run: |
           cd backend
