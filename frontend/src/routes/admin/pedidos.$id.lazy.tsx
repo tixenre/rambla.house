@@ -64,11 +64,13 @@ import { estadoClase, ESTADO_TEXT } from "@/design-system/ui/estado-color";
 import { WhatsAppButton } from "@/components/admin/WhatsAppButton";
 import {
   adminApi,
+  estudioAdminApi,
   ESTADO_LABEL,
   pedidoPdfUrl,
   type Pedido,
   type PedidoEstado,
   type Equipo,
+  type EstudioConfig,
 } from "@/lib/admin/api";
 import {
   usePedidoDraft,
@@ -106,6 +108,7 @@ import {
 import { Section } from "@/design-system/composites/Section";
 import { FieldLabel } from "@/design-system/ui/Field";
 import { esPedidoEstudio, esPedidoDerivado, esPedidoTaller } from "@/lib/tipos-pedido";
+import { ReservaEstudioSection } from "@/components/admin/estudio/ReservaEstudioSection";
 
 export const Route = createLazyFileRoute("/admin/pedidos/$id")({
   component: PedidoEditorRoute,
@@ -194,6 +197,16 @@ function PedidoEditorPage() {
     resetKey: pedidoId,
   });
 
+  // Config del Estudio — solo hace falta para un turno real (tipo='estudio');
+  // la sección de reserva inline (Fase 2, #1308) la necesita para franja/
+  // tarifa/promo. Mismo queryKey que /admin/estudio y /admin/estudio/reservas
+  // — comparte caché con esas pantallas.
+  const estudioQ = useQuery({
+    queryKey: ["admin", "estudio"],
+    queryFn: () => estudioAdminApi.get(),
+    enabled: p?.tipo === "estudio",
+  });
+
   // Modales
   const [openPagoModal, setOpenPagoModal] = useState(false);
   const [openMailDialog, setOpenMailDialog] = useState(false);
@@ -241,10 +254,15 @@ function PedidoEditorPage() {
   const { datos, setDatos, items, setItems, saveStatus, estadoMut } = draft;
   const ns = nextStep(p);
   const otrosDestinosPedido = otrosDestinos(p);
-  // Ítems/fechas de un turno del Estudio se editan desde Estudio → Reservas
-  // (el backend ya los bloquea con 409, Fase 1 #1283) — acá solo se neutralizan
-  // los controles para que el admin no choque con eso.
+  // Ítems/fechas de un turno o slot fijo del Estudio están blindados
+  // server-side (409, Fase 1 #1283) — `esEstudio` cubre ambos tipos (sigue
+  // usándose para eso + el destinatario default de cobranza).
   const esEstudio = esPedidoEstudio(p);
+  // Un turno REAL (no un slot fijo) se administra inline con su propia
+  // sección `ReservaEstudioSection` (Fase 2, #1308) — reemplaza el banner +
+  // controles neutralizados de antes. `estudio_fijo` sigue sin editor
+  // inline: su verdad es el slot recurrente, no este pedido.
+  const esEstudioReal = p.tipo === "estudio";
   // Un pedido de taller (Fase 1, #1308) también tiene la fecha blindada server-
   // side (409) — pero, a diferencia de estudio, SÍ permite agregar/editar
   // ítems (matrícula), así que solo el control de fecha se neutraliza acá.
@@ -425,21 +443,38 @@ function PedidoEditorPage() {
             </div>
           )}
 
-          {/* Banner turno del Estudio — ítems/fechas se editan en su propia
-              pantalla (Fase 1 #1283 los bloquea server-side con 409). */}
-          {esEstudio && (
+          {/* Banner slot fijo del Estudio — su verdad es el slot recurrente,
+              no este pedido (que es solo una muestra mensual). A diferencia
+              de un turno real, NO tiene editor inline acá. */}
+          {esEstudio && !esEstudioReal && (
             <div className="flex items-start gap-2 rounded-lg border border-amber/40 bg-amber/5 px-3 py-2.5 text-sm">
               <Info className="h-4 w-4 text-ink shrink-0 mt-0.5" />
               <div className="min-w-0">
-                <span className="font-medium text-ink">Este pedido es un turno del Estudio.</span>{" "}
-                El horario, la promo y los equipos sueltos se editan desde{" "}
-                <Link to="/admin/estudio/reservas" className="underline text-muted-foreground">
-                  Estudio → Reservas
+                <span className="font-medium text-ink">
+                  Este pedido es un slot fijo del Estudio.
+                </span>{" "}
+                El horario, la promo y los equipos sueltos los gobierna el slot recurrente en{" "}
+                <Link to="/admin/estudio" className="underline text-muted-foreground">
+                  Estudio → Slots fijos
                 </Link>
                 . Acá se maneja el pago, la facturación y el estado.
               </div>
             </div>
           )}
+
+          {/* Reserva del Estudio — franja, tarifa, promo y sueltos de un
+              turno real, administrados inline (Fase 2, #1308). Reemplaza el
+              viejo banner "andá a Estudio → Reservas": ahora se edita acá. */}
+          {esEstudioReal &&
+            (estudioQ.data ? (
+              <ReservaEstudioSection
+                pedido={p}
+                estudio={estudioQ.data}
+                onSaved={() => qc.invalidateQueries({ queryKey: ["admin", "pedido", pedidoId] })}
+              />
+            ) : (
+              <Skeleton className="h-64 w-full rounded-xl" />
+            ))}
 
           {/* Banner pedido de taller — resumen contable mensual generado por
               la edición (Fase 1, #1308): fechas bloqueadas server-side, pero
@@ -582,168 +617,176 @@ function PedidoEditorPage() {
 
           {/* Fechas — editables con re-validación de stock. Taller (#1308):
               `fecha_desde`/`fecha_hasta` son el mes contable de la edición, no
-              un evento real — se muestran las clases reales en su lugar. */}
-          <Section
-            variant="card"
-            tone="elevated"
-            icon={Calendar}
-            title={esTaller ? "Clases del taller" : "Fechas del alquiler"}
-            actions={
-              esTaller ? undefined : !datos.fecha_desde || !datos.fecha_hasta ? (
-                <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-destructive">
-                  <AlertTriangle className="h-3 w-3" /> sin fechas
-                </span>
-              ) : hasOverstock ? (
-                <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-destructive">
-                  <AlertTriangle className="h-3 w-3" /> revisar stock
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-verde-ink">
-                  <Check className="h-3 w-3" /> stock OK
-                </span>
-              )
-            }
-          >
-            {esTaller ? (
-              (p.clases_taller ?? []).length > 0 ? (
-                <ul className="space-y-2">
-                  {(p.clases_taller ?? []).map((c) => (
-                    <li
-                      key={c.id}
-                      className="flex items-center gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5 min-h-[44px]"
-                    >
-                      <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <div className="min-w-0 flex-1">
-                        <div className="font-mono text-sm tabular-nums text-ink">
-                          {format(new Date(c.fecha + "T12:00:00"), "EEEE d 'de' MMMM", {
-                            locale: es,
-                          })}
-                        </div>
-                        <div className="mt-0.5 text-xs text-muted-foreground">
-                          {c.hora_inicio_str}–{c.hora_fin_str}
-                          {c.titulo ? ` · ${c.titulo}` : ""}
-                        </div>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  Sin clases cargadas en la edición todavía —{" "}
-                  <Link to="/admin/talleres" className="underline">
-                    cargalas en Talleres
-                  </Link>
-                  .
-                </p>
-              )
-            ) : (
-              /* Píldora retiro→devolución — abre el selector de fechas+horas.
-                  Turno del Estudio: se reprograma desde Estudio → Reservas. */
-              <button
-                type="button"
-                disabled={fechaNoEditable}
-                onClick={() => setOpenDateModal(true)}
-                className={cn(
-                  "@container flex w-full items-center gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5 text-left transition min-h-[44px]",
-                  fechaNoEditable ? "cursor-not-allowed opacity-60" : "hover:border-ink",
-                )}
-              >
-                {startDate && endDate ? (
-                  <>
-                    <Calendar className="h-4 w-4 text-muted-foreground shrink-0 self-start mt-0.5" />
-                    <div className="min-w-0 flex-1 grid grid-cols-1 gap-x-6 gap-y-2 @2xl:grid-cols-2">
-                      <div className="min-w-0">
-                        <div className="t-eyebrow">Retiro</div>
-                        <div className="font-mono text-sm tabular-nums text-ink mt-0.5">
-                          {format(startDate, "EEEE d 'de' MMMM", { locale: es })} · {startTime}
-                        </div>
-                      </div>
-                      <div className="min-w-0">
-                        <div className="t-eyebrow">Devolución</div>
-                        <div className="font-mono text-sm tabular-nums text-ink mt-0.5">
-                          {format(endDate, "EEEE d 'de' MMMM", { locale: es })} · {endTime}
-                        </div>
-                      </div>
-                    </div>
-                    <span className="ml-auto card px-2.5 py-1 text-center shrink-0">
-                      <span className="font-mono text-base font-semibold leading-none">
-                        {jornadas}
-                      </span>
-                      <span className="t-eyebrow ml-1">
-                        {jornadas === 1 ? "jornada" : "jornadas"}
-                      </span>
-                    </span>
-                  </>
+              un evento real — se muestran las clases reales en su lugar. Un
+              turno real del Estudio no repite esta Section: su franja ya se
+              edita en `ReservaEstudioSection`, arriba. */}
+          {!esEstudioReal && (
+            <Section
+              variant="card"
+              tone="elevated"
+              icon={Calendar}
+              title={esTaller ? "Clases del taller" : "Fechas del alquiler"}
+              actions={
+                esTaller ? undefined : !datos.fecha_desde || !datos.fecha_hasta ? (
+                  <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-destructive">
+                    <AlertTriangle className="h-3 w-3" /> sin fechas
+                  </span>
+                ) : hasOverstock ? (
+                  <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-destructive">
+                    <AlertTriangle className="h-3 w-3" /> revisar stock
+                  </span>
                 ) : (
-                  <>
-                    <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <span className="text-sm text-muted-foreground">
-                      Elegí las fechas de retiro y devolución…
-                    </span>
-                  </>
-                )}
-              </button>
-            )}
-          </Section>
+                  <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-verde-ink">
+                    <Check className="h-3 w-3" /> stock OK
+                  </span>
+                )
+              }
+            >
+              {esTaller ? (
+                (p.clases_taller ?? []).length > 0 ? (
+                  <ul className="space-y-2">
+                    {(p.clases_taller ?? []).map((c) => (
+                      <li
+                        key={c.id}
+                        className="flex items-center gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5 min-h-[44px]"
+                      >
+                        <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-mono text-sm tabular-nums text-ink">
+                            {format(new Date(c.fecha + "T12:00:00"), "EEEE d 'de' MMMM", {
+                              locale: es,
+                            })}
+                          </div>
+                          <div className="mt-0.5 text-xs text-muted-foreground">
+                            {c.hora_inicio_str}–{c.hora_fin_str}
+                            {c.titulo ? ` · ${c.titulo}` : ""}
+                          </div>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Sin clases cargadas en la edición todavía —{" "}
+                    <Link to="/admin/talleres" className="underline">
+                      cargalas en Talleres
+                    </Link>
+                    .
+                  </p>
+                )
+              ) : (
+                /* Píldora retiro→devolución — abre el selector de fechas+horas.
+                  Turno del Estudio: se reprograma desde Estudio → Reservas. */
+                <button
+                  type="button"
+                  disabled={fechaNoEditable}
+                  onClick={() => setOpenDateModal(true)}
+                  className={cn(
+                    "@container flex w-full items-center gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5 text-left transition min-h-[44px]",
+                    fechaNoEditable ? "cursor-not-allowed opacity-60" : "hover:border-ink",
+                  )}
+                >
+                  {startDate && endDate ? (
+                    <>
+                      <Calendar className="h-4 w-4 text-muted-foreground shrink-0 self-start mt-0.5" />
+                      <div className="min-w-0 flex-1 grid grid-cols-1 gap-x-6 gap-y-2 @2xl:grid-cols-2">
+                        <div className="min-w-0">
+                          <div className="t-eyebrow">Retiro</div>
+                          <div className="font-mono text-sm tabular-nums text-ink mt-0.5">
+                            {format(startDate, "EEEE d 'de' MMMM", { locale: es })} · {startTime}
+                          </div>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="t-eyebrow">Devolución</div>
+                          <div className="font-mono text-sm tabular-nums text-ink mt-0.5">
+                            {format(endDate, "EEEE d 'de' MMMM", { locale: es })} · {endTime}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="ml-auto card px-2.5 py-1 text-center shrink-0">
+                        <span className="font-mono text-base font-semibold leading-none">
+                          {jornadas}
+                        </span>
+                        <span className="t-eyebrow ml-1">
+                          {jornadas === 1 ? "jornada" : "jornadas"}
+                        </span>
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="text-sm text-muted-foreground">
+                        Elegí las fechas de retiro y devolución…
+                      </span>
+                    </>
+                  )}
+                </button>
+              )}
+            </Section>
+          )}
 
           {/* Equipos — turno del Estudio: el centinela/promo/sueltos se
               cargan desde Estudio → Reservas (el buscador y la edición por
-              línea se neutralizan acá, el backend los rechaza con 409). */}
-          <Section variant="card" tone="elevated" icon={Box} title={`Equipos · ${items.length}`}>
-            {/* Buscador inline: resultados en dropdown debajo (no tapa el form) */}
-            {!esEstudio && (
-              <EquipoComboSearch
-                existing={items}
-                stockMap={stockMap}
-                onAdd={handleAddEquipo}
-                className="mb-2"
-              />
-            )}
+              línea se neutralizan acá, el backend los rechaza con 409). Un
+              turno real ya administra sus sueltos en `ReservaEstudioSection`,
+              arriba — no repite esta Section. */}
+          {!esEstudioReal && (
+            <Section variant="card" tone="elevated" icon={Box} title={`Equipos · ${items.length}`}>
+              {/* Buscador inline: resultados en dropdown debajo (no tapa el form) */}
+              {!esEstudio && (
+                <EquipoComboSearch
+                  existing={items}
+                  stockMap={stockMap}
+                  onAdd={handleAddEquipo}
+                  className="mb-2"
+                />
+              )}
 
-            {items.length === 0 ? (
-              <ul className="divide-y hairline">
-                <li className="py-4 text-sm text-muted-foreground">
-                  Sin equipos. Agregá al menos uno para confirmar.
-                </li>
-              </ul>
-            ) : (
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={esEstudio ? undefined : handleItemsDragEnd}
-              >
-                <SortableContext
-                  items={items.map((it) => it.uid)}
-                  strategy={verticalListSortingStrategy}
+              {items.length === 0 ? (
+                <ul className="divide-y hairline">
+                  <li className="py-4 text-sm text-muted-foreground">
+                    Sin equipos. Agregá al menos uno para confirmar.
+                  </li>
+                </ul>
+              ) : (
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={esEstudio ? undefined : handleItemsDragEnd}
                 >
-                  <ul className="divide-y hairline">
-                    {items.map((it) => (
-                      <ItemRow
-                        key={it.uid}
-                        it={it}
-                        stock={it.equipo_id != null ? stockMap[String(it.equipo_id)] : undefined}
-                        jornadas={jornadas}
-                        updateItem={esEstudio ? () => {} : updateItem}
-                        removeItem={esEstudio ? () => {} : removeItem}
-                      />
-                    ))}
-                  </ul>
-                </SortableContext>
-              </DndContext>
-            )}
+                  <SortableContext
+                    items={items.map((it) => it.uid)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <ul className="divide-y hairline">
+                      {items.map((it) => (
+                        <ItemRow
+                          key={it.uid}
+                          it={it}
+                          stock={it.equipo_id != null ? stockMap[String(it.equipo_id)] : undefined}
+                          jornadas={jornadas}
+                          updateItem={esEstudio ? () => {} : updateItem}
+                          removeItem={esEstudio ? () => {} : removeItem}
+                        />
+                      ))}
+                    </ul>
+                  </SortableContext>
+                </DndContext>
+              )}
 
-            {/* Agregar línea personalizada (#805): ítem libre fuera del catálogo */}
-            {!esEstudio && (
-              <button
-                type="button"
-                onClick={addLineaLibre}
-                className="mt-2 flex w-full items-center gap-2.5 px-3 py-2.5 rounded-md border border-dashed hairline text-sm text-muted-foreground hover:bg-muted/30 transition"
-              >
-                <Plus className="h-4 w-4 shrink-0" />
-                <span>Agregar línea personalizada (flete, servicio, etc.)</span>
-              </button>
-            )}
-          </Section>
+              {/* Agregar línea personalizada (#805): ítem libre fuera del catálogo */}
+              {!esEstudio && (
+                <button
+                  type="button"
+                  onClick={addLineaLibre}
+                  className="mt-2 flex w-full items-center gap-2.5 px-3 py-2.5 rounded-md border border-dashed hairline text-sm text-muted-foreground hover:bg-muted/30 transition"
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  <span>Agregar línea personalizada (flete, servicio, etc.)</span>
+                </button>
+              )}
+            </Section>
+          )}
 
           {/* Notas */}
           <Section variant="card" tone="elevated" icon={FileText} title="Notas internas">
@@ -825,8 +868,14 @@ function PedidoEditorPage() {
                 // Taller: el rango es el mes contable, no jornadas reales
                 // (las clases reales ya se muestran arriba) — "N jornadas"
                 // acá sería el mismo tipo de invención que el "31 jornadas"
-                // original del pedido #445.
-                l={esTaller ? "Bruto" : `Bruto · ${jornadas} jornada${jornadas !== 1 ? "s" : ""}`}
+                // original del pedido #445. Estudio: la franja es horaria
+                // (arriba, en `ReservaEstudioSection`) — "N jornadas" tampoco
+                // describe un turno de unas pocas horas.
+                l={
+                  esTaller || esEstudioReal
+                    ? "Bruto"
+                    : `Bruto · ${jornadas} jornada${jornadas !== 1 ? "s" : ""}`
+                }
                 v={fmtArs(totales.subtotal)}
               />
               {totales.descuentoPct > 0 && (

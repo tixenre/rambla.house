@@ -4,14 +4,14 @@
  * es del flujo público) — acá el admin carga a mano: cliente real o texto
  * libre, promo, equipos sueltos, override del precio del espacio.
  *
- * El front NO calcula plata (MEMORIA 2026-06-29): el desglose se pide en vivo
- * a `GET /admin/estudio/reservas/cotizar` (debounced) y solo se muestra.
- * `EquipoComboSearch` se reusa tal cual del editor de pedidos — necesita
- * `DraftItem[]` como shape de "lo ya elegido", así que los sueltos locales se
- * guardan como `{equipo: Equipo, cantidad}` y se adaptan al armar la prop.
+ * El modo EDICIÓN delega en `ReservaEstudioSection` (Fase 2, #1308) — la
+ * misma sección que usa la página del pedido, una sola forma de editar un
+ * turno existente (franja, tarifa, promo, sueltos, guardado). Este diálogo
+ * conserva solo lo propio del ALTA (cliente + estado inicial), que no aplica
+ * a un pedido ya creado.
  */
 import { useEffect, useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -28,7 +28,7 @@ import { Spinner } from "@/design-system/ui/spinner";
 import { Switch } from "@/design-system/ui/switch";
 import { formatARS } from "@/lib/format";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { buildTimeSlots, espacioOverrideInicial } from "@/lib/estudio-slots";
+import { buildTimeSlots } from "@/lib/estudio-slots";
 import {
   adminApi,
   estudioAdminApi,
@@ -43,6 +43,7 @@ import { EquipoComboSearch } from "@/components/admin/pedido/EquipoComboSearch";
 import { EquipoThumb } from "@/components/admin/pedido/EquipoThumb";
 import type { DraftItem } from "@/components/admin/pedido/usePedidoDraft";
 import { Field } from "./shared";
+import { ReservaEstudioSection } from "./ReservaEstudioSection";
 
 /** Solo lo que la UI necesita mostrar de un suelto agregado — no un `Equipo`
  *  completo (evita fabricar campos que no vienen ni del picker ni del
@@ -56,11 +57,6 @@ type SueltoLocal = {
   precio_jornada: number | null;
   cantidad: number;
 };
-
-// Debe coincidir con `NOMBRE_ITEM_PINTURA_RECIENTE`
-// (backend/services/estudio/commands/reserva.py) — así se detecta la línea al
-// hidratar la edición de un turno existente.
-const NOMBRE_ITEM_PINTURA_RECIENTE = "Recién pintado";
 
 function todayYmd(): string {
   const d = new Date();
@@ -81,17 +77,18 @@ export function ReservaDialog({
   estudio: EstudioConfig;
   onSaved: () => void;
 }) {
-  const qc = useQueryClient();
   const editando = !!reserva;
 
-  // El detalle completo (items) solo hace falta para hidratar la edición —
-  // la lista no trae con_promo/sueltos.
+  // El detalle completo (items) solo hace falta para editar — hidrata
+  // `ReservaEstudioSection`; la lista no trae con_promo/sueltos.
   const detalleQ = useQuery({
     queryKey: ["admin", "pedido", reserva?.id],
     queryFn: () => adminApi.getPedido(reserva!.id),
     enabled: open && editando,
   });
 
+  // Todo lo de acá en más es EXCLUSIVO del alta — el modo edición delega
+  // por completo en `ReservaEstudioSection` (ver el render, abajo).
   const [fecha, setFecha] = useState(todayYmd());
   const [start, setStart] = useState("");
   const [horas, setHoras] = useState(estudio.min_horas || 2);
@@ -111,62 +108,22 @@ export function ReservaDialog({
     [estudio.open_hour, estudio.close_hour, estudio.min_horas],
   );
 
-  // Reset / hidratación al abrir.
+  // Reset al abrir un alta nueva (editar hidrata su propia sección, no acá).
   useEffect(() => {
-    if (!open) return;
-    if (!editando) {
-      setFecha(todayYmd());
-      setStart(slots[0]?.value ?? "");
-      setHoras(estudio.min_horas || 2);
-      setClienteId(null);
-      setClienteNombreElegido(null);
-      setClienteNombreLibre("");
-      setConPromo(false);
-      setPinturaReciente(false);
-      setSueltos([]);
-      setEspacioOverride("");
-      setEstadoAlta("confirmado");
-      return;
-    }
-    if (!detalleQ.data || !reserva) return;
-    const p = detalleQ.data;
-    setFecha(p.fecha_desde?.slice(0, 10) ?? todayYmd());
-    setStart(p.fecha_desde?.slice(11, 16) ?? "");
-    let horasActuales = estudio.min_horas || 2;
-    if (p.fecha_desde && p.fecha_hasta) {
-      const ms = new Date(p.fecha_hasta).getTime() - new Date(p.fecha_desde).getTime();
-      horasActuales = Math.max(1, Math.round(ms / 3_600_000));
-      setHoras(horasActuales);
-    }
-    setClienteId(p.cliente_id ?? null);
-    setClienteNombreElegido(p.cliente_id ? p.cliente_nombre : null);
-    setClienteNombreLibre(p.cliente_id ? "" : (p.cliente_nombre ?? ""));
-
-    const centinela = estudio.equipo_id;
-    const promoId = estudio.promo_combo_id;
-    const otros = p.items.filter((it) => it.equipo_id !== centinela);
-    setConPromo(!!promoId && otros.some((it) => it.equipo_id === promoId));
-    setPinturaReciente(
-      otros.some((it) => it.equipo_id === null && it.nombre_libre === NOMBRE_ITEM_PINTURA_RECIENTE),
-    );
-    setSueltos(
-      otros
-        .filter((it) => it.equipo_id !== null && it.equipo_id !== promoId)
-        .map((it) => ({
-          equipo_id: it.equipo_id!,
-          nombre: it.nombre,
-          marca: it.marca,
-          nombre_publico: it.nombre_publico,
-          foto_url: it.foto_url ?? null,
-          precio_jornada: it.precio_jornada,
-          cantidad: it.cantidad,
-        })),
-    );
-    const centinelaItem = p.items.find((it) => it.equipo_id === centinela);
-    const autoEsperado = (estudio.precio_hora || 0) * horasActuales;
-    setEspacioOverride(espacioOverrideInicial(centinelaItem?.precio_jornada, autoEsperado));
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al abrir/hidratar, no en cada cambio de campo
-  }, [open, editando, detalleQ.data]);
+    if (!open || editando) return;
+    setFecha(todayYmd());
+    setStart(slots[0]?.value ?? "");
+    setHoras(estudio.min_horas || 2);
+    setClienteId(null);
+    setClienteNombreElegido(null);
+    setClienteNombreLibre("");
+    setConPromo(false);
+    setPinturaReciente(false);
+    setSueltos([]);
+    setEspacioOverride("");
+    setEstadoAlta("confirmado");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al abrir, no en cada cambio de campo
+  }, [open, editando]);
 
   const sueltosInput = useMemo(
     () => sueltos.map((s) => ({ equipo_id: s.equipo_id, cantidad: s.cantidad })),
@@ -181,34 +138,21 @@ export function ReservaDialog({
       con_promo: conPromo,
       pintura_reciente: pinturaReciente,
       sueltos: sueltosInput,
-      // Excluye el propio turno del chequeo de disponibilidad al editar —
-      // si no, siempre se vería "ocupado" por su propia franja.
-      pedido_id: reserva?.id,
     }),
-    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput, reserva?.id],
+    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput],
   );
   const cotizarDebounced = useDebouncedValue(cotizarParams, 400);
 
   const cotizarQ = useQuery({
-    queryKey: ["admin", "estudio", "cotizar", cotizarDebounced, reserva?.id],
+    queryKey: ["admin", "estudio", "cotizar", cotizarDebounced],
+    // Solo el alta cotiza acá — editar cotiza dentro de `ReservaEstudioSection`.
+    enabled: open && !editando && !!fecha && !!start && horas >= (estudio.min_horas || 1),
     queryFn: () => estudioAdminApi.cotizarReserva(cotizarDebounced),
-    enabled: open && !!fecha && !!start && horas >= (estudio.min_horas || 1),
   });
 
   const mutation = useMutation({
-    mutationFn: () => {
-      if (editando) {
-        return estudioAdminApi.updateReserva(reserva!.id, {
-          fecha,
-          start,
-          horas,
-          con_promo: conPromo,
-          pintura_reciente: pinturaReciente,
-          sueltos: sueltosInput,
-          espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
-        });
-      }
-      return estudioAdminApi.createReserva({
+    mutationFn: () =>
+      estudioAdminApi.createReserva({
         fecha,
         start,
         horas,
@@ -219,18 +163,15 @@ export function ReservaDialog({
         sueltos: sueltosInput,
         espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
         estado: estadoAlta,
-      });
-    },
+      }),
     onSuccess: (pedido) => {
-      toast.success(editando ? "Turno actualizado" : "Turno creado");
+      toast.success("Turno creado");
       if (pedido.promo_advertencia) {
         toast.warning("La promo se reservó incompleta", {
           description: pedido.promo_advertencia,
           duration: 7000,
         });
       }
-      qc.invalidateQueries({ queryKey: ["admin", "estudio", "reservas"] });
-      qc.invalidateQueries({ queryKey: ["admin", "estudio", "agenda"] });
       onSaved();
       onOpenChange(false);
     },
@@ -268,8 +209,7 @@ export function ReservaDialog({
     foto_url: s.foto_url,
   }));
 
-  const puedeGuardar =
-    !!fecha && !!start && horas >= (estudio.min_horas || 1) && (!editando || !detalleQ.isLoading);
+  const puedeGuardar = !!fecha && !!start && horas >= (estudio.min_horas || 1);
   const cotiz = cotizarQ.data;
   const cargandoDetalle = editando && detalleQ.isLoading;
 
@@ -282,10 +222,21 @@ export function ReservaDialog({
           </DialogTitle>
         </DialogHeader>
 
-        {cargandoDetalle ? (
-          <div className="flex justify-center py-10">
-            <Spinner />
-          </div>
+        {editando ? (
+          cargandoDetalle ? (
+            <div className="flex justify-center py-10">
+              <Spinner />
+            </div>
+          ) : detalleQ.data ? (
+            <ReservaEstudioSection
+              pedido={detalleQ.data}
+              estudio={estudio}
+              onSaved={() => {
+                onSaved();
+                onOpenChange(false);
+              }}
+            />
+          ) : null
         ) : (
           <div className="space-y-4 py-2">
             <div className="grid grid-cols-3 gap-3">
@@ -315,39 +266,37 @@ export function ReservaDialog({
               </Field>
             </div>
 
-            {!editando && (
-              <Field label="Cliente (ficha o texto libre)">
-                {clienteId ? (
-                  <div className="flex items-center gap-2 rounded-md border hairline px-2.5 py-1.5 text-sm">
-                    <span className="flex-1 truncate">{clienteNombreElegido}</span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setClienteId(null);
-                        setClienteNombreElegido(null);
-                      }}
-                      className="text-muted-foreground hover:text-ink"
-                    >
-                      <X className="h-3.5 w-3.5" />
-                    </button>
-                  </div>
-                ) : (
-                  <div className="space-y-1.5">
-                    <ClienteAutocomplete
-                      onPick={(c: Cliente) => {
-                        setClienteId(c.id);
-                        setClienteNombreElegido(nombreCliente(c));
-                      }}
-                    />
-                    <Input
-                      value={clienteNombreLibre}
-                      onChange={(e) => setClienteNombreLibre(e.target.value)}
-                      placeholder="…o nombre sin ficha (alguien que llamó)"
-                    />
-                  </div>
-                )}
-              </Field>
-            )}
+            <Field label="Cliente (ficha o texto libre)">
+              {clienteId ? (
+                <div className="flex items-center gap-2 rounded-md border hairline px-2.5 py-1.5 text-sm">
+                  <span className="flex-1 truncate">{clienteNombreElegido}</span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setClienteId(null);
+                      setClienteNombreElegido(null);
+                    }}
+                    className="text-muted-foreground hover:text-ink"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <ClienteAutocomplete
+                    onPick={(c: Cliente) => {
+                      setClienteId(c.id);
+                      setClienteNombreElegido(nombreCliente(c));
+                    }}
+                  />
+                  <Input
+                    value={clienteNombreLibre}
+                    onChange={(e) => setClienteNombreLibre(e.target.value)}
+                    placeholder="…o nombre sin ficha (alguien que llamó)"
+                  />
+                </div>
+              )}
+            </Field>
 
             <div className="grid grid-cols-2 gap-3">
               {estudio.promo_combo_id && (
@@ -418,19 +367,17 @@ export function ReservaDialog({
               />
             </Field>
 
-            {!editando && (
-              <Field label="Estado inicial">
-                <select
-                  value={estadoAlta}
-                  onChange={(e) => setEstadoAlta(e.target.value as typeof estadoAlta)}
-                  className="h-9 w-full rounded-md border hairline bg-background px-2 text-sm"
-                >
-                  <option value="solicitado">Solicitado</option>
-                  <option value="confirmado">Confirmado</option>
-                  <option value="retirado">Retirado</option>
-                </select>
-              </Field>
-            )}
+            <Field label="Estado inicial">
+              <select
+                value={estadoAlta}
+                onChange={(e) => setEstadoAlta(e.target.value as typeof estadoAlta)}
+                className="h-9 w-full rounded-md border hairline bg-background px-2 text-sm"
+              >
+                <option value="solicitado">Solicitado</option>
+                <option value="confirmado">Confirmado</option>
+                <option value="retirado">Retirado</option>
+              </select>
+            </Field>
 
             {/* Desglose en vivo — el front no calcula, solo muestra (2026-06-29). */}
             <div className="rounded-lg border hairline bg-muted/20 p-3 text-sm">
@@ -478,16 +425,24 @@ export function ReservaDialog({
         )}
 
         <DialogFooter>
-          <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancelar
-          </Button>
-          <Button
-            onClick={() => mutation.mutate()}
-            disabled={!puedeGuardar || mutation.isPending || cargandoDetalle}
-          >
-            {mutation.isPending ? <Spinner size="sm" className="mr-1.5" /> : null}
-            {editando ? "Guardar cambios" : "Crear turno"}
-          </Button>
+          {editando ? (
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+              Cerrar
+            </Button>
+          ) : (
+            <>
+              <Button variant="ghost" onClick={() => onOpenChange(false)}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={() => mutation.mutate()}
+                disabled={!puedeGuardar || mutation.isPending}
+              >
+                {mutation.isPending ? <Spinner size="sm" className="mr-1.5" /> : null}
+                Crear turno
+              </Button>
+            </>
+          )}
         </DialogFooter>
       </DialogContent>
     </Dialog>
