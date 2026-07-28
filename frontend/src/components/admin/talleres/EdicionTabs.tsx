@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { talleresAdminApi } from "@/lib/admin/api/talleres";
 import type { ClaseBody, EdicionAdmin, ModalidadPagoBody } from "@/lib/admin/api/types";
 import { Button } from "@/design-system/ui/button";
+import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
 import { IconButton } from "@/design-system/ui/icon-button";
 import { Input } from "@/design-system/ui/input";
 import {
@@ -17,6 +19,7 @@ import {
 } from "@/design-system/ui/select";
 import { Spinner } from "@/design-system/ui/spinner";
 import { Switch } from "@/design-system/ui/switch";
+import { fmtArs, fmtMesAno } from "@/lib/format";
 import { TallerCalendario } from "@/components/talleres/TallerCalendario";
 import { ClasesAsistente } from "./ClasesAsistente";
 import { updateEdicionInCache } from "./cache";
@@ -569,5 +572,53 @@ export function ModalidadesSection({ edicion }: { edicion: EdicionAdmin }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+// Puente Talleres → Pedidos (Fase 1, #1308): antes había que buscar a mano en
+// /admin/pedidos qué pedidos generó una edición y si ya estaban pagados.
+export function PedidosGeneradosSection({ edicion }: { edicion: EdicionAdmin }) {
+  const { data: pedidos = [], isLoading } = useQuery({
+    queryKey: ["admin", "ediciones", edicion.id, "pedidos"],
+    queryFn: () => talleresAdminApi.listPedidosEdicion(edicion.id),
+  });
+
+  if (isLoading) {
+    return (
+      <div className="flex justify-center py-4">
+        <Spinner size="sm" />
+      </div>
+    );
+  }
+
+  if (pedidos.length === 0) {
+    return (
+      <p className="text-sm text-muted-foreground italic">
+        Todavía no se generó ningún pedido para esta edición.
+      </p>
+    );
+  }
+
+  return (
+    <ul className="divide-y divide-border/40 rounded-lg border border-border/50">
+      {pedidos.map((p) => (
+        <li key={p.id}>
+          <Link
+            to="/admin/pedidos/$id"
+            params={{ id: String(p.id) }}
+            className="flex items-center gap-3 px-3 py-2.5 text-sm transition hover:bg-muted/20"
+          >
+            <span className="min-w-0 flex-1 truncate">
+              {fmtMesAno(p.fecha_desde)}
+              {p.numero_pedido ? ` · #${p.numero_pedido}` : ""}
+            </span>
+            <EstadoBadge estado={p.estado} />
+            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+              {fmtArs(p.monto_pagado)} / {fmtArs(p.monto_total)}
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
   );
 }

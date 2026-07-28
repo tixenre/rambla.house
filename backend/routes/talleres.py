@@ -2170,6 +2170,39 @@ def admin_edicion_kpis(edicion_id: int, request: Request):
     }
 
 
+@router.get("/admin/ediciones/{edicion_id}/pedidos")
+def admin_list_pedidos_edicion(edicion_id: int, request: Request):
+    """Pedidos mensuales que `_regenerar_pedidos_taller` generó para esta
+    edición (`taller_edicion_id`) — el puente Talleres → Pedidos (Fase 1,
+    #1308): antes había que buscarlos a mano en /admin/pedidos, sin ver de un
+    vistazo qué meses ya están pagados. Ordenados por mes; el front linkea
+    cada uno a `/admin/pedidos/{id}`."""
+    require_admin(request)
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, numero_pedido, estado, fecha_desde, fecha_hasta,
+                   monto_total, monto_pagado
+            FROM alquileres
+            WHERE taller_edicion_id = %s
+            ORDER BY fecha_desde
+            """,
+            (edicion_id,),
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "numero_pedido": r["numero_pedido"],
+            "estado": r["estado"],
+            "fecha_desde": r["fecha_desde"].isoformat() if r["fecha_desde"] else None,
+            "fecha_hasta": r["fecha_hasta"].isoformat() if r["fecha_hasta"] else None,
+            "monto_total": r["monto_total"],
+            "monto_pagado": r["monto_pagado"],
+        }
+        for r in rows
+    ]
+
+
 @router.get("/admin/talleres/{taller_id}/inscripciones/export-csv")
 def admin_export_inscripciones_csv(taller_id: int, request: Request):
     """Descarga CSV de inscriptos de un concepto de taller."""

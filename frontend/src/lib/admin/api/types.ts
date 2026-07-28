@@ -1583,6 +1583,18 @@ export type EdicionKpis = {
   plata_esperada_str: string;
 };
 
+/** Un pedido mensual que `_regenerar_pedidos_taller` generó para una edición
+ *  (Fase 1, #1308) — puente Talleres → Pedidos, `GET /admin/ediciones/{id}/pedidos`. */
+export type PedidoGeneradoEdicion = {
+  id: number;
+  numero_pedido: number | null;
+  estado: string;
+  fecha_desde: string | null;
+  fecha_hasta: string | null;
+  monto_total: number;
+  monto_pagado: number;
+};
+
 // F4c: FAQ del concepto — ninguna pregunta es obligatoria.
 export type FaqItem = { pregunta: string; respuesta: string };
 

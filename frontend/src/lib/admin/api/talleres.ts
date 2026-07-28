@@ -8,6 +8,7 @@ import type {
   Institucion,
   Instructor,
   Interesado,
+  PedidoGeneradoEdicion,
   Trabajo,
 } from "./types";
 
@@ -70,6 +71,11 @@ export const talleresAdminApi = {
   // F4c: mini-KPIs de una edición (señas + plata, ya resuelta por el backend).
   getEdicionKpis: (edicionId: number) =>
     authedJson<EdicionKpis>(`/api/admin/ediciones/${edicionId}/kpis`),
+
+  // Puente Talleres → Pedidos (Fase 1, #1308): los pedidos mensuales que
+  // _regenerar_pedidos_taller generó para esta edición.
+  listPedidosEdicion: (edicionId: number) =>
+    authedJson<PedidoGeneradoEdicion[]>(`/api/admin/ediciones/${edicionId}/pedidos`),
 
   eliminarInscripcion: (conceptoId: number, inscripcionId: number) =>
     authedJson<{ ok: boolean }>(

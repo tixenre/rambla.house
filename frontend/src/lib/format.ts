@@ -16,6 +16,14 @@ export const formatARS = (n: number) =>
 /** Como `formatARS` pero tolera null/undefined (→ $0). Atajo común en reportes. */
 export const fmtArs = (n: number | null | undefined) => formatARS(n ?? 0);
 
+/** "Agosto 2026" a partir de una fecha ISO (date u datetime) — mes contable
+ *  de un pedido de taller (Fase 1, #1308). */
+export function fmtMesAno(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const label = format(new Date(iso.slice(0, 10) + "T12:00:00"), "MMMM yyyy", { locale: es });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
 /** Formatea un monto en su moneda: ARS → "$97.500", USD → "US$ 1.200". */
 export const formatMoney = (n: number, moneda: string = "ARS") =>
   moneda === "USD"

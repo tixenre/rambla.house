@@ -561,6 +561,17 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export RESERVAS_DB_TEST=1
           python -m pytest tests/test_talleres_f4c_db.py -v --tb=short -m integration
+      - name: Puente Talleres → Pedidos — lista los pedidos generados de una edición contra Postgres real
+        run: |
+          cd backend
+          # Fase 1 (#1308): GET /admin/ediciones/{id}/pedidos lista los pedidos
+          # mensuales de _regenerar_pedidos_taller (mes, estado, monto_total/
+          # monto_pagado), ordenados y filtrados por edición.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_talleres_pedidos_generados_db.py -v --tb=short -m integration
       - name: Merge de identidad + índice único de CUIL contra Postgres real
         run: |
           cd backend
