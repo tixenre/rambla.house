@@ -90,6 +90,14 @@ de `queries/`; `queries/` **nunca** de `commands/`.
   distintas que no se bloquean entre sí — raza teórica angosta, nunca observada.
 - **`editar_reserva` no re-implementa el gate de identidad/anticipación** (son del cliente público,
   no aplican al admin) — solo re-valida slot/taller/stock, igual que `_crear_pedido_estudio`.
+- **`_crear_pedido_estudio(pedido_principal_id=...)` vincula un turno a un pedido de alquiler normal**
+  (#1308, sección "Turnos del Estudio" en la página de un pedido `tipo='diaria'`) — persiste
+  `alquileres.pedido_principal_id` (self-FK, `ON DELETE SET NULL`). El CALLER
+  (`routes/estudio.py::_resolver_pedido_principal`) es responsable de resolver
+  `cliente_id`/`cliente_nombre`/etc. DEL PEDIDO PRINCIPAL antes de llamar — el paquete en sí no
+  valida que coincidan, confía en que el caller ya los resolvió bien (mismo principio de "el route
+  resuelve sesión/cliente" de más arriba). Un futuro caller nuevo de `_crear_pedido_estudio` con este
+  parámetro tiene que repetir esa resolución, no pasar el `cliente_id`/`nombre` del request tal cual.
 - **Un `estudio_fijo` (pedido de slot) no se edita acá** (`editar_reserva` lo rechaza con 409) — lo
   gobierna su slot (`routes/estudio.py::_regenerar_pedidos_slot`, fuera de este paquete a propósito:
   dominio "slots", no "disponibilidad/reserva por hora").
@@ -121,4 +129,5 @@ paquete; un import de `routes.*` dentro de `services/estudio/`; un `queries/` im
 `commands/`; un commit dentro de un command (el route es dueño de la transacción); la promo vuelta
 DURA o un suelto vuelto best-effort; el re-chequeo bajo `FOR UPDATE` removido o reordenado después
 del INSERT del ítem centinela; un listado de "qué incluye" de la promo armado con SQL ad-hoc en vez
-de `services.contenido.contenido_de`.
+de `services.contenido.contenido_de`; un turno vinculado (`pedido_principal_id`) que use el
+cliente_id/nombre del REQUEST en vez de resolverlo del pedido principal.

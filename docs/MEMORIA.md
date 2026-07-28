@@ -1136,6 +1136,41 @@ marca: un literal de tipos reimplementado fuera de `tipos_pedido.py`; un query/b
 "pedido real" que no use `es_pedido_derivado()`/`es_pedido_taller()`; o un consumidor nuevo del total
 de un ítem de catálogo que no respete su `cobro_modo` real.
 
+### 2026-07-28 — Fase 2 de "integrar rental/Estudio/Talleres en el pedido sin que mienta": sección "Reserva del Estudio" en la página del pedido
+
+Último tramo de la iniciativa #1308 (pedido explícito del dueño en la Fase 0). Nuevo componente
+`ReservaEstudioSection` (franja horaria, tarifa con override, promo, sueltos, cotización en vivo,
+guardado) extraído del modo edición de `ReservaDialog` — autocontenido (estado + query + mutation
+propios), reusa `PATCH /admin/estudio/reservas/{id}` sin superficie nueva. Un pedido `tipo='estudio'`
+ya no muestra el banner "andá a Estudio → Reservas" + controles neutralizados: administra su franja/
+tarifa/promo/sueltos ahí mismo. `estudio_fijo` mantiene el banner de solo-lectura (su verdad es el
+slot recurrente) pero con el link corregido — apuntaba a `/admin/estudio/reservas`, una lista que lo
+filtra afuera (`WHERE tipo='estudio'`), ahora apunta a `/admin/estudio` (donde vive el CRUD de
+slots). El modo EDICIÓN de `ReservaDialog` (la agenda del Estudio) delega en la misma sección — una
+sola forma de editar un turno, verificado en navegador real que ambas superficies reflejan el mismo
+estado persistido. El supervisor marca un editor de turno del Estudio que reimplemente sus campos
+en vez de reusar `ReservaEstudioSection`, o un banner de `estudio_fijo` que vuelva a linkear a la
+lista de reservas.
+
+### 2026-07-28 — Turnos del Estudio vinculados a un pedido de alquiler normal (`pedido_principal_id`, #1308)
+
+El dueño pidió poder agregar horas de Estudio a un pedido de alquiler común sin duplicar la carga de
+cliente ("un solo modal, el de los pedidos… que mantenga la función de equipos, pero también una
+sección para el Estudio"). Nuevo self-FK `alquileres.pedido_principal_id` (nullable, `ON DELETE SET
+NULL`) vincula un turno del Estudio (`tipo='estudio'`) a un pedido de alquiler normal
+(`tipo='diaria'`) — registros DISTINTOS (fechas con significado incompatible: rango de días vs.
+franja horaria) administrados en una sola pantalla. El backend fuerza que el turno herede SIEMPRE
+cliente_id/nombre/email/teléfono del pedido principal (`routes/estudio.py::_resolver_pedido_principal`,
+ignora lo que mande el request) — nunca pueden desincronizar el cliente. Solo se puede vincular a un
+pedido `tipo='diaria'` (400 si no; 404 si no existe). Nueva sección "Turnos del Estudio" en la página
+de un pedido normal: lista los turnos vinculados reusando `ReservaEstudioSection` inline (misma
+pieza de Fase 2) + un botón "Agregar turno del Estudio" que reusa `ReservaDialog` en modo alta (con
+el picker de cliente oculto, hereda el del pedido). El turno vinculado muestra un banner de vuelta al
+pedido principal. Borrar el pedido principal NO borra el turno, solo lo desvincula (`ON DELETE SET
+NULL`, verificado con un DELETE real seguido de un re-fetch del turno). El supervisor marca un turno
+vinculado que use el cliente_id/nombre del request en vez de resolverlo del pedido principal, o un
+vínculo nuevo a un pedido que no sea `tipo='diaria'`.
+
 ---
 
 ## Preferencias (cómo quiero que se hagan las cosas)

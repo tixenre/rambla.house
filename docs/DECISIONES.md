@@ -3678,3 +3678,85 @@ PDF/imagen", "Qué NO cubre").
   ningún lado) y 3 filas nuevas en el mapa de código de §5. Fase 2 (sección "Reserva del Estudio" en
   la página del pedido, pedido explícito del dueño) queda para la próxima tanda de la misma
   iniciativa (issue de tracking #1308).
+
+### 2026-07-28 — Fase 2 de "integrar rental/Estudio/Talleres en el pedido sin que mienta": sección "Reserva del Estudio" en la página del pedido
+
+- **Contexto.** Último tramo de la iniciativa #1308. En la Fase 0 el dueño había pedido
+  explícitamente una sección propia para el Estudio en la página del pedido (en vez de un banner que
+  manda a otra pantalla) — condición del `consejo` para el alcance completo (Fases 0+1+2).
+- **`ReservaEstudioSection` (nuevo componente).** Extraído del modo edición de `ReservaDialog.tsx`:
+  franja horaria (fecha/hora/horas), tarifa del espacio con override, promo on/off, equipos sueltos,
+  cotización en vivo y guardado — todo autocontenido (state + `useQuery`/`useMutation` propios).
+  Reusa `GET /admin/estudio/reservas/cotizar` + `PATCH /admin/estudio/reservas/{id}` tal cual, sin
+  agregar superficie nueva. El modo ALTA de `ReservaDialog` (cliente + estado inicial, exclusivo de
+  crear un turno nuevo) NO se tocó — sigue con su propio state/mutation, cero riesgo al camino de
+  creación ya probado.
+- **La página del pedido.** Para `tipo='estudio'` (no `estudio_fijo`): desaparecen el banner "andá a
+  Estudio → Reservas" y las Sections genéricas de "Fechas del alquiler"/"Equipos" (redundantes con la
+  nueva sección) — se reemplazan por `ReservaEstudioSection` directo. El label "Bruto" del Desglose
+  también deja de decir "· N jornadas" para un turno real (mismo criterio que ya tenía taller,
+  Fase 1) — un turno de pocas horas no son "N jornadas".
+- **`estudio_fijo` — bug de link encontrado en el camino.** El banner de un slot fijo linkeaba a
+  `/admin/estudio/reservas`, pero esa lista filtra `WHERE tipo='estudio'` — un slot fijo JAMÁS
+  aparece ahí. Corregido a `/admin/estudio` (donde vive el CRUD de slots, `SlotsSection`).
+- **Tests + verificación.** `ReservaEstudioSection` verificada en navegador real
+  (backend+frontend+Postgres local): editar desde la página del pedido Y desde `ReservaDialog` (modo
+  edición) reflejan el MISMO estado persistido (mismo componente, dos entradas); el alta de un turno
+  nuevo sigue funcionando end-to-end (verificado con una creación real vía API); el banner de
+  `estudio_fijo` linkea correctamente. Suite completa, tsc, eslint, prettier, build en verde. CI
+  verde en `dev`.
+- **Alcance.** Solo UI + reutilización — cero cambios de backend, cero endpoints nuevos. El
+  supervisor marca un editor de turno del Estudio que reimplemente sus campos en vez de reusar
+  `ReservaEstudioSection`, o un banner de `estudio_fijo` que vuelva a linkear a la lista de reservas.
+
+### 2026-07-28 — Turnos del Estudio vinculados a un pedido de alquiler normal (`pedido_principal_id`, #1308)
+
+- **Contexto.** El dueño, probando el pedido #415 (un alquiler en blanco), intentó cargar "horas de
+  Estudio" buscando "estud" en el buscador de equipos del pedido — encontró el equipo centinela
+  ("Estudio (espacio)", `es_recurso_interno`) ya cargado como ítem, con "0 restante" y $0 (un
+  artefacto viejo, no reproducible hoy: `GET /equipos` ya excluye `es_recurso_interno` en el
+  buscador — confirmado leyendo `routes/equipos/core.py:307`). Pidió "un solo modal, el de los
+  pedidos" para cargar horas de Estudio; tras explicar la restricción de fechas (un pedido no puede
+  ser rango-de-días Y franja-horaria a la vez), aceptó la alternativa: dos registros, una sola
+  pantalla, "mientras que no se desincronicen".
+- **Diseño.** `alquileres.pedido_principal_id` — self-FK nullable, `ON DELETE SET NULL` (mismo
+  patrón que `taller_edicion_id`/`estudio_slot_id`). Vive en el TURNO (hijo), apunta al pedido de
+  alquiler (padre) — soporta 1 pedido ↔ N turnos. Migración `pv1nc2l3a4d5` + espejo en
+  `init_db()` (esquema en dos capas).
+- **La garantía real: el cliente nunca puede desincronizar.** `_crear_pedido_estudio` gana el
+  parámetro `pedido_principal_id`; cuando viene, `routes/estudio.py::_resolver_pedido_principal`
+  resuelve `cliente_id`/`cliente_nombre`/`cliente_email`/`cliente_telefono` DIRECTO del pedido
+  principal — el `cliente_id`/`cliente_nombre` que mande el body del request se IGNORAN por
+  completo (ni siquiera pasan por `_resolver_cliente_admin`). Valida además que el pedido a vincular
+  exista (404) y sea `tipo='diaria'` (400 — no se puede vincular un turno a otro turno/taller).
+  Candado: test que manda un `cliente_id` DISTINTO al del pedido principal en el body y verifica que
+  el turno persistido queda con el del pedido principal, no el del body — discrimina de verdad
+  (confirmado con `git stash`: sin el fix, el turno quedaba con el cliente del body).
+- **Enriquecimiento bidireccional.** `_get_alquiler_detail` (`routes/alquileres/detalle.py`) suma:
+  el pedido principal trae `turnos_estudio_vinculados` (mismo shape liviano que
+  `PedidoGeneradoEdicion`, el bridge de Talleres); el turno trae `pedido_principal` (breadcrumb: id,
+  numero_pedido, cliente_nombre).
+- **Frontend.** Nueva sección `TurnosEstudioSection` (pedido, `tipo='diaria'` — nunca en un
+  derivado): lista los turnos vinculados reusando `ReservaEstudioSection` inline (Fase 2, cada card
+  hace su propio fetch del detalle completo del turno) + botón "Agregar turno del Estudio" que abre
+  `ReservaDialog` en modo alta con el prop nuevo `pedidoVinculado={id, clienteNombre}` — oculta el
+  picker de cliente (muestra el heredado, solo lectura) y manda `pedido_principal_id` en vez de
+  `cliente_id`/`cliente_nombre`. El turno vinculado muestra un banner "Turno vinculado al pedido #N"
+  con link de vuelta.
+- **Tests + verificación.** `test_pedido_estudio_vinculado_db.py` (5 tests, Postgres real,
+  discriminados con `git stash`): hereda cliente del principal ignorando el body; rechaza vincular a
+  un turno ajeno (400); rechaza un principal inexistente (404); el detalle enriquece en ambas
+  direcciones; borrar el principal desvincula sin borrar el turno. Verificación en navegador real:
+  crear el turno vinculado desde la sección nueva, editarlo inline (cambia horas + agrega un
+  suelto), confirmar que el Desglose del pedido principal NO se mueve (son pedidos independientes),
+  navegar al turno por su cuenta y ver el banner + mismo cliente, borrar el pedido principal y
+  confirmar que el turno sobrevive con el banner ya no visible. Suite completa (2731 unit),
+  migración (`test_alembic_upgrade_db.py`), ruff, tsc, eslint, prettier, build en verde. CI verde en
+  `dev`.
+- **Alcance y qué NO se tocó.** No se combinó plata ni estado entre el pedido y el turno (cada uno
+  factura/cobra/transiciona independiente, mismo criterio que talleres↔pedidos). No se sincroniza el
+  cliente RETROACTIVAMENTE si el principal cambia de cliente después de crear el turno (cada uno
+  guarda su propio `cliente_id` al momento de vincular) — la garantía es "nunca desincronizado AL
+  CREAR", no "sincronizado para siempre" (documentado, no pedido por el dueño). `backend/reservas/`
+  intacto. El supervisor marca un turno vinculado que use el cliente del request en vez de
+  resolverlo del pedido principal, o un vínculo nuevo a un pedido que no sea `tipo='diaria'`.
