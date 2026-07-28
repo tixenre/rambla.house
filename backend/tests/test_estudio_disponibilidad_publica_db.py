@@ -159,11 +159,18 @@ def setup():
 
 @pytest.fixture(scope="module")
 def client_con_db():
+    """TestClient con Postgres real. Espera a que `main.db_init_thread`
+    (spawneado por el propio `startup` de `TestClient`, corre init_db+alembic+
+    seed+catalog en background) termine ANTES de yieldear — sin esto, el DML
+    de los fixtures de test podía chocar con el ALTER TABLE de ese thread
+    todavía en vuelo (deadlock real en CI, issue #1304)."""
     from database import init_db
     from fastapi.testclient import TestClient
 
     init_db()
     with TestClient(main.app, raise_server_exceptions=True) as c:
+        if main.db_init_thread is not None:
+            main.db_init_thread.join(timeout=60)
         yield c
 
 
