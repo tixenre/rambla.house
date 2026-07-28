@@ -68,6 +68,50 @@ TRANSICIONES: dict[str, set[str]] = {
 # Único destino legal para el cliente (portal) — todo lo demás es admin-only.
 _DESTINO_CLIENTE = "cancelado"
 
+# Secuencia del "camino feliz" — espejo de
+# `frontend/src/lib/pedido-estados.ts::FLOW`. Se usa SOLO para la cascada de
+# turnos del Estudio vinculados (#1308, "avanzan juntos") — no reemplaza ni
+# participa de `TRANSICIONES` (la única fuente de qué transición es legal).
+FLOW: tuple[str, ...] = ("solicitado", "confirmado", "retirado", "devuelto", "finalizado")
+
+
+def _cascada_turnos_vinculados(conn, pedido_id: int, estado_nuevo: str, actor: str) -> list[dict]:
+    """`pedido_id` acaba de pasar a `estado_nuevo`: si es uno de los 5 pasos
+    de `FLOW`, empuja cada turno del Estudio vinculado (`pedido_principal_id`)
+    al MISMO estado — salvo el que ya esté en un paso IGUAL o POSTERIOR (nunca
+    retrocede). `cancelado`/`borrador` quedan fuera de la cascada (no están en
+    `FLOW`): cancelar/cerrar un turno vinculado sigue siendo manual, y como el
+    portal cliente solo puede pedir `cancelado` (`_DESTINO_CLIENTE`), esto
+    también implica que la cascada nunca se dispara desde el portal.
+
+    Cada turno pasa por `cambiar_estado()` COMPLETO (mismo `FOR UPDATE`,
+    misma revalidación de stock/fechas, mismo `_maybe_finalizar`) — no un
+    UPDATE crudo. Si un turno puntual falla, se acumula como advertencia y se
+    sigue con el resto — la transición de `pedido_id` (que sí se pidió y sí es
+    válida) NUNCA se revierte por esto."""
+    if estado_nuevo not in FLOW:
+        return []
+    idx_destino = FLOW.index(estado_nuevo)
+    turnos = conn.execute(
+        "SELECT id, numero_pedido, estado FROM alquileres WHERE pedido_principal_id = %s "
+        "ORDER BY fecha_desde, id",
+        (pedido_id,),
+    ).fetchall()
+    advertencias = []
+    for t in turnos:
+        idx_actual = FLOW.index(t["estado"]) if t["estado"] in FLOW else -1
+        if idx_actual >= idx_destino:
+            continue
+        try:
+            cambiar_estado(conn, t["id"], estado_nuevo, es_admin=True, actor=actor)
+        except HTTPException as e:
+            advertencias.append({
+                "turno_id": t["id"],
+                "numero_pedido": t["numero_pedido"],
+                "error": e.detail if isinstance(e.detail, str) else str(e.detail),
+            })
+    return advertencias
+
 
 def _tiene_factura_activa(conn, pedido_id: int) -> bool:
     return bool(conn.execute(
@@ -211,8 +255,21 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
     from routes.alquileres.detalle import _maybe_finalizar
     _maybe_finalizar(conn, pedido_id)
 
+    # Cascada a los turnos del Estudio vinculados (#1308) — SOLO si `pedido_id`
+    # es un pedido PRINCIPAL (no un turno): un turno nunca puede ser principal
+    # de otro (`_resolver_pedido_principal` exige `tipo='diaria'` para
+    # vincularse), así que este guard también corta cualquier riesgo de
+    # recursión — al procesar el turno más abajo, su propio
+    # `pedido_principal_id` no es `None` y el guard frena ahí.
+    turnos_sin_avanzar = (
+        _cascada_turnos_vinculados(conn, pedido_id, estado_nuevo, actor)
+        if p["pedido_principal_id"] is None
+        else []
+    )
+
     return {
         "estado_anterior": estado_actual,
         "estado_nuevo": estado_nuevo,
         "numero_pedido_asignado": numero_asignado,
+        "turnos_vinculados_sin_avanzar": turnos_sin_avanzar,
     }

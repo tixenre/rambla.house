@@ -107,6 +107,7 @@ def test_transicion_hacia_adelante_ok(db_setup):
         conn.commit()
         assert resultado == {
             "estado_anterior": "borrador", "estado_nuevo": "solicitado", "numero_pedido_asignado": False,
+            "turnos_vinculados_sin_avanzar": [],
         }
         p = conn.execute("SELECT estado FROM alquileres WHERE id=%s", (_PEDIDO_IDS[0],)).fetchone()
         assert p["estado"] == "solicitado"

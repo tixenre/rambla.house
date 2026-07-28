@@ -208,6 +208,11 @@ def update_pedido(id: int, data: PedidoEstado, request: Request, background: Bac
             resultado = cambiar_estado(conn, id, data.estado, es_admin=True, actor="system")
             conn.commit()
             pedido = _get_alquiler_detail(conn, id)
+            # Bolt-on, mismo patrón que `promo_advertencia`: si `id` es un
+            # pedido principal, la cascada a sus turnos vinculados (#1308) ya
+            # corrió dentro de `cambiar_estado` — acá solo se propaga el
+            # resultado para que el admin vea cuál turno no pudo avanzar.
+            pedido["turnos_vinculados_sin_avanzar"] = resultado.get("turnos_vinculados_sin_avanzar", [])
         except Exception:
             logger.error("Error actualizando estado del pedido %s", id, exc_info=True)
             conn.rollback()
