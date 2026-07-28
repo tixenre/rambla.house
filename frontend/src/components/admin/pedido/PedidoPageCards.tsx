@@ -201,7 +201,11 @@ export function ItemsCard({
                       className="h-9 w-24 text-sm text-base sm:text-sm sm:h-7"
                     />
                   )}
-                  <span className="text-xs text-muted-foreground whitespace-nowrap">/día</span>
+                  {/* cobro_modo='fijo' (ej. centinela del Estudio en un pedido
+                      de taller): no se multiplica por jornadas, "/día" mentiría. */}
+                  <span className="text-xs text-muted-foreground whitespace-nowrap">
+                    {it.cobro_modo === "fijo" ? "fijo" : "/día"}
+                  </span>
                 </div>
                 {overstock && (
                   <div className="ml-auto text-xs text-destructive flex items-center gap-1">

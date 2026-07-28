@@ -1131,6 +1131,22 @@ export type PedidoPago = {
   anulado_motivo?: string | null;
 };
 
+/** Una clase real de una edición de taller — mismo shape que
+ *  `services.talleres.queries.clases._clase_dict` (backend). */
+export type ClaseTallerPedido = {
+  id: number;
+  fecha: string;
+  hora_inicio_min: number;
+  hora_fin_min: number;
+  hora_inicio_str: string;
+  hora_fin_str: string;
+  titulo: string;
+  descripcion: string;
+  nota: string;
+  portada_media_id: number | null;
+  portada_url: string;
+};
+
 export type Pedido = {
   id: number;
   numero_pedido: number | null;
@@ -1169,8 +1185,17 @@ export type Pedido = {
    *  slot mensual del Estudio, #1283) | "taller" (resumen mensual de una
    *  edición, ver `_regenerar_pedidos_taller`) — ver `lib/tipos-pedido.ts`.
    *  Ítems/fechas de un pedido del Estudio se editan desde Estudio → Reservas;
-   *  un pedido de taller queda editable normal. */
+   *  un pedido de taller (Fase 1, #1308) también las tiene blindadas —
+   *  fecha/ítem-auto rechazan el editor genérico, aunque sí permite agregar
+   *  una línea nueva (matrícula). */
   tipo?: "diaria" | "estudio" | "estudio_fijo" | "taller";
+  /** Presente solo si `tipo === "taller"`: la edición que lo generó. */
+  taller_edicion_id?: number | null;
+  /** Solo presente en el detalle (`getPedido`) de un pedido de taller: las
+   *  clases REALES (fecha + franja horaria) de la edición — la verdad
+   *  temporal que `fecha_desde`/`fecha_hasta` no representan (esas son el mes
+   *  contable completo). Vacío para cualquier otro tipo. Bug real #445. */
+  clases_taller?: ClaseTallerPedido[];
   /** Presente solo en la respuesta de crear/editar un turno del Estudio: si
    *  la promo (combo) se reservó con algún componente sin stock — best-effort,
    *  nunca bloquea la reserva, pero el admin/cliente debe saberlo. `null`/

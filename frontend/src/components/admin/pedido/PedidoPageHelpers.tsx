@@ -246,6 +246,13 @@ export function ItemRow({
               <option value="jornada">/jornada</option>
               <option value="fijo">fijo</option>
             </select>
+          ) : it.cobro_modo === "fijo" ? (
+            // Ítem de catálogo con cobro_modo='fijo' (ej. el centinela del
+            // Estudio en un pedido de taller): no se multiplica por jornadas,
+            // "/día" mentiría. No editable acá (a diferencia de una línea
+            // libre) — el cobro_modo de un ítem de catálogo lo decide su
+            // motor dueño (Estudio/Talleres), no el editor genérico.
+            <span className="text-xs text-muted-foreground whitespace-nowrap">fijo</span>
           ) : (
             <span className="text-xs text-muted-foreground whitespace-nowrap">/día</span>
           )}

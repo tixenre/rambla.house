@@ -105,7 +105,7 @@ import {
 } from "@/components/admin/pedido/PedidoPageHelpers";
 import { Section } from "@/design-system/composites/Section";
 import { FieldLabel } from "@/design-system/ui/Field";
-import { esPedidoEstudio } from "@/lib/tipos-pedido";
+import { esPedidoEstudio, esPedidoDerivado, esPedidoTaller } from "@/lib/tipos-pedido";
 
 export const Route = createLazyFileRoute("/admin/pedidos/$id")({
   component: PedidoEditorRoute,
@@ -245,6 +245,11 @@ function PedidoEditorPage() {
   // (el backend ya los bloquea con 409, Fase 1 #1283) — acá solo se neutralizan
   // los controles para que el admin no choque con eso.
   const esEstudio = esPedidoEstudio(p);
+  // Un pedido de taller (Fase 1, #1308) también tiene la fecha blindada server-
+  // side (409) — pero, a diferencia de estudio, SÍ permite agregar/editar
+  // ítems (matrícula), así que solo el control de fecha se neutraliza acá.
+  const esTaller = esPedidoTaller(p);
+  const fechaNoEditable = esPedidoDerivado(p);
 
   const clienteSinVerificar = !!p.cliente_id && !p.cliente_dni_validado_at;
   const ESTADOS_CON_AVISO: PedidoEstado[] = ["confirmado", "retirado"];
@@ -436,6 +441,25 @@ function PedidoEditorPage() {
             </div>
           )}
 
+          {/* Banner pedido de taller — resumen contable mensual generado por
+              la edición (Fase 1, #1308): fechas bloqueadas server-side, pero
+              SÍ se puede agregar una línea de matrícula acá. */}
+          {esTaller && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber/40 bg-amber/5 px-3 py-2.5 text-sm">
+              <Info className="h-4 w-4 text-ink shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <span className="font-medium text-ink">
+                  Este pedido es el resumen mensual de un taller.
+                </span>{" "}
+                Las fechas y los ítems automáticos (espacio/equipos) los gobierna la edición en{" "}
+                <Link to="/admin/talleres" className="underline text-muted-foreground">
+                  Talleres
+                </Link>
+                . Podés agregar una línea nueva acá (ej. matrícula) sin problema.
+              </div>
+            </div>
+          )}
+
           {/* Cliente */}
           <Section variant="card" tone="elevated" icon={User} title="Cliente">
             {/* Buscar ficha existente: al elegirla, el contacto y el descuento
@@ -556,14 +580,16 @@ function PedidoEditorPage() {
             }
           />
 
-          {/* Fechas — editables con re-validación de stock */}
+          {/* Fechas — editables con re-validación de stock. Taller (#1308):
+              `fecha_desde`/`fecha_hasta` son el mes contable de la edición, no
+              un evento real — se muestran las clases reales en su lugar. */}
           <Section
             variant="card"
             tone="elevated"
             icon={Calendar}
-            title="Fechas del alquiler"
+            title={esTaller ? "Clases del taller" : "Fechas del alquiler"}
             actions={
-              !datos.fecha_desde || !datos.fecha_hasta ? (
+              esTaller ? undefined : !datos.fecha_desde || !datos.fecha_hasta ? (
                 <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-destructive">
                   <AlertTriangle className="h-3 w-3" /> sin fechas
                 </span>
@@ -578,52 +604,86 @@ function PedidoEditorPage() {
               )
             }
           >
-            {/* Píldora retiro→devolución — abre el selector de fechas+horas.
-                Turno del Estudio: se reprograma desde Estudio → Reservas. */}
-            <button
-              type="button"
-              disabled={esEstudio}
-              onClick={() => setOpenDateModal(true)}
-              className={cn(
-                "@container flex w-full items-center gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5 text-left transition min-h-[44px]",
-                esEstudio ? "cursor-not-allowed opacity-60" : "hover:border-ink",
-              )}
-            >
-              {startDate && endDate ? (
-                <>
-                  <Calendar className="h-4 w-4 text-muted-foreground shrink-0 self-start mt-0.5" />
-                  <div className="min-w-0 flex-1 grid grid-cols-1 gap-x-6 gap-y-2 @2xl:grid-cols-2">
-                    <div className="min-w-0">
-                      <div className="t-eyebrow">Retiro</div>
-                      <div className="font-mono text-sm tabular-nums text-ink mt-0.5">
-                        {format(startDate, "EEEE d 'de' MMMM", { locale: es })} · {startTime}
+            {esTaller ? (
+              (p.clases_taller ?? []).length > 0 ? (
+                <ul className="space-y-2">
+                  {(p.clases_taller ?? []).map((c) => (
+                    <li
+                      key={c.id}
+                      className="flex items-center gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5 min-h-[44px]"
+                    >
+                      <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <div className="min-w-0 flex-1">
+                        <div className="font-mono text-sm tabular-nums text-ink">
+                          {format(new Date(c.fecha + "T12:00:00"), "EEEE d 'de' MMMM", {
+                            locale: es,
+                          })}
+                        </div>
+                        <div className="mt-0.5 text-xs text-muted-foreground">
+                          {c.hora_inicio_str}–{c.hora_fin_str}
+                          {c.titulo ? ` · ${c.titulo}` : ""}
+                        </div>
                       </div>
-                    </div>
-                    <div className="min-w-0">
-                      <div className="t-eyebrow">Devolución</div>
-                      <div className="font-mono text-sm tabular-nums text-ink mt-0.5">
-                        {format(endDate, "EEEE d 'de' MMMM", { locale: es })} · {endTime}
-                      </div>
-                    </div>
-                  </div>
-                  <span className="ml-auto card px-2.5 py-1 text-center shrink-0">
-                    <span className="font-mono text-base font-semibold leading-none">
-                      {jornadas}
-                    </span>
-                    <span className="t-eyebrow ml-1">
-                      {jornadas === 1 ? "jornada" : "jornadas"}
-                    </span>
-                  </span>
-                </>
+                    </li>
+                  ))}
+                </ul>
               ) : (
-                <>
-                  <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <span className="text-sm text-muted-foreground">
-                    Elegí las fechas de retiro y devolución…
-                  </span>
-                </>
-              )}
-            </button>
+                <p className="text-sm text-muted-foreground">
+                  Sin clases cargadas en la edición todavía —{" "}
+                  <Link to="/admin/talleres" className="underline">
+                    cargalas en Talleres
+                  </Link>
+                  .
+                </p>
+              )
+            ) : (
+              /* Píldora retiro→devolución — abre el selector de fechas+horas.
+                  Turno del Estudio: se reprograma desde Estudio → Reservas. */
+              <button
+                type="button"
+                disabled={fechaNoEditable}
+                onClick={() => setOpenDateModal(true)}
+                className={cn(
+                  "@container flex w-full items-center gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5 text-left transition min-h-[44px]",
+                  fechaNoEditable ? "cursor-not-allowed opacity-60" : "hover:border-ink",
+                )}
+              >
+                {startDate && endDate ? (
+                  <>
+                    <Calendar className="h-4 w-4 text-muted-foreground shrink-0 self-start mt-0.5" />
+                    <div className="min-w-0 flex-1 grid grid-cols-1 gap-x-6 gap-y-2 @2xl:grid-cols-2">
+                      <div className="min-w-0">
+                        <div className="t-eyebrow">Retiro</div>
+                        <div className="font-mono text-sm tabular-nums text-ink mt-0.5">
+                          {format(startDate, "EEEE d 'de' MMMM", { locale: es })} · {startTime}
+                        </div>
+                      </div>
+                      <div className="min-w-0">
+                        <div className="t-eyebrow">Devolución</div>
+                        <div className="font-mono text-sm tabular-nums text-ink mt-0.5">
+                          {format(endDate, "EEEE d 'de' MMMM", { locale: es })} · {endTime}
+                        </div>
+                      </div>
+                    </div>
+                    <span className="ml-auto card px-2.5 py-1 text-center shrink-0">
+                      <span className="font-mono text-base font-semibold leading-none">
+                        {jornadas}
+                      </span>
+                      <span className="t-eyebrow ml-1">
+                        {jornadas === 1 ? "jornada" : "jornadas"}
+                      </span>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+                    <span className="text-sm text-muted-foreground">
+                      Elegí las fechas de retiro y devolución…
+                    </span>
+                  </>
+                )}
+              </button>
+            )}
           </Section>
 
           {/* Equipos — turno del Estudio: el centinela/promo/sueltos se
@@ -762,7 +822,11 @@ function PedidoEditorPage() {
           <RailSection label="Desglose">
             <div className="space-y-1 text-sm">
               <BdRow
-                l={`Bruto · ${jornadas} jornada${jornadas !== 1 ? "s" : ""}`}
+                // Taller: el rango es el mes contable, no jornadas reales
+                // (las clases reales ya se muestran arriba) — "N jornadas"
+                // acá sería el mismo tipo de invención que el "31 jornadas"
+                // original del pedido #445.
+                l={esTaller ? "Bruto" : `Bruto · ${jornadas} jornada${jornadas !== 1 ? "s" : ""}`}
                 v={fmtArs(totales.subtotal)}
               />
               {totales.descuentoPct > 0 && (
