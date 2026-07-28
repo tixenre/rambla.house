@@ -14,8 +14,10 @@ OPT-IN y SEGURO POR DEFECTO (mismo gating que los demás *_db.py):
 """
 import os
 import threading
+import time
 from urllib.parse import urlparse
 
+import psycopg.errors
 import pytest
 
 _OPT_IN = os.getenv("RESERVAS_DB_TEST") == "1"
@@ -70,6 +72,26 @@ def _limpiar(conn):
     conn.execute("DELETE FROM clientes WHERE id = %s", (CLIENTE_ID,))
 
 
+def _limpiar_con_retry(conn, intentos: int = 3) -> None:
+    """`_limpiar` con reintento ante `DeadlockDetected` transitorio — mismo
+    patrón que `test_estudio_disponibilidad_publica_db.py`: el job de CI corre
+    ~20 archivos `test_*_db.py` como steps secuenciales contra el MISMO
+    contenedor Postgres, y el `init_db()` de un step posterior (`ALTER TABLE
+    ... ADD COLUMN`) puede pedir un lock que este `DELETE` de limpieza ya tiene
+    tomado — Postgres mata a una de las dos transacciones con
+    `DeadlockDetected` (issue #1304, 3 ocurrencias reales en CI con esta
+    firma). Reintentar es la respuesta esperada, no una tapa de un bug real."""
+    for intento in range(intentos):
+        try:
+            _limpiar(conn)
+            return
+        except psycopg.errors.DeadlockDetected:
+            conn.rollback()
+            if intento == intentos - 1:
+                raise
+            time.sleep(0.2 * (intento + 1))
+
+
 @pytest.fixture
 def setup(monkeypatch):
     monkeypatch.setenv("ADMIN_BYPASS_AUTH", "1")
@@ -82,7 +104,7 @@ def setup(monkeypatch):
 
     conn = get_db()
     try:
-        _limpiar(conn)
+        _limpiar_con_retry(conn)
         conn.execute(
             "INSERT INTO clientes (id, nombre, apellido, email, telefono) "
             "VALUES (%s,'Cliente','Admin Estudio','adminestudio@test.com','+5491100000000')",
@@ -128,7 +150,7 @@ def setup(monkeypatch):
 
     conn = get_db()
     try:
-        _limpiar(conn)
+        _limpiar_con_retry(conn)
         conn.commit()
     finally:
         conn.close()
