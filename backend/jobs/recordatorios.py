@@ -45,6 +45,14 @@ def _pedidos_para_retiro(conn, hoy, dias_antes: int) -> list[dict]:
     El `NOT EXISTS` contra `emails_log` es la primera línea anti-duplicado (la
     definitiva es el índice único). La ventana es `[día-objetivo 00:00, +1 00:00)`
     para cubrir el día entero sin importar la hora de retiro.
+
+    `p.tipo NOT IN ('taller','estudio_fijo')`: ninguno de los dos tiene "retiro"
+    real (taller = mes contable completo; estudio_fijo = muestra de una
+    recurrencia) — hoy además ninguno de los dos setea `cliente_email` al
+    generarse (`_regenerar_pedidos_taller`/`_regenerar_pedidos_slot`), así que
+    el filtro de abajo ya los excluye EN LA PRÁCTICA; este filtro es explícito
+    a propósito, para no depender de esa coincidencia si algún día alguno de
+    los dos empieza a llevar un email real.
     """
     dia_ini = (hoy + timedelta(days=dias_antes)).replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -58,6 +66,7 @@ def _pedidos_para_retiro(conn, hoy, dias_antes: int) -> list[dict]:
                a.monto_total, a.notas
         FROM alquileres a
         WHERE a.estado IN ({ph})
+          AND a.tipo NOT IN ('taller', 'estudio_fijo')
           AND a.fecha_desde >= %s
           AND a.fecha_desde <  %s
           AND a.cliente_email IS NOT NULL
