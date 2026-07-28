@@ -152,10 +152,10 @@ def test_faltante_best_effort_burbujea_a_la_linea_del_kit():
 
 
 def test_endpoint_llamado_directo_sin_items_va_al_camino_clasico():
-    """`routes/estudio.py` llama a `get_disponibilidad()` DIRECTO con 3 args
-    posicionales: el default de `items` tiene que ser None REAL — un
-    `Query(None)` de FastAPI es truthy, activaría el camino draft y rompería
-    la reserva del Estudio con 500 (hallazgo bloqueante de la revisión)."""
+    """`routes/cliente_portal/solicitudes.py` llama a `get_disponibilidad()`
+    DIRECTO con 3 args posicionales: el default de `items` tiene que ser None
+    REAL — un `Query(None)` de FastAPI es truthy, activaría el camino draft
+    sin querer (hallazgo bloqueante de la revisión original)."""
     import inspect
 
     from routes.alquileres.disponibilidad import get_disponibilidad

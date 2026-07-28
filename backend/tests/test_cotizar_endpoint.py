@@ -810,3 +810,80 @@ class TestPedidoCongeladoUsaTargetFiscalDelPedido:
         out = cotizar(self._data(), FakeReq())
         assert out["con_iva"] is False
         assert out["total_final"] == 10000
+
+
+class TestPedidoConFacturaCVigente:
+    """El dueño probó en staging: un pedido con Factura C YA EMITIDA (emisor
+    Monotributo, nunca suma IVA — 2026-07-27) seguía mostrando el Desglose/
+    Cobranza como si el cliente fuera a pagar el 21% de su perfil RI —
+    desfasaje real entre lo que el pedido dice que falta cobrar y lo que la
+    factura real ya cobró. `factura_c_vigente` (monkeypatcheado acá — su
+    propia lógica de query vive y se prueba en `test_facturacion_engine.py`)
+    tiene que apagar el IVA del Desglose/Cobranza cuando ya hay una Factura C."""
+
+    def _data(self, pedido_id=5):
+        return CotizarRequest(
+            items=[CotizarItem(equipo_id=7, cantidad=1)],
+            fecha_desde="2026-06-01T10:00:00",
+            fecha_hasta="2026-06-02T10:00:00",  # 1 jornada
+            cliente_id=99,
+            pedido_id=pedido_id,
+        )
+
+    def test_factura_c_emitida_apaga_el_iva_aunque_el_cliente_sea_ri(self, patch_db, monkeypatch):
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        monkeypatch.setattr(alq, "factura_c_vigente", lambda pedido_id, conn: True)
+        patch_db(
+            FakeConnConPedido(
+                precios={7: 10000}, perfil="responsable_inscripto", descuento=0,
+                pedido={"estado": "confirmado", "cliente_id": 99,
+                        "descuento_jornadas_pct": 0, "descuento_cliente_pct": 0},
+            ),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(self._data(), FakeReq())
+        # Sin la Factura C, esto daría con_iva=True/total_final=12100 (21% sobre
+        # 10000) — con ella, el pedido tiene que mostrar lo que se cobró de verdad.
+        assert out["neto"] == 10000
+        assert out["con_iva"] is False
+        assert out["iva_monto"] == 0
+        assert out["total_final"] == 10000
+
+    def test_sin_factura_c_sigue_sumando_iva_del_perfil_ri(self, patch_db, monkeypatch):
+        # Control: sin factura (o con una Factura A), el comportamiento no cambia.
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        monkeypatch.setattr(alq, "factura_c_vigente", lambda pedido_id, conn: False)
+        patch_db(
+            FakeConnConPedido(
+                precios={7: 10000}, perfil="responsable_inscripto", descuento=0,
+                pedido={"estado": "confirmado", "cliente_id": 99,
+                        "descuento_jornadas_pct": 0, "descuento_cliente_pct": 0},
+            ),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(self._data(), FakeReq())
+        assert out["con_iva"] is True
+        assert out["iva_monto"] == 2100
+        assert out["total_final"] == 12100
+
+    def test_presupuesto_no_chequea_factura_c(self, patch_db, monkeypatch):
+        # Un presupuesto (`estado='solicitado'`) nunca tiene factura — pero
+        # además `pedido_congelado` ya es None para ese estado (ver
+        # TestPedidoCongeladoRespetaSnapshot), así que el chequeo ni corre.
+        # Si `factura_c_vigente` devolviera True por error acá, este test lo cazaría.
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        monkeypatch.setattr(
+            alq, "factura_c_vigente",
+            lambda pedido_id, conn: (_ for _ in ()).throw(AssertionError("no debería llamarse")),
+        )
+        patch_db(
+            FakeConnConPedido(
+                precios={7: 10000}, perfil="responsable_inscripto", descuento=0,
+                pedido={"estado": "solicitado", "cliente_id": 99,
+                        "descuento_jornadas_pct": 0, "descuento_cliente_pct": 0},
+            ),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(self._data(), FakeReq())
+        assert out["con_iva"] is True
+        assert out["total_final"] == 12100

@@ -1074,6 +1074,21 @@ Fix: para emisor Monotributo, el importe facturado es SIEMPRE `pedido['monto_tot
 discriminando el 21% cuando corresponde. El supervisor marca cualquier cálculo de importe de Factura C
 que sume IVA del receptor, sea cual sea su condición.
 
+### 2026-07-27 — El Desglose/Cobranza del pedido apaga el IVA si ya hay una Factura C emitida
+
+Refina el fix anterior (mismo día): una vez que un pedido tiene una Factura C **ya emitida** (emisor
+Monotributo, nunca suma IVA), el "Desglose"/"Cobranza" en vivo del editor admin (`/api/cotizar`) tiene
+que dejar de mostrar el 21% que el perfil RI del cliente sugeriría — sin esto, la página seguía
+diciendo "resta $X + IVA" después de facturarse sin IVA, un desfasaje real entre lo que el pedido dice
+que falta cobrar y lo que la factura real ya cobró. Fuente única: `services/facturacion/repo.py::
+factura_c_vigente(pedido_id, conn)` (consulta `get_factura_principal_emitida` + chequea
+`cbte_tipo == CbteTipo.FACTURA_C`); `routes/alquileres/cotizacion.py::cotizar` la llama solo para un
+pedido congelado (no-presupuesto) y, si da `True`, fuerza `con_iva=False`/`iva_monto=0`/
+`total_final=neto`. Se anula por Nota de Crédito → la original pasa a `estado='anulada'` y
+`factura_c_vigente` vuelve a dar `False` sola (no hace falta lógica extra). El supervisor marca un
+consumidor nuevo del total de un pedido que no chequee `factura_c_vigente` antes de asumir el IVA del
+perfil fiscal.
+
 ---
 
 ## Preferencias (cómo quiero que se hagan las cosas)
@@ -1214,3 +1229,29 @@ nunca un 409. Los equipos SUELTOS (elegidos a mano, fuera de la promo) siguen si
 409 y no se crea nada. El gate de validación (`validar_stock_hipotetico`) es el mismo para ambos — lo
 que cambia es si el caller levanta excepción sobre el resultado o solo arma el aviso. El supervisor
 marca un 409 nuevo en la validación de la promo, o un ítem suelto que pase a ser best-effort.
+
+### 2026-07-25 — `backend/services/estudio/` = motor de disponibilidad/reserva del Estudio (split de `routes/estudio.py`, CQRS-lite)
+
+El motor de disponibilidad (franja/anticipación/centinela/slot/taller/`verificar_sesiones_disponibles`/
+`revalidar_disponibilidad_estudio`), la promo combo y el núcleo compartido de creación/edición de
+reservas (cliente+admin, `_crear_pedido_estudio`/`editar_reserva`) salieron de `routes/estudio.py`
+a `services/estudio/` (`queries/`+`commands/`, molde `descuentos/`/`contabilidad/`), move-verbatim.
+El route quedó como transporte (auth, conn/commit, HTTP) y conserva perfil/fotos/trabajos/slots/
+agenda. El paquete no importa de `routes.*`: `queries/promo.py::get_disponibilidad` es un wrapper
+local sobre `reservas.calcular_disponibilidad` (conexión propia, committed-only). El supervisor
+marca: lógica de disponibilidad/reserva del Estudio reimplementada fuera del paquete, un import de
+`routes.*` dentro de `services/estudio/`, o la promo vuelta dura / un suelto vuelto best-effort.
+
+### 2026-07-26 — `backend/services/talleres/` = dedup del gate de Estudio + economía de talleres (split de `routes/talleres.py`, CQRS-lite)
+
+El gate de conflicto con Estudio (copiado inline 3×), el INSERT de `ediciones_taller` (copiado 2×)
+y la economía (`_regenerar_pedidos_taller`) salieron de `routes/talleres.py` a
+`services/talleres/` (`queries/`+`commands/`, molde `services/estudio/`), move-verbatim. El route
+quedó como transporte; endpoints, lectura/serialización, instructores/trabajos e inscripción/seña
+(Fase 2 diferida) se quedaron sin tocar. El paquete no importa de `routes.*`:
+`_regenerar_pedidos_taller` recibe `numero_pedido_fn` inyectado en vez de importar
+`routes.alquileres._next_numero_pedido`. Desviación documentada respecto a `services/estudio/`: acá
+sí hay imports `commands/`→`commands/` (`ediciones.py` importa de `commands/clases.py` y
+`commands/economia.py`) — no viola la regla dura (`queries/` nunca importa de `commands/`). El
+supervisor marca: lógica de gate/economía reimplementada fuera del paquete, un import de
+`routes.*` dentro de `services/talleres/`, o el gate re-inlineado en un call-site nuevo.

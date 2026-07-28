@@ -72,9 +72,13 @@ def _limpiar(conn):
 
 @pytest.fixture
 def setup():
-    from database import get_db, init_db
+    # NO llama a init_db() acá: `client_con_db` (module-scoped) ya lo hace, y
+    # duplicarlo corre en paralelo con el `db_init_thread` que dispara el
+    # `startup` de `TestClient(main.app)` — carrera real que rompió CI en un
+    # archivo hermano (DuplicateObject en `spec_propuestas_pendientes_tipo_check`,
+    # 2026-07-26).
+    from database import get_db
 
-    init_db()
     conn = get_db()
     try:
         _limpiar(conn)
@@ -164,9 +168,9 @@ def test_slot_items_veraces_y_edicion_no_se_autobloquea(client_con_db, setup, mo
     `exclude_slot_id` en `_centinela_libre`."""
     monkeypatch.setenv("ADMIN_BYPASS_AUTH", "1")
     from database import get_db
-    from routes.estudio import _mes_actual_ar
+    from services.fechas import mes_actual_ar
 
-    mes = _mes_actual_ar()
+    mes = mes_actual_ar()
     y, m = (int(x) for x in mes.split("-"))
     mes_hasta = f"{y:04d}-{(m % 12) + 1:02d}" if m < 12 else f"{y + 1:04d}-01"
 

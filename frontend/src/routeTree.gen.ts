@@ -113,6 +113,9 @@ const AdminContabilidadLiquidacionLazyRouteImport = createFileRoute(
 const AdminContabilidadGlosarioLazyRouteImport = createFileRoute(
   '/admin/contabilidad/glosario',
 )()
+const AdminContabilidadEstudioLazyRouteImport = createFileRoute(
+  '/admin/contabilidad/estudio',
+)()
 const AdminContabilidadCuentasLazyRouteImport = createFileRoute(
   '/admin/contabilidad/cuentas',
 )()
@@ -522,6 +525,14 @@ const AdminContabilidadGlosarioLazyRoute =
   } as any).lazy(() =>
     import('./routes/admin/contabilidad.glosario.lazy').then((d) => d.Route),
   )
+const AdminContabilidadEstudioLazyRoute =
+  AdminContabilidadEstudioLazyRouteImport.update({
+    id: '/contabilidad/estudio',
+    path: '/contabilidad/estudio',
+    getParentRoute: () => AdminRoute,
+  } as any).lazy(() =>
+    import('./routes/admin/contabilidad.estudio.lazy').then((d) => d.Route),
+  )
 const AdminContabilidadCuentasLazyRoute =
   AdminContabilidadCuentasLazyRouteImport.update({
     id: '/contabilidad/cuentas',
@@ -601,6 +612,7 @@ export interface FileRoutesByFullPath {
   '/escuela/': typeof EscuelaIndexLazyRoute
   '/escuela/sena/$token': typeof EscuelaSenaTokenRoute
   '/admin/contabilidad/cuentas': typeof AdminContabilidadCuentasLazyRoute
+  '/admin/contabilidad/estudio': typeof AdminContabilidadEstudioLazyRoute
   '/admin/contabilidad/glosario': typeof AdminContabilidadGlosarioLazyRoute
   '/admin/contabilidad/liquidacion': typeof AdminContabilidadLiquidacionLazyRoute
   '/admin/contabilidad/movimientos': typeof AdminContabilidadMovimientosLazyRoute
@@ -667,6 +679,7 @@ export interface FileRoutesByTo {
   '/escuela': typeof EscuelaIndexLazyRoute
   '/escuela/sena/$token': typeof EscuelaSenaTokenRoute
   '/admin/contabilidad/cuentas': typeof AdminContabilidadCuentasLazyRoute
+  '/admin/contabilidad/estudio': typeof AdminContabilidadEstudioLazyRoute
   '/admin/contabilidad/glosario': typeof AdminContabilidadGlosarioLazyRoute
   '/admin/contabilidad/liquidacion': typeof AdminContabilidadLiquidacionLazyRoute
   '/admin/contabilidad/movimientos': typeof AdminContabilidadMovimientosLazyRoute
@@ -741,6 +754,7 @@ export interface FileRoutesById {
   '/escuela/': typeof EscuelaIndexLazyRoute
   '/escuela/sena/$token': typeof EscuelaSenaTokenRoute
   '/admin/contabilidad/cuentas': typeof AdminContabilidadCuentasLazyRoute
+  '/admin/contabilidad/estudio': typeof AdminContabilidadEstudioLazyRoute
   '/admin/contabilidad/glosario': typeof AdminContabilidadGlosarioLazyRoute
   '/admin/contabilidad/liquidacion': typeof AdminContabilidadLiquidacionLazyRoute
   '/admin/contabilidad/movimientos': typeof AdminContabilidadMovimientosLazyRoute
@@ -816,6 +830,7 @@ export interface FileRouteTypes {
     | '/escuela/'
     | '/escuela/sena/$token'
     | '/admin/contabilidad/cuentas'
+    | '/admin/contabilidad/estudio'
     | '/admin/contabilidad/glosario'
     | '/admin/contabilidad/liquidacion'
     | '/admin/contabilidad/movimientos'
@@ -882,6 +897,7 @@ export interface FileRouteTypes {
     | '/escuela'
     | '/escuela/sena/$token'
     | '/admin/contabilidad/cuentas'
+    | '/admin/contabilidad/estudio'
     | '/admin/contabilidad/glosario'
     | '/admin/contabilidad/liquidacion'
     | '/admin/contabilidad/movimientos'
@@ -955,6 +971,7 @@ export interface FileRouteTypes {
     | '/escuela/'
     | '/escuela/sena/$token'
     | '/admin/contabilidad/cuentas'
+    | '/admin/contabilidad/estudio'
     | '/admin/contabilidad/glosario'
     | '/admin/contabilidad/liquidacion'
     | '/admin/contabilidad/movimientos'
@@ -1468,6 +1485,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminContabilidadGlosarioLazyRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/contabilidad/estudio': {
+      id: '/admin/contabilidad/estudio'
+      path: '/contabilidad/estudio'
+      fullPath: '/admin/contabilidad/estudio'
+      preLoaderRoute: typeof AdminContabilidadEstudioLazyRouteImport
+      parentRoute: typeof AdminRoute
+    }
     '/admin/contabilidad/cuentas': {
       id: '/admin/contabilidad/cuentas'
       path: '/contabilidad/cuentas'
@@ -1573,6 +1597,7 @@ interface AdminRouteChildren {
   AdminUnidadesLazyRoute: typeof AdminUnidadesLazyRoute
   AdminIndexLazyRoute: typeof AdminIndexLazyRoute
   AdminContabilidadCuentasLazyRoute: typeof AdminContabilidadCuentasLazyRoute
+  AdminContabilidadEstudioLazyRoute: typeof AdminContabilidadEstudioLazyRoute
   AdminContabilidadGlosarioLazyRoute: typeof AdminContabilidadGlosarioLazyRoute
   AdminContabilidadLiquidacionLazyRoute: typeof AdminContabilidadLiquidacionLazyRoute
   AdminContabilidadMovimientosLazyRoute: typeof AdminContabilidadMovimientosLazyRoute
@@ -1610,6 +1635,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminUnidadesLazyRoute: AdminUnidadesLazyRoute,
   AdminIndexLazyRoute: AdminIndexLazyRoute,
   AdminContabilidadCuentasLazyRoute: AdminContabilidadCuentasLazyRoute,
+  AdminContabilidadEstudioLazyRoute: AdminContabilidadEstudioLazyRoute,
   AdminContabilidadGlosarioLazyRoute: AdminContabilidadGlosarioLazyRoute,
   AdminContabilidadLiquidacionLazyRoute: AdminContabilidadLiquidacionLazyRoute,
   AdminContabilidadMovimientosLazyRoute: AdminContabilidadMovimientosLazyRoute,

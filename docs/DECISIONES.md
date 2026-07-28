@@ -3345,6 +3345,93 @@ PDF/imagen", "Qué NO cubre").
   duro pensando que es un bug. El supervisor lo hace cumplir: un 409 nuevo en la validación de la promo
   es la señal de que alguien reintrodujo el comportamiento viejo.
 
+### 2026-07-25 — `backend/services/estudio/` = motor de disponibilidad/reserva del Estudio (split de `routes/estudio.py`, CQRS-lite)
+
+- **Contexto.** `backend/routes/estudio.py` (2577 líneas) mezclaba 5 responsabilidades en un solo route
+  file: perfil/fotos, trabajos/portfolio, disponibilidad+reservas (con promo combo), slots fijos, y las
+  vistas de agenda/ocupación del dashboard. A diferencia de los otros motores del repo
+  (`backend/reservas/`, `backend/contabilidad/`, `backend/services/carrito/`), la lógica de negocio de
+  disponibilidad/reserva vivía directo en el route. Disparador: al chequear overbooking talleres↔reservas
+  de estudio se encontró que `GET /estudio/disponibilidad` y `POST /estudio/reservas` reimplementaban la
+  secuencia slot→taller→centinela por separado.
+- **Qué se movió.** Las 8 primitivas de disponibilidad (`_get_estudio_row`, `_franja_estudio`,
+  `_viola_anticipacion`, `_slot_bloqueante`, `_taller_bloqueante`, `_estudio_disponible`,
+  `verificar_sesiones_disponibles`, `_ADVISORY_NS_ESTUDIO`) + `revalidar_disponibilidad_estudio`
+  (consumida por `routes/alquileres/transiciones.py`); el núcleo compartido `_crear_pedido_estudio`
+  (cliente+admin); el flujo de alta/edición/cotización admin (#1283 F6); promo combo (#1283 F5). Quedaron
+  afuera: perfil/fotos, trabajos/portfolio, slots fijos (CRUD), agenda/ocupación del dashboard (lectura
+  agregada de display, sin decisión de negocio).
+- **El paquete no importa de `routes.*`.** `queries/promo.py::get_disponibilidad` es un wrapper LOCAL de
+  3 líneas sobre `reservas.calcular_disponibilidad`, con conexión PROPIA (deliberado: es un snapshot
+  committed-only, nunca la conn del caller); `commands/`/`queries/` reciben `estudio`,
+  `cliente_id`/`cliente_nombre`/etc. ya resueltos como parámetros — la resolución de sesión/cliente/Didit
+  queda en el route.
+- **Deliberadamente NO resuelto en el split** (documentado en `services/estudio/CLAUDE.md`): 2
+  duplicaciones preexistentes (predicado de taller copiado 3×; cálculo de precio promo+sueltos copiado 3×
+  — este último se resolvió después, en una pasada separada dentro del mismo PR) y la inconsistencia de
+  locking conocida (advisory lock vs. `FOR UPDATE`).
+- **Verificación.** Suite completa corrida contra Postgres 16 real (unit + integración) — 0 regresiones;
+  2 fallos preexistentes y no relacionados (`test_auth_purge_expired_db.py`, `test_catalogo_motor_shape.py`)
+  confirmados independientes del diff. El agente `supervisor` corrió su propia verificación completa y
+  devolvió APROBADO CON OBSERVACIONES (resueltas en el mismo PR). Gap colateral cerrado de paso: ninguno
+  de los 9 archivos `test_*_db.py` de Estudio/Talleres que trajo #1283 estaba conectado al CI — se
+  conectaron los que ejercitan directo el paquete nuevo.
+- **Why.** Mismo criterio que ya motivó `contabilidad`/`descuentos`: cuando la lógica de decisión de un
+  dominio vive enterrada en un archivo de transporte, el riesgo de reimplementaciones divergentes (como
+  el overbooking que disparó esta pasada) crece con cada endpoint nuevo. Tracking: #1296. PR: #1297.
+
+### 2026-07-26 — `backend/services/talleres/` = dedup del gate de Estudio + economía de talleres (split de `routes/talleres.py`, CQRS-lite)
+
+- **Contexto.** `backend/routes/talleres.py` (2856 líneas) pasó a ser, tras el split de estudio, el
+  archivo de route más grande del repo. Se encontraron (y verificaron línea por línea) dos duplicaciones
+  reales: el gate de conflicto con Estudio (`_get_estudio_row` + `pg_advisory_xact_lock` +
+  `verificar_sesiones_disponibles`) copiado inline 3 veces (`admin_create_taller`, `admin_create_edicion`,
+  `admin_update_edicion`); y el INSERT de `ediciones_taller` (20 columnas, mismo orden de parámetros)
+  copiado byte a byte entre `admin_create_taller` y `admin_create_edicion`. Además,
+  `_regenerar_pedidos_taller` (la economía del taller) importaba de `routes.estudio`/`routes.alquileres`
+  dentro de la función — un movimiento tal cual a `services/` hubiera violado el invariante "el paquete no
+  importa de `routes.*`".
+- **Qué se movió.** El gate deduplicado en `_gate_conflicto_estudio` (encapsula el CÓMO; cada caller sigue
+  decidiendo su propio CUÁNDO — el trigger difiere entre "nace publicada" y "transición a publicada"); el
+  INSERT deduplicado en `crear_edicion` (también hace `_insert_clases` + regenerar-pedidos); validación de
+  clases/modalidades (`_validar_clases`/`_validar_modalidades`, puras) + sus commands
+  (`_insert_clases`/`_upsert_clases`/`_upsert_modalidades`); la economía (`_regenerar_pedidos_taller` +
+  `_ADVISORY_NS_TALLER`). Prerrequisito: se promovió `iter_meses` a `services/fechas.py` y se retiró un
+  duplicado muerto de `mes_actual_ar` en `routes/estudio.py`. Los endpoints HTTP en sí, la lectura/
+  serialización, instructores/instituciones/trabajos/portada, y la inscripción/seña (Fase 2 diferida)
+  quedaron sin tocar; `_regenerar_pedidos_taller` recibe `numero_pedido_fn` inyectado en vez de importar
+  `routes.alquileres._next_numero_pedido` (mismo patrón "valor ya resuelto como parámetro" de
+  `services/estudio/CLAUDE.md`, extendido acá a una función).
+- **Desviación documentada respecto a `services/estudio/`.** Acá SÍ hay imports `commands/`→`commands/`
+  (`ediciones.py` importa de `commands/clases.py` y `commands/economia.py`) — no viola la única regla dura
+  (`queries/` nunca importa de `commands/`), pero es distinto del molde de estudio; documentado en el
+  `CLAUDE.md` del paquete para que no se marque por comparación automática.
+- **No se extrajo** un `_borrar_pedidos_futuros_impagos_taller` (a diferencia de estudio) — no existe un
+  segundo call-site real que lo justifique (`admin_delete_edicion` no limpia pedidos futuros, confía en
+  `ON DELETE SET NULL`). Asimetría preexistente, documentada, no resuelta.
+- **2 bugs reales encontrados y arreglados en el camino** (ninguno por ruff/compileall — ambos corriendo
+  la suite de integración contra Postgres real): (1) un call-site de `_regenerar_pedidos_taller` que el
+  plan original no había identificado (`admin_update_edicion` también la llama, no solo los 2 endpoints de
+  creación) — lo cazó `ruff` (F821) al remover la función vieja del route; (2) un monkeypatch stale en
+  `test_talleres_f2_db.py` — `_gate_conflicto_estudio` importa `_get_estudio_row`/
+  `verificar_sesiones_disponibles` a nivel de módulo (mismo estilo que
+  `services/estudio/commands/reserva.py`), así que 2 tests que parcheaban los módulos de ORIGEN
+  (`services.estudio.queries.*`) dejaron de interceptar — "patch where it's used", mismo criterio ya
+  documentado en `test_estudio.py::_patch_post_collaborators`.
+- **Verificación.** Suite unit completa (2680 tests) verde; 201 tests unit+integración del dominio
+  taller/estudio corridos juntos contra Postgres 16 real (47s) sin regresiones; `ruff`+`compileall`
+  limpios. Gap de CI cerrado de paso: `test_talleres_liquidacion_db.py` (integración real, ya existía,
+  nunca corría en CI) conectado al job `db-migrations`. El agente `supervisor` devolvió APROBADO CON
+  OBSERVACIONES — confirmó de forma independiente los 2 bugs arreglados, que no hay ningún `import
+  routes.*` en `services/talleres/`, y que el YAML del CI nuevo corre bien.
+- **Rama apilada.** La rama de este split salió de la rama del PR de estudio (#1297), no de `dev`, porque
+  el paquete nuevo consume `services/estudio/queries/*` (el gate), que solo existía ahí hasta que #1297
+  mergeó. El PR (#1299) apuntó a esa rama hasta que #1297 mergeó a `dev`, momento en el que se retargeteó
+  a `dev` — mismo patrón "PR como hoja de ruta" (2026-06-27) aplicado a una dependencia entre dos splits
+  consecutivos del mismo dominio.
+- **Why.** Mismo motivo que motivó el split de estudio: lógica de decisión duplicada en un archivo de
+  transporte es una fuente de drift silencioso. Tracking: #1298. PR: #1299.
+
 ### 2026-07-27 — `/api/cotizar` para un pedido existente ignoraba el perfil fiscal/productora elegido para ESE pedido
 
 - **Contexto.** Al revisar el override de emisor (Factura C para un cliente RI, PR #1301), el dueño
@@ -3409,3 +3496,40 @@ PDF/imagen", "Qué NO cubre").
   ya dependía solo del emisor (`tipo_comprobante` en `arca_fe`, correcto desde el día uno); esto extiende
   el mismo criterio al IMPORTE — depende solo de si el EMISOR discrimina IVA, nunca de si el receptor
   es RI. El supervisor marca cualquier cálculo de importe de Factura C que sume IVA del receptor.
+
+### 2026-07-27 — El Desglose/Cobranza del pedido apaga el IVA si ya hay una Factura C emitida
+
+- **Contexto.** El dueño probó en staging el fix anterior (Factura C sin IVA): la factura real quedó
+  bien ($296.611, CAE real emitido), pero al volver a la página del pedido, el "Desglose" seguía
+  mostrando "IVA 21% $75.600, Total $435.600" y "Cobranza: resta $435.600" — el pedido seguía
+  reclamando el 21% que la factura real, deliberadamente, ya no cobra. Pedido explícito: "deberíamos
+  actualizar el pedido, porque va a ser pago sin el IVA".
+- **Decisión de alcance.** Solo se corrige la vista del editor admin (`/api/cotizar`, consumida por
+  `pedidos.$id.lazy.tsx` para "Desglose" Y "Cobranza" — ambas leen `totales.total`/`totales.conIva`
+  del mismo response, así que un solo fix del lado backend arregla las dos secciones a la vez). NO se
+  tocó `services/finanzas_flujo/pedido.py::desglose_de_pedido` (PDF/mail/facturación) ni `monto_total`
+  persistido — el Presupuesto/PDF normalmente se genera ANTES de que exista una factura, así que el
+  caso "ya hay Factura C" casi no aplica ahí; si aparece, es un refinamiento aparte, no pedido todavía.
+- **Fix.** `services/facturacion/repo.py::factura_c_vigente(pedido_id, conn) -> bool` — nueva función
+  puerta: llama a `get_factura_principal_emitida` (ya existía, usada por el portal cliente) y chequea
+  `cbte_tipo == int(CbteTipo.FACTURA_C)`. `routes/alquileres/cotizacion.py::cotizar`, después de calcular
+  el `desglose` normal, si hay `pedido_congelado` (pedido no-presupuesto) y `factura_c_vigente` da
+  `True`, fuerza `con_iva=False`/`iva_monto=0`/`total_final=neto` — pisando lo que el perfil fiscal del
+  cliente hubiera sugerido. `pedido_congelado` pasó a inicializarse SIEMPRE (no solo dentro de
+  `if tiene_fechas:`) para que este chequeo no reviente con `UnboundLocalError` en el modo estimado
+  (sin fechas) — bug real encontrado por la suite existente al agregar el chequeo, no en producción.
+- **Por qué no reventar la NC.** Si más adelante se anula la Factura C con una Nota de Crédito, la
+  original pasa a `estado='anulada'` (motor de facturación, sin cambios) — `get_factura_principal_emitida`
+  ya filtra `estado='emitida'`, así que `factura_c_vigente` vuelve a dar `False` sola: el Desglose
+  vuelve a mostrar el IVA del perfil fiscal sin necesitar lógica extra acá.
+- **Tests.** `test_facturacion_engine.py`: 3 tests directos de `factura_c_vigente` (true con Factura C,
+  false con Factura A, false sin factura). `test_cotizar_endpoint.py::TestPedidoConFacturaCVigente`
+  (monkeypatchea `factura_c_vigente` en vez de fabricar una fila completa de `facturas` en el FakeConn —
+  su propia lógica de query ya está cubierta en `test_facturacion_engine.py`): Factura C vigente apaga
+  el IVA aunque el cliente sea RI; sin ella sigue sumando; un presupuesto ni siquiera llama a la
+  función (se verifica con un monkeypatch que explota si se invoca).
+- **Why.** Cierra el círculo de la iniciativa del día: letra del comprobante (solo el emisor decide) →
+  importe facturado (solo el emisor decide, PR anterior) → lo que el PEDIDO muestra que falta cobrar
+  (tiene que reflejar lo que la factura real ya resolvió, no re-litigar el perfil fiscal del cliente
+  una vez que ya hay un documento fiscal emitido). El supervisor marca un consumidor nuevo del total de
+  un pedido que no chequee `factura_c_vigente` antes de asumir el IVA del perfil fiscal.

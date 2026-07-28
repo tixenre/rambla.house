@@ -216,6 +216,13 @@ export function RegistrarPagoModal({
           </div>
         </div>
 
+        {esEstudio && destinatario !== "Estudio" && (
+          <p className="rounded-md border border-amber/40 bg-amber/5 px-2.5 py-2 text-xs text-ink">
+            Esta plata es del Estudio — si la cobra {destinatario}, va a quedar pendiente de que{" "}
+            {destinatario} se la rinda (lo vas a ver en Finanzas → Caja Estudio).
+          </p>
+        )}
+
         {/* CTA */}
         <Button
           variant="amber"

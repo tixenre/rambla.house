@@ -88,7 +88,7 @@ def _funciones_motor():
     )
     from reservas.gate import _validar_demanda
     from routes.cliente_portal import _check_stock_hipotetico
-    from routes.estudio import _centinela_libre
+    from services.estudio.queries.disponibilidad import _centinela_libre
 
     return [
         validar_stock,

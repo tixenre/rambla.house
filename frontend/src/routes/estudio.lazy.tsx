@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { PublicLayout } from "@/components/rental/shell/PublicLayout";
 import { Button } from "@/design-system/ui/button";
 import { Grain } from "@/components/common/Grain";
+import { BoxItemsSection } from "@/components/rental/KitSection";
 
 export const Route = createLazyFileRoute("/estudio")({
   component: EstudioPage,
@@ -869,6 +870,9 @@ function EstudioPage() {
         openHour: data.open_hour,
         closeHour: data.close_hour,
         promo: data.promo,
+        precioPinturaReciente: data.precio_pintura_reciente,
+        anticipacionMinHoras: data.anticipacion_min_horas,
+        anticipacionPinturaHoras: data.anticipacion_pintura_horas,
       }
     : undefined;
 
@@ -1104,6 +1108,16 @@ function EstudioPage() {
                           </p>
                         )}
                       </div>
+                      {promo.componentes.length > 0 && (
+                        <BoxItemsSection
+                          title="Incluye"
+                          items={promo.componentes.map((c) => ({
+                            name: c.nombre,
+                            qty: c.cantidad,
+                            fotoUrl: c.foto_url,
+                          }))}
+                        />
+                      )}
                     </div>
                   ) : (
                     <p className="text-sm text-ink leading-relaxed">

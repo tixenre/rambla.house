@@ -1,7 +1,7 @@
 ---
 name: mantenimiento
 model: opus
-last-reviewed: 2026-06-23
+last-reviewed: 2026-07-26
 version: 1.0
 description: El go-to para AUDITAR y MEJORAR el repo sin romper nada. Flujo completo de salud del repositorio — diagnosticar (rúbrica de calidad) → rutear por riesgo → ejecutar en 5 frentes con la misma disciplina — (A) código muerto/imports/archivos/deps/DRY/optimizar; (B) seguridad + bugs; (C) ramas; (D) issues; (E) modularización / split de god-modules (move-verbatim, gateado). Úsalo cuando el dueño pida "auditá", "mejorá el repo", "está bien hecho?", "es profesional?", "hay deuda?", "limpiá / housekeeping", "sacá lo que no se usa", "código muerto", "hay legacy", "revisá seguridad/bugs", "está todo seguro?", "limpiá ramas", "ordená los issues", "modularizá / partí ese god-module", o cuando detectes cruft/drift mientras trabajás. El corazón NO es una lista de ítems, sino el MÉTODO seguro: diagnosticar con rúbrica → verificar antes de ACTUAR (borrar/cerrar/afirmar — las herramientas Y la intuición mienten) → red de tests → no perder tracking → commits atómicos → supervisor. Los cortes grandes (Frente E, core sagrado) NO son barridos rápidos: van como iniciativa gateada, UNA PR por corte.
 ---
@@ -71,8 +71,10 @@ lo terminan**.
 
 ### 1 · Inventario con herramientas (no grep ciego)
 
-Las herramientas no están en CI (no hay linter de Python en CI; knip no corre solo) → se instalan
-para el barrido. Dan una **lista de candidatos**.
+`ruff` ya corre pineado como gate de CI (job "Python lint + syntax", `backend/ruff.toml`) — pero **solo
+con el ruleset conservador de ese gate** (bugs/imports, no las reglas F401/F811/F841 completas que usa
+este barrido); `vulture`/`knip` no corren solos → se instalan para el barrido. Dan una **lista de
+candidatos**.
 
 | Capa | Herramienta | Qué caza | Comando |
 |---|---|---|---|

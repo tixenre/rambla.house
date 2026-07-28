@@ -53,7 +53,7 @@ export function SegmentedControl({
   }
 
   return (
-    <div className={cn("flex gap-1", className)} role="group">
+    <div className={cn("flex flex-wrap gap-1", className)} role="group">
       {options.map((opt) => (
         <button
           key={opt.value}
@@ -62,7 +62,7 @@ export function SegmentedControl({
           aria-checked={value === opt.value}
           onClick={() => onChange(opt.value)}
           className={cn(
-            "flex-1 rounded-md border px-2.5 py-1.5 text-xs font-medium capitalize transition",
+            "flex-1 basis-[max-content] rounded-md border px-2.5 py-1.5 text-xs font-medium capitalize transition",
             value === opt.value
               ? "border-ink bg-ink text-background"
               : "border-muted-foreground/30 text-muted-foreground hover:border-ink hover:text-ink",

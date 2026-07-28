@@ -102,13 +102,16 @@ def _crear_edicion(t, numero=1, activo=None, clases=None):
 def test_edicion_nace_borrador_y_no_chequea_estudio(taller_base, monkeypatch):
     """Default F2: la edición nace despublicada, y crearla como borrador NO
     corre el chequeo del estudio (correría recién al publicar)."""
-    import routes.estudio as est
+    import services.talleres.commands.ediciones as ed_cmd
     t = taller_base
 
     def _boom(*a, **k):
         raise AssertionError("un borrador no debe verificar el estudio al crearse")
 
-    monkeypatch.setattr(est, "verificar_sesiones_disponibles", _boom)
+    # "patch where it's used" (services.talleres.commands.ediciones), no en
+    # el módulo de origen — ver comentario en
+    # test_publicar_reverifica_estudio_y_409_mantiene_borrador.
+    monkeypatch.setattr(ed_cmd, "verificar_sesiones_disponibles", _boom)
     d = _crear_edicion(t)
     assert d["activo"] is False
 
@@ -124,7 +127,7 @@ def test_publicar_reverifica_estudio_y_409_mantiene_borrador(taller_base, monkey
     """Publicar (activo false→true) re-verifica la disponibilidad del estudio:
     si el chequeo falla → 409 y la edición SIGUE en borrador; si pasa → publicada."""
     from fastapi import HTTPException
-    import routes.estudio as est
+    import services.talleres.commands.ediciones as ed_cmd
     from database import get_db
     t = taller_base
 
@@ -133,12 +136,17 @@ def test_publicar_reverifica_estudio_y_409_mantiene_borrador(taller_base, monkey
 
     # El estudio puede no estar configurado en la DB de test → forzamos un
     # estudio "real" para que el camino de verificación se ejecute.
-    monkeypatch.setattr(est, "_get_estudio_row", lambda conn: {"equipo_id": 1, "buffer_horas": 0})
+    # Se patchea sobre `services.talleres.commands.ediciones` (donde
+    # `_gate_conflicto_estudio` los usa vía `from ... import`), no sobre los
+    # módulos de origen en `services.estudio.queries.*` — "patch where it's
+    # used", mismo criterio ya documentado en `test_estudio.py`
+    # (`_patch_post_collaborators`) para `services.estudio.commands.reserva`.
+    monkeypatch.setattr(ed_cmd, "_get_estudio_row", lambda conn: {"equipo_id": 1, "buffer_horas": 0})
 
     def _conflicto(*a, **k):
         raise HTTPException(409, "El estudio no está libre (test)")
 
-    monkeypatch.setattr(est, "verificar_sesiones_disponibles", _conflicto)
+    monkeypatch.setattr(ed_cmd, "verificar_sesiones_disponibles", _conflicto)
     with pytest.raises(HTTPException) as exc:
         t.admin_update_edicion(edicion_id, t.EdicionUpdateBody(activo=True), None)
     assert exc.value.status_code == 409
@@ -153,7 +161,7 @@ def test_publicar_reverifica_estudio_y_409_mantiene_borrador(taller_base, monkey
     def _ok(conn, estudio, sesiones, **k):
         llamado["sesiones"] = list(sesiones)
 
-    monkeypatch.setattr(est, "verificar_sesiones_disponibles", _ok)
+    monkeypatch.setattr(ed_cmd, "verificar_sesiones_disponibles", _ok)
     d2 = t.admin_update_edicion(edicion_id, t.EdicionUpdateBody(activo=True), None)
     assert d2["activo"] is True
     assert len(llamado["sesiones"]) == 2, "publicar verifica las clases EXISTENTES"

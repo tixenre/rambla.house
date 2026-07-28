@@ -41,11 +41,13 @@ const schema = z.object({
   tagline: z.string(),
   descripcion: z.string(),
   precio_hora: z.coerce.number().int().min(0),
+  precio_pintura_reciente: z.coerce.number().int().min(0),
   min_horas: z.coerce.number().int().min(1),
   open_hour: z.coerce.number().int().min(0).max(23),
   close_hour: z.coerce.number().int().min(1).max(24),
   buffer_horas: z.coerce.number().int().min(0),
   anticipacion_min_horas: z.coerce.number().int().min(0),
+  anticipacion_pintura_horas: z.coerce.number().int().min(0),
   features: z.array(featureSchema),
   faq: z.array(faqSchema),
   direccion: z.string(),
@@ -62,11 +64,13 @@ function configToForm(c: EstudioConfig): FormValues {
     tagline: c.tagline,
     descripcion: c.descripcion,
     precio_hora: c.precio_hora,
+    precio_pintura_reciente: c.precio_pintura_reciente,
     min_horas: c.min_horas,
     open_hour: c.open_hour,
     close_hour: c.close_hour,
     buffer_horas: c.buffer_horas,
     anticipacion_min_horas: c.anticipacion_min_horas,
+    anticipacion_pintura_horas: c.anticipacion_pintura_horas,
     features: c.features ?? [],
     faq: c.faq ?? [],
     direccion: c.direccion,
@@ -170,6 +174,13 @@ export function ConfigForm({ config, onSaved }: { config: EstudioConfig; onSaved
           <Field label="Precio por hora ($)" error={errors.precio_hora?.message}>
             <Input type="number" min={0} {...register("precio_hora")} />
           </Field>
+          <Field
+            label="Precio recién pintado ($)"
+            error={errors.precio_pintura_reciente?.message}
+            hint="Add-on opcional que el cliente tilda en el checkout. 0 = todavía sin cargar."
+          >
+            <Input type="number" min={0} {...register("precio_pintura_reciente")} />
+          </Field>
           <Field label="Mínimo de horas" error={errors.min_horas?.message}>
             <Input type="number" min={1} {...register("min_horas")} />
           </Field>
@@ -178,6 +189,13 @@ export function ConfigForm({ config, onSaved }: { config: EstudioConfig; onSaved
           </Field>
           <Field label="Anticipación mínima (h)" error={errors.anticipacion_min_horas?.message}>
             <Input type="number" min={0} {...register("anticipacion_min_horas")} />
+          </Field>
+          <Field
+            label="Anticipación recién pintado (h)"
+            error={errors.anticipacion_pintura_horas?.message}
+            hint="Se exige ADEMÁS de la anticipación mínima (pintar/secar el ciclorama lleva más tiempo). 0 = sin restricción extra."
+          >
+            <Input type="number" min={0} {...register("anticipacion_pintura_horas")} />
           </Field>
           <Field label="Apertura (hora)" error={errors.open_hour?.message}>
             <Input type="number" min={0} max={23} {...register("open_hour")} />

@@ -96,11 +96,10 @@ def _revalidar_stock(conn, p) -> list[str]:
     economía del Estudio: confirmar/transicionar un pedido de estudio no
     revalidaba con el buffer correcto).
 
-    Import diferido de `routes.estudio` — ese módulo ya importa de
-    `routes.alquileres` (mismo motivo que el resto de los imports diferidos
-    de este archivo, ver `cambiar_estado`)."""
+    Import diferido de `services.estudio` — mismo estilo que el resto de los
+    imports diferidos de este archivo, ver `cambiar_estado`."""
     if es_pedido_estudio(p):
-        from routes.estudio import revalidar_disponibilidad_estudio
+        from services.estudio.queries.disponibilidad import revalidar_disponibilidad_estudio
         return revalidar_disponibilidad_estudio(conn, p)
     return [
         f"Sin stock suficiente: {s}"

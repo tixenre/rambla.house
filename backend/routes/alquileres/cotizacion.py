@@ -23,6 +23,7 @@ from services.precios import (
 )
 from descuentos.queries.decision import resolver_origen_pedido_monto
 from descuentos.queries.jornadas import obtener_descuento_jornadas
+from services.facturacion.repo import factura_c_vigente
 from routes.alquileres.core import router, _resolver_descuentos_snapshot_o_vivo
 # Validadores de descuento: fuente única compartida con `PedidoDatos`
 # (routes/alquileres/modelos.py) — antes estaban duplicados byte a byte acá.
@@ -196,6 +197,10 @@ def cotizar(data: CotizarRequest, request: Request):
         descuento_manual_pct = 0.0
         descuento_manual_tipo = "pct"
         descuento_manual_monto = 0.0
+        # Definido acá (no solo dentro de `if tiene_fechas:`) para que el chequeo de
+        # Factura C más abajo pueda leerlo sin importar el modo — sin fechas nunca
+        # hay pedido congelado, así que `factura_c_vigente` simplemente no corre.
+        pedido_congelado = None
         if tiene_fechas:
             # ¿El preview es el editor de un pedido con la plata YA congelada?
             # Entonces el descuento (cliente + jornadas) sale del MISMO snapshot
@@ -204,7 +209,6 @@ def cotizar(data: CotizarRequest, request: Request):
             # distinto al de `monto_total` / la lista de pedidos (MEMORIA
             # 2026-06-06 "plata congelada"). El perfil fiscal (IVA) sí sigue en
             # vivo. Presupuesto (o sin `pedido_id`) → flujo en vivo de siempre.
-            pedido_congelado = None
             if es_admin and data.pedido_id:
                 pedido_congelado = conn.execute(
                     "SELECT estado, cliente_id, descuento_jornadas_pct, "
@@ -327,6 +331,16 @@ def cotizar(data: CotizarRequest, request: Request):
             descuento_manual_monto=descuento_manual_monto,
             perfil_impuestos=perfil,
         )
+
+        # Si el pedido YA tiene una Factura C emitida, el cliente NO va a pagar el
+        # 21% que su perfil fiscal sugeriría — un emisor Monotributo nunca lo suma
+        # (2026-07-27). Sin esto, el Desglose/Cobranza de la página seguía mostrando
+        # "resta $X + IVA" después de facturarse sin IVA, un desfasaje real entre lo
+        # que el pedido dice que falta cobrar y lo que la factura real ya cobró.
+        if pedido_congelado and data.pedido_id and factura_c_vigente(data.pedido_id, conn):
+            desglose["con_iva"] = False
+            desglose["iva_monto"] = 0
+            desglose["total_final"] = desglose["neto"]
 
         # Cuál descuento ganó (para el label del UI) — misma jerarquía que
         # decidió el pct en `calcular_total`, así nunca puede divergir.

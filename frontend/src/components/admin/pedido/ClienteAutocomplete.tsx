@@ -95,14 +95,19 @@ export function ClienteAutocomplete({
           onBlur={() => setTimeout(() => setOpen(false), 150)}
           placeholder={placeholder}
         />
-        {open && q.trim().length > 0 && (
+        {(creando || (open && q.trim().length > 0)) && (
           <div
             role="listbox"
             id="cliente-autocomplete-list"
             className="absolute z-30 left-0 right-0 mt-1 card shadow-md max-h-72 overflow-auto"
           >
             {creando ? (
-              <div className="space-y-2 p-3" onMouseDown={(e) => e.preventDefault()}>
+              <div
+                className="space-y-2 p-3"
+                onBlur={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node)) setCreando(false);
+                }}
+              >
                 <div className="grid grid-cols-2 gap-2">
                   <Input
                     autoFocus

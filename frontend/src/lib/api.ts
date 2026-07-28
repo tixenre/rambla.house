@@ -247,6 +247,12 @@ export type EstudioConfig = {
   fotos: EstudioFoto[];
   promo_combo_id?: number | null;
   promo?: EstudioPromo | null;
+  /** Add-on independiente "recién pintado" — cargo fijo opcional, se suma a
+   *  cualquier elección de con_promo (no la reemplaza). 0 = sin cargar todavía. */
+  precio_pintura_reciente: number;
+  /** Anticipación PROPIA del add-on "recién pintado" — se exige ADEMÁS de
+   *  `anticipacion_min_horas`, no en su lugar. 0 = sin restricción extra. */
+  anticipacion_pintura_horas: number;
   trabajos?: EstudioTrabajo[];
 };
 
@@ -260,6 +266,10 @@ export type EstudioPromo = {
   foto_url: string | null;
   precio: number;
   disponible?: boolean;
+  /** Listado público "qué incluye" — misma fuente que el catálogo
+   *  (services.contenido), nunca se puede desincronizar de lo que la promo
+   *  realmente reserva. */
+  componentes: Array<{ nombre: string; cantidad: number; foto_url: string | null }>;
 };
 
 /** Un medio del carrusel de un trabajo: link externo (YouTube/Instagram) o foto
@@ -348,12 +358,33 @@ export function apiLogSearchClick(queryId: number, equipoId: number | null) {
 
 /** ¿El estudio está libre en [fecha start, +horas]? El backend aplica el buffer
  *  propio del estudio. `promo` = disponibilidad del combo real de equipos. */
-export function apiGetEstudioDisponibilidad(fecha: string, start: string, horas: number) {
+export function apiGetEstudioDisponibilidad(
+  fecha: string,
+  start: string,
+  horas: number,
+  pinturaReciente?: boolean,
+) {
   return get<{
     libre: boolean;
     motivo?: string | null;
     promo?: EstudioPromo | null;
-  }>("/api/estudio/disponibilidad", { fecha, start, horas: String(horas) });
+  }>("/api/estudio/disponibilidad", {
+    fecha,
+    start,
+    horas: String(horas),
+    pintura_reciente: String(!!pinturaReciente),
+  });
+}
+
+/** Bloques ocupados del estudio en [desde, hasta] (YYYY-MM-DD, inclusive) —
+ *  vista pública y anónima (sin cliente/nombre/número de pedido) para la
+ *  grilla semanal del selector de fechas. Es un atajo visual: la franja
+ *  elegida igual se re-valida con `apiGetEstudioDisponibilidad` antes de
+ *  confirmar la reserva. */
+export function apiGetEstudioOcupacionPublica(desde: string, hasta: string) {
+  return get<{
+    bloques: { fecha_desde: string; fecha_hasta: string }[];
+  }>("/api/estudio/ocupacion-publica", { desde, hasta });
 }
 
 export type EstudioReservaBody = {
@@ -361,6 +392,8 @@ export type EstudioReservaBody = {
   start: string;
   horas: number;
   con_promo?: boolean;
+  /** Add-on independiente "recién pintado" — se suma sea cual sea con_promo. */
+  pintura_reciente?: boolean;
   // Datos del cliente: NO van en el body, salen de la sesión (login obligatorio).
 };
 
