@@ -1,0 +1,199 @@
+/**
+ * EstudioIncluyeList — "qué incluye este turno" como un solo listado: Espacio
+ * (siempre, precio editable inline) + Pack + Recién pintado (chips para
+ * agregar/quitar, se muestran como fila una vez agregados) + Equipos sueltos
+ * (buscador existente). Reemplaza los switches sueltos + el campo de override
+ * separado + el desglose por-componente duplicado — una sola forma de ver y
+ * tocar cada línea, con su precio en vivo al lado (el front no calcula
+ * plata, MEMORIA 2026-06-29: los precios de Pack/Pintura/sueltos vienen de
+ * `cotiz`, ya resuelto por el backend).
+ *
+ * Presentacional puro — sin query/mutation propias. Compartido por
+ * `ReservaEstudioSection` (editar) y `ReservaDialog` (alta): cada uno maneja
+ * su propio estado y le pasa acá los callbacks, así las dos superficies se
+ * ven y comportan igual sin duplicar el layout.
+ */
+import { useMemo } from "react";
+import { Plus, X } from "lucide-react";
+
+import { Input } from "@/design-system/ui/input";
+import { formatARS } from "@/lib/format";
+import { type Equipo, type EstudioConfig, type EstudioCotizacion } from "@/lib/admin/api";
+import { EquipoComboSearch } from "@/components/admin/pedido/EquipoComboSearch";
+import { EquipoThumb } from "@/components/admin/pedido/EquipoThumb";
+import type { DraftItem } from "@/components/admin/pedido/usePedidoDraft";
+import { Field } from "./shared";
+
+/** Solo lo que la UI necesita mostrar de un suelto agregado — no un `Equipo`
+ *  completo (evita fabricar campos que no vienen ni del picker ni del
+ *  detalle del pedido, como `dueno`/`visible_catalogo`). Fuente única —
+ *  antes duplicado byte a byte en `ReservaDialog` y `ReservaEstudioSection`. */
+export type SueltoLocal = {
+  equipo_id: number;
+  nombre: string;
+  marca: string | null;
+  nombre_publico?: string | null;
+  foto_url: string | null;
+  precio_jornada: number | null;
+  cantidad: number;
+};
+
+function AddChip({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="flex flex-1 items-center justify-center gap-1.5 rounded-md border border-dashed hairline px-3 py-2 text-sm text-muted-foreground transition hover:bg-muted/30"
+    >
+      <Plus className="h-3.5 w-3.5 shrink-0" />
+      <span className="truncate">{label}</span>
+    </button>
+  );
+}
+
+export function EstudioIncluyeList({
+  estudio,
+  horas,
+  conPromo,
+  onTogglePromo,
+  pinturaReciente,
+  onTogglePintura,
+  sueltos,
+  onAddSuelto,
+  onRemoveSuelto,
+  onChangeSueltoCantidad,
+  espacioOverride,
+  onChangeEspacioOverride,
+  cotiz,
+}: {
+  estudio: EstudioConfig;
+  horas: number;
+  conPromo: boolean;
+  onTogglePromo: (v: boolean) => void;
+  pinturaReciente: boolean;
+  onTogglePintura: (v: boolean) => void;
+  sueltos: SueltoLocal[];
+  onAddSuelto: (eq: Equipo) => void;
+  onRemoveSuelto: (equipoId: number) => void;
+  onChangeSueltoCantidad: (equipoId: number, cantidad: number) => void;
+  espacioOverride: string;
+  onChangeEspacioOverride: (v: string) => void;
+  cotiz?: EstudioCotizacion;
+}) {
+  const existingAsDraftItems: DraftItem[] = useMemo(
+    () =>
+      sueltos.map((s) => ({
+        uid: String(s.equipo_id),
+        equipo_id: s.equipo_id,
+        cantidad: s.cantidad,
+        precio_jornada: s.precio_jornada ?? 0,
+        nombre: s.nombre,
+        marca: s.marca,
+        nombre_publico: s.nombre_publico,
+        foto_url: s.foto_url,
+      })),
+    [sueltos],
+  );
+
+  return (
+    <Field label="Qué incluye este turno">
+      <EquipoComboSearch
+        existing={existingAsDraftItems}
+        stockMap={{}}
+        onAdd={onAddSuelto}
+        placeholder="Buscar equipo para sumar…"
+      />
+
+      <ul className="mt-2 divide-y hairline rounded-md border hairline">
+        {/* Espacio — siempre presente, no se puede quitar (es la base del
+            turno); el precio se edita ACÁ, inline (reemplaza el campo de
+            override separado que había antes). */}
+        <li className="flex items-center gap-2 px-2.5 py-2">
+          <span className="min-w-0 flex-1 truncate text-sm">Espacio</span>
+          <Input
+            type="number"
+            min={0}
+            value={espacioOverride}
+            onChange={(e) => onChangeEspacioOverride(e.target.value)}
+            placeholder={String((estudio.precio_hora || 0) * horas)}
+            className="h-8 w-28 text-right"
+          />
+        </li>
+
+        {conPromo && (
+          <li className="flex items-center gap-2 px-2.5 py-2">
+            <span className="min-w-0 flex-1 truncate text-sm">
+              {estudio.promo?.nombre || "Pack"}
+            </span>
+            <span className="text-sm tabular-nums">{cotiz ? formatARS(cotiz.promo) : "…"}</span>
+            <button
+              type="button"
+              onClick={() => onTogglePromo(false)}
+              className="text-muted-foreground hover:text-destructive"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </li>
+        )}
+
+        {pinturaReciente && (
+          <li className="flex items-center gap-2 px-2.5 py-2">
+            <span className="min-w-0 flex-1 truncate text-sm">Recién pintado</span>
+            <span className="text-sm tabular-nums">
+              {cotiz ? formatARS(cotiz.pintura_reciente) : "…"}
+            </span>
+            <button
+              type="button"
+              onClick={() => onTogglePintura(false)}
+              className="text-muted-foreground hover:text-destructive"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </li>
+        )}
+
+        {sueltos.map((s) => {
+          const subtotal = cotiz?.sueltos.find((cs) => cs.equipo_id === s.equipo_id)?.subtotal;
+          return (
+            <li key={s.equipo_id} className="flex items-center gap-2 px-2.5 py-2">
+              <EquipoThumb src={s.foto_url} alt={s.nombre} className="h-8 w-8 shrink-0" />
+              <span className="min-w-0 flex-1 truncate text-sm">{s.nombre}</span>
+              {subtotal !== undefined && (
+                <span className="text-sm tabular-nums text-muted-foreground">
+                  {formatARS(subtotal)}
+                </span>
+              )}
+              <Input
+                type="number"
+                min={1}
+                value={s.cantidad}
+                onChange={(e) =>
+                  onChangeSueltoCantidad(s.equipo_id, Math.max(1, Number(e.target.value) || 1))
+                }
+                className="h-8 w-16 text-center"
+              />
+              <button
+                type="button"
+                onClick={() => onRemoveSuelto(s.equipo_id)}
+                className="text-muted-foreground hover:text-destructive"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+
+      {(!conPromo && estudio.promo_combo_id) || !pinturaReciente ? (
+        <div className="mt-2 flex gap-2">
+          {!conPromo && estudio.promo_combo_id && (
+            <AddChip label={estudio.promo?.nombre || "Pack"} onClick={() => onTogglePromo(true)} />
+          )}
+          {!pinturaReciente && (
+            <AddChip label="Recién pintado" onClick={() => onTogglePintura(true)} />
+          )}
+        </div>
+      ) : null}
+    </Field>
+  );
+}

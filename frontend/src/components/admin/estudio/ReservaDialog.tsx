@@ -25,7 +25,6 @@ import {
 import { Button } from "@/design-system/ui/button";
 import { Input } from "@/design-system/ui/input";
 import { Spinner } from "@/design-system/ui/spinner";
-import { Switch } from "@/design-system/ui/switch";
 import { formatARS } from "@/lib/format";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { buildTimeSlots } from "@/lib/estudio-slots";
@@ -39,24 +38,9 @@ import {
 } from "@/lib/admin/api";
 import { nombreCliente } from "@/lib/cliente-nombre";
 import { ClienteAutocomplete } from "@/components/admin/pedido/ClienteAutocomplete";
-import { EquipoComboSearch } from "@/components/admin/pedido/EquipoComboSearch";
-import { EquipoThumb } from "@/components/admin/pedido/EquipoThumb";
-import type { DraftItem } from "@/components/admin/pedido/usePedidoDraft";
 import { Field } from "./shared";
 import { ReservaEstudioSection } from "./ReservaEstudioSection";
-
-/** Solo lo que la UI necesita mostrar de un suelto agregado — no un `Equipo`
- *  completo (evita fabricar campos que no vienen ni del picker ni del
- *  detalle del pedido, como `dueno`/`visible_catalogo`). */
-type SueltoLocal = {
-  equipo_id: number;
-  nombre: string;
-  marca: string | null;
-  nombre_publico?: string | null;
-  foto_url: string | null;
-  precio_jornada: number | null;
-  cantidad: number;
-};
+import { EstudioIncluyeList, type SueltoLocal } from "./EstudioIncluyeList";
 
 function todayYmd(): string {
   const d = new Date();
@@ -211,16 +195,10 @@ export function ReservaDialog({
       ];
     });
   };
-  const existingAsDraftItems: DraftItem[] = sueltos.map((s) => ({
-    uid: String(s.equipo_id),
-    equipo_id: s.equipo_id,
-    cantidad: s.cantidad,
-    precio_jornada: s.precio_jornada ?? 0,
-    nombre: s.nombre,
-    marca: s.marca,
-    nombre_publico: s.nombre_publico,
-    foto_url: s.foto_url,
-  }));
+  const handleRemoveSuelto = (equipoId: number) =>
+    setSueltos((prev) => prev.filter((x) => x.equipo_id !== equipoId));
+  const handleChangeSueltoCantidad = (equipoId: number, cantidad: number) =>
+    setSueltos((prev) => prev.map((x) => (x.equipo_id === equipoId ? { ...x, cantidad } : x)));
 
   const puedeGuardar = !!fecha && !!start && horas >= (estudio.min_horas || 1);
   const cotiz = cotizarQ.data;
@@ -323,74 +301,21 @@ export function ReservaDialog({
               </Field>
             )}
 
-            <div className="grid grid-cols-2 gap-3">
-              {estudio.promo_combo_id && (
-                <label className="flex items-center gap-2 text-sm">
-                  <Switch checked={conPromo} onCheckedChange={setConPromo} />
-                  {estudio.promo?.nombre || "Promo"}
-                </label>
-              )}
-              <label className="flex items-center gap-2 text-sm">
-                <Switch checked={pinturaReciente} onCheckedChange={setPinturaReciente} />
-                Recién pintado
-              </label>
-            </div>
-
-            <Field label="Equipos sueltos (opcional)">
-              <EquipoComboSearch
-                existing={existingAsDraftItems}
-                stockMap={{}}
-                onAdd={handleAddSuelto}
-                placeholder="Buscar equipo para sumar…"
-              />
-              {sueltos.length > 0 && (
-                <ul className="mt-2 divide-y hairline rounded-md border hairline">
-                  {sueltos.map((s) => (
-                    <li key={s.equipo_id} className="flex items-center gap-2 px-2 py-1.5">
-                      <EquipoThumb src={s.foto_url} alt={s.nombre} className="h-8 w-8 shrink-0" />
-                      <span className="min-w-0 flex-1 truncate text-sm">{s.nombre}</span>
-                      <Input
-                        type="number"
-                        min={1}
-                        value={s.cantidad}
-                        onChange={(e) =>
-                          setSueltos((prev) =>
-                            prev.map((x) =>
-                              x.equipo_id === s.equipo_id
-                                ? { ...x, cantidad: Math.max(1, Number(e.target.value) || 1) }
-                                : x,
-                            ),
-                          )
-                        }
-                        className="h-8 w-16 text-center"
-                      />
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setSueltos((prev) => prev.filter((x) => x.equipo_id !== s.equipo_id))
-                        }
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </Field>
-
-            <Field
-              label="Precio del espacio — override (opcional)"
-              hint="Vacío = calculado automático (horas × precio/hora)."
-            >
-              <Input
-                type="number"
-                min={0}
-                value={espacioOverride}
-                onChange={(e) => setEspacioOverride(e.target.value)}
-                placeholder={String((estudio.precio_hora || 0) * horas)}
-              />
-            </Field>
+            <EstudioIncluyeList
+              estudio={estudio}
+              horas={horas}
+              conPromo={conPromo}
+              onTogglePromo={setConPromo}
+              pinturaReciente={pinturaReciente}
+              onTogglePintura={setPinturaReciente}
+              sueltos={sueltos}
+              onAddSuelto={handleAddSuelto}
+              onRemoveSuelto={handleRemoveSuelto}
+              onChangeSueltoCantidad={handleChangeSueltoCantidad}
+              espacioOverride={espacioOverride}
+              onChangeEspacioOverride={setEspacioOverride}
+              cotiz={cotiz}
+            />
 
             <Field label="Estado inicial">
               <select
@@ -404,7 +329,7 @@ export function ReservaDialog({
               </select>
             </Field>
 
-            {/* Desglose en vivo — el front no calcula, solo muestra (2026-06-29). */}
+            {/* Total en vivo — el front no calcula, solo muestra (2026-06-29). */}
             <div className="rounded-lg border hairline bg-muted/20 p-3 text-sm">
               {cotizarQ.isLoading ? (
                 <div className="flex items-center gap-2 text-muted-foreground">
@@ -412,29 +337,7 @@ export function ReservaDialog({
                 </div>
               ) : cotiz ? (
                 <div className="space-y-1">
-                  <div className="flex justify-between">
-                    <span className="text-muted-foreground">Espacio</span>
-                    <span>{formatARS(cotiz.espacio)}</span>
-                  </div>
-                  {cotiz.promo > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Promo</span>
-                      <span>{formatARS(cotiz.promo)}</span>
-                    </div>
-                  )}
-                  {cotiz.sueltos.map((s) => (
-                    <div key={s.equipo_id} className="flex justify-between text-muted-foreground">
-                      <span>Suelto ×{s.cantidad}</span>
-                      <span>{formatARS(s.subtotal)}</span>
-                    </div>
-                  ))}
-                  {cotiz.pintura_reciente > 0 && (
-                    <div className="flex justify-between">
-                      <span className="text-muted-foreground">Recién pintado</span>
-                      <span>{formatARS(cotiz.pintura_reciente)}</span>
-                    </div>
-                  )}
-                  <div className="flex justify-between border-t hairline pt-1 font-semibold text-ink">
+                  <div className="flex justify-between font-semibold text-ink">
                     <span>Total</span>
                     <span>{formatARS(cotiz.monto_total)}</span>
                   </div>
