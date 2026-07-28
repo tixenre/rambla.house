@@ -159,6 +159,106 @@ def agregar_pago(id: int, data: PagoCreate, request: Request):
             raise
 
 
+class PagoCombinadoCreate(BaseModel):
+    monto:        int = Field(gt=0, le=2_000_000_000)
+    concepto:     Optional[str] = Field(default=None, max_length=500)
+    fecha:        Optional[str] = Field(default=None, max_length=10)
+    destinatario: Optional[str] = Field(default=None, max_length=20)
+    metodo:       Optional[str] = Field(default=None, max_length=20)
+
+
+def _agregar_pago_combinado(conn, id: int, data: PagoCombinadoCreate, admin_email: str) -> dict:
+    """Reparte `data.monto` entre `id` (el pedido principal) y sus turnos del
+    Estudio vinculados (#1308, "un pago, reparte solo"): primero satura el
+    resta del PRINCIPAL, después cada turno por `fecha_desde` ascendente (se
+    paga primero lo que vence antes — mismo orden que ya usa
+    `_turnos_vinculados` para listarlos en pantalla). Un turno `cancelado`
+    queda EXCLUIDO del reparto (nunca participa, nunca bloquea el resto —
+    sin este filtro, un solo turno cancelado tumbaría el pago combinado
+    completo con el 400 que `_agregar_pago` ya lanza para pedidos
+    cancelados). El sobrante, si lo hay tras recorrer todas las filas, se
+    acredita SIEMPRE en el PRINCIPAL (nunca en el último turno tocado) — es
+    la pantalla donde el admin apretó "Registrar pago" y donde lo espera ver
+    (mismo criterio "no esconder el excedente" que MEMORIA 2026-07-02).
+
+    Cada parte del reparto pasa por el `_agregar_pago` YA EXISTENTE, sin
+    modificar — nunca se inventa una tabla/concepto de "pago compartido"; el
+    `pedido_id` de cada fila de `alquiler_pagos` sigue siendo el real. Todo
+    esto es una transacción (el caller hace commit/rollback): funciona sobre
+    CUALQUIER pedido — sin turnos vinculados, `turnos` da vacío y el
+    comportamiento es idéntico a `_agregar_pago` de siempre (superset
+    seguro, no un camino paralelo)."""
+    p = conn.execute(
+        "SELECT id, monto_total, monto_pagado, estado FROM alquileres WHERE id=%s FOR UPDATE",
+        (id,),
+    ).fetchone()
+    if not p:
+        raise HTTPException(404, "Pedido no encontrado")
+    if p["estado"] == "cancelado":
+        raise HTTPException(400, "No se pueden agregar pagos a un pedido cancelado")
+
+    turnos = conn.execute(
+        "SELECT id, monto_total, monto_pagado FROM alquileres "
+        "WHERE pedido_principal_id = %s AND estado <> 'cancelado' "
+        "ORDER BY fecha_desde, id",
+        (id,),
+    ).fetchall()
+
+    filas = [p, *turnos]
+    restante = data.monto
+    reparto: list[dict] = []
+    for fila in filas:
+        resta_fila = max(0, (fila["monto_total"] or 0) - (fila["monto_pagado"] or 0))
+        aporte = min(restante, resta_fila)
+        if aporte <= 0:
+            continue
+        _agregar_pago(
+            conn, fila["id"],
+            PagoCreate(
+                monto=aporte, concepto=data.concepto, fecha=data.fecha,
+                destinatario=data.destinatario, metodo=data.metodo,
+            ),
+            admin_email,
+        )
+        reparto.append({"pedido_id": fila["id"], "monto": aporte})
+        restante -= aporte
+
+    if restante > 0:
+        concepto_excedente = f"{data.concepto} (excedente)" if data.concepto else "(excedente)"
+        _agregar_pago(
+            conn, id,
+            PagoCreate(
+                monto=restante, concepto=concepto_excedente, fecha=data.fecha,
+                destinatario=data.destinatario, metodo=data.metodo,
+            ),
+            admin_email,
+        )
+        reparto.append({"pedido_id": id, "monto": restante, "excedente": True})
+
+    resp = _get_alquiler_detail(conn, id)
+    resp["reparto"] = reparto
+    return resp
+
+
+@router.post("/alquileres/{id}/pagos-combinado", status_code=201)
+@limiter.limit(ADMIN_WRITE_LIMIT)
+@map_pg_errors
+def agregar_pago_combinado(id: int, data: PagoCombinadoCreate, request: Request):
+    """Registra un pago que se reparte entre `id` y sus turnos del Estudio
+    vinculados (#1308) — "un pago, reparte solo": el admin ve un solo total
+    combinado y una sola acción de cobro. Ver `_agregar_pago_combinado`."""
+    admin = require_admin(request)
+    with get_db() as conn:
+        try:
+            pedido = _agregar_pago_combinado(conn, id, data, admin.get("email"))
+            conn.commit()
+            return pedido
+        except Exception:
+            logger.error("Error agregando pago combinado al pedido %s", id, exc_info=True)
+            conn.rollback()
+            raise
+
+
 def _anular_pago(conn, id: int, pago_id: int, motivo: str, admin_email: str) -> dict:
     """Lógica de `anular_pago`, sin FastAPI/decorators — ver `_agregar_pago`.
 
