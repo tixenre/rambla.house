@@ -2,12 +2,18 @@
  * EstudioIncluyeList — "qué incluye este turno" como un solo listado: Espacio
  * (siempre, franja horaria + precio editables INLINE en la misma fila) +
  * Pack + Recién pintado (chips para agregar/quitar, se muestran como fila
- * una vez agregados) + Equipos sueltos (buscador existente). Reemplaza los
- * switches sueltos + el campo de override separado + el desglose
- * por-componente duplicado — una sola forma de ver y tocar cada línea, con
- * su precio en vivo al lado (el front no calcula plata, MEMORIA 2026-06-29:
- * los precios de Pack/Pintura/sueltos vienen de `cotiz`, ya resuelto por el
- * backend).
+ * una vez agregados) + Equipos sueltos. Reemplaza los switches sueltos + el
+ * campo de override separado + el desglose por-componente duplicado — una
+ * sola forma de ver y tocar cada línea, con su precio en vivo al lado (el
+ * front no calcula plata, MEMORIA 2026-06-29: los precios de Pack/Pintura/
+ * sueltos vienen de `cotiz`, ya resuelto por el backend).
+ *
+ * El buscador de sueltos arranca colapsado detrás de un chip ("el dueño pidió
+ * ver solo Espacio/Pack/Pintura por default"): NO es redundante con "Equipos"
+ * del pedido (ese reserva/cobra por el rango de días completo; un suelto
+ * reserva/cobra solo la franja horaria puntual del turno, cargo fijo, stock
+ * duro) y en una reserva standalone del Estudio es la ÚNICA vía de sumar
+ * equipo — por eso se colapsa, no se saca.
  *
  * La fila "Espacio" absorbe fecha/hora/horas (#1308, pedido del dueño: "no
  * quiero el modal... quiero una lista para seleccionar, como con los
@@ -20,7 +26,7 @@
  * maneja su propio estado y le pasa acá los callbacks, así las dos
  * superficies se ven y comportan igual sin duplicar el layout.
  */
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { Plus, X } from "lucide-react";
 
 import { Input } from "@/design-system/ui/input";
@@ -103,6 +109,11 @@ export function EstudioIncluyeList({
     [estudio.open_hour, estudio.close_hour, estudio.min_horas],
   );
 
+  // Colapsado por default (el dueño pidió ver solo Espacio/Pack/Pintura) —
+  // sueltos ya agregados siguen mostrándose igual, esto solo esconde la vía
+  // para agregar uno nuevo hasta que se pida explícitamente.
+  const [showBuscador, setShowBuscador] = useState(false);
+
   const existingAsDraftItems: DraftItem[] = useMemo(
     () =>
       sueltos.map((s) => ({
@@ -120,12 +131,16 @@ export function EstudioIncluyeList({
 
   return (
     <Field label="Qué incluye este turno">
-      <EquipoComboSearch
-        existing={existingAsDraftItems}
-        stockMap={{}}
-        onAdd={onAddSuelto}
-        placeholder="Buscar equipo para sumar…"
-      />
+      {showBuscador ? (
+        <EquipoComboSearch
+          existing={existingAsDraftItems}
+          stockMap={{}}
+          onAdd={onAddSuelto}
+          placeholder="Buscar equipo para sumar…"
+        />
+      ) : (
+        <AddChip label="Agregar equipo puntual" onClick={() => setShowBuscador(true)} />
+      )}
 
       <ul className="mt-2 divide-y hairline rounded-md border hairline">
         {/* Espacio — siempre presente, no se puede quitar (es la base del
