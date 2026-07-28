@@ -182,7 +182,17 @@ def cotizar(data: CotizarRequest, request: Request):
                 "equipo_id": it.equipo_id,
                 "cantidad": it.cantidad,
                 "precio_jornada": precio,
-                "cobro_modo": "jornada",
+                # Antes hardcodeado a "jornada": un ítem de catálogo con
+                # cobro_modo='fijo' persistido (ej. el centinela del Estudio en
+                # un pedido de taller) se multiplicaba igual por las jornadas
+                # del rango — para un taller (rango = mes contable completo)
+                # esto inflaba el "Desglose"/"Cobranza" del editor a un
+                # múltiplo absurdo del monto_total real. El front ya manda el
+                # cobro_modo real de la línea junto con `precio_jornada`
+                # cuando `respetar_precio_item` (mismo `if` de arriba,
+                # `lib/cotizacion.ts`); sin ese contexto (carrito público,
+                # cotización nueva) no lo manda y cae al default de siempre.
+                "cobro_modo": it.cobro_modo or "jornada",
                 "es_combo": tipos.get(it.equipo_id) == "combo",
             })
         subtotal_por_jornada = sum(

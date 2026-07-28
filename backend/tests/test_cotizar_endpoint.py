@@ -887,3 +887,75 @@ class TestPedidoConFacturaCVigente:
         out = cotizar(self._data(), FakeReq())
         assert out["con_iva"] is True
         assert out["total_final"] == 12100
+
+
+class TestRespetarPrecioItemCobroModo:
+    """Bug real encontrado en vivo (Fase 1, #1308) mientras se probaba el
+    Desglose de un pedido de taller: con `respetar_precio_item` (el editor
+    admin de un pedido existente), un ítem de CATÁLOGO siempre se etiquetaba
+    `cobro_modo="jornada"` para `calcular_total`, sin importar el cobro_modo
+    REAL persistido en la línea. Un ítem `cobro_modo='fijo'` (ej. el
+    centinela del Estudio en un pedido de taller, cuyo rango es el mes
+    contable completo) se multiplicaba igual por las jornadas del rango —
+    para 31 jornadas, un pedido de $1.200.000 mostraba $37.200.000 en el
+    Desglose/Cobranza del editor, mintiendo sobre cuánto falta cobrar. El
+    front YA mandaba el `cobro_modo` real (`lib/cotizacion.ts`); el bug era
+    puramente que el backend lo ignoraba para ítems de catálogo."""
+
+    def _data(self, cobro_modo=None):
+        item = CotizarItem(
+            equipo_id=7, cantidad=1, precio_jornada=1_200_000, cobro_modo=cobro_modo,
+        )
+        return CotizarRequest(
+            items=[item],
+            fecha_desde="2026-08-01T00:00:00",
+            fecha_hasta="2026-08-31T23:59:59",  # 31 jornadas
+            cliente_id=99,
+            pedido_id=5,
+            respetar_precio_item=True,
+        )
+
+    def test_item_fijo_no_se_multiplica_por_jornadas(self, patch_db, monkeypatch):
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        patch_db(
+            FakeConnConPedido(
+                precios={7: 10000}, descuento=0,
+                pedido={"estado": "confirmado", "cliente_id": 99,
+                        "descuento_jornadas_pct": 0, "descuento_cliente_pct": 0},
+            ),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(self._data(cobro_modo="fijo"), FakeReq())
+        assert out["neto"] == 1_200_000, (
+            f"cobro_modo='fijo' no debe multiplicarse por jornadas (31); dio {out['neto']}"
+        )
+
+    def test_item_jornada_si_se_multiplica_por_jornadas(self, patch_db, monkeypatch):
+        # Control: el caso normal (catálogo, cobro por jornada) tiene que
+        # seguir multiplicando — el fix no debe apagar esto por accidente.
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        patch_db(
+            FakeConnConPedido(
+                precios={7: 10000}, descuento=0,
+                pedido={"estado": "confirmado", "cliente_id": 99,
+                        "descuento_jornadas_pct": 0, "descuento_cliente_pct": 0},
+            ),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(self._data(cobro_modo="jornada"), FakeReq())
+        assert out["neto"] == 1_200_000 * 31
+
+    def test_sin_cobro_modo_explicito_default_jornada(self, patch_db, monkeypatch):
+        # Si el front no manda cobro_modo (ej. un caller viejo), el default
+        # sigue siendo "jornada" — mismo comportamiento que antes del fix.
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        patch_db(
+            FakeConnConPedido(
+                precios={7: 10000}, descuento=0,
+                pedido={"estado": "confirmado", "cliente_id": 99,
+                        "descuento_jornadas_pct": 0, "descuento_cliente_pct": 0},
+            ),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(self._data(cobro_modo=None), FakeReq())
+        assert out["neto"] == 1_200_000 * 31
