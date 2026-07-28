@@ -250,6 +250,9 @@ export type EstudioConfig = {
   /** Add-on independiente "recién pintado" — cargo fijo opcional, se suma a
    *  cualquier elección de con_promo (no la reemplaza). 0 = sin cargar todavía. */
   precio_pintura_reciente: number;
+  /** Anticipación PROPIA del add-on "recién pintado" — se exige ADEMÁS de
+   *  `anticipacion_min_horas`, no en su lugar. 0 = sin restricción extra. */
+  anticipacion_pintura_horas: number;
   trabajos?: EstudioTrabajo[];
 };
 
@@ -355,12 +358,22 @@ export function apiLogSearchClick(queryId: number, equipoId: number | null) {
 
 /** ¿El estudio está libre en [fecha start, +horas]? El backend aplica el buffer
  *  propio del estudio. `promo` = disponibilidad del combo real de equipos. */
-export function apiGetEstudioDisponibilidad(fecha: string, start: string, horas: number) {
+export function apiGetEstudioDisponibilidad(
+  fecha: string,
+  start: string,
+  horas: number,
+  pinturaReciente?: boolean,
+) {
   return get<{
     libre: boolean;
     motivo?: string | null;
     promo?: EstudioPromo | null;
-  }>("/api/estudio/disponibilidad", { fecha, start, horas: String(horas) });
+  }>("/api/estudio/disponibilidad", {
+    fecha,
+    start,
+    horas: String(horas),
+    pintura_reciente: String(!!pinturaReciente),
+  });
 }
 
 /** Bloques ocupados del estudio en [desde, hasta] (YYYY-MM-DD, inclusive) —

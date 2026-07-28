@@ -219,6 +219,47 @@ def test_segunda_reserva_misma_franja_rebota_409_sin_fila_huerfana(client_con_db
     )
 
 
+def test_pintura_reciente_anticipacion_propia_bloquea_get_y_post(client_con_db, setup):
+    """El add-on "recién pintado" exige su PROPIA anticipación
+    (`anticipacion_pintura_horas`), independiente de `anticipacion_min_horas`
+    (el `setup` la deja en 0): sin tildar el add-on la franja está libre; con
+    el add-on tildado, la MISMA franja rebota tanto en el GET (preview) como
+    en el POST (creación) — end-to-end contra Postgres real."""
+    from datetime import timedelta
+
+    from database import get_db, now_ar
+
+    conn = get_db()
+    try:
+        conn.execute("UPDATE estudio SET anticipacion_pintura_horas=48 WHERE id=1")
+        conn.commit()
+    finally:
+        conn.close()
+
+    pronto = now_ar() + timedelta(hours=2)
+    fecha, start, horas = pronto.strftime("%Y-%m-%d"), pronto.strftime("%H:00"), 1
+
+    r0 = _disponibilidad(client_con_db, fecha=fecha, start=start, horas=horas)
+    assert r0.status_code == 200, r0.text
+    assert r0.json()["libre"] is True
+
+    r1 = client_con_db.get(
+        "/api/estudio/disponibilidad",
+        params={"fecha": fecha, "start": start, "horas": horas, "pintura_reciente": "true"},
+    )
+    assert r1.status_code == 200, r1.text
+    assert r1.json()["libre"] is False
+    assert "recién pintado" in r1.json()["motivo"]
+
+    r2 = client_con_db.post(
+        "/api/estudio/reservas",
+        json={"fecha": fecha, "start": start, "horas": horas, "pintura_reciente": True},
+        headers={"Cookie": _COOKIE},
+    )
+    assert r2.status_code == 400, r2.text
+    assert "recién pintado" in r2.json()["detail"]
+
+
 def test_taller_publicado_bloquea_get_y_post(client_con_db, setup, monkeypatch):
     """Un taller publicado en la franja bloquea tanto GET disponibilidad como
     POST reservas del Estudio — ejercita `_taller_bloqueante` end-to-end

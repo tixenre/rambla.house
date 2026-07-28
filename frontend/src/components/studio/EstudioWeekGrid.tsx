@@ -42,6 +42,11 @@ type EstudioWeekGridProps = {
   /** Duración actual elegida (horas) — solo para el highlight de hover, no
    *  filtra ni bloquea ninguna celda (ver docstring del módulo). */
   hours: number;
+  /** Horas de anticipación EFECTIVAS que hay que respetar ahora mismo — el
+   *  caller ya resolvió cuál aplica (la general, o el máximo contra la del
+   *  add-on "recién pintado" si está tildado); acá solo se usa para grisar.
+   *  0 = sin restricción extra (además del chequeo de "ya pasó"). */
+  anticipacionHoras: number;
   selected: Seleccion | null;
   onSelectSlot: (date: Date, startSlot: string) => void;
   className?: string;
@@ -80,6 +85,7 @@ type CeldaProps = {
   disabled: boolean;
   ocupado: boolean;
   sinTiempo: boolean;
+  antelacionInsuficiente: boolean;
   seleccionado: boolean;
   highlight: boolean;
   onSelectSlot: (date: Date, startSlot: string) => void;
@@ -101,11 +107,18 @@ function Celda({
   disabled,
   ocupado,
   sinTiempo,
+  antelacionInsuficiente,
   seleccionado,
   highlight,
   onSelectSlot,
 }: CeldaProps) {
-  const motivo = ocupado ? " — ocupado" : sinTiempo ? " — no alcanza para la duración mínima" : "";
+  const motivo = ocupado
+    ? " — ocupado"
+    : sinTiempo
+      ? " — no alcanza para la duración mínima"
+      : antelacionInsuficiente
+        ? " — necesita más anticipación"
+        : "";
   const horaEnPunto = slot.endsWith(":00");
 
   return (
@@ -138,6 +151,7 @@ export function EstudioWeekGrid({
   closeHour,
   minHours,
   hours,
+  anticipacionHoras,
   selected,
   onSelectSlot,
   className,
@@ -178,6 +192,16 @@ export function EstudioWeekGrid({
 
   const slots = useMemo(() => slotsDelDia(openHour, closeHour), [openHour, closeHour]);
   const ahora = useMemo(() => new Date(), []);
+  // Barra mínima de inicio: "ahora" + la anticipación efectiva (0 = sin
+  // restricción extra, la barra queda en "ahora" — mismo comportamiento que
+  // antes de que existiera este prop). Generaliza el viejo `yaPaso` (que era
+  // el caso particular anticipacionHoras=0): un inicio futuro pero DEMASIADO
+  // pronto es tan no-reservable como uno ya pasado — mismo motivo de gris,
+  // solo cambia el label del porqué (ver `Celda`).
+  const minInicio = useMemo(
+    () => new Date(ahora.getTime() + Math.max(0, anticipacionHoras) * 60 * 60_000),
+    [ahora, anticipacionHoras],
+  );
 
   const estaOcupado = (day: Date, slot: string): boolean => {
     const [h, m] = slot.split(":").map(Number);
@@ -192,6 +216,15 @@ export function EstudioWeekGrid({
     const inicio = new Date(day);
     inicio.setHours(h, m, 0, 0);
     return inicio < ahora;
+  };
+
+  // Futuro, pero no deja la anticipación exigida — distinto de `yaPaso`
+  // (ya en el pasado) para poder mostrar un motivo de a11y más preciso.
+  const antelacionInsuficiente = (day: Date, slot: string): boolean => {
+    const [h, m] = slot.split(":").map(Number);
+    const inicio = new Date(day);
+    inicio.setHours(h, m, 0, 0);
+    return inicio >= ahora && inicio < minInicio;
   };
 
   // Un inicio que no deja lugar para `minHours` antes de `closeHour` no es
@@ -317,7 +350,8 @@ export function EstudioWeekGrid({
                 const ocupado = estaOcupado(d, slot);
                 const pasado = yaPaso(d, slot);
                 const sinTiempo = noAlcanzaDuracionMinima(slot);
-                const disabled = ocupado || pasado || sinTiempo;
+                const antelacion = !pasado && antelacionInsuficiente(d, slot);
+                const disabled = ocupado || pasado || sinTiempo || antelacion;
                 const seleccionado = estaSeleccionado(d, slot);
                 const highlight =
                   !disabled && (enHighlight(dayIdx, slot) || enSeleccionActual(dayIdx, slot));
@@ -330,6 +364,7 @@ export function EstudioWeekGrid({
                       disabled={disabled}
                       ocupado={ocupado}
                       sinTiempo={sinTiempo}
+                      antelacionInsuficiente={antelacion}
                       seleccionado={seleccionado}
                       highlight={highlight}
                       onSelectSlot={onSelectSlot}
@@ -380,7 +415,8 @@ export function EstudioWeekGrid({
             const ocupado = estaOcupado(day, slot);
             const pasado = yaPaso(day, slot);
             const sinTiempo = noAlcanzaDuracionMinima(slot);
-            const disabled = ocupado || pasado || sinTiempo;
+            const antelacion = !pasado && antelacionInsuficiente(day, slot);
+            const disabled = ocupado || pasado || sinTiempo || antelacion;
             const seleccionado = estaSeleccionado(day, slot);
             return (
               <button
@@ -398,6 +434,7 @@ export function EstudioWeekGrid({
               >
                 <span className="tabular">{slot}</span>
                 {ocupado && <span className="text-2xs">Ocupado</span>}
+                {!ocupado && antelacion && <span className="text-2xs">Muy pronto</span>}
               </button>
             );
           })}

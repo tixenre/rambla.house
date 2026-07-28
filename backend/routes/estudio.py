@@ -49,6 +49,7 @@ from services.estudio.queries.disponibilidad import (
     _primer_dia_semana,
     _sesiones_de_slot,
     _viola_anticipacion,
+    _viola_anticipacion_pintura,
     verificar_sesiones_disponibles,
 )
 from services.estudio.queries.promo import _promo_info
@@ -138,6 +139,7 @@ def _build_response(row, fotos: list) -> dict:
         "pack_precio": row["pack_precio"],
         "promo_combo_id": row["promo_combo_id"],
         "precio_pintura_reciente": row["precio_pintura_reciente"],
+        "anticipacion_pintura_horas": row["anticipacion_pintura_horas"],
         "features": _parse_json_field(row["features_json"]),
         "faq": _parse_json_field(row["faq_json"]),
         "direccion": row["direccion"],
@@ -537,6 +539,7 @@ class EstudioUpdate(BaseModel):
     buffer_horas: Optional[int] = None
     anticipacion_min_horas: Optional[int] = None
     precio_pintura_reciente: Optional[int] = None
+    anticipacion_pintura_horas: Optional[int] = None
     # ⏰ pack_activo/pack_nombre/pack_precio retirados (Fase 8, #1283) — el pack
     # ya no existe como mecanismo editable. `pack_descripcion` queda: es la
     # descripción EN VIVO de la promo actual (ver `_build_response`).
@@ -1237,9 +1240,12 @@ def estudio_disponibilidad(
     fecha: str = Query(..., description="YYYY-MM-DD"),
     start: str = Query(..., description="HH:MM"),
     horas: int = Query(..., description="Duración en horas (>= min_horas)"),
+    pintura_reciente: bool = Query(False, description="¿Con el add-on 'recién pintado'?"),
 ):
     """¿El estudio está libre en [fecha start, +horas]? Aplica el buffer propio
-    del estudio (no el global) y la anticipación mínima. Devuelve {libre, motivo}."""
+    del estudio (no el global), la anticipación mínima y — si `pintura_reciente`
+    viene tildado — la anticipación PROPIA del add-on (se exige ADEMÁS de la
+    mínima). Devuelve {libre, motivo}."""
     with get_db() as conn:
         estudio = _get_estudio_row(conn)
 
@@ -1252,6 +1258,16 @@ def estudio_disponibilidad(
             return {
                 "libre": False,
                 "motivo": f"Necesitás reservar con al menos {estudio['anticipacion_min_horas']} h de anticipación",
+                "promo": None,
+            }
+
+        if pintura_reciente and _viola_anticipacion_pintura(estudio, fecha_desde):
+            return {
+                "libre": False,
+                "motivo": (
+                    f"El add-on \"recién pintado\" necesita al menos "
+                    f"{estudio['anticipacion_pintura_horas']} h de anticipación"
+                ),
                 "promo": None,
             }
 
@@ -1356,6 +1372,12 @@ def crear_reserva_estudio(body: EstudioReservaCreate, request: Request, backgrou
                 raise HTTPException(
                     400,
                     f"Necesitás reservar con al menos {estudio['anticipacion_min_horas']} h de anticipación",
+                )
+            if body.pintura_reciente and _viola_anticipacion_pintura(estudio, fecha_desde):
+                raise HTTPException(
+                    400,
+                    f"El add-on \"recién pintado\" necesita al menos "
+                    f"{estudio['anticipacion_pintura_horas']} h de anticipación",
                 )
 
             pedido_id, promo_advertencia = _crear_pedido_estudio(

@@ -1669,6 +1669,12 @@ def _init_db_schema(conn):
     # de la promo/sueltos — el cliente lo tilda aparte, no reemplaza ninguna opción.
     # 0 = todavía no lo cargó el dueño (el checkbox sigue disponible, sin costo).
     conn.execute("ALTER TABLE estudio ADD COLUMN IF NOT EXISTS precio_pintura_reciente INTEGER NOT NULL DEFAULT 0")
+    # Anticipación PROPIA del add-on "recién pintado" (#1300 seguimiento): pintar/
+    # secar el ciclorama necesita más lead time que una reserva común —
+    # independiente de `anticipacion_min_horas` (se exige ADEMÁS, no en su lugar).
+    # 0 = sin restricción extra (mismo criterio "apagado por default" que el resto
+    # de las anticipaciones del repo).
+    conn.execute("ALTER TABLE estudio ADD COLUMN IF NOT EXISTS anticipacion_pintura_horas INTEGER NOT NULL DEFAULT 0")
 
     # Registro de búsquedas del catálogo público (analítica interna). Acompaña a
     # la migración i1c2d3e4f5a6 — acá garantizamos su creación en cada boot

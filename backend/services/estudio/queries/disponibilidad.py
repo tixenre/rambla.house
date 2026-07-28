@@ -59,13 +59,28 @@ def _franja_estudio(estudio, fecha: str, start: str, horas: int) -> tuple[dateti
     return fecha_desde, fecha_hasta
 
 
-def _viola_anticipacion(estudio, fecha_desde) -> bool:
-    """¿La franja arranca antes de la anticipación mínima exigida por el estudio?
-    Solo aplica al estudio (no a equipos). anticipacion_min_horas <= 0 → sin tope."""
-    horas = estudio["anticipacion_min_horas"] or 0
+def _viola_anticipacion_horas(fecha_desde, horas: int) -> bool:
+    """Núcleo puro: ¿`fecha_desde` no deja `horas` de anticipación desde ahora?
+    `horas <= 0` → sin tope (apagado)."""
+    horas = horas or 0
     if horas <= 0:
         return False
     return fecha_desde < now_ar() + timedelta(hours=horas)
+
+
+def _viola_anticipacion(estudio, fecha_desde) -> bool:
+    """¿La franja arranca antes de la anticipación mínima exigida por el estudio?
+    Solo aplica al estudio (no a equipos). anticipacion_min_horas <= 0 → sin tope."""
+    return _viola_anticipacion_horas(fecha_desde, estudio["anticipacion_min_horas"])
+
+
+def _viola_anticipacion_pintura(estudio, fecha_desde) -> bool:
+    """¿La franja arranca antes de la anticipación PROPIA del add-on "recién
+    pintado" (pintar/secar el ciclorama necesita más lead time que una reserva
+    común)? Se exige ADEMÁS de `_viola_anticipacion`, no en su lugar — el caller
+    solo la chequea cuando el cliente tildó el add-on.
+    `anticipacion_pintura_horas` <= 0 → sin tope extra."""
+    return _viola_anticipacion_horas(fecha_desde, estudio["anticipacion_pintura_horas"])
 
 
 def _centinela_libre(conn, equipo_id: int, fecha_desde, fecha_hasta,

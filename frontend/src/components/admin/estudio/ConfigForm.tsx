@@ -47,6 +47,7 @@ const schema = z.object({
   close_hour: z.coerce.number().int().min(1).max(24),
   buffer_horas: z.coerce.number().int().min(0),
   anticipacion_min_horas: z.coerce.number().int().min(0),
+  anticipacion_pintura_horas: z.coerce.number().int().min(0),
   features: z.array(featureSchema),
   faq: z.array(faqSchema),
   direccion: z.string(),
@@ -69,6 +70,7 @@ function configToForm(c: EstudioConfig): FormValues {
     close_hour: c.close_hour,
     buffer_horas: c.buffer_horas,
     anticipacion_min_horas: c.anticipacion_min_horas,
+    anticipacion_pintura_horas: c.anticipacion_pintura_horas,
     features: c.features ?? [],
     faq: c.faq ?? [],
     direccion: c.direccion,
@@ -187,6 +189,13 @@ export function ConfigForm({ config, onSaved }: { config: EstudioConfig; onSaved
           </Field>
           <Field label="Anticipación mínima (h)" error={errors.anticipacion_min_horas?.message}>
             <Input type="number" min={0} {...register("anticipacion_min_horas")} />
+          </Field>
+          <Field
+            label="Anticipación recién pintado (h)"
+            error={errors.anticipacion_pintura_horas?.message}
+            hint="Se exige ADEMÁS de la anticipación mínima (pintar/secar el ciclorama lleva más tiempo). 0 = sin restricción extra."
+          >
+            <Input type="number" min={0} {...register("anticipacion_pintura_horas")} />
           </Field>
           <Field label="Apertura (hora)" error={errors.open_hour?.message}>
             <Input type="number" min={0} max={23} {...register("open_hour")} />

@@ -38,6 +38,12 @@ export type StudioBookingConfig = {
   /** Add-on independiente "recién pintado" — cargo fijo opcional, se suma
    *  sea cual sea la elección de con_promo (no la reemplaza). */
   precioPinturaReciente?: number;
+  /** Anticipación mínima general del estudio (h). */
+  anticipacionMinHoras?: number;
+  /** Anticipación PROPIA del add-on "recién pintado" — se exige ADEMÁS de
+   *  `anticipacionMinHoras`, no en su lugar (pintar/secar el ciclorama lleva
+   *  más tiempo que una reserva común). */
+  anticipacionPinturaHoras?: number;
 };
 
 type Disponibilidad = "idle" | "checking" | "libre" | "ocupado" | "error";
@@ -116,6 +122,8 @@ export function StudioBookingForm({
   const closeHour = config?.closeHour ?? STUDIO.closeHour;
   const promo = config?.promo ?? null;
   const precioPintura = config?.precioPinturaReciente ?? 0;
+  const anticipacionMinHoras = config?.anticipacionMinHoras ?? 0;
+  const anticipacionPinturaHoras = config?.anticipacionPinturaHoras ?? 0;
 
   const initial = useMemo(() => readBookingFromQuery(), []);
   const [date, setDate] = useState<Date | undefined>(initial?.date);
@@ -234,7 +242,7 @@ export function StudioBookingForm({
     let cancelado = false;
     setDisponibilidad("checking");
     setMotivo(null);
-    apiGetEstudioDisponibilidad(fechaISO, startSlot, hours)
+    apiGetEstudioDisponibilidad(fechaISO, startSlot, hours, pinturaReciente)
       .then((res) => {
         if (cancelado) return;
         setDisponibilidad(res.libre ? "libre" : "ocupado");
@@ -246,7 +254,7 @@ export function StudioBookingForm({
     return () => {
       cancelado = true;
     };
-  }, [fechaISO, startSlot, hours]);
+  }, [fechaISO, startSlot, hours, pinturaReciente]);
 
   const canSubmit = !!fechaISO && disponibilidad === "libre" && !submitting;
 
@@ -420,6 +428,11 @@ export function StudioBookingForm({
           closeHour={closeHour}
           minHours={minHours}
           hours={hours}
+          anticipacionHoras={
+            pinturaReciente
+              ? Math.max(anticipacionMinHoras, anticipacionPinturaHoras)
+              : anticipacionMinHoras
+          }
           selected={date ? { date, startSlot } : null}
           onSelectSlot={(d, slot) => {
             setDate(d);

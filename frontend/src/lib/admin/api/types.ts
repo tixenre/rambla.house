@@ -1276,6 +1276,9 @@ export type EstudioConfig = {
   /** Add-on independiente "recién pintado" — cargo fijo opcional, se suma a
    *  cualquier elección de con_promo (no la reemplaza). 0 = sin cargar todavía. */
   precio_pintura_reciente: number;
+  /** Anticipación PROPIA del add-on "recién pintado" — se exige ADEMÁS de
+   *  `anticipacion_min_horas`, no en su lugar. 0 = sin restricción extra. */
+  anticipacion_pintura_horas: number;
   features: Array<{ label: string; value: string }> | null;
   faq: Array<{ q: string; a: string }> | null;
   direccion: string;
@@ -1378,6 +1381,7 @@ export type EstudioInput = {
   buffer_horas?: number;
   anticipacion_min_horas?: number;
   precio_pintura_reciente?: number;
+  anticipacion_pintura_horas?: number;
   pack_descripcion?: string;
   features_json?: string;
   faq_json?: string;

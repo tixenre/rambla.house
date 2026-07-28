@@ -871,6 +871,8 @@ function EstudioPage() {
         closeHour: data.close_hour,
         promo: data.promo,
         precioPinturaReciente: data.precio_pintura_reciente,
+        anticipacionMinHoras: data.anticipacion_min_horas,
+        anticipacionPinturaHoras: data.anticipacion_pintura_horas,
       }
     : undefined;
 

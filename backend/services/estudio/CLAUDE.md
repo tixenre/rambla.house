@@ -105,6 +105,16 @@ de `queries/`; `queries/` **nunca** de `commands/`.
   (detecta `equipo_id IS NULL` para exigir que el pedido no use el pack retirado) excluye
   explícitamente `NOMBRE_ITEM_PINTURA_RECIENTE` — si se renombra la constante, actualizar ese guard
   a la vez.
+- **`estudio.anticipacion_pintura_horas` es una anticipación PROPIA del add-on "recién pintado",
+  ADEMÁS de `anticipacion_min_horas` — no en su lugar.** `_viola_anticipacion_pintura`
+  (`queries/disponibilidad.py`) comparte el núcleo puro `_viola_anticipacion_horas` con
+  `_viola_anticipacion`, pero son chequeos INDEPENDIENTES: el caller (`GET /estudio/disponibilidad`
+  con `pintura_reciente=true`, y `POST /estudio/reservas` con `body.pintura_reciente`) exige AMBOS.
+  Solo aplica a los caminos PÚBLICOS (mismo criterio que `_viola_anticipacion`) — el admin no la
+  chequea. El front resuelve la anticipación EFECTIVA en `StudioBookingForm`
+  (`Math.max(anticipacionMinHoras, anticipacionPinturaHoras)` cuando el checkbox está tildado) y se
+  la pasa a `EstudioWeekGrid` como un solo `anticipacionHoras` — la grilla no sabe de "pintura", solo
+  griséa según la barra que le dan (atajo visual; el gate real sigue siendo el chequeo del backend).
 
 El supervisor marca: lógica de disponibilidad/reserva del Estudio reimplementada fuera de este
 paquete; un import de `routes.*` dentro de `services/estudio/`; un `queries/` importando de

@@ -81,6 +81,7 @@ class TestBuildResponse:
             "pack_precio": 10000,
             "promo_combo_id": None,
             "precio_pintura_reciente": 0,
+            "anticipacion_pintura_horas": 0,
             "features_json": json.dumps([{"label": "Superficie", "value": "50 m²"}]),
             "faq_json": json.dumps([{"q": "¿Mínimo?", "a": "2 h"}]),
             "direccion": "",
@@ -199,6 +200,7 @@ def _estudio_row(**overrides):
         "equipo_id": 99,  # id del centinela
         "promo_combo_id": None,
         "precio_pintura_reciente": 0,
+        "anticipacion_pintura_horas": 0,
     }
     defaults.update(overrides)
     return defaults
@@ -441,6 +443,47 @@ class TestAnticipacionMinima:
 
     def test_anticipacion_cero_nunca_viola(self):
         assert self._viola(0, 0) is False
+
+
+class TestAnticipacionPintura:
+    """anticipacion_pintura_horas (#1300 seguimiento) — anticipación PROPIA del
+    add-on "recién pintado", independiente de `anticipacion_min_horas` (se exige
+    ADEMÁS, no en su lugar)."""
+
+    def _viola(self, horas_anticipacion, horas_hasta_franja):
+        from datetime import timedelta
+        from database import now_ar
+        from services.estudio.queries.disponibilidad import _viola_anticipacion_pintura
+        fecha_desde = now_ar() + timedelta(hours=horas_hasta_franja)
+        return _viola_anticipacion_pintura(
+            _estudio_row(anticipacion_pintura_horas=horas_anticipacion), fecha_desde
+        )
+
+    def test_rechaza_antes_de_la_anticipacion(self):
+        # Anticipación de pintura 24h, franja dentro de 6h → viola.
+        assert self._viola(24, 6) is True
+
+    def test_permite_a_partir_de_la_anticipacion(self):
+        # Anticipación de pintura 24h, franja dentro de 48h → OK.
+        assert self._viola(24, 48) is False
+
+    def test_anticipacion_cero_nunca_viola(self):
+        assert self._viola(0, 0) is False
+
+    def test_es_independiente_de_la_anticipacion_minima(self):
+        # anticipacion_min_horas=0 (sin tope general) pero
+        # anticipacion_pintura_horas=24 (con tope propio) — la franja de
+        # pintura sigue violando aunque la general no lo haría.
+        from datetime import timedelta
+        from database import now_ar
+        from services.estudio.queries.disponibilidad import (
+            _viola_anticipacion,
+            _viola_anticipacion_pintura,
+        )
+        estudio = _estudio_row(anticipacion_min_horas=0, anticipacion_pintura_horas=24)
+        fecha_desde = now_ar() + timedelta(hours=6)
+        assert _viola_anticipacion(estudio, fecha_desde) is False
+        assert _viola_anticipacion_pintura(estudio, fecha_desde) is True
 
 
 class TestNoRegresionTipo:
