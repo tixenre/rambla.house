@@ -294,6 +294,21 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
       toast.success("Estado actualizado");
       qc.setQueryData(["admin", "pedido", p.id], p);
       qc.invalidateQueries({ queryKey: ["admin", "pedidos"] });
+      // Cascada a turnos del Estudio vinculados (#1308, "avanzan juntos"): ya
+      // corrió en el backend — acá solo refrescamos cada turno tocado (su
+      // propia query, si está montada en TurnosEstudioSection) y avisamos si
+      // alguno quedó sin poder avanzar (el pedido principal SÍ avanzó igual).
+      (p.turnos_estudio_vinculados ?? []).forEach((t) =>
+        qc.invalidateQueries({ queryKey: ["admin", "pedido", t.id] }),
+      );
+      if (p.turnos_vinculados_sin_avanzar?.length) {
+        toast.warning("Algún turno vinculado no pudo avanzar", {
+          description: p.turnos_vinculados_sin_avanzar
+            .map((w) => `#${w.numero_pedido ?? w.turno_id}: ${w.error}`)
+            .join(" · "),
+          duration: 8000,
+        });
+      }
     },
     onError: (e: Error) => toast.error(e.message),
   });

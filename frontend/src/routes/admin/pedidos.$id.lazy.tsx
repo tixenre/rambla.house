@@ -86,6 +86,7 @@ import { computeJornadas, parseDateTimeParts, toLocalISO } from "@/lib/rental-da
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useCotizacion, descuentoLabel } from "@/lib/cotizacion";
+import { combinarTotales } from "@/lib/pedido-combinado";
 import { SegmentedControl } from "@/design-system/ui/segmented-control";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { fmtArs } from "@/lib/format";
@@ -333,6 +334,13 @@ function PedidoEditorPage() {
   const total = totales.total;
   const pagadoMonto = p.monto_pagado ?? 0;
   const restante = Math.max(0, total - pagadoMonto);
+
+  // Combinado con los turnos del Estudio vinculados (#1308) — cálculo 100%
+  // frontend, cero query nueva (los montos de cada turno ya vienen en la
+  // respuesta del pedido). Sin turnos vinculados, es un pass-through exacto
+  // de total/pagadoMonto/restante (mismos números, cero cambio visual).
+  const turnosVinculados = p.turnos_estudio_vinculados ?? [];
+  const combinado = combinarTotales(total, pagadoMonto, turnosVinculados);
 
   // stockMap: { equipo_id → libres tras TODO el draft } (con signo; negativo =
   // faltan unidades). hasOverstock lo deriva el hook con la misma regla.
@@ -919,7 +927,28 @@ function PedidoEditorPage() {
                 v={totales.conIva ? fmtArs(totales.iva) : "— sin IVA"}
               />
               <div className="border-t hairline my-1" />
-              <BdRow l="Total" v={fmtArs(total)} strong />
+              <BdRow
+                l={combinado.turnos.length > 0 ? "Total del pedido" : "Total"}
+                v={fmtArs(total)}
+                strong
+              />
+              {combinado.turnos.length > 0 && (
+                <>
+                  {combinado.turnos.map((t) => (
+                    <BdRow
+                      key={t.id}
+                      l={`Turno #${t.numero_pedido ?? t.id}${
+                        t.fecha_desde
+                          ? ` · ${format(new Date(t.fecha_desde), "d MMM", { locale: es })}`
+                          : ""
+                      }`}
+                      v={fmtArs(t.monto_total)}
+                    />
+                  ))}
+                  <div className="border-t hairline my-1" />
+                  <BdRow l="Total combinado" v={fmtArs(combinado.totalCombinado)} strong />
+                </>
+              )}
             </div>
             {/* Div plano, NO <FieldLabel> (que renderiza un <label> nativo):
                 un <label> reenvía cualquier click dentro de su área al PRIMER
@@ -998,35 +1027,54 @@ function PedidoEditorPage() {
             </div>
           </RailSection>
 
-          {/* Cobranza */}
+          {/* Cobranza — combinada con los turnos del Estudio vinculados
+              (#1308): sin turnos, `combinado.*` es un pass-through exacto de
+              pagadoMonto/total/restante (cero cambio visual). */}
           <RailSection label="Cobranza">
             <div className="flex items-center justify-between">
               <span className="font-mono text-xs text-muted-foreground">
-                {fmtArs(pagadoMonto)} de {fmtArs(total)}
-                {pagadoMonto === 0 ? " · sin seña" : ""}
+                {fmtArs(combinado.pagadoCombinado)} de {fmtArs(combinado.totalCombinado)}
+                {combinado.pagadoCombinado === 0 ? " · sin seña" : ""}
               </span>
               <span
                 className={cn(
                   "font-mono text-xs font-semibold",
-                  pagadoMonto >= total && total > 0 ? "text-verde-ink" : "text-destructive",
+                  combinado.pagadoCombinado >= combinado.totalCombinado &&
+                    combinado.totalCombinado > 0
+                    ? "text-verde-ink"
+                    : "text-destructive",
                 )}
               >
-                {pagadoMonto >= total && total > 0 ? "pagado" : `resta ${fmtArs(restante)}`}
+                {combinado.pagadoCombinado >= combinado.totalCombinado &&
+                combinado.totalCombinado > 0
+                  ? "pagado"
+                  : `resta ${fmtArs(combinado.restaCombinado)}`}
               </span>
             </div>
             <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
               <div
                 className={cn(
                   "h-full transition-colors",
-                  pagadoMonto >= total && total > 0 ? "bg-verde" : "bg-amber",
+                  combinado.pagadoCombinado >= combinado.totalCombinado &&
+                    combinado.totalCombinado > 0
+                    ? "bg-verde"
+                    : "bg-amber",
                 )}
-                style={{ width: `${total ? Math.min(100, (pagadoMonto / total) * 100) : 0}%` }}
+                style={{
+                  width: `${
+                    combinado.totalCombinado
+                      ? Math.min(100, (combinado.pagadoCombinado / combinado.totalCombinado) * 100)
+                      : 0
+                  }%`,
+                }}
               />
             </div>
             {(p.pagos ?? []).map((pago) => (
               <PagoRow key={pago.id} pago={pago} pedidoId={p.id} />
             ))}
-            {!(pagadoMonto >= total && total > 0) && (
+            {!(
+              combinado.pagadoCombinado >= combinado.totalCombinado && combinado.totalCombinado > 0
+            ) && (
               <Button
                 variant="outline"
                 size="sm"
@@ -1144,6 +1192,7 @@ function PedidoEditorPage() {
         open={openPagoModal}
         onOpenChange={setOpenPagoModal}
         esEstudio={esEstudio}
+        turnosVinculados={turnosVinculados}
       />
       <EnviarDocsDialog
         pedidoId={p.id}

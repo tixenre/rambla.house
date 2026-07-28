@@ -1208,6 +1208,17 @@ export type Pedido = {
    *  del Estudio vinculados (#1308) — mismo shape que `PedidoGeneradoEdicion`
    *  (Talleres → Pedidos). Vacío/ausente = sin turnos vinculados. */
   turnos_estudio_vinculados?: PedidoGeneradoEdicion[];
+  /** Solo presente en la respuesta de `PATCH /alquileres/{id}` cuando `id` es
+   *  un pedido PRINCIPAL con turnos vinculados (#1308, cascada de estado
+   *  "avanzan juntos"): qué turno no pudo seguir el mismo paso (bloqueado por
+   *  una validación de negocio propia, ej. sin ítems) — el pedido principal
+   *  SIGUE avanzando igual, esto es solo una advertencia a mostrar. Vacío =
+   *  todos los turnos avanzaron sin problema (o no hay turnos vinculados). */
+  turnos_vinculados_sin_avanzar?: {
+    turno_id: number;
+    numero_pedido: number | null;
+    error: string;
+  }[];
   /** Solo presente en el detalle (`getPedido`) de un pedido de taller: las
    *  clases REALES (fecha + franja horaria) de la edición — la verdad
    *  temporal que `fecha_desde`/`fecha_hasta` no representan (esas son el mes
@@ -1615,6 +1626,12 @@ export type PedidoGeneradoEdicion = {
   monto_total: number;
   monto_pagado: number;
 };
+
+/** Una línea del reparto de un pago combinado (#1308) — a qué pedido real
+ *  (principal o un turno vinculado) se le aplicó qué parte del monto
+ *  cobrado. `excedente` marca la línea del sobrante (siempre sobre el
+ *  pedido principal, nunca sobre un turno). */
+export type RepartoPagoLinea = { pedido_id: number; monto: number; excedente?: boolean };
 
 // F4c: FAQ del concepto — ninguna pregunta es obligatoria.
 export type FaqItem = { pregunta: string; respuesta: string };
