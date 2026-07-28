@@ -3533,3 +3533,70 @@ PDF/imagen", "Qué NO cubre").
   (tiene que reflejar lo que la factura real ya resolvió, no re-litigar el perfil fiscal del cliente
   una vez que ya hay un documento fiscal emitido). El supervisor marca un consumidor nuevo del total de
   un pedido que no chequee `factura_c_vigente` antes de asumir el IVA del perfil fiscal.
+
+### 2026-07-28 — Fase 0 de "integrar rental/Estudio/Talleres en el pedido sin que mienta": 5 bugs funcionales donde un pedido derivado se mostraba/contaba como un evento real
+
+- **Contexto.** El dueño, mirando el pedido #445 (taller "Workshop Dirección de Arte"), reportó: el
+  pedido muestra "sáb 15 ago → sáb 22 ago · 7 jornadas" cuando el taller real son 2 clases (2 sábados,
+  franja horaria); el ítem "Estudio (espacio) 1× $1.200.000" aparece bajo "PRECIO / JORNADA"; y en
+  general "estudio y rental están separados pero a la vez mezclados… no se entiende". Pidió analizar
+  a fondo (workflow de 6 lectores read-only, ~974k tokens) y decidir si separar completamente el
+  Estudio/Talleres del rental o integrarlos mejor. Veredicto (pase crítico del skill `consejo`,
+  confirmado por el dueño): **seguir integrando** — separar duplicaría lo más caro (cobranza/
+  facturación/liquidación/estados) y contradice la decisión fundacional _2026-05-27 — El Estudio:
+  producto aparte que reusa el motor de reservas_. Condición del consejo para avanzar: los bugs
+  funcionales (esta Fase 0) van primero, antes de tocar semántica/UI (Fase 1) o agregar la sección
+  "Reserva del Estudio" en la página del pedido (Fase 2, pedido explícito del dueño) — ambas
+  quedan para tandas siguientes de la misma iniciativa, plan completo en el issue de tracking #1308.
+- **Root cause compartida.** `fecha_desde`/`fecha_hasta` de un pedido significan 4 cosas distintas
+  según `tipo`: rango de jornadas real (`diaria`), franja intradía real (`estudio`), muestra de una
+  recurrencia semanal (`estudio_fijo`) o mes calendario contable de la edición (`taller`,
+  `_regenerar_pedidos_taller`). El único predicado de familia que existía, `TIPOS_ESTUDIO`
+  (`backend/tipos_pedido.py`), cubre 2 de los 4 — **`taller` había quedado afuera de todos los
+  blindajes**, y ni siquiera `estudio_fijo` estaba excluido en varios de los 5 puntos de abajo pese a
+  estar cubierto por la constante.
+- **Los 5 bugs (todos con test que discrimina contra el código viejo):**
+  1. `_centinela_libre` (`services/estudio/queries/disponibilidad.py`) contaba el ítem del centinela
+     de CUALQUIER pedido reservado sin filtrar tipo → un pedido de taller confirmado con rango
+     mensual bloqueaba el Estudio los 7 días corridos del mes, aunque el bloqueo real de las clases
+     puntuales ya lo hiciera `_taller_bloqueante` (y el de un slot, `_slot_bloqueante`). Fix:
+     `p.tipo NOT IN ('taller', 'estudio_fijo')` en la query.
+  2. "Equipos afuera" del dashboard (`routes/dashboard.py`) listaba "Estudio (espacio) ×1" como si
+     fuera un equipo físico retirado — no filtraba `es_recurso_interno` (a diferencia de
+     `routes/equipos/dashboard.py`, que sí lo hacía). Fix: sumar `AND e.es_recurso_interno = FALSE`.
+  3. El calendario general (`get_calendario`) dibujaba el pedido de taller/estudio_fijo como una
+     barra más — duplicado con el overlay de ocupación real que ya lo representa. El comentario en
+     `routes/estudio.py` que decía que el INNER JOIN ya los excluía (por "no tener ítems") estaba
+     obsoleto desde que el pedido tiene ítem real (items veraces, Fase 2 de #1283) — corregido.
+  4. `salen_hoy`/`devuelven_hoy`/`devuelven_manana` (`routes/dashboard.py`) y el job de recordatorio
+     de retiro (`jobs/recordatorios.py::_pedidos_para_retiro`) podían mostrar/notificar un pedido de
+     taller/estudio_fijo "saliendo"/"volviendo" un día puntual. En la práctica ninguno de los dos
+     setea `cliente_email` al generarse, así que el recordatorio ya estaba excluido por esa
+     coincidencia — el filtro explícito no depende de ella.
+  5. La tarifa negociada del espacio se perdía al editar un turno: `ReservaDialog.tsx` siempre
+     hidrataba el campo de override en blanco al abrir la edición, así que cualquier guardado que no
+     tocara ese campo mandaba `espacio_monto: null` y `editar_reserva`
+     (`services/estudio/commands/reserva.py`) lo recalculaba a precio de lista, perdiendo en silencio
+     cualquier monto acordado con el cliente — el origen exacto del "$1.200.000" del pedido #445.
+- **Fix de (5), en detalle.** Nueva función pura `espacioOverrideInicial`
+  (`frontend/src/lib/estudio-slots.ts`, junto al resto de lógica compartida del Estudio): hidrata el
+  campo con el precio persistido del centinela SOLO si difiere del automático (`precio_hora × horas`).
+  Si coincide, el campo queda vacío (no había override en juego) — y ahora limpiar un campo que SÍ
+  tenía un valor mostrado resetea de verdad a precio de lista, en vez de mentir con un blanco que no
+  reflejaba si había o no una tarifa custom. `editar_reserva` no se tocó en comportamiento — solo gana
+  un comentario documentando el contrato de `espacio_monto=None` ("siempre recalcula, no conserva")
+  para que un futuro caller no reintroduzca el mismo bug; hoy el único caller es este mismo diálogo.
+- **Tests.** Candado unitario nuevo en `test_taller_bloqueo.py` (asserts sobre el SQL de
+  `_centinela_libre`) + `test_estudio_centinela_ignora_derivados_db.py` (4 tests, Postgres real) para
+  (1); `test_dashboard_excluye_derivados_db.py` (3 tests, Postgres real) para (2)+(3)+la mitad de (4);
+  candado unitario nuevo en `test_recordatorios.py` para la otra mitad de (4); 4 tests unitarios de
+  `espacioOverrideInicial` (`estudio-slots.test.ts`, `node:test`, mismo estilo que `lib/utils.test.ts`,
+  sumado a `test:unit`) para (5). Los 2 archivos `_db.py` nuevos quedaron conectados al CI. Suite
+  completa (2708 unit + 56 integration de estudio), ruff, tsc, eslint y prettier en verde.
+- **Alcance y qué NO se tocó.** Solo Fase 0 (bugs funcionales) — no se tocó `backend/reservas/`
+  (sagrado), el buffer del espacio (sigue fuera del motor), la promo (best-effort)/sueltos (duro), ni
+  la granularidad mensual del pedido de taller. La UI del pedido sigue mostrando "7 jornadas" para un
+  taller hasta la Fase 1 (semántica por tipo) — eso es intencional, esta tanda es solo los 5 bugs de
+  arriba. El supervisor marca: un query nuevo de "pedidos reales" (salen/vuelven/ocupan/bloquean) que
+  no excluya `('taller','estudio_fijo')`, o un caller nuevo de `editar_reserva`/`_crear_pedido_estudio`
+  que pase `espacio_monto=None` sin haber resuelto explícitamente si hay una tarifa que preservar.

@@ -1089,6 +1089,27 @@ pedido congelado (no-presupuesto) y, si da `True`, fuerza `con_iva=False`/`iva_m
 consumidor nuevo del total de un pedido que no chequee `factura_c_vigente` antes de asumir el IVA del
 perfil fiscal.
 
+### 2026-07-28 — Fase 0 de "integrar rental/Estudio/Talleres en el pedido sin que mienta": 5 bugs funcionales donde un pedido derivado se mostraba/contaba como un evento real
+
+Bug real (pedido #445, dueño): un pedido de **taller**/**estudio_fijo** lleva un rango de fechas
+CONTABLE (mes calendario de la edición / muestra de una recurrencia semanal), no un evento real de un
+día puntual — pero se mostraba/contaba como si lo fuera en 5 lugares. Fixes, todos con test
+discriminante: (1) `_centinela_libre` ya no bloquea el Estudio por el rango ancho de un
+taller/estudio_fijo confirmado — su bloqueo real ya lo hacen `_taller_bloqueante`/`_slot_bloqueante`;
+(2) "Equipos afuera" no lista el centinela (`es_recurso_interno`); (3) el calendario general y (4)
+`salen_hoy`/`devuelven_hoy`/`devuelven_manana`/el recordatorio de retiro excluyen ambos tipos
+('estudio', el turno real, se queda en todos). (5) La tarifa negociada del espacio ya no se pierde al
+editar un turno: `ReservaDialog` hidrata el override con el precio persistido del centinela SOLO si
+difiere del automático (`espacioOverrideInicial`, `frontend/src/lib/estudio-slots.ts`) — antes
+siempre mandaba `null` y `editar_reserva` recalculaba a lista en silencio (el origen exacto del
+"$1.200.000" del pedido #445). Veredicto del skill `consejo` (confirmado por el dueño): seguir
+integrando el Estudio/Talleres en el pedido en vez de separarlos — Fase 0 (estos 5 bugs) va primero;
+Fase 1 (semántica por tipo: fechas/labels/blindaje honestos para taller) y Fase 2 (sección "Reserva
+del Estudio" en la página del pedido, pedido explícito del dueño) quedan para tandas siguientes de la
+misma iniciativa (issue de tracking #1308). El supervisor marca: un query nuevo de pedidos "reales" que no excluya
+`('taller','estudio_fijo')`, o un caller nuevo de `editar_reserva`/`_crear_pedido_estudio` con
+`espacio_monto=None` sin resolver explícitamente si hay una tarifa que preservar.
+
 ---
 
 ## Preferencias (cómo quiero que se hagan las cosas)
