@@ -28,3 +28,22 @@ export function buildTimeSlots(
   }
   return slots;
 }
+
+/** Qué mostrar en el campo de override de precio del espacio al hidratar la
+ *  edición de una reserva existente: el precio persistido del centinela SOLO
+ *  si difiere del automático (`precio_hora × horas`) — así una tarifa
+ *  negociada sobrevive un guardado que no la toca. Si coincide con el
+ *  automático (o no hay centinela todavía), el campo queda vacío = "sin
+ *  override, calculado en vivo".
+ *
+ *  Bug real (pedido #445, 2026-07-28): `ReservaDialog` siempre hidrataba el
+ *  campo vacío al editar → mandaba `espacio_monto: null` → `editar_reserva`
+ *  (`backend/services/estudio/commands/reserva.py`) lo recalculaba a lista,
+ *  perdiendo en silencio cualquier tarifa negociada. */
+export function espacioOverrideInicial(
+  centinelaPrecio: number | null | undefined,
+  autoEsperado: number,
+): string {
+  if (centinelaPrecio == null || centinelaPrecio === autoEsperado) return "";
+  return String(centinelaPrecio);
+}

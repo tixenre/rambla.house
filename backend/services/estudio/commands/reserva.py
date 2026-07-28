@@ -366,6 +366,13 @@ def editar_reserva(
             for it in items_actuales
             if it["equipo_id"] is not None and it["equipo_id"] not in ids_conocidos
         ]
+    # Contrato de `espacio_monto` (gotcha real, pedido #445, 2026-07-28): acá
+    # `None` SIEMPRE recalcula a precio de lista — no "conserva lo que había".
+    # Cualquier caller que quiera preservar una tarifa negociada tiene que
+    # RESOLVER y reenviar el monto actual él mismo (así lo hace `ReservaDialog`
+    # vía `espacioOverrideInicial`, `frontend/src/lib/estudio-slots.ts`); este
+    # módulo no tiene forma de distinguir "el admin no tocó el campo" de "el
+    # admin quiere volver a lista" — esa decisión es del caller, no de acá.
     espacio_monto_final = (
         espacio_monto if espacio_monto is not None
         else (estudio["precio_hora"] or 0)

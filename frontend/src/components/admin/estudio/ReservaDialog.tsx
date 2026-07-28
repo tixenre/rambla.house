@@ -28,7 +28,7 @@ import { Spinner } from "@/design-system/ui/spinner";
 import { Switch } from "@/design-system/ui/switch";
 import { formatARS } from "@/lib/format";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { buildTimeSlots } from "@/lib/estudio-slots";
+import { buildTimeSlots, espacioOverrideInicial } from "@/lib/estudio-slots";
 import {
   adminApi,
   estudioAdminApi,
@@ -132,9 +132,11 @@ export function ReservaDialog({
     const p = detalleQ.data;
     setFecha(p.fecha_desde?.slice(0, 10) ?? todayYmd());
     setStart(p.fecha_desde?.slice(11, 16) ?? "");
+    let horasActuales = estudio.min_horas || 2;
     if (p.fecha_desde && p.fecha_hasta) {
       const ms = new Date(p.fecha_hasta).getTime() - new Date(p.fecha_desde).getTime();
-      setHoras(Math.max(1, Math.round(ms / 3_600_000)));
+      horasActuales = Math.max(1, Math.round(ms / 3_600_000));
+      setHoras(horasActuales);
     }
     setClienteId(p.cliente_id ?? null);
     setClienteNombreElegido(p.cliente_id ? p.cliente_nombre : null);
@@ -160,7 +162,9 @@ export function ReservaDialog({
           cantidad: it.cantidad,
         })),
     );
-    setEspacioOverride("");
+    const centinelaItem = p.items.find((it) => it.equipo_id === centinela);
+    const autoEsperado = (estudio.precio_hora || 0) * horasActuales;
+    setEspacioOverride(espacioOverrideInicial(centinelaItem?.precio_jornada, autoEsperado));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al abrir/hidratar, no en cada cambio de campo
   }, [open, editando, detalleQ.data]);
 
