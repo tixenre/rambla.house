@@ -441,6 +441,23 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export RESERVAS_DB_TEST=1
           python -m pytest tests/test_dashboard_excluye_derivados_db.py -v --tb=short -m integration
+      - name: Blindaje del pedido de taller (fechas/ítems/descuento/transición) contra Postgres real
+        run: |
+          cd backend
+          # Fase 1 (#1308): el editor genérico no debe poder pisar fechas/plata
+          # de un taller, PERO sí agregar matrícula (a diferencia del bloqueo en
+          # bloque de estudio). 2 bugs latentes reales encontrados y cerrados acá:
+          # _apply_pedido_items/_recalcular_total_pedido podían aplicarle un %
+          # de descuento a un taller sin cliente/jornadas reales (0 por
+          # coincidencia, no por regla); _revalidar_stock caía al motor
+          # genérico, que contaba el centinela contra el mes ENTERO del taller
+          # y podía rechazar una transición legítima por un turno real
+          # cualquiera ese mes.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_taller_pedidos_blindaje_db.py -v --tb=short -m integration
       - name: Escuela v2 — instructores como entidad contra Postgres real (F3, #1278)
         run: |
           cd backend

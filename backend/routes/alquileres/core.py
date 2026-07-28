@@ -36,7 +36,7 @@ from services.precios import bruto_linea, calcular_total, jornadas_periodo, tipo
 from services.fechas import validar_rango_fechas
 from descuentos.queries.jornadas import obtener_descuento_jornadas
 from descuentos.queries.cliente import obtener_descuento_cliente
-from tipos_pedido import es_pedido_estudio
+from tipos_pedido import es_pedido_estudio, es_pedido_derivado, es_pedido_taller
 
 # Modelos Pydantic del pedido: viven en `modelos.py` (split de este archivo, issue
 # de tracking #1254). Re-exportados acá TAL CUAL — `routes/alquileres/__init__.py`
@@ -330,19 +330,28 @@ def _recalcular_total_pedido(conn, id: int) -> None:
     tener la fila lockeada al llamar acá — Postgres no deadlockea consigo
     mismo). No es el motor de reservas (ese lockea `equipos`, tabla distinta).
 
-    No-op para pedidos del Estudio (`tipo` en `TIPOS_ESTUDIO`): sus ítems
-    llevan la plata real del espacio/promo directo en `subtotal`
-    (`cobro_modo='fijo'`, ver `routes/estudio.py`), no un `precio_jornada`
-    recalculable desde jornadas/descuentos — recalcular acá pisaría
-    `monto_total` a partir de esos subtotales con la fórmula de un alquiler
-    normal, rompiéndolo (bug vivo detectado en la auditoría de la economía
-    del Estudio). Sus ítems y su plata se editan desde los endpoints propios
-    de `routes/estudio.py`, que ya escriben `monto_total` directo.
+    No-op para pedidos DERIVADOS (`tipo` en `TIPOS_DERIVADOS` — estudio,
+    estudio_fijo o taller): sus ítems llevan la plata real del espacio/promo/
+    economía de la edición directo en `subtotal` (`cobro_modo='fijo'`, ver
+    `routes/estudio.py` y `services/talleres/commands/economia.py`), no un
+    `precio_jornada` recalculable desde jornadas/descuentos — recalcular acá
+    pisaría `monto_total` a partir de esos subtotales con la fórmula de un
+    alquiler normal, rompiéndolo. Para estudio/estudio_fijo esto ya se sabía
+    (bug vivo detectado en la auditoría de esa economía); para taller es la
+    MISMA clase de riesgo, antes sin cerrar: `bruto_linea` respeta
+    `cobro_modo='fijo'` así que los SUBTOTALES por línea sobrevivían, pero
+    `calcular_total` de todos modos podía aplicarle un % de descuento de
+    cliente/jornadas/manual a un pedido de taller sin cliente ni jornadas
+    reales — nunca se disparó porque esos campos resultan en 0 por
+    coincidencia (sin `cliente_id`, sin override cargado), no por regla
+    explícita. Sus ítems y su plata se editan desde los endpoints propios de
+    `routes/estudio.py`/`routes/talleres.py`, que ya escriben `monto_total`
+    directo.
     """
     p = conn.execute("SELECT * FROM alquileres WHERE id=%s FOR UPDATE", (id,)).fetchone()
     if not p:
         return
-    if es_pedido_estudio(p):
+    if es_pedido_derivado(p):
         return
     d0 = to_datetime(p["fecha_desde"]) if p["fecha_desde"] else None
     d1 = to_datetime(p["fecha_hasta"]) if p["fecha_hasta"] else None
@@ -452,13 +461,16 @@ def _apply_pedido_datos(conn, id: int, data: "PedidoDatos", es_admin: bool = Fal
     `_recalcular_total_pedido` (que esta función llama más abajo; relockear la
     misma fila en la misma transacción es reentrante, no deadlockea).
 
-    Pedidos del Estudio (`tipo` en `TIPOS_ESTUDIO`): un cambio de fecha/hora
-    real se rechaza (409) — este endpoint nunca revalida stock (ni el genérico
-    ni el buffer propio del espacio; ver `update_pedido_datos`), así que
-    aplicarlo sin más movería un turno confirmado a una franja ya ocupada sin
-    ningún chequeo. Notas/cliente/etc. pasan igual (`_recalcular_total_pedido`
-    ya es no-op para este tipo). Reprogramar un turno real es un endpoint
-    propio de `routes/estudio.py` (revalida `_centinela_libre`/motor).
+    Pedidos DERIVADOS (`tipo` en `TIPOS_DERIVADOS` — estudio, estudio_fijo o
+    taller): un cambio de fecha/hora real se rechaza (409) — este endpoint
+    nunca revalida stock (ni el genérico ni el buffer propio del espacio; ver
+    `update_pedido_datos`), así que aplicarlo sin más movería un turno
+    confirmado a una franja ya ocupada sin ningún chequeo, o correría la
+    ventana contable de un taller sin pasar por la economía de la edición.
+    Notas/cliente/etc. pasan igual (`_recalcular_total_pedido` ya es no-op
+    para estos tipos). Reprogramar un turno real de estudio es un endpoint
+    propio de `routes/estudio.py` (revalida `_centinela_libre`/motor); las
+    fechas de un taller las gobierna la edición (`routes/talleres.py`).
     """
     p = conn.execute("SELECT * FROM alquileres WHERE id=%s FOR UPDATE", (id,)).fetchone()
     if not p:
@@ -470,15 +482,18 @@ def _apply_pedido_datos(conn, id: int, data: "PedidoDatos", es_admin: bool = Fal
         if _k in payload and not payload[_k]:
             payload[_k] = None
 
-    if es_pedido_estudio(p) and (
+    if es_pedido_derivado(p) and (
         ("fecha_desde" in payload and _fecha_cambia(p["fecha_desde"], payload["fecha_desde"]))
         or ("fecha_hasta" in payload and _fecha_cambia(p["fecha_hasta"], payload["fecha_hasta"]))
     ):
-        raise HTTPException(
-            409,
-            "Las fechas de un pedido del Estudio se reprograman desde Admin → Estudio "
-            "(para revalidar la disponibilidad del espacio).",
+        mensaje = (
+            "Las fechas de un pedido de taller las gobierna la edición (Talleres → "
+            "economía) — no se editan acá."
+            if es_pedido_taller(p)
+            else "Las fechas de un pedido del Estudio se reprograman desde Admin → Estudio "
+            "(para revalidar la disponibilidad del espacio)."
         )
+        raise HTTPException(409, mensaje)
 
     cliente_cambio = "cliente_id" in payload and payload["cliente_id"]
     if cliente_cambio:
@@ -558,6 +573,60 @@ def _apply_pedido_datos(conn, id: int, data: "PedidoDatos", es_admin: bool = Fal
     return _get_alquiler_detail(conn, id)
 
 
+def _validar_reemplazo_items_taller(conn, pedido_id: int, items_nuevos: list["PedidoItem"]) -> None:
+    """Un pedido de taller SÍ permite reemplazar ítems (a diferencia de
+    estudio/estudio_fijo, 409 en bloque) — es la única vía hoy para agregar
+    una línea de matrícula a mano (no hay un endpoint de "agregar un ítem",
+    `PUT items` reemplaza todo el array). Lo que no permite es que ese
+    reemplazo DESCARTE el/los ítem(s) AUTO-generados por
+    `_regenerar_pedidos_taller` (`services/talleres/commands/economia.py`) —
+    perderlos desatribuiría esa plata en silencio de la economía de
+    Estudio/Rambla, y el próximo recálculo de la edición no los repone (solo
+    borra-y-recrea meses SIN plata pagada, ver esa función).
+
+    Identifica el/los ítem(s) auto por su FORMA actual en la base (no
+    recomputando contra `ediciones_taller` — más simple y alcanza): el
+    centinela del Estudio (`equipo_id == estudio.equipo_id`, si `usa_estudio`)
+    y/o la línea libre "Uso de equipos — …" (si `usa_equipos`). El placeholder
+    "sin nada" (ni estudio ni equipos, precio 0) no se protege — no hay plata
+    que perder. Agregar líneas nuevas, o editar/quitar líneas manuales
+    (equipo_id o nombre_libre que NO matcheen lo de arriba), sigue libre.
+
+    Import diferido de `services.estudio` — mismo estilo que
+    `transiciones.py::_revalidar_stock` (ese paquete no importa de `routes.*`,
+    así que esta dirección de import es segura, sin ciclo).
+    """
+    from services.estudio.queries.estudio import _get_estudio_row
+
+    actuales = conn.execute(
+        "SELECT equipo_id, nombre_libre FROM alquiler_items WHERE pedido_id=%s",
+        (pedido_id,),
+    ).fetchall()
+    estudio = _get_estudio_row(conn)
+    centinela_id = estudio["equipo_id"] if estudio else None
+
+    tenia_centinela = bool(centinela_id) and any(a["equipo_id"] == centinela_id for a in actuales)
+    nombres_equipos_actuales = {
+        a["nombre_libre"] or "" for a in actuales
+        if a["equipo_id"] is None and (a["nombre_libre"] or "").startswith("Uso de equipos — ")
+    }
+    if not tenia_centinela and not nombres_equipos_actuales:
+        return  # nada reconocible que proteger (ej. el placeholder "sin nada")
+
+    nuevos_equipo_ids = {it.equipo_id for it in items_nuevos if it.equipo_id is not None}
+    nuevos_nombres_libres = {(it.nombre_libre or "") for it in items_nuevos if it.equipo_id is None}
+
+    perdio_centinela = tenia_centinela and centinela_id not in nuevos_equipo_ids
+    perdio_equipos = bool(nombres_equipos_actuales) and not (nombres_equipos_actuales & nuevos_nombres_libres)
+    if perdio_centinela or perdio_equipos:
+        raise HTTPException(
+            409,
+            "No se puede quitar la línea del espacio/equipos generada por la edición del "
+            "taller (se administra desde Talleres, no acá). Podés agregar líneas nuevas, "
+            "como una matrícula.",
+        )
+
+
 def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
     """Reemplaza los ítems del pedido por `items`. Recalcula subtotales y monto.
 
@@ -568,10 +637,12 @@ def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
     `_recalcular_total_pedido` (evitar lost-update entre dos escritores
     concurrentes del mismo pedido).
 
-    Rechaza pedidos del Estudio (`tipo` en `TIPOS_ESTUDIO`, 409): este
-    reemplazo reconstruye subtotales con la fórmula de un alquiler normal
+    Rechaza pedidos del Estudio (`tipo` en `TIPOS_ESTUDIO`, 409 en bloque):
+    este reemplazo reconstruye subtotales con la fórmula de un alquiler normal
     (jornadas × precio de catálogo) y perdería el ítem centinela que bloquea
-    el espacio — sus ítems se editan desde `routes/estudio.py`.
+    el espacio — sus ítems se editan desde `routes/estudio.py`. Un taller NO
+    se bloquea en bloque (ver `_validar_reemplazo_items_taller`): agregar una
+    línea de matrícula a mano sigue siendo válido, solo se protege el ítem auto.
     """
     p = conn.execute("SELECT * FROM alquileres WHERE id=%s FOR UPDATE", (id,)).fetchone()
     if not p:
@@ -580,6 +651,8 @@ def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
         raise HTTPException(
             409, "Los ítems de un pedido del Estudio se editan desde Admin → Estudio."
         )
+    if es_pedido_taller(p):
+        _validar_reemplazo_items_taller(conn, id, items)
     if not items:
         raise HTTPException(400, "Debe tener al menos un ítem")
 
@@ -653,18 +726,31 @@ def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
     # `presupuesto`, el % de cliente/jornadas queda CONGELADO (se reusa el
     # snapshot ya persistido) — editar ítems de un pedido confirmado no debe
     # poder cambiar el % de descuento, solo el bruto/monto que ese % multiplica.
-    descuento_jornadas_pct, descuento_cliente_pct = _resolver_descuentos_snapshot_o_vivo(conn, p, jornadas)
-    total_desglose = calcular_total(
-        items=lineas,  # incluye cobro_modo por línea (líneas 'fijo' no × jornadas)
-        jornadas=jornadas,
-        descuento_cliente_pct=descuento_cliente_pct,
-        descuento_jornadas_pct=descuento_jornadas_pct,
-        descuento_manual_pct=p["descuento_pct"] or 0,
-        descuento_manual_tipo=p["descuento_manual_tipo"] or "pct",
-        descuento_manual_monto=p["descuento_manual_monto"] or 0,
-        perfil_impuestos=None,  # persiste NETO; IVA derivado al mostrar.
-    )
-    monto_total = total_desglose["neto"]
+    #
+    # `taller` NUNCA pasa por esta jerarquía (bug latente cerrado en esta
+    # pasada): a diferencia de estudio/estudio_fijo (bloqueados en bloque más
+    # arriba), un taller SÍ llega hasta acá para poder agregar matrícula — pero
+    # su monto es la suma llana de sus líneas (`_regenerar_pedidos_taller`),
+    # sin cliente ni jornadas reales. Sin este branch, `calcular_total` le
+    # aplicaría igual cualquier `descuento_pct`/`descuento_manual_*` que la
+    # fila tuviera cargado (0 hoy por coincidencia, no por regla — mismo tipo
+    # de riesgo que ya se cerró en `_recalcular_total_pedido`).
+    if es_pedido_taller(p):
+        monto_total = sum(r[4] for r in rows)  # r[4] = subtotal (bruto_linea, ya sin descuento)
+        descuento_jornadas_pct, descuento_cliente_pct = 0, 0
+    else:
+        descuento_jornadas_pct, descuento_cliente_pct = _resolver_descuentos_snapshot_o_vivo(conn, p, jornadas)
+        total_desglose = calcular_total(
+            items=lineas,  # incluye cobro_modo por línea (líneas 'fijo' no × jornadas)
+            jornadas=jornadas,
+            descuento_cliente_pct=descuento_cliente_pct,
+            descuento_jornadas_pct=descuento_jornadas_pct,
+            descuento_manual_pct=p["descuento_pct"] or 0,
+            descuento_manual_tipo=p["descuento_manual_tipo"] or "pct",
+            descuento_manual_monto=p["descuento_manual_monto"] or 0,
+            perfil_impuestos=None,  # persiste NETO; IVA derivado al mostrar.
+        )
+        monto_total = total_desglose["neto"]
 
     conn.execute("DELETE FROM alquiler_items WHERE pedido_id=%s", (id,))
     conn.executemany("""

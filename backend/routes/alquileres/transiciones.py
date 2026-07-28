@@ -39,7 +39,7 @@ from fastapi import HTTPException
 
 from database import to_datetime
 from reservas import validar_stock as _check_stock
-from tipos_pedido import es_pedido_estudio
+from tipos_pedido import es_pedido_estudio, es_pedido_taller
 
 # Estados que reservan stock activamente — entrar a uno de estos desde uno que
 # NO reserva exige re-validar stock (ver `_requiere_revalidar_stock`).
@@ -86,21 +86,34 @@ def _requiere_revalidar_stock(estado_actual: str, estado_nuevo: str) -> bool:
 
 def _revalidar_stock(conn, p) -> list[str]:
     """Errores de stock/disponibilidad (YA formateados como mensaje) al
-    transicionar el pedido `p` a un estado que reserva.
+    transicionar el pedido `p` a un estado que reserva. Solo se llama cuando
+    `p["fecha_desde"]`/`p["fecha_hasta"]` están cargadas (ver `cambiar_estado`)
+    — para un pedido DERIVADO ese rango no es una franja/evento real, así que
+    los 3 tipos branchean distinto acá (no es un simple `es_pedido_derivado`):
 
-    Pedidos del Estudio (`tipo` en `TIPOS_ESTUDIO`) van por su propio
-    revalidador (`routes.estudio.revalidar_disponibilidad_estudio`: espacio
-    con SU buffer propio + equipos reales por el motor) — el `_check_stock`
-    genérico leería el ítem centinela como un equipo más y lo validaría con
-    el buffer GLOBAL, no el propio del espacio (bug encontrado auditando la
-    economía del Estudio: confirmar/transicionar un pedido de estudio no
-    revalidaba con el buffer correcto).
+    - Pedidos del Estudio (`tipo` en `TIPOS_ESTUDIO`) van por su propio
+      revalidador (`routes.estudio.revalidar_disponibilidad_estudio`: espacio
+      con SU buffer propio + equipos reales por el motor) — el `_check_stock`
+      genérico leería el ítem centinela como un equipo más y lo validaría con
+      el buffer GLOBAL, no el propio del espacio (bug encontrado auditando la
+      economía del Estudio: confirmar/transicionar un pedido de estudio no
+      revalidaba con el buffer correcto).
+    - Un pedido de `taller` SE SALTEA por completo (sin errores): su rango es
+      el mes contable de la edición, no una franja real — ni el motor
+      genérico (que contaría el centinela contra el buffer global de un mes
+      entero) ni el revalidador del Estudio (que preguntaría "¿está libre el
+      espacio ese mes completo?", casi siempre no por las reservas reales que
+      ese mes sí contiene) dan un resultado con sentido. El bloqueo real de
+      las clases puntuales ya lo hace `_taller_bloqueante`/el gate de la
+      edición (`services/talleres/commands/ediciones.py`), no este endpoint.
 
     Import diferido de `services.estudio` — mismo estilo que el resto de los
     imports diferidos de este archivo, ver `cambiar_estado`."""
     if es_pedido_estudio(p):
         from services.estudio.queries.disponibilidad import revalidar_disponibilidad_estudio
         return revalidar_disponibilidad_estudio(conn, p)
+    if es_pedido_taller(p):
+        return []
     return [
         f"Sin stock suficiente: {s}"
         for s in _check_stock(conn, p["id"], p["fecha_desde"], p["fecha_hasta"])
