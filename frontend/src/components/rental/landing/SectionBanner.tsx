@@ -1,22 +1,26 @@
 import { AREAS, type AreaKey } from "@/data/areas";
 
-// Bajada propia del banner (copy editorial, más larga que `AREAS[].desc` que
-// es para el menú) — reusa frases ya escritas para la misma área en el hub
-// (`routes/index.tsx`), no inventa una voz nueva.
-const TAGLINE: Record<AreaKey, string> = {
-  rental: "Alquilá lo que necesitás — retiro en el estudio.",
-  estudio: "Un lugar donde pasan cosas: set con ciclorama y luz natural.",
+// El hero ya NO repite el nombre del área (el topbar de arriba ya dice
+// "RAMBLA <área>." — poner el label de nuevo acá abajo, aunque fuera sin el
+// wordmark, seguía leyendo como "escuela." dos veces seguidas). En su lugar,
+// el título grande del banner es la PROMESA de la sección — reusa frases ya
+// escritas para la misma área en el hub (`routes/index.tsx`), no inventa una
+// voz nueva. `AREAS[].label` sigue vivo para el topbar/menú, acá no se usa.
+const HEADLINE: Record<AreaKey, string> = {
+  rental: "alquilá lo que necesitás.",
+  estudio: "un lugar donde pasan cosas.",
+  escuela: "aprender haciendo.",
+};
+
+const BODY: Record<AreaKey, string> = {
+  rental: "Cámaras, lentes, iluminación, audio y soportes. Retiro en el estudio.",
+  estudio: "Set con fondo infinito, ciclorama y luz natural. Por hora.",
   escuela: "Clases prácticas de dirección de arte, foto y video. Cupos limitados.",
 };
 
 /**
- * Banner de sección: fondo ink + grain, label enorme en el color de marca de
- * la sección + bajada. Un banner por cada vertical de Rambla.
- *
- * Sin el wordmark "RAMBLA" (se sacó, #1304-adjacent): el topbar de arriba ya
- * lo muestra pegado al label del área ("RAMBLA escuela.") — repetirlo acá
- * abajo leía como el mismo texto dos veces seguidas. La bajada ocupa ese
- * lugar con información nueva en vez de repetir la marca.
+ * Banner de sección: fondo ink + grain, promesa de la sección enorme (no el
+ * nombre del área) + bajada. Un banner por cada vertical de Rambla.
  */
 export function SectionBanner({
   section,
@@ -25,8 +29,9 @@ export function SectionBanner({
   section: AreaKey;
   className?: string;
 }) {
-  const { label, eyebrow, accent: color } = AREAS[section];
-  const tagline = TAGLINE[section];
+  const { eyebrow, accent: color } = AREAS[section];
+  const headline = HEADLINE[section];
+  const body = BODY[section];
 
   return (
     <div className={`relative bg-ink overflow-hidden flex flex-col justify-end ${className}`}>
@@ -46,16 +51,16 @@ export function SectionBanner({
           {eyebrow}
         </p>
 
-        {/* Label de sección */}
+        {/* Promesa de la sección (no repite el área — ver comentario arriba) */}
         <p
-          className={`font-display font-black lowercase leading-[0.88] tracking-[-0.02em] ${color}`}
-          style={{ fontSize: "clamp(2rem, 6vw, 4rem)" }}
+          className={`font-display font-black lowercase leading-[0.95] tracking-[-0.02em] max-w-xl ${color}`}
+          style={{ fontSize: "clamp(1.75rem, 4.5vw, 3rem)" }}
         >
-          {label}
+          {headline}
         </p>
 
         {/* Bajada */}
-        <p className="max-w-md text-sm sm:text-base text-white/70 leading-relaxed">{tagline}</p>
+        <p className="max-w-md text-sm sm:text-base text-white/70 leading-relaxed">{body}</p>
       </div>
     </div>
   );
