@@ -35,7 +35,8 @@ services/estudio/
                             # selector de fechas de /estudio. No es el gate — solo lectura/display.
     promo.py              # get_disponibilidad (wrapper LOCAL sobre reservas.calcular_disponibilidad,
                            # conexión propia — ver "Reglas" abajo), _pack_equipo_ids (sobrevive
-                           # como semilla de componentes), _promo_info
+                           # como semilla de componentes), _promo_info (incluye `componentes`
+                           # públicos vía services.contenido.contenido_de — ver "Reglas" abajo)
   commands/           # ESCRITURA — única puerta de mutación
     reserva.py           # SueltoItem, _ESTADOS_ADMIN_CREACION, _precio_promo_y_sueltos +
                           # _validar_e_insertar_promo_sueltos (compartidos, ver abajo),
@@ -92,6 +93,10 @@ de `queries/`; `queries/` **nunca** de `commands/`.
 - **Un `estudio_fijo` (pedido de slot) no se edita acá** (`editar_reserva` lo rechaza con 409) — lo
   gobierna su slot (`routes/estudio.py::_regenerar_pedidos_slot`, fuera de este paquete a propósito:
   dominio "slots", no "disponibilidad/reserva por hora").
+- **El listado público "qué incluye" de la promo (`_promo_info`'s `componentes`) sale de la puerta
+  única `services.contenido.contenido_de`** (2026-06-29), NUNCA de una query ad-hoc a
+  `kit_componentes` — misma fuente que `attach_kit` usa para el catálogo, así el panel público de
+  `/estudio` no puede desincronizarse de lo que la promo realmente reserva.
 - **"Recién pintado" (`estudio.precio_pintura_reciente`) es un add-on INDEPENDIENTE, no un tercer
   camino de promo/sueltos.** Se inserta como línea libre (`equipo_id=NULL`, `cobro_modo='fijo'`,
   mismo patrón que flete/limpieza #805) vía `_insertar_item_pintura`, SIN pasar por
@@ -105,4 +110,5 @@ El supervisor marca: lógica de disponibilidad/reserva del Estudio reimplementad
 paquete; un import de `routes.*` dentro de `services/estudio/`; un `queries/` importando de
 `commands/`; un commit dentro de un command (el route es dueño de la transacción); la promo vuelta
 DURA o un suelto vuelto best-effort; el re-chequeo bajo `FOR UPDATE` removido o reordenado después
-del INSERT del ítem centinela.
+del INSERT del ítem centinela; un listado de "qué incluye" de la promo armado con SQL ad-hoc en vez
+de `services.contenido.contenido_de`.

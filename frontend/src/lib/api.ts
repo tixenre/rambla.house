@@ -263,6 +263,10 @@ export type EstudioPromo = {
   foto_url: string | null;
   precio: number;
   disponible?: boolean;
+  /** Listado público "qué incluye" — misma fuente que el catálogo
+   *  (services.contenido), nunca se puede desincronizar de lo que la promo
+   *  realmente reserva. */
+  componentes: Array<{ nombre: string; cantidad: number; foto_url: string | null }>;
 };
 
 /** Un medio del carrusel de un trabajo: link externo (YouTube/Instagram) o foto

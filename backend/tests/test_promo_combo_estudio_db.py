@@ -218,6 +218,10 @@ def test_get_estudio_expone_promo(client_con_db, setup):
     promo = r.json()["promo"]
     assert promo is not None
     assert promo["precio"] == 1200
+    # Listado público "qué incluye" — misma fuente que el catálogo
+    # (services.contenido), nunca desincronizado de lo que la promo reserva.
+    assert {c["nombre"] for c in promo["componentes"]} == {"Equipo promo A", "Equipo promo B"}
+    assert all(c["cantidad"] == 1 for c in promo["componentes"])
 
 
 def test_disponibilidad_expone_promo_disponible(client_con_db, setup):

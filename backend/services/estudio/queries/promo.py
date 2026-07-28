@@ -7,6 +7,7 @@ sobrevive solo como semilla de componentes al crear la promo
 """
 from database import get_db
 from reservas import calcular_disponibilidad as _calcular_disponibilidad
+from services.contenido import contenido_de
 from services.precios import precio_jornada_efectivo
 
 
@@ -41,11 +42,15 @@ def _pack_equipo_ids(conn) -> list[int]:
 
 def _promo_info(conn, estudio_row, fecha_desde=None, fecha_hasta=None,
                 exclude_pedido_id: int | None = None) -> dict | None:
-    """Info de la promo (combo) del Estudio: nombre/foto/precio — `None` si
-    todavía no se creó (#1283 Fase 5). El precio sale de `precio_jornada_efectivo`
-    (fuente única, sigue en vivo el precio de los componentes). `descripcion` reusa
-    `pack_descripcion` (texto libre ya editable desde el back-office, no se agrega
-    un campo nuevo). Si se pasa una franja (`fecha_desde`/`fecha_hasta`, ambos
+    """Info de la promo (combo) del Estudio: nombre/foto/precio/componentes —
+    `None` si todavía no se creó (#1283 Fase 5). El precio sale de
+    `precio_jornada_efectivo` (fuente única, sigue en vivo el precio de los
+    componentes). `descripcion` reusa `pack_descripcion` (texto libre ya
+    editable desde el back-office, no se agrega un campo nuevo). `componentes`
+    (listado público "qué incluye") sale de la puerta única
+    `services.contenido.contenido_de` — MISMA fuente que el catálogo
+    (`attach_kit`), nunca puede desincronizarse de lo que la promo realmente
+    reserva. Si se pasa una franja (`fecha_desde`/`fecha_hasta`, ambos
     `datetime`), suma `disponible` (deriva de `get_disponibilidad`, que expande
     los componentes del combo igual que cualquier compuesto — sin lógica nueva)."""
     combo_id = estudio_row["promo_combo_id"]
@@ -63,6 +68,10 @@ def _promo_info(conn, estudio_row, fecha_desde=None, fecha_hasta=None,
         "descripcion": estudio_row["pack_descripcion"],
         "foto_url": combo["foto_url"],
         "precio": precio_jornada_efectivo(conn, combo_id) or 0,
+        "componentes": [
+            {"nombre": c["nombre"], "cantidad": c["cantidad"], "foto_url": c["foto_url"]}
+            for c in contenido_de(conn, combo_id, solo_activos=True)
+        ],
     }
     if fecha_desde is not None:
         disp = get_disponibilidad(fecha_desde.isoformat(), fecha_hasta.isoformat(), exclude_pedido_id)
