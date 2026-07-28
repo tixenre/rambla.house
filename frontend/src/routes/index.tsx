@@ -4,6 +4,7 @@ import { SITE_URL } from "@/lib/site";
 import { useHeroPhotos } from "@/lib/studio/hero-photos";
 import { Logo } from "@/components/rental/shell/Logo";
 import { AreaMenu } from "@/components/rental/shell/AreaMenu";
+import { AREAS } from "@/data/areas";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -67,7 +68,7 @@ function LandingHub() {
             className="group relative flex flex-1 flex-col justify-center md:justify-start px-6 py-5 sm:p-10 bg-amber text-ink md:flex-none transition-[filter] hover:brightness-105 active:brightness-95"
           >
             <p className="font-mono text-2xs tracking-[0.28em] uppercase text-ink/55 mb-2 sm:mb-5">
-              Equipos audiovisuales
+              {AREAS.rental.eyebrow}
             </p>
             <h2
               className="font-display font-black lowercase leading-[0.9] tracking-[-0.02em] text-ink mb-3 sm:mb-4"
@@ -110,7 +111,7 @@ function LandingHub() {
             )}
             <div className="relative">
               <p className="font-mono text-2xs tracking-[0.28em] uppercase mb-2 sm:mb-5 text-ink">
-                El Estudio
+                {AREAS.estudio.eyebrow}
               </p>
               <h2
                 className="font-display font-black lowercase leading-[0.9] tracking-[-0.02em] text-ink mb-3 sm:mb-4"
@@ -141,7 +142,7 @@ function LandingHub() {
             style={{ backgroundColor: "var(--color-rosa)" }}
           >
             <p className="font-mono text-2xs tracking-[0.28em] uppercase text-ink/55 mb-2 sm:mb-5">
-              La Escuela
+              {AREAS.escuela.eyebrow}
             </p>
             <h2
               className="font-display font-black lowercase leading-[0.9] tracking-[-0.02em] text-ink mb-3 sm:mb-4"
