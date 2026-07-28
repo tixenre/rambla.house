@@ -417,6 +417,18 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export RESERVAS_DB_TEST=1
           python -m pytest tests/test_estudio_transiciones_stock_db.py -v --tb=short -m integration
+      - name: services/estudio — el centinela ignora pedidos derivados (taller/estudio_fijo) contra Postgres real
+        run: |
+          cd backend
+          # Bug real (pedido #445, dueño): un pedido de taller con rango mensual ancho
+          # bloqueaba el espacio los días corridos del mes — su bloqueo real ya lo hace
+          # _taller_bloqueante (clases_taller). _centinela_libre ahora excluye
+          # tipo IN ('taller','estudio_fijo'); un turno real sigue bloqueando (regresión).
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_estudio_centinela_ignora_derivados_db.py -v --tb=short -m integration
       - name: Escuela v2 — instructores como entidad contra Postgres real (F3, #1278)
         run: |
           cd backend

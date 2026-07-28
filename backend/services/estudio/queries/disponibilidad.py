@@ -95,11 +95,22 @@ def _centinela_libre(conn, equipo_id: int, fecha_desde, fecha_hasta,
     pise con la franja expandida (half-open: fecha_desde < hi AND fecha_hasta > lo)
     significa ocupado. `exclude_pedido_id` excluye el propio pedido en el POST.
 
-    `exclude_slot_id`: los pedidos `estudio_fijo` llevan su propio ítem
-    centinela (Fase 2, ítems veraces) — sin esto, revalidar la disponibilidad
-    de un slot fijo (`actualizar_slot`, ANTES de regenerar sus pedidos)
-    chocaría contra los pedidos YA EXISTENTES del propio slot para ese mismo
-    día/hora, bloqueándose a sí mismo.
+    `exclude_slot_id`: dejado por compatibilidad de firma con `_slot_bloqueante` (que sí lo
+    usa) — desde que esta query excluye `tipo IN ('taller','estudio_fijo')` (ver abajo), un
+    `estudio_fijo` nunca llega a contarse acá de todas formas, así que este parámetro quedó
+    sin efecto PARA ESTA función específica (no se retira: sigue siendo parte del contrato
+    de `_estudio_disponible`, que lo reenvía también a `_slot_bloqueante`).
+
+    Filtro `p.tipo IN ('taller', 'estudio_fijo')` (2026-07-28): esos dos tipos son pedidos
+    DERIVADOS/contables — sus fechas NO representan la franja real ocupada (`taller` guarda
+    el mes calendario completo de la edición; `estudio_fijo` guarda solo la primera
+    ocurrencia semanal). El bloqueo REAL de ambos ya lo hacen, ANTES de llegar acá,
+    `_taller_bloqueante` (clases_taller, fecha+hora exactas) y `_slot_bloqueante` (regla de
+    día de semana) — ambos corren primero en `_estudio_disponible`. Sin este filtro, un
+    pedido de taller confirmado con rango mensual (ej. "15→22 ago") bloqueaba el espacio los
+    7 días corridos aunque el taller real fueran 2 clases de 4h — bug real reportado por el
+    dueño en el pedido #445. Los turnos reales (`tipo='estudio'`) SÍ tienen que seguir
+    contándose acá: es la única forma en que dos turnos por hora se pisan entre sí.
     """
     lo = fecha_desde - timedelta(hours=max(0, buffer_horas or 0))
     hi = fecha_hasta + timedelta(hours=max(0, buffer_horas or 0))
@@ -110,6 +121,7 @@ def _centinela_libre(conn, equipo_id: int, fecha_desde, fecha_hasta,
         JOIN alquileres p ON p.id = pi.pedido_id
         WHERE pi.equipo_id = %s
           AND p.estado IN {ESTADOS_RESERVADO}
+          AND p.tipo NOT IN ('taller', 'estudio_fijo')
           AND (%s IS NULL OR p.id != %s)
           AND (%s IS NULL OR p.estudio_slot_id IS DISTINCT FROM %s)
           AND p.fecha_desde < %s
