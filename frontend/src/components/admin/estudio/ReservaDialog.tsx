@@ -69,6 +69,7 @@ export function ReservaDialog({
   reserva,
   estudio,
   onSaved,
+  pedidoVinculado,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -76,6 +77,11 @@ export function ReservaDialog({
   reserva: EstudioReservaListItem | null;
   estudio: EstudioConfig;
   onSaved: () => void;
+  /** Alta de un turno DESDE la página de un pedido de alquiler normal
+   *  (#1308, sección "Reserva del Estudio"): el cliente se hereda de ese
+   *  pedido — oculta el picker y manda `pedido_principal_id` en vez de
+   *  cliente_id/nombre. Solo aplica al modo alta (`reserva == null`). */
+  pedidoVinculado?: { id: number; clienteNombre: string | null };
 }) {
   const editando = !!reserva;
 
@@ -156,8 +162,15 @@ export function ReservaDialog({
         fecha,
         start,
         horas,
-        cliente_id: clienteId,
-        cliente_nombre: clienteId ? null : clienteNombreLibre.trim() || null,
+        // Vinculado: el cliente lo resuelve el backend desde el pedido
+        // principal — no mandamos cliente_id/nombre de acá (el picker ni
+        // siquiera se muestra en ese caso, ver el render).
+        ...(pedidoVinculado
+          ? { pedido_principal_id: pedidoVinculado.id }
+          : {
+              cliente_id: clienteId,
+              cliente_nombre: clienteId ? null : clienteNombreLibre.trim() || null,
+            }),
         con_promo: conPromo,
         pintura_reciente: pinturaReciente,
         sueltos: sueltosInput,
@@ -218,7 +231,11 @@ export function ReservaDialog({
       <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
-            {editando ? `Editar turno #${reserva?.numero_pedido ?? reserva?.id}` : "Nuevo turno"}
+            {editando
+              ? `Editar turno #${reserva?.numero_pedido ?? reserva?.id}`
+              : pedidoVinculado
+                ? "Nuevo turno del Estudio"
+                : "Nuevo turno"}
           </DialogTitle>
         </DialogHeader>
 
@@ -266,37 +283,45 @@ export function ReservaDialog({
               </Field>
             </div>
 
-            <Field label="Cliente (ficha o texto libre)">
-              {clienteId ? (
-                <div className="flex items-center gap-2 rounded-md border hairline px-2.5 py-1.5 text-sm">
-                  <span className="flex-1 truncate">{clienteNombreElegido}</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setClienteId(null);
-                      setClienteNombreElegido(null);
-                    }}
-                    className="text-muted-foreground hover:text-ink"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+            {pedidoVinculado ? (
+              <Field label="Cliente" hint="Heredado del pedido al que se vincula este turno.">
+                <div className="rounded-md border hairline bg-muted/20 px-2.5 py-1.5 text-sm text-muted-foreground">
+                  {pedidoVinculado.clienteNombre || "Sin cliente"}
                 </div>
-              ) : (
-                <div className="space-y-1.5">
-                  <ClienteAutocomplete
-                    onPick={(c: Cliente) => {
-                      setClienteId(c.id);
-                      setClienteNombreElegido(nombreCliente(c));
-                    }}
-                  />
-                  <Input
-                    value={clienteNombreLibre}
-                    onChange={(e) => setClienteNombreLibre(e.target.value)}
-                    placeholder="…o nombre sin ficha (alguien que llamó)"
-                  />
-                </div>
-              )}
-            </Field>
+              </Field>
+            ) : (
+              <Field label="Cliente (ficha o texto libre)">
+                {clienteId ? (
+                  <div className="flex items-center gap-2 rounded-md border hairline px-2.5 py-1.5 text-sm">
+                    <span className="flex-1 truncate">{clienteNombreElegido}</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClienteId(null);
+                        setClienteNombreElegido(null);
+                      }}
+                      className="text-muted-foreground hover:text-ink"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-1.5">
+                    <ClienteAutocomplete
+                      onPick={(c: Cliente) => {
+                        setClienteId(c.id);
+                        setClienteNombreElegido(nombreCliente(c));
+                      }}
+                    />
+                    <Input
+                      value={clienteNombreLibre}
+                      onChange={(e) => setClienteNombreLibre(e.target.value)}
+                      placeholder="…o nombre sin ficha (alguien que llamó)"
+                    />
+                  </div>
+                )}
+              </Field>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               {estudio.promo_combo_id && (

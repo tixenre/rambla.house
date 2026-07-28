@@ -1191,6 +1191,23 @@ export type Pedido = {
   tipo?: "diaria" | "estudio" | "estudio_fijo" | "taller";
   /** Presente solo si `tipo === "taller"`: la edición que lo generó. */
   taller_edicion_id?: number | null;
+  /** Presente solo en un turno del Estudio creado desde la página de un
+   *  pedido de alquiler normal (#1308, sección "Reserva del Estudio" en el
+   *  pedido principal) — el pedido del que "cuelga". `cliente_id`/nombre del
+   *  turno se heredan SIEMPRE de este pedido (lo fuerza el backend, nunca
+   *  desincroniza). `null`/ausente = turno sin vincular (el caso normal). */
+  pedido_principal_id?: number | null;
+  /** Breadcrumb liviano de vuelta al pedido principal — solo en el detalle
+   *  (`getPedido`) de un turno vinculado. */
+  pedido_principal?: {
+    id: number;
+    numero_pedido: number | null;
+    cliente_nombre: string | null;
+  } | null;
+  /** Solo presente en el detalle de un pedido de alquiler normal: los turnos
+   *  del Estudio vinculados (#1308) — mismo shape que `PedidoGeneradoEdicion`
+   *  (Talleres → Pedidos). Vacío/ausente = sin turnos vinculados. */
+  turnos_estudio_vinculados?: PedidoGeneradoEdicion[];
   /** Solo presente en el detalle (`getPedido`) de un pedido de taller: las
    *  clases REALES (fecha + franja horaria) de la edición — la verdad
    *  temporal que `fecha_desde`/`fecha_hasta` no representan (esas son el mes
@@ -1486,6 +1503,10 @@ export type EstudioReservaCreateInput = {
   sueltos?: EstudioSueltoInput[];
   espacio_monto?: number | null;
   estado?: "solicitado" | "confirmado" | "retirado";
+  /** Vincula el turno a un pedido de alquiler normal (#1308) — cuando viene,
+   *  el backend ignora `cliente_id`/`cliente_nombre` de este mismo body y
+   *  hereda el contacto del pedido principal. */
+  pedido_principal_id?: number;
 };
 
 export type EstudioReservaUpdateInput = {

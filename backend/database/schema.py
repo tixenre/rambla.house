@@ -2637,4 +2637,22 @@ def _init_db_schema(conn):
         "ON aceptaciones_tyc(cliente_id)"
     )
 
+    # Vincula un turno del Estudio (tipo='estudio') a un pedido de alquiler
+    # normal (tipo='diaria') del que "cuelga" — el pedido de rental de varios
+    # días y el turno puntual del Estudio son registros distintos (fechas con
+    # significado incompatible: rango vs. franja horaria, ver `tipos_pedido.py`)
+    # pero se administran en una sola pantalla (el pedido principal muestra sus
+    # turnos vinculados inline, el turno muestra un link de vuelta). Self-FK
+    # nullable, ON DELETE SET NULL: si se borra el pedido principal, el turno
+    # sobrevive como turno normal (no huérfano, no se re-elimina en cascada).
+    # NULL en todo pedido existente → cero impacto. Esquema en dos capas
+    # (MEMORIA 2026-06-03): también en la migración pv1nc2l3a4d5.
+    conn.execute(
+        "ALTER TABLE alquileres ADD COLUMN IF NOT EXISTS pedido_principal_id "
+        "INTEGER REFERENCES alquileres(id) ON DELETE SET NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pedidos_principal ON alquileres(pedido_principal_id)"
+    )
+
     conn.commit()

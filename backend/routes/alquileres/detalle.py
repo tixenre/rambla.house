@@ -100,9 +100,42 @@ def _get_alquiler_detail(conn, id: int) -> dict:
         _clases_del_taller(conn, pedido["taller_edicion_id"])
         if pedido.get("taller_edicion_id") else []
     )
+    pedido["pedido_principal"] = (
+        _pedido_principal_liviano(conn, pedido["pedido_principal_id"])
+        if pedido.get("pedido_principal_id") else None
+    )
+    pedido["turnos_estudio_vinculados"] = _turnos_vinculados(conn, id)
     _enriquecer_pedido_con_cliente(conn, pedido)
     _enriquecer_pedido_con_total(conn, pedido)
     return pedido
+
+
+def _pedido_principal_liviano(conn, pedido_principal_id: int) -> dict | None:
+    """Breadcrumb de vuelta para un turno del Estudio vinculado (#1308): el
+    pedido de alquiler normal del que "cuelga". `None` si se borró (el link
+    es `ON DELETE SET NULL`, no debería pasar, pero no reventar si pasa)."""
+    row = conn.execute(
+        "SELECT id, numero_pedido, cliente_nombre FROM alquileres WHERE id = %s",
+        (pedido_principal_id,),
+    ).fetchone()
+    return row_to_dict(row) if row else None
+
+
+def _turnos_vinculados(conn, pedido_id: int) -> list[dict]:
+    """Turnos del Estudio vinculados a este pedido (#1308) — mismo shape
+    liviano que `services.talleres` usa para "pedidos generados" de una
+    edición (`PedidoGeneradoEdicion` en el front)."""
+    rows = conn.execute(
+        """
+        SELECT id, numero_pedido, estado, fecha_desde, fecha_hasta,
+               monto_total, monto_pagado
+        FROM alquileres
+        WHERE pedido_principal_id = %s
+        ORDER BY fecha_desde
+        """,
+        (pedido_id,),
+    ).fetchall()
+    return [row_to_dict(r) for r in rows]
 
 
 def _clases_del_taller(conn, edicion_id: int) -> list[dict]:

@@ -109,6 +109,7 @@ import { Section } from "@/design-system/composites/Section";
 import { FieldLabel } from "@/design-system/ui/Field";
 import { esPedidoEstudio, esPedidoDerivado, esPedidoTaller } from "@/lib/tipos-pedido";
 import { ReservaEstudioSection } from "@/components/admin/estudio/ReservaEstudioSection";
+import { TurnosEstudioSection } from "@/components/admin/pedido/TurnosEstudioSection";
 
 export const Route = createLazyFileRoute("/admin/pedidos/$id")({
   component: PedidoEditorRoute,
@@ -438,6 +439,26 @@ function PedidoEditorPage() {
                 <Link to="/admin/solicitudes" className="underline text-muted-foreground">
                   Revisarla en Solicitudes
                 </Link>
+                .
+              </div>
+            </div>
+          )}
+
+          {/* Breadcrumb de vuelta — este turno se creó desde la sección
+              "Turnos del Estudio" de otro pedido (#1308). */}
+          {p.pedido_principal && (
+            <div className="flex items-start gap-2 rounded-lg border hairline bg-muted/20 px-3 py-2.5 text-sm">
+              <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                Turno vinculado al pedido{" "}
+                <Link
+                  to="/admin/pedidos/$id"
+                  params={{ id: String(p.pedido_principal.id) }}
+                  className="underline text-ink"
+                >
+                  #{p.pedido_principal.numero_pedido ?? p.pedido_principal.id}
+                </Link>
+                {p.pedido_principal.cliente_nombre ? ` (${p.pedido_principal.cliente_nombre})` : ""}
                 .
               </div>
             </div>
@@ -787,6 +808,10 @@ function PedidoEditorPage() {
               )}
             </Section>
           )}
+
+          {/* Turnos del Estudio vinculados (#1308) — solo para un pedido de
+              alquiler normal (un turno/slot/taller no anida otro turno). */}
+          {!esPedidoDerivado(p) && <TurnosEstudioSection pedido={p} />}
 
           {/* Notas */}
           <Section variant="card" tone="elevated" icon={FileText} title="Notas internas">

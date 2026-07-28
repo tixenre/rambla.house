@@ -163,6 +163,7 @@ def _crear_pedido_estudio(
     cliente_id, cliente_nombre, cliente_email, cliente_telefono,
     con_promo: bool, sueltos: list | None, pintura_reciente: bool = False,
     espacio_monto: int | None, estado: str, numero_pedido: int,
+    pedido_principal_id: int | None = None,
 ) -> tuple[int, Optional[str]]:
     """Núcleo de creación de un pedido del Estudio (#1283 Fase 6 — extraído de
     `crear_reserva_estudio`, que ahora es un wrapper: sesión+Didit+anticipación
@@ -181,6 +182,13 @@ def _crear_pedido_estudio(
     `espacio_monto`: si es `None`, se calcula `precio_hora × horas` como
     siempre; si viene, es un override manual del admin (ej. tarifa
     negociada) — el pedido lo persiste tal cual, sin recalcularlo.
+
+    `pedido_principal_id`: si viene, vincula este turno a un pedido de
+    alquiler normal (#1308, "Reserva del Estudio" desde la página del
+    pedido) — el CALLER es responsable de resolver `cliente_id`/
+    `cliente_nombre`/etc. DEL PEDIDO PRINCIPAL antes de llamar (no de lo que
+    mande el request), así el turno y su pedido nunca muestran clientes
+    distintos.
     """
     slot_cliente = _slot_bloqueante(conn, fecha_desde, fecha_hasta)
     if slot_cliente:
@@ -213,13 +221,15 @@ def _crear_pedido_estudio(
         """
         INSERT INTO alquileres (cliente_id, cliente_nombre, cliente_email, cliente_telefono,
                                 fecha_desde, fecha_hasta, monto_total, estado,
-                                fuente, tipo, estudio_con_pack, numero_pedido)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                fuente, tipo, estudio_con_pack, numero_pedido,
+                                pedido_principal_id)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """,
         (
             cliente_id, cliente_nombre, cliente_email, cliente_telefono,
             fecha_desde, fecha_hasta, monto_total, estado,
             "estudio", "estudio", False, numero_pedido,
+            pedido_principal_id,
         ),
     )
 

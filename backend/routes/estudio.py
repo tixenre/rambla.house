@@ -1618,6 +1618,29 @@ class EstudioReservaAdminCreate(BaseModel):
     sueltos: list[SueltoItem] = []
     espacio_monto: Optional[int] = None
     estado: str = "confirmado"
+    # Vincula el turno a un pedido de alquiler normal (#1308, "Reserva del
+    # Estudio" desde la página del pedido) — cuando viene, el cliente del
+    # turno se hereda del pedido principal (`cliente_id`/`cliente_nombre` de
+    # este body se ignoran) para que nunca puedan desincronizarse.
+    pedido_principal_id: Optional[int] = None
+
+
+def _resolver_pedido_principal(conn, pedido_principal_id: int):
+    """Valida el pedido a vincular y devuelve su contacto — el turno hereda
+    SIEMPRE de acá, nunca de lo que mande el request (ver docstring de
+    `_crear_pedido_estudio`)."""
+    p = conn.execute(
+        "SELECT tipo, cliente_id, cliente_nombre, cliente_email, cliente_telefono "
+        "FROM alquileres WHERE id = %s",
+        (pedido_principal_id,),
+    ).fetchone()
+    if not p:
+        raise HTTPException(404, "El pedido a vincular no existe")
+    if p["tipo"] != "diaria":
+        raise HTTPException(
+            400, "Solo se puede vincular un turno a un pedido de alquiler normal"
+        )
+    return p["cliente_id"], p["cliente_nombre"], p["cliente_email"], p["cliente_telefono"]
 
 
 @router.post("/admin/estudio/reservas", status_code=201)
@@ -1640,9 +1663,14 @@ def crear_reserva_estudio_admin(body: EstudioReservaAdminCreate, request: Reques
             if not estudio["equipo_id"]:
                 raise HTTPException(409, "El estudio todavía no tiene un recurso asociado")
 
-            cliente_id, cliente_nombre, cliente_email, cliente_telefono = _resolver_cliente_admin(
-                conn, body.cliente_id, body.cliente_nombre
-            )
+            if body.pedido_principal_id is not None:
+                cliente_id, cliente_nombre, cliente_email, cliente_telefono = (
+                    _resolver_pedido_principal(conn, body.pedido_principal_id)
+                )
+            else:
+                cliente_id, cliente_nombre, cliente_email, cliente_telefono = (
+                    _resolver_cliente_admin(conn, body.cliente_id, body.cliente_nombre)
+                )
             fecha_desde, fecha_hasta = _franja_estudio(estudio, body.fecha, body.start, body.horas)
 
             pedido_id, promo_advertencia = _crear_pedido_estudio(
@@ -1653,6 +1681,7 @@ def crear_reserva_estudio_admin(body: EstudioReservaAdminCreate, request: Reques
                 pintura_reciente=body.pintura_reciente,
                 espacio_monto=body.espacio_monto, estado=body.estado,
                 numero_pedido=_next_numero_pedido(conn),
+                pedido_principal_id=body.pedido_principal_id,
             )
             conn.commit()
             resp = _reserva_estudio_admin_dict(conn, pedido_id)
