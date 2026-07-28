@@ -11,6 +11,15 @@ from auth.guards import require_admin
 
 router = APIRouter()
 
+# Pedidos DERIVADOS/contables ('taller': mes calendario completo de la edición;
+# 'estudio_fijo': solo la primera ocurrencia semanal del mes) — sus fechas NO
+# representan un evento real de un día puntual (nadie "sale"/"retira" ese día
+# ni el pedido entero "vuelve" en fecha_hasta). 'estudio' (turno real) SÍ queda:
+# es un evento real, y puede llevar equipos sueltos reales que sí se retiran.
+# Mismo estilo que reservas.ESTADOS_RESERVADO — string SQL ya formado, no un
+# tuple Python interpolado (evita depender de que su repr() coincida con SQL).
+_TIPOS_NO_RETIRO = "('taller', 'estudio_fijo')"
+
 
 @router.get("/dashboard")
 def get_dashboard(_admin: dict = Depends(require_admin)):
@@ -26,25 +35,28 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
             "SELECT COUNT(*) FROM alquileres WHERE estado IN ('confirmado','retirado') AND fecha_hasta >= %s", (hoy,)
         ).fetchone()[0]
 
-        salen_hoy = conn.execute("""
+        salen_hoy = conn.execute(f"""
             SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
             WHERE estado IN ('confirmado','retirado')
+              AND p.tipo NOT IN {_TIPOS_NO_RETIRO}
               AND p.fecha_desde::date = %s
             ORDER BY p.fecha_desde
         """, (hoy,)).fetchall()
 
-        devuelven_hoy = conn.execute("""
+        devuelven_hoy = conn.execute(f"""
             SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
-            WHERE estado IN ('confirmado','retirado') AND p.fecha_hasta::date = %s
+            WHERE estado IN ('confirmado','retirado') AND p.tipo NOT IN {_TIPOS_NO_RETIRO}
+              AND p.fecha_hasta::date = %s
             ORDER BY p.fecha_hasta
         """, (hoy,)).fetchall()
 
-        devuelven_manana = conn.execute("""
+        devuelven_manana = conn.execute(f"""
             SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
-            WHERE estado IN ('confirmado','retirado') AND p.fecha_hasta::date = %s
+            WHERE estado IN ('confirmado','retirado') AND p.tipo NOT IN {_TIPOS_NO_RETIRO}
+              AND p.fecha_hasta::date = %s
             ORDER BY p.fecha_hasta
         """, (manana,)).fetchall()
 
@@ -66,6 +78,7 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
             LEFT JOIN marcas mb ON mb.id = e.brand_id
             JOIN alquileres p ON p.id = pi.pedido_id
             WHERE p.estado IN ('confirmado','retirado') AND p.fecha_hasta >= %s
+              AND e.es_recurso_interno = FALSE
             GROUP BY pi.equipo_id, p.id, e.nombre, mb.nombre, p.cliente_nombre, p.fecha_hasta
             ORDER BY p.fecha_hasta
         """, (hoy,)).fetchall()
@@ -89,7 +102,7 @@ def get_calendario(
     _admin: dict = Depends(require_admin),
 ):
     with get_db() as conn:
-        rows = conn.execute("""
+        rows = conn.execute(f"""
             SELECT p.id, p.numero_pedido, p.cliente_nombre, p.estado, p.tipo,
                    p.fecha_desde, p.fecha_hasta, p.monto_total,
                    STRING_AGG(e.nombre, ' / ') AS equipos
@@ -97,6 +110,7 @@ def get_calendario(
             JOIN alquiler_items pi ON pi.pedido_id = p.id
             JOIN equipos e ON e.id = pi.equipo_id
             WHERE p.estado IN ('solicitado','confirmado','retirado','devuelto','finalizado')
+              AND p.tipo NOT IN {_TIPOS_NO_RETIRO}
               AND p.fecha_hasta >= %s AND p.fecha_desde <= %s
             GROUP BY p.id, p.numero_pedido, p.cliente_nombre, p.estado, p.tipo,
                      p.fecha_desde, p.fecha_hasta, p.monto_total

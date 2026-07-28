@@ -1707,13 +1707,17 @@ def editar_reserva_estudio_admin(pedido_id: int, body: EstudioReservaAdminUpdate
 # `GET /admin/calendario` (routes/dashboard.py) lista pedidos — una reserva de
 # estudio confirmada/solicitada YA aparece ahí (es un alquiler normal sobre el
 # centinela). Lo que ese endpoint NO puede ver son los bloqueos que no son
-# pedidos: los slots fijos (el pedido mensual que genera `_regenerar_pedidos_slot`
-# es solo un marcador de facturación, sin `alquiler_items` — el INNER JOIN de
-# `get_calendario` lo excluye a propósito, y aunque no lo excluyera solo mostraría
-# UN día representativo por mes, no cada ocurrencia semanal real) y las clases de
-# taller publicadas. Mismas reglas que `_slot_bloqueante`/`_taller_bloqueante`
-# (una sola forma de decidir "¿está ocupado?"), en forma de lista para un rango
-# en vez de un chequeo puntual.
+# pedidos reales: los slots fijos y los talleres. Ambos SÍ generan un pedido
+# (`_regenerar_pedidos_slot`/`_regenerar_pedidos_taller`, con su ítem centinela
+# real desde Fase 2 — "sin alquiler_items" dejó de ser cierto ahí), pero ese
+# pedido es un resumen CONTABLE (un solo día representativo por mes, o el mes
+# calendario completo), no la ocupación real — por eso `get_calendario`
+# (2026-07-28) filtra explícito `p.tipo NOT IN ('taller','estudio_fijo')`, no
+# depende de que el INNER JOIN "no tenga ítems" para excluirlos. Esta función
+# es la que sí muestra la ocupación REAL (slots fijos + clases de taller
+# publicadas), leyendo `estudio_slots_fijos`/`clases_taller` directo. Mismas
+# reglas que `_slot_bloqueante`/`_taller_bloqueante` (una sola forma de decidir
+# "¿está ocupado?"), en forma de lista para un rango en vez de un chequeo puntual.
 
 def _ocupacion_estudio_rango(conn, desde: date, hasta: date) -> list[dict]:
     """Slots fijos + clases de taller que ocupan el estudio en [desde, hasta].
