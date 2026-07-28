@@ -1,23 +1,31 @@
 /**
  * EstudioIncluyeList — "qué incluye este turno" como un solo listado: Espacio
- * (siempre, precio editable inline) + Pack + Recién pintado (chips para
- * agregar/quitar, se muestran como fila una vez agregados) + Equipos sueltos
- * (buscador existente). Reemplaza los switches sueltos + el campo de override
- * separado + el desglose por-componente duplicado — una sola forma de ver y
- * tocar cada línea, con su precio en vivo al lado (el front no calcula
- * plata, MEMORIA 2026-06-29: los precios de Pack/Pintura/sueltos vienen de
- * `cotiz`, ya resuelto por el backend).
+ * (siempre, franja horaria + precio editables INLINE en la misma fila) +
+ * Pack + Recién pintado (chips para agregar/quitar, se muestran como fila
+ * una vez agregados) + Equipos sueltos (buscador existente). Reemplaza los
+ * switches sueltos + el campo de override separado + el desglose
+ * por-componente duplicado — una sola forma de ver y tocar cada línea, con
+ * su precio en vivo al lado (el front no calcula plata, MEMORIA 2026-06-29:
+ * los precios de Pack/Pintura/sueltos vienen de `cotiz`, ya resuelto por el
+ * backend).
+ *
+ * La fila "Espacio" absorbe fecha/hora/horas (#1308, pedido del dueño: "no
+ * quiero el modal... quiero una lista para seleccionar, como con los
+ * equipos") — antes vivían en un grid de 3 columnas aparte, arriba de esta
+ * lista, en cada caller (duplicado 2 veces); ahora es UNA sola fila de UNA
+ * sola lista, igual de simple que la sección "Equipos" del pedido.
  *
  * Presentacional puro — sin query/mutation propias. Compartido por
- * `ReservaEstudioSection` (editar) y `ReservaDialog` (alta): cada uno maneja
- * su propio estado y le pasa acá los callbacks, así las dos superficies se
- * ven y comportan igual sin duplicar el layout.
+ * `ReservaEstudioSection` (editar) y `NuevoTurnoEstudioForm` (alta): cada uno
+ * maneja su propio estado y le pasa acá los callbacks, así las dos
+ * superficies se ven y comportan igual sin duplicar el layout.
  */
 import { useMemo } from "react";
 import { Plus, X } from "lucide-react";
 
 import { Input } from "@/design-system/ui/input";
 import { formatARS } from "@/lib/format";
+import { buildTimeSlots } from "@/lib/estudio-slots";
 import { type Equipo, type EstudioConfig, type EstudioCotizacion } from "@/lib/admin/api";
 import { EquipoComboSearch } from "@/components/admin/pedido/EquipoComboSearch";
 import { EquipoThumb } from "@/components/admin/pedido/EquipoThumb";
@@ -53,7 +61,12 @@ function AddChip({ label, onClick }: { label: string; onClick: () => void }) {
 
 export function EstudioIncluyeList({
   estudio,
+  fecha,
+  onChangeFecha,
+  start,
+  onChangeStart,
   horas,
+  onChangeHoras,
   conPromo,
   onTogglePromo,
   pinturaReciente,
@@ -67,7 +80,12 @@ export function EstudioIncluyeList({
   cotiz,
 }: {
   estudio: EstudioConfig;
+  fecha: string;
+  onChangeFecha: (v: string) => void;
+  start: string;
+  onChangeStart: (v: string) => void;
   horas: number;
+  onChangeHoras: (v: number) => void;
   conPromo: boolean;
   onTogglePromo: (v: boolean) => void;
   pinturaReciente: boolean;
@@ -80,6 +98,11 @@ export function EstudioIncluyeList({
   onChangeEspacioOverride: (v: string) => void;
   cotiz?: EstudioCotizacion;
 }) {
+  const slots = useMemo(
+    () => buildTimeSlots(estudio.open_hour, estudio.close_hour, estudio.min_horas || 1),
+    [estudio.open_hour, estudio.close_hour, estudio.min_horas],
+  );
+
   const existingAsDraftItems: DraftItem[] = useMemo(
     () =>
       sueltos.map((s) => ({
@@ -106,17 +129,48 @@ export function EstudioIncluyeList({
 
       <ul className="mt-2 divide-y hairline rounded-md border hairline">
         {/* Espacio — siempre presente, no se puede quitar (es la base del
-            turno); el precio se edita ACÁ, inline (reemplaza el campo de
-            override separado que había antes). */}
-        <li className="flex items-center gap-2 px-2.5 py-2">
-          <span className="min-w-0 flex-1 truncate text-sm">Espacio</span>
+            turno); franja horaria + precio se editan ACÁ, inline, en la
+            misma fila (#1308 — antes vivían en un grid aparte arriba de
+            toda la lista, que es justo lo que se leía como "un form"). */}
+        <li className="flex flex-wrap items-center gap-2 px-2.5 py-2">
+          <span className="shrink-0 text-sm">Espacio</span>
+          <Input
+            type="date"
+            aria-label="Fecha"
+            value={fecha}
+            onChange={(e) => onChangeFecha(e.target.value)}
+            className="h-8 w-[136px] text-sm"
+          />
+          <select
+            aria-label="Hora"
+            value={start}
+            onChange={(e) => onChangeStart(e.target.value)}
+            className="h-8 rounded-md border hairline bg-background px-1.5 text-sm"
+          >
+            {slots.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+          <div className="flex items-center gap-1">
+            <Input
+              type="number"
+              aria-label="Horas"
+              min={estudio.min_horas || 1}
+              value={horas}
+              onChange={(e) => onChangeHoras(Number(e.target.value) || 0)}
+              className="h-8 w-14 text-center text-sm"
+            />
+            <span className="text-xs text-muted-foreground">h</span>
+          </div>
           <Input
             type="number"
             min={0}
             value={espacioOverride}
             onChange={(e) => onChangeEspacioOverride(e.target.value)}
             placeholder={String((estudio.precio_hora || 0) * horas)}
-            className="h-8 w-28 text-right"
+            className="ml-auto h-8 w-24 text-right text-sm"
           />
         </li>
 

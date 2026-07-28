@@ -2,28 +2,33 @@
  * TurnosEstudioSection — turnos del Estudio vinculados a un pedido de
  * alquiler normal (#1308: "quiero un solo modal, el de los pedidos... que
  * mantenga la función actual de equipos, pero también una sección para el
- * Estudio"; luego afinado a "no quiero el modal, poder agregar en la
- * sección del estudio... como si fuera el listado de equipos" — el alta
- * también pasa a ser inline, sin popup). Un pedido de rental (equipos por
- * rango de días) y un turno del Estudio (franja horaria puntual) son
- * registros DISTINTOS — no pueden ser una sola fila (`fecha_desde`/
- * `fecha_hasta` significan cosas incompatibles, ver `lib/tipos-pedido.ts`) —
- * pero se administran en una sola pantalla: esta sección los lista inline
- * (reusando `ReservaEstudioSection`, la misma pieza que ya usa un pedido
- * `tipo='estudio'`) y deja agregar uno nuevo sin salir de acá ni abrir un
- * diálogo (`NuevoTurnoEstudioForm` inline, misma pieza que usa
- * `ReservaDialog` para el alta desde la agenda del Estudio). El backend
- * garantiza que el turno nunca pueda mostrar un cliente distinto al del
- * pedido principal (`pedido_principal_id`, hereda SIEMPRE el contacto de
- * acá — ver `routes/estudio.py::_resolver_pedido_principal`).
+ * Estudio"; afinado dos veces más — "no quiero el modal... como si fuera el
+ * listado de equipos" y después "quiero una lista para seleccionar, como con
+ * los equipos" — hasta terminar en: el compose de un turno nuevo queda
+ * SIEMPRE visible acá abajo, igual que el buscador de "Equipos" nunca está
+ * escondido detrás de un botón). Un pedido de rental (equipos por rango de
+ * días) y un turno del Estudio (franja horaria puntual) son registros
+ * DISTINTOS — no pueden ser una sola fila (`fecha_desde`/`fecha_hasta`
+ * significan cosas incompatibles, ver `lib/tipos-pedido.ts`) — pero se
+ * administran en una sola pantalla: esta sección los lista inline (reusando
+ * `ReservaEstudioSection`, la misma pieza que ya usa un pedido
+ * `tipo='estudio'`) y deja componer uno nuevo sin salir de acá ni abrir un
+ * diálogo (`NuevoTurnoEstudioForm chrome="inline"`, misma pieza que usa
+ * `ReservaDialog` para el alta desde la agenda del Estudio, en modo
+ * `chrome="dialog"`). El `key={composeKey}` fuerza un remount tras crear un
+ * turno — así el compose vuelve limpio, listo para otro, sin estado colgado
+ * del anterior. El backend garantiza que el turno nunca pueda mostrar un
+ * cliente distinto al del pedido principal (`pedido_principal_id`, hereda
+ * SIEMPRE el contacto de acá — ver `routes/estudio.py::_resolver_pedido_principal`).
  */
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clapperboard, Plus } from "lucide-react";
+import { Clapperboard } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 
 import { Section } from "@/design-system/composites/Section";
 import { Spinner } from "@/design-system/ui/spinner";
+import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
 import { adminApi, estudioAdminApi, type Pedido } from "@/lib/admin/api";
 import { ReservaEstudioSection } from "@/components/admin/estudio/ReservaEstudioSection";
 import { NuevoTurnoEstudioForm } from "@/components/admin/estudio/NuevoTurnoEstudioForm";
@@ -56,20 +61,31 @@ function TurnoVinculadoCard({ turnoId }: { turnoId: number }) {
           qc.invalidateQueries({ queryKey: ["admin", "pedido", turnoId] });
         }}
       />
-      <Link
-        to="/admin/pedidos/$id"
-        params={{ id: String(turnoId) }}
-        className="inline-block px-1 text-xs text-muted-foreground underline hover:text-ink"
-      >
-        Abrir turno #{turnoQ.data.numero_pedido ?? turnoId} en su propia pantalla ↗
-      </Link>
+      <div className="flex items-center gap-2 px-1">
+        {/* El estado puede haber cambiado SOLO (cascada #1308, "avanzan
+            juntos" desde el pedido principal) sin que el admin haya tocado
+            esta tarjeta — visible acá para no depender de abrir la pantalla
+            propia del turno. `ReservaEstudioSection` no lo muestra (la
+            página standalone del turno ya tiene su propio FlowStrip). */}
+        <EstadoBadge estado={turnoQ.data.estado} />
+        <Link
+          to="/admin/pedidos/$id"
+          params={{ id: String(turnoId) }}
+          className="text-xs text-muted-foreground underline hover:text-ink"
+        >
+          Abrir turno #{turnoQ.data.numero_pedido ?? turnoId} en su propia pantalla ↗
+        </Link>
+      </div>
     </div>
   );
 }
 
 export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
   const qc = useQueryClient();
-  const [mostrarAlta, setMostrarAlta] = useState(false);
+  // Se incrementa tras cada alta exitosa para remontar NuevoTurnoEstudioForm
+  // (vía `key`) y así resetear su estado interno — el compose queda limpio,
+  // listo para otro turno, sin necesidad de que el form exponga un reset.
+  const [composeKey, setComposeKey] = useState(0);
   const estudioQ = useQuery({
     queryKey: ["admin", "estudio"],
     queryFn: () => estudioAdminApi.get(),
@@ -87,32 +103,22 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
           </div>
         )}
 
-        {mostrarAlta && estudioQ.data ? (
-          <div className="rounded-lg border hairline p-3">
-            <NuevoTurnoEstudioForm
-              estudio={estudioQ.data}
-              pedidoVinculado={{
-                id: pedido.id,
-                clienteNombre: pedido.cliente_nombre,
-                estado: pedido.estado,
-              }}
-              onCreated={() => {
-                qc.invalidateQueries({ queryKey: ["admin", "pedido", pedido.id] });
-                setMostrarAlta(false);
-              }}
-              onCancel={() => setMostrarAlta(false)}
-            />
-          </div>
-        ) : (
-          <button
-            type="button"
-            disabled={!estudioQ.data}
-            onClick={() => setMostrarAlta(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed hairline px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <Plus className="h-4 w-4 shrink-0" />
-            <span>Agregar turno del Estudio</span>
-          </button>
+        {estudioQ.data && (
+          <NuevoTurnoEstudioForm
+            key={composeKey}
+            chrome="inline"
+            estudio={estudioQ.data}
+            pedidoVinculado={{
+              id: pedido.id,
+              clienteNombre: pedido.cliente_nombre,
+              estado: pedido.estado,
+            }}
+            onCreated={() => {
+              qc.invalidateQueries({ queryKey: ["admin", "pedido", pedido.id] });
+              setComposeKey((k) => k + 1);
+            }}
+            onCancel={() => {}}
+          />
         )}
       </div>
     </Section>

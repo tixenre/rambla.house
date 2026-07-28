@@ -1,21 +1,25 @@
 /**
  * NuevoTurnoEstudioForm — alta de un turno del Estudio: franja + cliente (o
- * heredado de un pedido) + "qué incluye" (`EstudioIncluyeList`) + estado
- * inicial. Extraído de `ReservaDialog` (#1308 — pedido explícito del dueño:
- * "no quiero el modal, en el formulario de los pedidos poder agregar... como
- * si fuera el listado de equipos") para que el alta también pueda vivir
- * INLINE en la página del pedido (`TurnosEstudioSection`), sin popup.
+ * heredado de un pedido) + "qué incluye" (`EstudioIncluyeList`, que absorbe
+ * la franja horaria como una fila más) + estado inicial. Extraído de
+ * `ReservaDialog` (#1308 — pedido explícito del dueño: "no quiero el modal,
+ * en el formulario de los pedidos poder agregar... como si fuera el listado
+ * de equipos") para que el alta también pueda vivir INLINE en la página del
+ * pedido (`TurnosEstudioSection`), sin popup — y sin sentirse "un form"
+ * (segunda vuelta del mismo pedido: "quiero una lista para seleccionar, como
+ * con los equipos").
  *
- * Sin chrome propio (sin Dialog ni Section) — cada caller decide dónde
- * montarlo: `ReservaDialog` lo sigue envolviendo en su propio Dialog para el
- * alta "suelta" desde la agenda del Estudio (con cliente picker, sin pedido
- * que herede el contacto); `TurnosEstudioSection` lo monta directo en la
- * página del pedido, con `pedidoVinculado` (oculta el picker, hereda el
- * contacto — el backend lo garantiza, no confiar solo en esto).
+ * Sin Dialog/Section propios — el prop `chrome` decide qué chrome extra le
+ * hace falta a cada caller: `ReservaDialog` sigue envolviéndolo en su propio
+ * Dialog para el alta "suelta" desde la agenda del Estudio (`chrome="dialog"`,
+ * default — cliente picker real + Total propio, sin pedido que herede);
+ * `TurnosEstudioSection` lo monta directo en la página del pedido
+ * (`chrome="inline"`, con `pedidoVinculado` — sin cliente ni Total, ya se ven
+ * arriba/en el rail combinado).
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/design-system/ui/button";
@@ -51,6 +55,7 @@ type EstadoAlta = (typeof ESTADOS_ADMIN_CREACION)[number];
 export function NuevoTurnoEstudioForm({
   estudio,
   pedidoVinculado,
+  chrome = "dialog",
   onCreated,
   onCancel,
 }: {
@@ -63,6 +68,13 @@ export function NuevoTurnoEstudioForm({
    *  Ausente = alta suelta desde la agenda del Estudio, con picker de
    *  cliente y selector de estado propios. */
   pedidoVinculado?: { id: number; clienteNombre: string | null; estado: string };
+  /** "dialog" (default, cero cambio para `ReservaDialog`): cliente picker
+   *  real + Total propio + Cancelar/Crear turno. "inline" (montado en
+   *  `TurnosEstudioSection`): sin cliente (ya se ve arriba, en el pedido) ni
+   *  Total (el combinado vive en el rail) — un solo botón "+ Agregar" al pie
+   *  de la lista, mismo lugar/estilo que "Agregar línea personalizada" de
+   *  Equipos. */
+  chrome?: "dialog" | "inline";
   onCreated: (pedido: Pedido) => void;
   onCancel: () => void;
 }) {
@@ -177,76 +189,55 @@ export function NuevoTurnoEstudioForm({
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-3 gap-3">
-        <Field label="Fecha">
-          <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
-        </Field>
-        <Field label="Hora">
-          <select
-            value={start}
-            onChange={(e) => setStart(e.target.value)}
-            className="h-9 w-full rounded-md border hairline bg-background px-2 text-sm"
-          >
-            {slots.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Field label={`Horas · mín ${estudio.min_horas}`}>
-          <Input
-            type="number"
-            min={estudio.min_horas || 1}
-            value={horas}
-            onChange={(e) => setHoras(Number(e.target.value) || 0)}
-          />
-        </Field>
-      </div>
-
-      {pedidoVinculado ? (
-        <Field label="Cliente" hint="Heredado del pedido al que se vincula este turno.">
-          <div className="rounded-md border hairline bg-muted/20 px-2.5 py-1.5 text-sm text-muted-foreground">
-            {pedidoVinculado.clienteNombre || "Sin cliente"}
-          </div>
-        </Field>
-      ) : (
-        <Field label="Cliente (ficha o texto libre)">
-          {clienteId ? (
-            <div className="flex items-center gap-2 rounded-md border hairline px-2.5 py-1.5 text-sm">
-              <span className="flex-1 truncate">{clienteNombreElegido}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setClienteId(null);
-                  setClienteNombreElegido(null);
-                }}
-                className="text-muted-foreground hover:text-ink"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
+      {chrome === "dialog" &&
+        (pedidoVinculado ? (
+          <Field label="Cliente" hint="Heredado del pedido al que se vincula este turno.">
+            <div className="rounded-md border hairline bg-muted/20 px-2.5 py-1.5 text-sm text-muted-foreground">
+              {pedidoVinculado.clienteNombre || "Sin cliente"}
             </div>
-          ) : (
-            <div className="space-y-1.5">
-              <ClienteAutocomplete
-                onPick={(c: Cliente) => {
-                  setClienteId(c.id);
-                  setClienteNombreElegido(nombreCliente(c));
-                }}
-              />
-              <Input
-                value={clienteNombreLibre}
-                onChange={(e) => setClienteNombreLibre(e.target.value)}
-                placeholder="…o nombre sin ficha (alguien que llamó)"
-              />
-            </div>
-          )}
-        </Field>
-      )}
+          </Field>
+        ) : (
+          <Field label="Cliente (ficha o texto libre)">
+            {clienteId ? (
+              <div className="flex items-center gap-2 rounded-md border hairline px-2.5 py-1.5 text-sm">
+                <span className="flex-1 truncate">{clienteNombreElegido}</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setClienteId(null);
+                    setClienteNombreElegido(null);
+                  }}
+                  className="text-muted-foreground hover:text-ink"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-1.5">
+                <ClienteAutocomplete
+                  onPick={(c: Cliente) => {
+                    setClienteId(c.id);
+                    setClienteNombreElegido(nombreCliente(c));
+                  }}
+                />
+                <Input
+                  value={clienteNombreLibre}
+                  onChange={(e) => setClienteNombreLibre(e.target.value)}
+                  placeholder="…o nombre sin ficha (alguien que llamó)"
+                />
+              </div>
+            )}
+          </Field>
+        ))}
 
       <EstudioIncluyeList
         estudio={estudio}
+        fecha={fecha}
+        onChangeFecha={setFecha}
+        start={start}
+        onChangeStart={setStart}
         horas={horas}
+        onChangeHoras={setHoras}
         conPromo={conPromo}
         onTogglePromo={setConPromo}
         pinturaReciente={pinturaReciente}
@@ -274,36 +265,60 @@ export function NuevoTurnoEstudioForm({
         </Field>
       )}
 
-      {/* Total en vivo — el front no calcula, solo muestra (2026-06-29). */}
-      <div className="rounded-lg border hairline bg-muted/20 p-3 text-sm">
-        {cotizarQ.isLoading ? (
-          <div className="flex items-center gap-2 text-muted-foreground">
-            <Spinner size="sm" /> Calculando…
-          </div>
-        ) : cotiz ? (
-          <div className="space-y-1">
-            <div className="flex justify-between font-semibold text-ink">
-              <span>Total</span>
-              <span>{formatARS(cotiz.monto_total)}</span>
+      {/* Total en vivo — el front no calcula, solo muestra (2026-06-29). Solo
+          en modo "dialog": en "inline" el combinado ya vive en el rail del
+          pedido, un segundo Total acá sería el mismo tipo de redundancia que
+          motivó sacar el grid de fecha/hora/horas. Si no está disponible, el
+          aviso SÍ se muestra en los dos modos — es información accionable,
+          no un número de plata redundante. */}
+      {chrome === "dialog" && (
+        <div className="rounded-lg border hairline bg-muted/20 p-3 text-sm">
+          {cotizarQ.isLoading ? (
+            <div className="flex items-center gap-2 text-muted-foreground">
+              <Spinner size="sm" /> Calculando…
             </div>
-            {!cotiz.espacio_disponible && (
-              <p className="mt-1 text-xs text-destructive">
-                El espacio no está disponible: {cotiz.espacio_motivo}
-              </p>
-            )}
-          </div>
-        ) : null}
-      </div>
+          ) : cotiz ? (
+            <div className="space-y-1">
+              <div className="flex justify-between font-semibold text-ink">
+                <span>Total</span>
+                <span>{formatARS(cotiz.monto_total)}</span>
+              </div>
+              {!cotiz.espacio_disponible && (
+                <p className="mt-1 text-xs text-destructive">
+                  El espacio no está disponible: {cotiz.espacio_motivo}
+                </p>
+              )}
+            </div>
+          ) : null}
+        </div>
+      )}
+      {chrome === "inline" && cotiz && !cotiz.espacio_disponible && (
+        <p className="text-xs text-destructive">
+          El espacio no está disponible: {cotiz.espacio_motivo}
+        </p>
+      )}
 
-      <div className="flex justify-end gap-2">
-        <Button variant="ghost" onClick={onCancel}>
-          Cancelar
-        </Button>
-        <Button onClick={() => mutation.mutate()} disabled={!puedeGuardar || mutation.isPending}>
-          {mutation.isPending ? <Spinner size="sm" className="mr-1.5" /> : null}
-          Crear turno
-        </Button>
-      </div>
+      {chrome === "inline" ? (
+        <button
+          type="button"
+          onClick={() => mutation.mutate()}
+          disabled={!puedeGuardar || mutation.isPending}
+          className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed hairline px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {mutation.isPending ? <Spinner size="sm" /> : <Plus className="h-4 w-4 shrink-0" />}
+          <span>Agregar</span>
+        </button>
+      ) : (
+        <div className="flex justify-end gap-2">
+          <Button variant="ghost" onClick={onCancel}>
+            Cancelar
+          </Button>
+          <Button onClick={() => mutation.mutate()} disabled={!puedeGuardar || mutation.isPending}>
+            {mutation.isPending ? <Spinner size="sm" className="mr-1.5" /> : null}
+            Crear turno
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

@@ -12,7 +12,9 @@
  * superficie nueva. El front no calcula plata (MEMORIA 2026-06-29): el
  * desglose se pide en vivo y solo se muestra. El listado "qué incluye"
  * (Espacio/Pack/Pintura/sueltos) vive en `EstudioIncluyeList`, compartido con
- * el modo alta de `ReservaDialog`.
+ * el modo alta de `ReservaDialog` — incluida la franja horaria, que
+ * `EstudioIncluyeList` absorbe como parte de la fila "Espacio" (#1308: ya no
+ * hay un grid Fecha/Hora/Horas aparte acá, quedaba duplicado con el del alta).
  */
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,13 +23,11 @@ import { toast } from "sonner";
 
 import { Section } from "@/design-system/composites/Section";
 import { Button } from "@/design-system/ui/button";
-import { Input } from "@/design-system/ui/input";
 import { Spinner } from "@/design-system/ui/spinner";
 import { formatARS } from "@/lib/format";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { buildTimeSlots, espacioOverrideInicial } from "@/lib/estudio-slots";
+import { espacioOverrideInicial } from "@/lib/estudio-slots";
 import { estudioAdminApi, type Equipo, type EstudioConfig, type Pedido } from "@/lib/admin/api";
-import { Field } from "./shared";
 import { EstudioIncluyeList, type SueltoLocal } from "./EstudioIncluyeList";
 
 // Debe coincidir con `NOMBRE_ITEM_PINTURA_RECIENTE`
@@ -51,11 +51,6 @@ export function ReservaEstudioSection({
   onSaved?: (pedido: Pedido) => void;
 }) {
   const qc = useQueryClient();
-
-  const slots = useMemo(
-    () => buildTimeSlots(estudio.open_hour, estudio.close_hour, estudio.min_horas || 1),
-    [estudio.open_hour, estudio.close_hour, estudio.min_horas],
-  );
 
   const [fecha, setFecha] = useState(() => pedido.fecha_desde?.slice(0, 10) ?? "");
   const [start, setStart] = useState(() => pedido.fecha_desde?.slice(11, 16) ?? "");
@@ -189,36 +184,14 @@ export function ReservaEstudioSection({
   return (
     <Section variant="card" tone="elevated" icon={Clapperboard} title="Reserva del Estudio">
       <div className="space-y-4">
-        <div className="grid grid-cols-3 gap-3">
-          <Field label="Fecha">
-            <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
-          </Field>
-          <Field label="Hora">
-            <select
-              value={start}
-              onChange={(e) => setStart(e.target.value)}
-              className="h-9 w-full rounded-md border hairline bg-background px-2 text-sm"
-            >
-              {slots.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field label={`Horas · mín ${estudio.min_horas}`}>
-            <Input
-              type="number"
-              min={estudio.min_horas || 1}
-              value={horas}
-              onChange={(e) => setHoras(Number(e.target.value) || 0)}
-            />
-          </Field>
-        </div>
-
         <EstudioIncluyeList
           estudio={estudio}
+          fecha={fecha}
+          onChangeFecha={setFecha}
+          start={start}
+          onChangeStart={setStart}
           horas={horas}
+          onChangeHoras={setHoras}
           conPromo={conPromo}
           onTogglePromo={setConPromo}
           pinturaReciente={pinturaReciente}
