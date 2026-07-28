@@ -2,15 +2,20 @@
  * TurnosEstudioSection — turnos del Estudio vinculados a un pedido de
  * alquiler normal (#1308: "quiero un solo modal, el de los pedidos... que
  * mantenga la función actual de equipos, pero también una sección para el
- * Estudio"). Un pedido de rental (equipos por rango de días) y un turno del
- * Estudio (franja horaria puntual) son registros DISTINTOS — no pueden ser
- * una sola fila (`fecha_desde`/`fecha_hasta` significan cosas incompatibles,
- * ver `lib/tipos-pedido.ts`) — pero se administran en una sola pantalla:
- * esta sección los lista inline (reusando `ReservaEstudioSection`, la misma
- * pieza que ya usa un pedido `tipo='estudio'`) y deja agregar uno nuevo sin
- * salir de acá. El backend garantiza que el turno nunca pueda mostrar un
- * cliente distinto al del pedido principal (`pedido_principal_id`, hereda
- * SIEMPRE el contacto de acá — ver `routes/estudio.py::_resolver_pedido_principal`).
+ * Estudio"; luego afinado a "no quiero el modal, poder agregar en la
+ * sección del estudio... como si fuera el listado de equipos" — el alta
+ * también pasa a ser inline, sin popup). Un pedido de rental (equipos por
+ * rango de días) y un turno del Estudio (franja horaria puntual) son
+ * registros DISTINTOS — no pueden ser una sola fila (`fecha_desde`/
+ * `fecha_hasta` significan cosas incompatibles, ver `lib/tipos-pedido.ts`) —
+ * pero se administran en una sola pantalla: esta sección los lista inline
+ * (reusando `ReservaEstudioSection`, la misma pieza que ya usa un pedido
+ * `tipo='estudio'`) y deja agregar uno nuevo sin salir de acá ni abrir un
+ * diálogo (`NuevoTurnoEstudioForm` inline, misma pieza que usa
+ * `ReservaDialog` para el alta desde la agenda del Estudio). El backend
+ * garantiza que el turno nunca pueda mostrar un cliente distinto al del
+ * pedido principal (`pedido_principal_id`, hereda SIEMPRE el contacto de
+ * acá — ver `routes/estudio.py::_resolver_pedido_principal`).
  */
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -21,7 +26,7 @@ import { Section } from "@/design-system/composites/Section";
 import { Spinner } from "@/design-system/ui/spinner";
 import { adminApi, estudioAdminApi, type Pedido } from "@/lib/admin/api";
 import { ReservaEstudioSection } from "@/components/admin/estudio/ReservaEstudioSection";
-import { ReservaDialog } from "@/components/admin/estudio/ReservaDialog";
+import { NuevoTurnoEstudioForm } from "@/components/admin/estudio/NuevoTurnoEstudioForm";
 
 function TurnoVinculadoCard({ turnoId }: { turnoId: number }) {
   const qc = useQueryClient();
@@ -64,7 +69,7 @@ function TurnoVinculadoCard({ turnoId }: { turnoId: number }) {
 
 export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
   const qc = useQueryClient();
-  const [openAlta, setOpenAlta] = useState(false);
+  const [mostrarAlta, setMostrarAlta] = useState(false);
   const estudioQ = useQuery({
     queryKey: ["admin", "estudio"],
     queryFn: () => estudioAdminApi.get(),
@@ -82,27 +87,30 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
           </div>
         )}
 
-        <button
-          type="button"
-          disabled={!estudioQ.data}
-          onClick={() => setOpenAlta(true)}
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed hairline px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <Plus className="h-4 w-4 shrink-0" />
-          <span>Agregar turno del Estudio</span>
-        </button>
+        {mostrarAlta && estudioQ.data ? (
+          <div className="rounded-lg border hairline p-3">
+            <NuevoTurnoEstudioForm
+              estudio={estudioQ.data}
+              pedidoVinculado={{ id: pedido.id, clienteNombre: pedido.cliente_nombre }}
+              onCreated={() => {
+                qc.invalidateQueries({ queryKey: ["admin", "pedido", pedido.id] });
+                setMostrarAlta(false);
+              }}
+              onCancel={() => setMostrarAlta(false)}
+            />
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={!estudioQ.data}
+            onClick={() => setMostrarAlta(true)}
+            className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed hairline px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Plus className="h-4 w-4 shrink-0" />
+            <span>Agregar turno del Estudio</span>
+          </button>
+        )}
       </div>
-
-      {estudioQ.data && (
-        <ReservaDialog
-          open={openAlta}
-          onOpenChange={setOpenAlta}
-          reserva={null}
-          estudio={estudioQ.data}
-          pedidoVinculado={{ id: pedido.id, clienteNombre: pedido.cliente_nombre }}
-          onSaved={() => qc.invalidateQueries({ queryKey: ["admin", "pedido", pedido.id] })}
-        />
-      )}
     </Section>
   );
 }
