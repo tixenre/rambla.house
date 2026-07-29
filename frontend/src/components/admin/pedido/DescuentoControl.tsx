@@ -96,6 +96,13 @@ export function DescuentoControl({
               aria-label="Descuento % manual"
               value={value.pct}
               className="pr-7"
+              // Seleccionar el valor entero al enfocar: sin esto, arrancar en
+              // 0 y tipear "2" insertaba el dígito DESPUÉS del cero ("02") en
+              // vez de reemplazarlo — el cero visible quedaba pegado hasta
+              // borrarlo a mano (lo reportó el dueño). Con el texto
+              // seleccionado, la primera tecla lo reemplaza entero, como
+              // espera cualquiera al ver un campo numérico en 0.
+              onFocus={(e) => e.currentTarget.select()}
               onChange={(e) =>
                 onChange({
                   ...value,
