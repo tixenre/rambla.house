@@ -23,6 +23,7 @@ import { Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/design-system/ui/button";
+import { IconButton } from "@/design-system/ui/icon-button";
 import { Input } from "@/design-system/ui/input";
 import { Spinner } from "@/design-system/ui/spinner";
 import { formatARS } from "@/lib/format";
@@ -76,7 +77,13 @@ export function NuevoTurnoEstudioForm({
    *  Equipos. */
   chrome?: "dialog" | "inline";
   onCreated: (pedido: Pedido) => void;
-  onCancel: () => void;
+  /** Descartar el turno todavía sin crear. En "dialog" es el botón "Cancelar".
+   *  En "inline" es un ✕ arriba a la derecha del bloque — y es OPCIONAL a
+   *  propósito: cuando el pedido ya tiene turnos cargados, el compose queda
+   *  fijo al pie de la lista (como el buscador de "Equipos") y no hay nada que
+   *  cerrar; ahí el caller no lo pasa y el ✕ no se muestra, en vez de ofrecer
+   *  un botón que no haría nada. */
+  onCancel?: () => void;
 }) {
   const estadoHeredado: EstadoAlta =
     pedidoVinculado &&
@@ -252,6 +259,23 @@ export function NuevoTurnoEstudioForm({
         espacioOverride={espacioOverride}
         onChangeEspacioOverride={setEspacioOverride}
         cotiz={cotiz}
+        // El ✕ que descarta el turno sin crear. Va acá arriba, no al pie: el
+        // pie es "+ Agregar" (crear), y meter la salida al lado de la
+        // confirmación invita a errarle. Sin esto, abrir "Agregar un turno del
+        // Estudio" era un camino de ida — no había forma de volver al estado
+        // vacío (lo reportó el dueño: "ahora no puedo quitar el turno").
+        accion={
+          chrome === "inline" && onCancel ? (
+            <IconButton
+              aria-label="Descartar este turno"
+              title="Descartar este turno"
+              onClick={onCancel}
+              className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+            >
+              <X className="h-4 w-4" />
+            </IconButton>
+          ) : undefined
+        }
       />
 
       {!pedidoVinculado && (

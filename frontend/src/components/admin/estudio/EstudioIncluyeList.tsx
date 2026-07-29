@@ -202,6 +202,7 @@ export function EstudioIncluyeList({
   espacioOverride,
   onChangeEspacioOverride,
   cotiz,
+  accion,
 }: {
   estudio: EstudioConfig;
   fecha: string;
@@ -221,6 +222,9 @@ export function EstudioIncluyeList({
   espacioOverride: string;
   onChangeEspacioOverride: (v: string) => void;
   cotiz?: EstudioCotizacion;
+  /** Acción a la derecha del label, para el bloque ENTERO (no una fila): hoy,
+   *  el ✕ que descarta un turno todavía sin crear. */
+  accion?: ReactNode;
 }) {
   const slots = useMemo(
     () => buildTimeSlots(estudio.open_hour, estudio.close_hour, estudio.min_horas || 1),
@@ -247,7 +251,7 @@ export function EstudioIncluyeList({
   );
 
   return (
-    <Field label="Qué incluye este turno">
+    <Field label="Qué incluye este turno" accion={accion}>
       {/* Orden de lectura (pedido del dueño): PRIMERO el turno — su franja y su
           precio —, después lo que se le suma. Antes el buscador de equipos
           abría la sección, así que lo primero que se veía era cómo agregar

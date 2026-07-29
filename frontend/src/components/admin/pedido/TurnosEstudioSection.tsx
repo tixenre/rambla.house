@@ -27,6 +27,7 @@ import { Clapperboard, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Section } from "@/design-system/composites/Section";
+import { IconButton } from "@/design-system/ui/icon-button";
 import { Spinner } from "@/design-system/ui/spinner";
 import { adminApi, estudioAdminApi, type Pedido } from "@/lib/admin/api";
 import { ReservaEstudioSection } from "@/components/admin/estudio/ReservaEstudioSection";
@@ -35,9 +36,15 @@ import { NuevoTurnoEstudioForm } from "@/components/admin/estudio/NuevoTurnoEstu
 function TurnoVinculadoCard({
   turnoId,
   pedidoPrincipalId,
+  onEliminado,
 }: {
   turnoId: number;
   pedidoPrincipalId: number;
+  /** Avisa al padre que este turno ya no está — así, si era el último, la
+   *  sección vuelve a su estado vacío explícito en vez de dejar abierto el
+   *  compose (que se lee como "ya hay un turno", justo lo que se quería
+   *  evitar). */
+  onEliminado: () => void;
 }) {
   const qc = useQueryClient();
   const estudioQ = useQuery({
@@ -63,6 +70,7 @@ function TurnoVinculadoCard({
       toast.success("Turno eliminado");
       qc.invalidateQueries({ queryKey: ["admin", "pedido", pedidoPrincipalId] });
       qc.invalidateQueries({ queryKey: ["admin", "pedidos"] });
+      onEliminado();
     },
     onError: (e: Error) => toast.error("No se pudo eliminar el turno", { description: e.message }),
   });
@@ -75,30 +83,31 @@ function TurnoVinculadoCard({
     );
   }
 
+  // Sin badge de estado: el turno sigue el estado de su pedido (cascada +
+  // gate, #1308), así que mostrarlo era repetir lo que ya dice el rail. Y sin
+  // link a "su propia pantalla": el turno no es un pedido aparte.
   return (
-    <div className="space-y-1.5">
-      <ReservaEstudioSection
-        pedido={turnoQ.data}
-        estudio={estudioQ.data}
-        onSaved={() => {
-          qc.invalidateQueries({ queryKey: ["admin", "pedido", turnoId] });
-        }}
-      />
-      {/* Sin badge de estado: el turno sigue el estado de su pedido (cascada +
-          gate, #1308), así que mostrarlo era repetir lo que ya dice el rail. Y
-          sin link a "su propia pantalla": el turno no es un pedido aparte. */}
-      <div className="flex items-center px-1">
-        <button
-          type="button"
+    <ReservaEstudioSection
+      pedido={turnoQ.data}
+      estudio={estudioQ.data}
+      // El ✕ vive en el ENCABEZADO de la tarjeta del turno. Antes flotaba en
+      // una fila propia debajo, sin nada que lo anclara — el dueño no lo
+      // encontraba ("ahora no puedo quitar el turno").
+      accion={
+        <IconButton
+          aria-label="Quitar el turno del pedido"
+          title="Quitar el turno del pedido"
           onClick={() => borrarMut.mutate()}
           disabled={borrarMut.isPending}
-          title="Quitar turno del pedido"
-          className="ml-auto text-muted-foreground hover:text-destructive disabled:opacity-50"
+          className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
         >
           <X className="h-4 w-4" />
-        </button>
-      </div>
-    </div>
+        </IconButton>
+      }
+      onSaved={() => {
+        qc.invalidateQueries({ queryKey: ["admin", "pedido", turnoId] });
+      }}
+    />
   );
 }
 
@@ -128,7 +137,12 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
         {turnos.length > 0 && (
           <div className="space-y-4">
             {turnos.map((t) => (
-              <TurnoVinculadoCard key={t.id} turnoId={t.id} pedidoPrincipalId={pedido.id} />
+              <TurnoVinculadoCard
+                key={t.id}
+                turnoId={t.id}
+                pedidoPrincipalId={pedido.id}
+                onEliminado={() => setComponiendo(false)}
+              />
             ))}
           </div>
         )}
@@ -158,7 +172,10 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
               qc.invalidateQueries({ queryKey: ["admin", "pedido", pedido.id] });
               setComposeKey((k) => k + 1);
             }}
-            onCancel={() => setComponiendo(false)}
+            // Solo se puede descartar cuando el compose es la ÚNICA cosa de la
+            // sección: con turnos ya cargados queda fijo al pie (como el
+            // buscador de "Equipos") y cerrarlo no tendría a dónde volver.
+            onCancel={turnos.length === 0 ? () => setComponiendo(false) : undefined}
           />
         )}
       </div>

@@ -16,7 +16,7 @@
  * `EstudioIncluyeList` absorbe como parte de la fila "Espacio" (#1308: ya no
  * hay un grid Fecha/Hora/Horas aparte acá, quedaba duplicado con el del alta).
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clapperboard } from "lucide-react";
 import { toast } from "sonner";
@@ -44,10 +44,15 @@ function horasEntre(desde?: string | null, hasta?: string | null, fallback = 2):
 export function ReservaEstudioSection({
   pedido,
   estudio,
+  accion,
   onSaved,
 }: {
   pedido: Pedido;
   estudio: EstudioConfig;
+  /** Acción del encabezado de la tarjeta — hoy, el ✕ que saca el turno del
+   *  pedido. Va en el header (slot `actions` del `Section`) y no como una fila
+   *  colgada abajo, que era donde estaba y no se encontraba. */
+  accion?: ReactNode;
   onSaved?: (pedido: Pedido) => void;
 }) {
   const qc = useQueryClient();
@@ -222,7 +227,13 @@ export function ReservaEstudioSection({
         : "saved";
 
   return (
-    <Section variant="card" tone="elevated" icon={Clapperboard} title="Reserva del Estudio">
+    <Section
+      variant="card"
+      tone="elevated"
+      icon={Clapperboard}
+      title="Reserva del Estudio"
+      actions={accion}
+    >
       <div className="space-y-4">
         <EstudioIncluyeList
           estudio={estudio}
