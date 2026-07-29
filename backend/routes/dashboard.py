@@ -6,7 +6,7 @@ import datetime
 
 from fastapi import APIRouter, Depends, Query
 
-from database import get_db, row_to_dict
+from database import get_db, now_ar, row_to_dict
 from auth.guards import require_admin
 from tipos_pedido import TIPOS_SIN_RETIRO_SQL
 
@@ -15,8 +15,12 @@ router = APIRouter()
 
 @router.get("/dashboard")
 def get_dashboard(_admin: dict = Depends(require_admin)):
-    hoy     = datetime.date.today().isoformat()
-    manana  = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+    # now_ar(), no date.today() — este último corre en UTC en la nube/CI y
+    # desfasa un día entre 00:00-03:00 UTC (21:00-24:00 hora Argentina),
+    # ver services/fechas.py.
+    hoy_date = now_ar().date()
+    hoy     = hoy_date.isoformat()
+    manana  = (hoy_date + datetime.timedelta(days=1)).isoformat()
     mes_ini = hoy[:7] + "-01"
     with get_db() as conn:
         pendientes = conn.execute(
