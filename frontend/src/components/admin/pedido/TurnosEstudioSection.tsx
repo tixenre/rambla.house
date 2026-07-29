@@ -68,7 +68,19 @@ function TurnoVinculadoCard({
     mutationFn: () => adminApi.deletePedido(turnoId),
     onSuccess: () => {
       toast.success("Turno eliminado");
-      qc.invalidateQueries({ queryKey: ["admin", "pedido", pedidoPrincipalId] });
+      // Sacar la entrada de la caché en vez de repedir el pedido: la tarjeta se
+      // va en el acto, sin el ida y vuelta que hacía parpadear la sección.
+      qc.setQueryData(["admin", "pedido", pedidoPrincipalId], (prev?: Pedido) =>
+        prev
+          ? {
+              ...prev,
+              turnos_estudio_vinculados: (prev.turnos_estudio_vinculados ?? []).filter(
+                (t) => t.id !== turnoId,
+              ),
+            }
+          : prev,
+      );
+      qc.removeQueries({ queryKey: ["admin", "pedido", turnoId] });
       qc.invalidateQueries({ queryKey: ["admin", "pedidos"] });
       onEliminado();
     },
@@ -179,8 +191,36 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
               clienteNombre: pedido.cliente_nombre,
               estado: pedido.estado,
             }}
-            onCreated={() => {
-              qc.invalidateQueries({ queryKey: ["admin", "pedido", pedido.id] });
+            onCreated={(nuevo) => {
+              // El alta ya devolvió el turno COMPLETO (`_get_alquiler_detail`,
+              // la misma función que sirve el GET). Se siembran las dos cachés
+              // que la tarjeta necesita en vez de invalidar y esperar: sin esto
+              // el compose desaparecía, la tarjeta arrancaba sin datos y se veía
+              // ~90ms de spinner en el medio — el "se sale lo que hay, aparece
+              // la pantalla de guardado y vuelve" que reportó el dueño.
+              qc.setQueryData(["admin", "pedido", nuevo.id], nuevo);
+              qc.setQueryData(["admin", "pedido", pedido.id], (prev?: Pedido) =>
+                prev
+                  ? {
+                      ...prev,
+                      turnos_estudio_vinculados: [
+                        ...(prev.turnos_estudio_vinculados ?? []),
+                        {
+                          id: nuevo.id,
+                          numero_pedido: nuevo.numero_pedido,
+                          estado: nuevo.estado,
+                          fecha_desde: nuevo.fecha_desde,
+                          fecha_hasta: nuevo.fecha_hasta,
+                          monto_total: nuevo.monto_total,
+                          monto_pagado: nuevo.monto_pagado,
+                        },
+                      ],
+                    }
+                  : prev,
+              );
+              // Otra pantalla (la lista de pedidos muestra el badge 🎬): no está
+              // montada acá, invalidarla no dispara nada ahora.
+              qc.invalidateQueries({ queryKey: ["admin", "pedidos"] });
               setComposeKey((k) => k + 1);
               // El turno ya existe y se administra en su propia tarjeta: acá no
               // queda nada abierto (si no, el alta automática crearía otro).
