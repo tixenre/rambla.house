@@ -11,6 +11,7 @@ import {
   Trash2,
   ShieldAlert,
   X,
+  Clapperboard,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -29,6 +30,7 @@ import {
 } from "@/design-system/ui/alert-dialog";
 import { SearchInput } from "@/design-system/ui/search-input";
 import { Skeleton } from "@/design-system/ui/skeleton";
+import { CountBadge } from "@/design-system/ui/count-badge";
 import { adminApi, ESTADO_LABEL, type Pedido } from "@/lib/admin/api";
 import { nextStep, type EstadoPedido } from "@/lib/pedido-estados";
 import { esPedidoEstudio } from "@/lib/tipos-pedido";
@@ -79,6 +81,22 @@ function creadoHace(iso?: string): string | null {
   if (h < 24) return `hace ${h} h`;
   const d = Math.floor(h / 24);
   return `hace ${d} d`;
+}
+
+/** Cuántos turnos del Estudio tiene vinculados este pedido (#1308) — el
+ *  turno en sí ya no aparece como fila propia en esta lista, esta señal
+ *  es para no perderlo de vista. */
+function TurnosVinculadosTag({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-0.5"
+      title={`${count} turno(s) del Estudio vinculado(s)`}
+    >
+      <Clapperboard className="h-3 w-3 text-muted-foreground" />
+      <CountBadge count={count} size="sm" />
+    </span>
+  );
 }
 
 const saldoDe = (p: Pedido) => Math.max(0, (p.monto_total ?? 0) - (p.monto_pagado ?? 0));
@@ -377,7 +395,10 @@ function PedidosPage() {
           <AdminCard key={p.id} onClick={() => openEditor(p.id)}>
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <div className="mb-0.5 t-eyebrow">#{p.numero_pedido ?? p.id}</div>
+                <div className="mb-0.5 flex items-center gap-1.5 t-eyebrow">
+                  <span>#{p.numero_pedido ?? p.id}</span>
+                  <TurnosVinculadosTag count={p.turnos_vinculados_count ?? 0} />
+                </div>
                 <div className="truncate font-medium text-ink">
                   {p.cliente_nombre || "Sin cliente"}
                 </div>
@@ -495,6 +516,7 @@ function MasterList({
                       {fechaDia(p.fecha_desde)} → {fechaDia(p.fecha_hasta)}
                     </span>
                   )}
+                  <TurnosVinculadosTag count={p.turnos_vinculados_count ?? 0} />
                 </div>
                 <div className="mt-1.5 flex items-center gap-2">
                   {!estaPagado(p) && (

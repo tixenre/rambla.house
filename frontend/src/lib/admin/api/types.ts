@@ -1208,6 +1208,10 @@ export type Pedido = {
    *  del Estudio vinculados (#1308) — mismo shape que `PedidoGeneradoEdicion`
    *  (Talleres → Pedidos). Vacío/ausente = sin turnos vinculados. */
   turnos_estudio_vinculados?: PedidoGeneradoEdicion[];
+  /** Solo presente en `GET /alquileres` (la lista): cuántos turnos del
+   *  Estudio (no cancelados) tiene vinculados este pedido — el turno en sí
+   *  ya no aparece como fila propia ahí, esto es la señal de que existen. */
+  turnos_vinculados_count?: number;
   /** Solo presente en la respuesta de `PATCH /alquileres/{id}` cuando `id` es
    *  un pedido PRINCIPAL con turnos vinculados (#1308, cascada de estado
    *  "avanzan juntos"): qué turno no pudo seguir el mismo paso (bloqueado por

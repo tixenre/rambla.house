@@ -58,6 +58,25 @@ def _batch_get_alquiler_items(conn, pedido_ids: list[int]) -> dict[int, list[dic
     return result
 
 
+def _batch_count_turnos_vinculados(conn, pedido_ids: list[int]) -> dict[int, int]:
+    """Cuenta, por pedido principal, cuántos turnos del Estudio tiene
+    vinculados (`pedido_principal_id`) — para el badge de la lista de
+    pedidos, en 1 query en vez de N+1. Un turno cancelado no cuenta (mismo
+    criterio que la cascada de estado y el reparto de pago combinado, que
+    también lo excluyen)."""
+    if not pedido_ids:
+        return {}
+
+    ph = ",".join(["%s"] * len(pedido_ids))
+    rows = conn.execute(f"""
+        SELECT pedido_principal_id, COUNT(*) AS cnt
+        FROM alquileres
+        WHERE pedido_principal_id IN ({ph}) AND estado <> 'cancelado'
+        GROUP BY pedido_principal_id
+    """, pedido_ids).fetchall()
+    return {r["pedido_principal_id"]: r["cnt"] for r in rows}
+
+
 _CAMPOS_FISCALES = "perfil_impuestos, razon_social, domicilio_fiscal, email_facturacion, cuit"
 
 

@@ -18,9 +18,11 @@ from fastapi import Request, HTTPException, Query, BackgroundTasks
 from database import get_db, row_to_dict
 from auth.guards import require_admin
 from busqueda import construir
+from pedidos_vinculados import SIN_PRINCIPAL_SQL
 from rate_limit import limiter, ADMIN_WRITE_LIMIT
 from services.email import send_email
 from services.facturacion.repo import pedidos_con_factura_emitida
+from services.pedidos_enriquecimiento import _batch_count_turnos_vinculados
 from reservas import validar_stock as _check_stock
 from routes.alquileres.core import (
     router,
@@ -75,7 +77,11 @@ def list_pedidos(
     require_admin(request)
     offset = (page - 1) * per_page
     params: list = []
-    where  = "WHERE 1=1"
+    # Un turno del Estudio vinculado (`pedido_principal_id`) no es una venta
+    # propia — se administra desde "Turnos del Estudio" en la página de su
+    # principal (#1308). Sin este filtro aparecía como fila propia acá,
+    # duplicando la venta a la vista del admin.
+    where  = f"WHERE {SIN_PRINCIPAL_SQL}"
 
     with get_db() as conn:
         if estado:
@@ -143,6 +149,9 @@ def list_pedidos(
 
         # Pedidos con solicitud de modificación pendiente — para badge en UI.
         pedido_ids = [p["id"] for p in pedidos]
+        # Turnos del Estudio vinculados por pedido — para el badge de la
+        # lista (el turno en sí ya no aparece como fila propia, ver `where`).
+        turnos_count_map = _batch_count_turnos_vinculados(conn, pedido_ids)
         # `facturado` = tiene factura PRINCIPAL emitida. La puerta única
         # `pedidos_con_factura_emitida` excluye las notas de crédito (una NC
         # también es una fila 'emitida' → un EXISTS crudo marcaría "facturado" un
@@ -162,6 +171,7 @@ def list_pedidos(
             p["items"] = items_map.get(p["id"], [])
             p["tiene_solicitud_pendiente"] = p["id"] in pendientes
             p["facturado"] = p["id"] in facturados
+            p["turnos_vinculados_count"] = turnos_count_map.get(p["id"], 0)
 
         return {"total": total, "page": page, "per_page": per_page, "items": pedidos}
 
