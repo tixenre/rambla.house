@@ -28,13 +28,17 @@ import { toast } from "sonner";
 
 import { Section } from "@/design-system/composites/Section";
 import { Spinner } from "@/design-system/ui/spinner";
-import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
 import { adminApi, estudioAdminApi, type Pedido } from "@/lib/admin/api";
-import { transiciones } from "@/lib/pedido-estados";
 import { ReservaEstudioSection } from "@/components/admin/estudio/ReservaEstudioSection";
 import { NuevoTurnoEstudioForm } from "@/components/admin/estudio/NuevoTurnoEstudioForm";
 
-function TurnoVinculadoCard({ turnoId }: { turnoId: number }) {
+function TurnoVinculadoCard({
+  turnoId,
+  pedidoPrincipalId,
+}: {
+  turnoId: number;
+  pedidoPrincipalId: number;
+}) {
   const qc = useQueryClient();
   const estudioQ = useQuery({
     queryKey: ["admin", "estudio"],
@@ -45,24 +49,22 @@ function TurnoVinculadoCard({ turnoId }: { turnoId: number }) {
     queryFn: () => adminApi.getPedido(turnoId),
   });
 
-  // Cancelar un turno vinculado no tenía atajo acá — obligaba a abrir el
-  // turno en su propia pantalla y buscar "Zona peligrosa". Misma primitiva
-  // que usa esa pantalla (setPedidoEstado → cambiar_estado), sin endpoint
-  // nuevo: el motor ya excluye un turno cancelado de la cascada de estado y
-  // del reparto de pago combinado (#1308, D4/D6). Sin diálogo de confirmación
-  // — la ✕ es instantánea, igual que sacar un suelto en `EstudioIncluyeList`:
-  // el gesto de sacarlo ya comunica que se cancela.
-  const cancelarMut = useMutation({
-    mutationFn: () => adminApi.setPedidoEstado(turnoId, "cancelado"),
-    onSuccess: (t) => {
-      toast.success("Turno cancelado");
-      qc.invalidateQueries({ queryKey: ["admin", "pedido", turnoId] });
-      if (t.pedido_principal_id) {
-        qc.invalidateQueries({ queryKey: ["admin", "pedido", t.pedido_principal_id] });
-      }
+  // La ✕ BORRA el turno, no lo cancela (pedido del dueño: "que se comporte como
+  // cuando saco un equipo, simplemente se borra y listo"). Un turno que se saca
+  // del pedido no es una venta cancelada que haya que conservar en el historial
+  // — es una línea que nunca terminó de existir, igual que un equipo que sumaste
+  // y sacaste. Antes quedaba como una tarjeta "Cancelado" colgada en la sección.
+  // Hard delete real, la misma primitiva que "Eliminar pedido"
+  // (`DELETE /alquileres/{id}`, que ya borra ítems y pagos en cascada); el
+  // backend lo frena si el turno tiene plata cobrada encima.
+  const borrarMut = useMutation({
+    mutationFn: () => adminApi.deletePedido(turnoId),
+    onSuccess: () => {
+      toast.success("Turno eliminado");
+      qc.invalidateQueries({ queryKey: ["admin", "pedido", pedidoPrincipalId] });
       qc.invalidateQueries({ queryKey: ["admin", "pedidos"] });
     },
-    onError: (e: Error) => toast.error("No se pudo cancelar", { description: e.message }),
+    onError: (e: Error) => toast.error("No se pudo eliminar el turno", { description: e.message }),
   });
 
   if (turnoQ.isLoading || estudioQ.isLoading || !turnoQ.data || !estudioQ.data) {
@@ -73,8 +75,6 @@ function TurnoVinculadoCard({ turnoId }: { turnoId: number }) {
     );
   }
 
-  const puedeCancelar = transiciones(turnoQ.data.estado).includes("cancelado");
-
   return (
     <div className="space-y-1.5">
       <ReservaEstudioSection
@@ -84,25 +84,19 @@ function TurnoVinculadoCard({ turnoId }: { turnoId: number }) {
           qc.invalidateQueries({ queryKey: ["admin", "pedido", turnoId] });
         }}
       />
-      <div className="flex items-center gap-2 px-1">
-        {/* Cancelado es el único estado del turno que puede diferir del pedido:
-            la cascada lo arrastra hacia adelante y el gate le impide adelantarse
-            (#1308), así que mostrar su estado en el camino feliz sería repetir
-            el del pedido. El link "Abrir turno #N en su propia pantalla" se
-            retiró: el turno no es un pedido aparte y ya no tiene pantalla
-            propia — se administra acá. */}
-        {turnoQ.data.estado === "cancelado" && <EstadoBadge estado="cancelado" />}
-        {puedeCancelar && (
-          <button
-            type="button"
-            onClick={() => cancelarMut.mutate()}
-            disabled={cancelarMut.isPending}
-            title="Cancelar turno"
-            className="ml-auto text-muted-foreground hover:text-destructive disabled:opacity-50"
-          >
-            <X className="h-4 w-4" />
-          </button>
-        )}
+      {/* Sin badge de estado: el turno sigue el estado de su pedido (cascada +
+          gate, #1308), así que mostrarlo era repetir lo que ya dice el rail. Y
+          sin link a "su propia pantalla": el turno no es un pedido aparte. */}
+      <div className="flex items-center px-1">
+        <button
+          type="button"
+          onClick={() => borrarMut.mutate()}
+          disabled={borrarMut.isPending}
+          title="Quitar turno del pedido"
+          className="ml-auto text-muted-foreground hover:text-destructive disabled:opacity-50"
+        >
+          <X className="h-4 w-4" />
+        </button>
       </div>
     </div>
   );
@@ -126,7 +120,7 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
         {turnos.length > 0 && (
           <div className="space-y-4">
             {turnos.map((t) => (
-              <TurnoVinculadoCard key={t.id} turnoId={t.id} />
+              <TurnoVinculadoCard key={t.id} turnoId={t.id} pedidoPrincipalId={pedido.id} />
             ))}
           </div>
         )}

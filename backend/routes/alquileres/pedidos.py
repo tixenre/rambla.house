@@ -203,8 +203,23 @@ def delete_pedido(id: int, request: Request):
     require_admin(request)
     with get_db() as conn:
         try:
-            if not conn.execute("SELECT id FROM alquileres WHERE id=%s", (id,)).fetchone():
+            p = conn.execute(
+                "SELECT id, pedido_principal_id, monto_pagado FROM alquileres WHERE id=%s", (id,)
+            ).fetchone()
+            if not p:
                 raise HTTPException(404, "Pedido no encontrado")
+            # Un turno del Estudio vinculado se saca del pedido con la ✕, y eso
+            # lo BORRA (no lo cancela) — igual que sacar un equipo (#1308). Pero
+            # el pago combinado escribe las filas de `alquiler_pagos` con el
+            # `pedido_id` del turno, así que borrarlo con plata encima haría
+            # desaparecer un cobro real de los libros. Ahí se frena: primero se
+            # anula el pago. (Guard SOLO para turnos vinculados — el borrado de
+            # un pedido normal no cambia.)
+            if p["pedido_principal_id"] and (p["monto_pagado"] or 0) > 0:
+                raise HTTPException(
+                    409,
+                    "Este turno ya tiene plata cobrada. Anulá el pago antes de sacarlo del pedido.",
+                )
             # Borrar ítems, pagos e historicos asociados (FK cascade si está activada, pero por las dudas)
             conn.execute("DELETE FROM alquiler_items  WHERE pedido_id=%s", (id,))
             conn.execute("DELETE FROM alquiler_pagos  WHERE pedido_id=%s", (id,))

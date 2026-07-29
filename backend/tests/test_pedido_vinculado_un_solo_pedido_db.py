@@ -374,6 +374,70 @@ def test_dashboard_no_cuenta_el_turno_como_pedido_activo(client_con_db, setup):
 
 # ── Liquidación: el aporte va bajo el número del pedido real ─────────────────
 
+# ── Sacar un turno del pedido lo BORRA, no lo cancela ────────────────────────
+
+def test_sacar_un_turno_lo_borra_de_verdad(client_con_db, setup):
+    """Pedido del dueño: "que se comporte como cuando saco un equipo, simplemente
+    se borra y listo" — antes quedaba una tarjeta "Cancelado" colgada en la
+    sección. Hard delete: la fila y sus ítems desaparecen."""
+    from database import get_db
+
+    r = client_con_db.delete(f"/api/alquileres/{TURNO_ID}")
+    assert r.status_code == 204, r.text
+
+    conn = get_db()
+    try:
+        assert conn.execute(
+            "SELECT id FROM alquileres WHERE id = %s", (TURNO_ID,)
+        ).fetchone() is None
+        assert conn.execute(
+            "SELECT id FROM alquiler_items WHERE pedido_id = %s", (TURNO_ID,)
+        ).fetchone() is None
+        # El principal queda intacto, sin el turno.
+        assert conn.execute(
+            "SELECT id FROM alquileres WHERE id = %s", (PRINCIPAL_ID,)
+        ).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def test_no_se_puede_sacar_un_turno_con_plata_cobrada(client_con_db, setup):
+    """El pago combinado escribe las filas de `alquiler_pagos` con el `pedido_id`
+    del turno: borrarlo con plata encima haría desaparecer un cobro real."""
+    from database import get_db
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE alquileres SET monto_pagado = %s WHERE id = %s", (10_000, TURNO_ID)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    r = client_con_db.delete(f"/api/alquileres/{TURNO_ID}")
+    assert r.status_code == 409, r.text
+    assert "plata cobrada" in r.json()["detail"]
+
+
+def test_un_pedido_normal_con_plata_se_sigue_pudiendo_borrar(client_con_db, setup):
+    """El guard es SOLO para turnos vinculados — el borrado de un pedido normal
+    (con su propia "Zona peligrosa") no cambia."""
+    from database import get_db
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE alquileres SET monto_pagado = %s WHERE id = %s", (10_000, PRINCIPAL_ID)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    r = client_con_db.delete(f"/api/alquileres/{PRINCIPAL_ID}")
+    assert r.status_code == 204, r.text
+
+
 def test_liquidacion_agrupa_el_turno_bajo_el_numero_del_principal(client_con_db, setup):
     """El aporte del Estudio deja de figurar como un pedido separado en el
     reporte — se agrupa bajo la venta real. La ATRIBUCIÓN por dueño no cambia."""
