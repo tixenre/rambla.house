@@ -162,7 +162,7 @@ export function RegistrarPagoModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle>Registrar pago</DialogTitle>
         </DialogHeader>
@@ -189,14 +189,15 @@ export function RegistrarPagoModal({
           )}
         </div>
 
-        {/* Presets */}
+        {/* Presets — solo Seña/Saldo: el monto siempre se puede tipear libre
+            abajo, un botón "Otro" era redundante con eso (no habilitaba nada
+            que el input ya no permitiera). */}
         <SegmentedControl
           value={preset}
           onChange={(v) => selectPreset(v as Preset)}
           options={[
             { value: "sena", label: "Seña 50%" },
             { value: "saldo", label: "Saldo total" },
-            { value: "otro", label: "Otro" },
           ]}
           ariaLabel="Monto a cobrar"
         />
@@ -220,38 +221,39 @@ export function RegistrarPagoModal({
           </div>
         </div>
 
-        {/* Concepto */}
-        <div className="space-y-1">
-          <Label
-            htmlFor="pago-concepto"
-            className="font-mono text-2xs uppercase tracking-[0.15em] text-muted-foreground"
-          >
-            Concepto
-          </Label>
-          <Input
-            id="pago-concepto"
-            value={concepto}
-            onChange={(e) => setConcepto(e.target.value)}
-            placeholder="Seña, saldo final…"
-            className="h-9 text-base md:text-sm"
-          />
-        </div>
-
-        {/* Fecha */}
-        <div className="space-y-1">
-          <Label
-            htmlFor="pago-fecha"
-            className="font-mono text-2xs uppercase tracking-[0.15em] text-muted-foreground"
-          >
-            Fecha del cobro
-          </Label>
-          <Input
-            id="pago-fecha"
-            type="date"
-            value={fecha}
-            onChange={(e) => setFecha(e.target.value)}
-            className="h-9 text-base md:text-sm"
-          />
+        {/* Concepto + fecha — pareados como Cobró/Método: menos filas apiladas
+            ahora que el modal tiene más ancho para usar. */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <Label
+              htmlFor="pago-concepto"
+              className="font-mono text-2xs uppercase tracking-[0.15em] text-muted-foreground"
+            >
+              Concepto
+            </Label>
+            <Input
+              id="pago-concepto"
+              value={concepto}
+              onChange={(e) => setConcepto(e.target.value)}
+              placeholder="Seña, saldo final…"
+              className="h-9 text-base md:text-sm"
+            />
+          </div>
+          <div className="space-y-1">
+            <Label
+              htmlFor="pago-fecha"
+              className="font-mono text-2xs uppercase tracking-[0.15em] text-muted-foreground"
+            >
+              Fecha del cobro
+            </Label>
+            <Input
+              id="pago-fecha"
+              type="date"
+              value={fecha}
+              onChange={(e) => setFecha(e.target.value)}
+              className="h-9 text-base md:text-sm"
+            />
+          </div>
         </div>
 
         {/* Destinatario + método */}
@@ -283,10 +285,19 @@ export function RegistrarPagoModal({
           </div>
         </div>
 
+        {/* Aviso simétrico: cualquier cruce entre la plata del Estudio y la
+            del rental necesita rendición — para el lado que la cobra, no solo
+            cuando el Estudio "pierde" plata que cobró otro. */}
         {hayParteEstudio && destinatario !== "Estudio" && (
           <p className="rounded-md border border-amber/40 bg-amber/5 px-2.5 py-2 text-xs text-ink">
             Esta plata es del Estudio — si la cobra {destinatario}, va a quedar pendiente de que{" "}
             {destinatario} se la rinda (lo vas a ver en Finanzas → Caja Estudio).
+          </p>
+        )}
+        {!hayParteEstudio && destinatario === "Estudio" && (
+          <p className="rounded-md border border-amber/40 bg-amber/5 px-2.5 py-2 text-xs text-ink">
+            Esta plata es del rental, no del Estudio — va a quedar pendiente de que el Estudio se la
+            rinda (lo vas a ver en Finanzas → Caja Estudio).
           </p>
         )}
 
