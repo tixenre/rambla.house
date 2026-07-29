@@ -1168,6 +1168,22 @@ function PedidoEditorPage() {
                 {(p.pagos ?? []).map((pago) => (
                   <PagoRow key={pago.id} pago={pago} pedidoId={p.id} />
                 ))}
+                {/* Pagos de los turnos del Estudio vinculados (#1308): el pago
+                    combinado reparte filas reales de `alquiler_pagos` contra
+                    CADA turno — sin esto, esa plata quedaba invisible e
+                    irreversible desde la única página que el admin abre (el
+                    turno no tiene página propia). */}
+                {turnosVinculados.flatMap((t, i) =>
+                  (t.pagos ?? []).map((pago) => (
+                    <PagoRow
+                      key={pago.id}
+                      pago={pago}
+                      pedidoId={t.id}
+                      invalidatePedidoId={p.id}
+                      origenLabel={turnosVinculados.length > 1 ? `Estudio ${i + 1}` : "Estudio"}
+                    />
+                  )),
+                )}
                 {!(
                   combinado.pagadoCombinado >= combinado.totalCombinado &&
                   combinado.totalCombinado > 0

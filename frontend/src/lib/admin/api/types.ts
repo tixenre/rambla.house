@@ -1655,6 +1655,10 @@ export type PedidoGeneradoEdicion = {
   fecha_hasta: string | null;
   monto_total: number;
   monto_pagado: number;
+  /** Solo presente en `turnos_estudio_vinculados` (#1308) — el pago combinado
+   *  reparte filas reales de `alquiler_pagos` con el `pedido_id` del turno;
+   *  Talleres → Pedidos no lo necesita y no lo manda. */
+  pagos?: PedidoPago[];
 };
 
 /** Una línea del reparto de un pago combinado (#1308) — a qué pedido real

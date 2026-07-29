@@ -67,19 +67,35 @@ import { EquipoThumb } from "@/components/admin/pedido/EquipoThumb";
 export function PagoRow({
   pago,
   pedidoId,
+  invalidatePedidoId,
+  origenLabel,
 }: {
   // El tipo canónico, no una copia local recortada: la copia venía sin
   // `destinatario`/`metodo` (que el backend SÍ devuelve) y por eso no había
   // forma de mostrarlos sin que TypeScript los rechazara.
   pago: PedidoPago;
+  /** El pedido REAL dueño de esta fila de `alquiler_pagos` — el pago
+   *  combinado (#1308) reparte contra el principal Y sus turnos vinculados,
+   *  cada fila con SU PROPIO `pedido_id`. Es lo que usa la anulación. */
   pedidoId: number;
+  /** Qué pedido invalidar en caché al anular — default `pedidoId`. Un pago de
+   *  un TURNO vinculado se anula contra el turno (`pedidoId=turno.id`, la
+   *  fila real), pero lo único que esta página tiene fetcheado es el
+   *  PRINCIPAL — sin esto, anular el pago de un turno no refrescaba nada en
+   *  pantalla hasta recargar. */
+  invalidatePedidoId?: number;
+  /** "Estudio"/"Estudio N" cuando este pago es de un turno vinculado, no del
+   *  pedido principal — sin esto, con más de un turno cobrado, todos los
+   *  pagos se leen igual y no hay forma de saber cuál pagó qué. */
+  origenLabel?: string;
 }) {
   const qc = useQueryClient();
+  const invalidateId = invalidatePedidoId ?? pedidoId;
   const delMut = useMutation({
     mutationFn: (motivo: string) => adminApi.anularPago(pedidoId, pago.id, motivo),
     onSuccess: () => {
       toast.success("Pago anulado");
-      qc.invalidateQueries({ queryKey: ["admin", "pedido", pedidoId] });
+      qc.invalidateQueries({ queryKey: ["admin", "pedido", invalidateId] });
       qc.invalidateQueries({ queryKey: ["admin", "pedidos"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -92,6 +108,7 @@ export function PagoRow({
       <span className="text-muted-foreground">
         <span className={cn(pago.anulado && "line-through")}>
           {pago.concepto || "Pago"} · {formatFechaCorta(pago.fecha)}
+          {origenLabel ? ` · ${origenLabel}` : ""}
           {/* Quién cobró y cómo: el modal OBLIGA a elegirlos y el backend los
               guarda, pero acá no se veían — para saber quién tiene la plata
               había que salir a Finanzas. */}

@@ -142,7 +142,14 @@ def _pedido_principal_liviano(conn, pedido_principal_id: int) -> dict | None:
 def _turnos_vinculados(conn, pedido_id: int) -> list[dict]:
     """Turnos del Estudio vinculados a este pedido (#1308) — mismo shape
     liviano que `services.talleres` usa para "pedidos generados" de una
-    edición (`PedidoGeneradoEdicion` en el front)."""
+    edición (`PedidoGeneradoEdicion` en el front), más sus propios `pagos`.
+
+    El pago combinado (`_agregar_pago_combinado`) reparte filas REALES de
+    `alquiler_pagos` con el `pedido_id` del turno — sin traerlas acá, esa
+    plata quedaba invisible y sin forma de anularse desde la página del
+    pedido principal (la única que el admin abre; el turno no tiene página
+    propia). Turnos son 0-2 por pedido en la práctica — un `_get_alquiler_pagos`
+    por turno no vale la pena batchear."""
     rows = conn.execute(
         """
         SELECT id, numero_pedido, estado, fecha_desde, fecha_hasta,
@@ -153,7 +160,10 @@ def _turnos_vinculados(conn, pedido_id: int) -> list[dict]:
         """,
         (pedido_id,),
     ).fetchall()
-    return [row_to_dict(r) for r in rows]
+    turnos = [row_to_dict(r) for r in rows]
+    for t in turnos:
+        t["pagos"] = _get_alquiler_pagos(conn, t["id"])
+    return turnos
 
 
 def _clases_del_taller(conn, edicion_id: int) -> list[dict]:
