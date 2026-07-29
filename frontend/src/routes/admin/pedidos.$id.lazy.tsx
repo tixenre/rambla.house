@@ -856,7 +856,7 @@ function PedidoEditorPage() {
                 // separar los equipos de la parte contable?"). Mismo patrón
                 // ya usado para el mismo tipo de corte en
                 // `contabilidad.reporte.lazy.tsx`, no uno nuevo.
-                <div className="border-t-2 border-ink/15 pt-4 space-y-3">
+                <div className="border-t-2 border-ink/35 pt-4 space-y-3">
                   <DescuentoControl
                     value={{
                       tipo: datos.descuento_manual_tipo,

@@ -327,14 +327,19 @@ export function ReservaEstudioSection({
             contable (pedido del dueño: "una línea horizontal más ancha para
             separar los equipos de la parte contable"); las dos secciones son
             gemelas, la frontera tiene que leerse igual en las dos. */}
-        <div className="border-t-2 border-ink/15 pt-4 space-y-3">
+        <div className="border-t-2 border-ink/35 pt-4 space-y-3">
           {/* Descuento propio del turno (#1308) — acá adentro, igual que el de
               los equipos vive dentro de "Alquiler de equipos" (pedido del
               dueño: "¿podemos hacer que los descuentos estén en la
               sección?"). Es la MISMA pieza (`DescuentoControl`), no una
               copia. */}
           <DescuentoControl
-            label="Descuento del turno (0 = sin descuento)"
+            // Sin el paréntesis "(0 = sin descuento)": era una explicación
+            // redundante (el dueño lo notó) — el bloque de abajo YA lo
+            // muestra: en 0, `TotalSeccion` esconde bruto/descuento y deja
+            // solo el Total, así que la conducta de "0" se ve, no hace falta
+            // narrarla en el label.
+            label="Descuento del turno"
             value={descuento}
             onChange={setDescuento}
             maxMonto={cotiz?.bruto_descontable ?? cotiz?.monto_total ?? 0}

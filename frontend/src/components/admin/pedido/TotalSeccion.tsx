@@ -39,14 +39,18 @@ export function TotalSeccion({
   const hayDescuento = (descuentoMonto ?? 0) > 0;
   return (
     <div className="rounded-lg border hairline bg-muted/20 p-3 text-sm">
+      {/* justify-end, no justify-between: el label va PEGADO a su número,
+          los dos juntos contra el borde derecho — no repartidos en las dos
+          puntas de la fila (el dueño: "este texto al lado de los números,
+          ¿me explico? justificado a la derecha"). */}
       <div className="space-y-1">
         {hayDescuento && (
           <>
-            <div className="flex items-center justify-between gap-2 text-muted-foreground">
+            <div className="flex items-center justify-end gap-2 text-muted-foreground">
               <span>{brutoLabel}</span>
               <span className="font-mono tabular-nums">{fmtArs(bruto)}</span>
             </div>
-            <div className="flex items-center justify-between gap-2 text-muted-foreground">
+            <div className="flex items-center justify-end gap-2 text-muted-foreground">
               <span>
                 {descuentoLabel ?? "Descuento"}
                 {descuentoPct ? ` · ${descuentoPct}%` : ""}
@@ -57,7 +61,7 @@ export function TotalSeccion({
             </div>
           </>
         )}
-        <div className="flex items-center justify-between gap-2 font-semibold text-ink">
+        <div className="flex items-center justify-end gap-2 font-semibold text-ink">
           <span>Total</span>
           <span className="flex items-center gap-2 font-mono tabular-nums">
             {trailing}
