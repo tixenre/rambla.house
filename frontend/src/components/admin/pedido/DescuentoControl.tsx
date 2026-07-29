@@ -34,7 +34,13 @@ export function DescuentoControl({
    *  convierte a su equivalente en vez de resetear a 0. */
   efectivoPct,
   efectivoMonto,
-  label = "Descuento manual (0 = automático)",
+  /** Sin default: "Alquiler de equipos" pasa el suyo ("0 = automático" es
+   *  información real ahí — 0 no es "sin descuento", cae al de cliente/
+   *  jornadas). El turno del Estudio no pasa nada — su ledger de abajo YA
+   *  dice "Descuento del turno · X%" en cuanto hay uno, así que un eyebrow
+   *  propio ACÁ ARRIBA anunciando lo mismo era el mismo aviso otra vez (el
+   *  dueño: "sacale ese texto"). Omitido → sin `<span>`, cero espacio. */
+  label,
   className,
 }: {
   value: DescuentoManual;
@@ -53,7 +59,7 @@ export function DescuentoControl({
        adentro, un <label> no es seguro; FieldLabel sigue bien para los campos
        de un solo input. */
     <div className={cn("block", className)}>
-      <span className="block t-eyebrow mb-1">{label}</span>
+      {label && <span className="block t-eyebrow mb-1">{label}</span>}
       {/* justify-end: alineado a la derecha con los números de arriba/abajo
           (bruto/descuento/total en `TotalSeccion` son todos flex
           justify-between, con el valor pegado al borde derecho) — el pedido

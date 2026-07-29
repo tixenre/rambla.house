@@ -334,12 +334,13 @@ export function ReservaEstudioSection({
               sección?"). Es la MISMA pieza (`DescuentoControl`), no una
               copia. */}
           <DescuentoControl
-            // Sin el paréntesis "(0 = sin descuento)": era una explicación
-            // redundante (el dueño lo notó) — el bloque de abajo YA lo
-            // muestra: en 0, `TotalSeccion` esconde bruto/descuento y deja
-            // solo el Total, así que la conducta de "0" se ve, no hace falta
-            // narrarla en el label.
-            label="Descuento del turno"
+            // Sin `label`: primero se sacó el paréntesis "(0 = sin
+            // descuento)" (explicación redundante — en 0, `TotalSeccion` ya
+            // esconde bruto/descuento y deja solo el Total). Después el
+            // dueño pidió sacar el label ENTERO ("sacale ese texto") — el
+            // ledger de abajo ya dice "Descuento del turno · X%" en cuanto
+            // hay uno, un eyebrow acá arriba anunciando lo mismo era la
+            // misma info dos veces.
             value={descuento}
             onChange={setDescuento}
             maxMonto={cotiz?.bruto_descontable ?? cotiz?.monto_total ?? 0}

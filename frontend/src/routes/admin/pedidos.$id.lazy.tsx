@@ -858,6 +858,7 @@ function PedidoEditorPage() {
                 // `contabilidad.reporte.lazy.tsx`, no uno nuevo.
                 <div className="border-t-2 border-ink/35 pt-4 space-y-3">
                   <DescuentoControl
+                    label="Descuento manual (0 = automático)"
                     value={{
                       tipo: datos.descuento_manual_tipo,
                       pct: datos.descuento_pct,
