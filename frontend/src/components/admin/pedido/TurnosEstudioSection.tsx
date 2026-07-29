@@ -122,14 +122,12 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
     queryFn: () => estudioAdminApi.get(),
   });
   const turnos = pedido.turnos_estudio_vinculados ?? [];
-  // Con la sección vacía, el compose de un turno nuevo se ve IGUAL que un turno
-  // ya cargado ("Espacio", su franja, su precio) → parecía que el pedido ya
-  // tenía uno (lo reportó el dueño). Vacío ⇒ se muestra un estado vacío
-  // explícito con su botón; recién ahí aparece el compose. Con al menos un
-  // turno cargado el compose sigue SIEMPRE visible debajo, como se pidió
-  // cuando se sacó el modal — ahí no hay ambigüedad posible.
+  // El compose NO vive fijo al pie: se abre con el botón y se cierra solo
+  // apenas el turno queda creado (el alta ya no tiene botón de confirmar —
+  // "que sea como los equipos: si está en el listado, se cotiza"). Dejarlo
+  // permanente sería una fila fantasma que se lee como un turno más y que,
+  // con el alta automática, se pondría a crear turnos sola.
   const [componiendo, setComponiendo] = useState(false);
-  const mostrarCompose = turnos.length > 0 || componiendo;
 
   return (
     <Section variant="card" tone="elevated" icon={Clapperboard} title="Turnos del Estudio">
@@ -147,18 +145,7 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
           </div>
         )}
 
-        {!mostrarCompose && (
-          <button
-            type="button"
-            onClick={() => setComponiendo(true)}
-            className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed hairline px-3 py-4 text-sm text-muted-foreground transition hover:bg-muted/30 hover:text-ink"
-          >
-            <Plus className="h-4 w-4 shrink-0" />
-            Agregar un turno del Estudio
-          </button>
-        )}
-
-        {mostrarCompose && estudioQ.data && (
+        {componiendo && estudioQ.data ? (
           <NuevoTurnoEstudioForm
             key={composeKey}
             chrome="inline"
@@ -171,12 +158,22 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
             onCreated={() => {
               qc.invalidateQueries({ queryKey: ["admin", "pedido", pedido.id] });
               setComposeKey((k) => k + 1);
+              // El turno ya existe y se administra en su propia tarjeta: acá no
+              // queda nada abierto (si no, el alta automática crearía otro).
+              setComponiendo(false);
             }}
-            // Solo se puede descartar cuando el compose es la ÚNICA cosa de la
-            // sección: con turnos ya cargados queda fijo al pie (como el
-            // buscador de "Equipos") y cerrarlo no tendría a dónde volver.
-            onCancel={turnos.length === 0 ? () => setComponiendo(false) : undefined}
+            onCancel={() => setComponiendo(false)}
           />
+        ) : (
+          /* Mismo lugar y forma que "Agregar línea personalizada" de Equipos. */
+          <button
+            type="button"
+            onClick={() => setComponiendo(true)}
+            className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed hairline px-3 py-4 text-sm text-muted-foreground transition hover:bg-muted/30 hover:text-ink"
+          >
+            <Plus className="h-4 w-4 shrink-0" />
+            {turnos.length > 0 ? "Agregar otro turno del Estudio" : "Agregar un turno del Estudio"}
+          </button>
         )}
       </div>
     </Section>

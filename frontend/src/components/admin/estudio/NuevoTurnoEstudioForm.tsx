@@ -17,9 +17,9 @@
  * (`chrome="inline"`, con `pedidoVinculado` — sin cliente ni Total, ya se ven
  * arriba/en el rail combinado).
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { Plus, X } from "lucide-react";
+import { X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/design-system/ui/button";
@@ -197,6 +197,47 @@ export function NuevoTurnoEstudioForm({
   const puedeGuardar = !!fecha && !!start && horas >= (estudio.min_horas || 1);
   const cotiz = cotizarQ.data;
 
+  // ── Alta sin botón (modo inline) ──────────────────────────────────────────
+  // "Sacá ese Agregar, que sea como los equipos: si está en el listado, se
+  // cotiza". En "Equipos" no hay un botón de confirmar: elegís del buscador y
+  // la línea ya cuenta. Acá el equivalente es que el turno se cree SOLO apenas
+  // la franja es válida Y el espacio está libre.
+  //
+  // Tres candados para no crear cualquier cosa:
+  //  1. `espacio_disponible` de la cotización — es el MISMO `_centinela_libre`
+  //     que valida la creación en el backend, así que en verde el POST no
+  //     debería rebotar (y si hay carrera, el 409 la corta igual).
+  //  2. la cotización tiene que ser de ESTOS valores, no de los anteriores: el
+  //     query va con debounce, y crear con una disponibilidad vieja sería
+  //     reservar a ciegas.
+  //  3. `intentadoRef` — se intenta UNA vez por combinación de valores: si el
+  //     backend rechaza, no se reintenta en loop; recién vuelve a intentar
+  //     cuando se cambia algo.
+  const claveAlta = JSON.stringify(cotizarParams);
+  const cotizacionAlDia = JSON.stringify(cotizarDebounced) === claveAlta && !cotizarQ.isFetching;
+  const intentadoRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (chrome !== "inline") return;
+    if (!puedeGuardar || !cotizacionAlDia || !cotiz?.espacio_disponible) return;
+    if (mutation.isPending || mutation.isSuccess) return;
+    if (intentadoRef.current === claveAlta) return;
+    const t = setTimeout(() => {
+      intentadoRef.current = claveAlta;
+      mutation.mutate();
+    }, 600);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- dispara por los valores del turno; incluir `mutation` reiniciaría el timer en cada render
+  }, [
+    chrome,
+    puedeGuardar,
+    cotizacionAlDia,
+    cotiz?.espacio_disponible,
+    claveAlta,
+    mutation.isPending,
+    mutation.isSuccess,
+  ]);
+
   return (
     <div className="space-y-4">
       {chrome === "dialog" &&
@@ -319,23 +360,20 @@ export function NuevoTurnoEstudioForm({
           ) : null}
         </div>
       )}
-      {chrome === "inline" && cotiz && !cotiz.espacio_disponible && (
-        <p className="text-xs text-destructive">
-          El espacio no está disponible: {cotiz.espacio_motivo}
-        </p>
-      )}
+      {/* En "inline" no hay botón de crear (el turno se crea solo): lo único
+          que va al pie es el motivo por el que TODAVÍA no se creó. */}
+      {chrome === "inline" &&
+        (cotiz && !cotiz.espacio_disponible ? (
+          <p className="text-xs text-destructive">
+            El espacio no está disponible: {cotiz.espacio_motivo}. Elegí otra franja.
+          </p>
+        ) : mutation.isPending ? (
+          <p className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Spinner size="sm" /> Agregando el turno…
+          </p>
+        ) : null)}
 
-      {chrome === "inline" ? (
-        <button
-          type="button"
-          onClick={() => mutation.mutate()}
-          disabled={!puedeGuardar || mutation.isPending}
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed hairline px-3 py-2.5 text-sm text-muted-foreground transition hover:bg-muted/30 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {mutation.isPending ? <Spinner size="sm" /> : <Plus className="h-4 w-4 shrink-0" />}
-          <span>Agregar</span>
-        </button>
-      ) : (
+      {chrome === "dialog" && (
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={onCancel}>
             Cancelar
