@@ -368,9 +368,16 @@ def export_clientes(conn) -> list[dict]:
 def export_alquileres(conn) -> list[dict]:
     """Exporta alquileres con items y pagos embebidos.
 
-    Filtra los que no tienen numero_pedido (legacy sin nro) — no son
-    re-importables sin clave natural. Si los necesitás, generales un
-    numero_pedido antes vía un script de mantenimiento.
+    Filtra los que no tienen numero_pedido — no son re-importables sin clave
+    natural. Eso deja afuera dos grupos, los dos a propósito:
+
+    - **Legacy sin número** (importados viejos). Si los necesitás, generales un
+      numero_pedido antes vía un script de mantenimiento.
+    - **Borradores.** Un borrador nace SIN número por diseño (es un presupuesto
+      rápido, no una venta — ver `create_pedido`), así que no entra al backup.
+      **CONFIRMADO POR EL DUEÑO** ("no pasa nada si el borrador no entra en el
+      back up"): es efímero y se borra de verdad (hard delete), no algo que
+      haya que preservar. NO "arreglar" este filtro para incluirlos.
     """
     rows = conn.execute("""
         SELECT a.numero_pedido, a.cliente_nombre, a.cliente_telefono,
