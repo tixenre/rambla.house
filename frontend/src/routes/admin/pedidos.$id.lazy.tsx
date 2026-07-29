@@ -643,17 +643,23 @@ function PedidoEditorPage() {
             }
           />
 
-          {/* Fechas — editables con re-validación de stock. Taller (#1308):
-              `fecha_desde`/`fecha_hasta` son el mes contable de la edición, no
-              un evento real — se muestran las clases reales en su lugar. Un
-              turno real del Estudio no repite esta Section: su franja ya se
-              edita en `ReservaEstudioSection`, arriba. */}
+          {/* Alquiler = fechas + equipos en UNA sola sección (#1308, pedido del
+              dueño: "¿podemos unir lo del rango de fechas y los equipos? que
+              esté la sección del rental y la sección del Estudio"). Las dos
+              eran cards separadas aunque describen lo mismo: qué se alquila y
+              cuándo. Queda hermanada con "Turnos del Estudio", que tiene la
+              misma forma — banda de tiempo arriba, lista de qué incluye abajo.
+              Taller (#1308): `fecha_desde`/`fecha_hasta` son el mes contable de
+              la edición, no un evento real — se muestran las clases reales en
+              su lugar. Un turno real del Estudio no repite esta Section: su
+              franja y sus ítems ya se editan en `ReservaEstudioSection`. */}
           {!esEstudioReal && (
             <Section
               variant="card"
               tone="elevated"
-              icon={Calendar}
-              title={esTaller ? "Clases del taller" : "Fechas del alquiler"}
+              icon={Box}
+              title={esTaller ? "Taller" : "Alquiler"}
+              contentClassName="space-y-3"
               actions={
                 esTaller ? undefined : !datos.fecha_desde || !datos.fecha_hasta ? (
                   <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-destructive">
@@ -750,16 +756,14 @@ function PedidoEditorPage() {
                   )}
                 </button>
               )}
-            </Section>
-          )}
 
-          {/* Equipos — turno del Estudio: el centinela/promo/sueltos se
-              cargan desde Estudio → Reservas (el buscador y la edición por
-              línea se neutralizan acá, el backend los rechaza con 409). Un
-              turno real ya administra sus sueltos en `ReservaEstudioSection`,
-              arriba — no repite esta Section. */}
-          {!esEstudioReal && (
-            <Section variant="card" tone="elevated" icon={Box} title={`Equipos · ${items.length}`}>
+              {/* Equipos — turno del Estudio: el centinela/promo/sueltos se
+                  cargan desde Estudio → Reservas (el buscador y la edición por
+                  línea se neutralizan acá, el backend los rechaza con 409). El
+                  rótulo espeja al "Qué incluye este turno" del Estudio: banda de
+                  tiempo arriba, qué incluye abajo. */}
+              <div className="t-eyebrow pt-1">Equipos · {items.length}</div>
+
               {/* Buscador inline: resultados en dropdown debajo (no tapa el form) */}
               {!esEstudio && (
                 <EquipoComboSearch

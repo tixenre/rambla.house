@@ -1,15 +1,17 @@
 /**
- * EstudioIncluyeList — "qué incluye este turno" como UNA sola lista, sin nada
- * suelto alrededor: Espacio (siempre, franja horaria + precio editables INLINE
- * en la misma fila) + Pack + Recién pintado + Equipos sueltos, cada uno como
- * una fila —incluido lo que TODAVÍA NO está agregado, que aparece atenuado con
- * un + en la misma columna donde lo incluido tiene su ✕—, y el buscador de
- * equipos como última fila. Reemplaza los switches sueltos + el campo de
- * override separado + el desglose por-componente duplicado + los chips dashed
- * de add-on: una sola forma de ver y tocar cada línea, con su precio al lado
- * (el front no calcula plata, MEMORIA 2026-06-29: los precios vienen de
- * `cotiz` —o del config del Estudio para lo disponible—, resueltos por el
- * backend).
+ * EstudioIncluyeList — el turno en dos bloques, con la MISMA forma que la
+ * sección "Alquiler" del pedido para que se lean como hermanas: arriba la
+ * banda de tiempo (cuándo empieza y cuánto dura — espejo de la píldora
+ * "Retiro → Devolución"), abajo "qué incluye" como UNA sola lista —Espacio
+ * (siempre, con su tarifa editable) + Pack + Recién pintado + Equipos sueltos,
+ * cada uno una fila, incluido lo que TODAVÍA NO está agregado (atenuado, bajo
+ * su rótulo, con un + en la misma columna donde lo incluido tiene su ✕)— y el
+ * buscador de equipos como última fila. Reemplaza los switches sueltos + el
+ * campo de override separado + el desglose por-componente duplicado + los
+ * chips dashed de add-on: una sola forma de ver y tocar cada línea, con su
+ * precio al lado (el front no calcula plata, MEMORIA 2026-06-29: los precios
+ * vienen de `cotiz` —o del config del Estudio para lo disponible—, resueltos
+ * por el backend).
  *
  * El buscador de sueltos replica la misma lógica que "Equipos" del pedido:
  * SIEMPRE visible, sin colapsar detrás de ningún chip/toggle (el dueño lo
@@ -19,11 +21,14 @@
  * fijo, stock duro) — y en una reserva standalone del Estudio es la ÚNICA
  * vía de sumar equipo.
  *
- * La fila "Espacio" absorbe fecha/hora/horas (#1308, pedido del dueño: "no
- * quiero el modal... quiero una lista para seleccionar, como con los
- * equipos") — antes vivían en un grid de 3 columnas aparte, arriba de esta
- * lista, en cada caller (duplicado 2 veces); ahora es UNA sola fila de UNA
- * sola lista, igual de simple que la sección "Equipos" del pedido.
+ * Historia de fecha/hora/horas (#1308, tres vueltas del mismo pedido): vivían
+ * en un grid de 3 columnas suelto, duplicado en cada caller → se plegaron
+ * adentro de la fila "Espacio" para que la lista fuera una sola cosa → y ahora
+ * salieron de la fila a la `BandaFranja`, que NO es aquel grid: es una banda
+ * con la forma de la del alquiler, dentro de la misma sección ("separar las
+ * fechas a un coso arriba, como en el rental, y así visualmente están
+ * hermanados"). Sigue habiendo UNA sola definición, compartida por los dos
+ * callers.
  *
  * Presentacional puro — sin query/mutation propias. Compartido por
  * `ReservaEstudioSection` (editar) y `NuevoTurnoEstudioForm` (alta): cada uno
@@ -203,6 +208,93 @@ function FilaRotulo({ children }: { children: ReactNode }) {
   );
 }
 
+/**
+ * Banda de tiempo del turno — CUÁNDO, arriba de todo, separada de "qué
+ * incluye". Es el espejo de la píldora "Retiro → Devolución" del alquiler
+ * (`pedidos.$id.lazy.tsx`): mismo contenedor, mismos eyebrows, misma posición
+ * dentro de la sección, para que las dos secciones se lean como hermanas
+ * (pedido del dueño: "al Estudio, separar las fechas a un coso arriba, como en
+ * el rental, y así visualmente están hermanados").
+ *
+ * Diferencia honesta con el alquiler: allá la píldora es un BOTÓN que abre el
+ * selector y las jornadas son un número derivado; acá los tres campos se
+ * editan en el lugar y la duración ES un campo. No se fuerza el parecido hasta
+ * fingir un control que no existe.
+ *
+ * (Estos campos vivieron un tiempo adentro de la fila "Espacio". Salieron de
+ * ahí por este pedido — pero NO vuelven al grid suelto de antes: ahora son una
+ * banda con la forma de la del alquiler, dentro de la misma sección.)
+ */
+function BandaFranja({
+  fecha,
+  onChangeFecha,
+  start,
+  onChangeStart,
+  horas,
+  onChangeHoras,
+  minHoras,
+  slots,
+  accion,
+}: {
+  fecha: string;
+  onChangeFecha: (v: string) => void;
+  start: string;
+  onChangeStart: (v: string) => void;
+  horas: number;
+  onChangeHoras: (v: number) => void;
+  minHoras: number;
+  slots: { value: string; label: string }[];
+  accion?: ReactNode;
+}) {
+  return (
+    <div className="@container flex items-start gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5">
+      <Clapperboard className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+      <div className="grid min-w-0 flex-1 grid-cols-1 gap-x-6 gap-y-2 @xl:grid-cols-3">
+        <div className="min-w-0">
+          <div className="t-eyebrow">Fecha</div>
+          <Input
+            type="date"
+            aria-label="Fecha del turno"
+            value={fecha}
+            onChange={(e) => onChangeFecha(e.target.value)}
+            className="mt-0.5 h-9 w-full max-w-[150px] text-sm"
+          />
+        </div>
+        <div className="min-w-0">
+          <div className="t-eyebrow">Empieza</div>
+          <select
+            aria-label="Hora de inicio"
+            value={start}
+            onChange={(e) => onChangeStart(e.target.value)}
+            className="mt-0.5 h-9 w-full max-w-[110px] rounded-md border hairline bg-surface-elevated px-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+          >
+            {slots.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="min-w-0">
+          <div className="t-eyebrow">Duración</div>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <Input
+              type="number"
+              aria-label="Horas"
+              min={minHoras}
+              value={horas}
+              onChange={(e) => onChangeHoras(Number(e.target.value) || 0)}
+              className="h-9 w-16 text-center text-sm"
+            />
+            <span className="t-eyebrow">{horas === 1 ? "hora" : "horas"}</span>
+          </div>
+        </div>
+      </div>
+      {accion && <div className="-mr-1.5 shrink-0">{accion}</div>}
+    </div>
+  );
+}
+
 export function EstudioIncluyeList({
   estudio,
   fecha,
@@ -272,52 +364,35 @@ export function EstudioIncluyeList({
   );
 
   return (
-    <Field label="Qué incluye este turno" accion={accion}>
-      {/* Orden de lectura (pedido del dueño): PRIMERO el turno — su franja y su
-          precio —, después lo que se le suma. Antes el buscador de equipos
-          abría la sección, así que lo primero que se veía era cómo agregar
-          equipo y no el turno en sí. */}
-      <ul className="divide-y hairline rounded-md border hairline">
-        {/* Espacio — siempre presente, no se puede quitar (es la base del
-            turno); franja horaria + precio se editan ACÁ, inline, en la
-            misma fila (#1308 — antes vivían en un grid aparte arriba de
-            toda la lista, que es justo lo que se leía como "un form"). */}
-        <FilaIncluye
-          icono={<FilaIcono icon={Clapperboard} />}
-          titulo="Espacio"
-          subtotal={cotiz?.espacio}
-          controles={
-            <>
-              <Input
-                type="date"
-                aria-label="Fecha"
-                value={fecha}
-                onChange={(e) => onChangeFecha(e.target.value)}
-                className="h-9 w-[136px] text-sm"
-              />
-              <select
-                aria-label="Hora"
-                value={start}
-                onChange={(e) => onChangeStart(e.target.value)}
-                className="h-9 rounded-md border hairline bg-surface-elevated px-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
-              >
-                {slots.map((s) => (
-                  <option key={s.value} value={s.value}>
-                    {s.label}
-                  </option>
-                ))}
-              </select>
-              <div className="flex items-center gap-1">
-                <Input
-                  type="number"
-                  aria-label="Horas"
-                  min={estudio.min_horas || 1}
-                  value={horas}
-                  onChange={(e) => onChangeHoras(Number(e.target.value) || 0)}
-                  className="h-9 w-14 text-center text-sm"
-                />
-                <span className="text-xs text-muted-foreground">h</span>
-              </div>
+    <div className="space-y-3">
+      {/* CUÁNDO arriba (banda), QUÉ INCLUYE abajo (lista) — la misma forma que
+          la sección "Alquiler" del pedido, para que se lean como hermanas. */}
+      <BandaFranja
+        fecha={fecha}
+        onChangeFecha={onChangeFecha}
+        start={start}
+        onChangeStart={onChangeStart}
+        horas={horas}
+        onChangeHoras={onChangeHoras}
+        minHoras={estudio.min_horas || 1}
+        slots={slots}
+        accion={accion}
+      />
+
+      <Field label="Qué incluye este turno">
+        {/* Orden de lectura (pedido del dueño): PRIMERO el turno — su precio —,
+            después lo que se le suma. Antes el buscador de equipos abría la
+            sección, así que lo primero que se veía era cómo agregar equipo y no
+            el turno en sí. */}
+        <ul className="divide-y hairline rounded-md border hairline">
+          {/* Espacio — siempre presente, no se puede quitar (es la base del
+            turno); su TARIFA se edita acá, en la misma fila — la franja
+            horaria vive arriba, en la banda de tiempo. */}
+          <FilaIncluye
+            icono={<FilaIcono icon={Clapperboard} />}
+            titulo="Espacio"
+            subtotal={cotiz?.espacio}
+            controles={
               <Input
                 type="number"
                 min={0}
@@ -327,88 +402,88 @@ export function EstudioIncluyeList({
                 placeholder={String((estudio.precio_hora || 0) * horas)}
                 className="h-9 w-24 text-right text-sm"
               />
-            </>
-          }
-        />
-
-        {conPromo && (
-          <FilaIncluye
-            icono={<FilaIcono icon={Package} />}
-            titulo={nombrePromo}
-            subtotal={cotiz?.promo}
-            accion={<BotonQuitar label={nombrePromo} onClick={() => onTogglePromo(false)} />}
-          />
-        )}
-
-        {pinturaReciente && (
-          <FilaIncluye
-            icono={<FilaIcono icon={Paintbrush} />}
-            titulo="Recién pintado"
-            subtotal={cotiz?.pintura_reciente}
-            accion={<BotonQuitar label="Recién pintado" onClick={() => onTogglePintura(false)} />}
-          />
-        )}
-
-        {sueltos.map((s) => (
-          <FilaIncluye
-            key={s.equipo_id}
-            icono={<EquipoThumb src={s.foto_url} alt={s.nombre} className="h-10 w-10 shrink-0" />}
-            titulo={s.nombre}
-            subtotal={cotiz?.sueltos.find((cs) => cs.equipo_id === s.equipo_id)?.subtotal}
-            accion={<BotonQuitar label={s.nombre} onClick={() => onRemoveSuelto(s.equipo_id)} />}
-            controles={
-              // Mismo stepper del DS que usa la fila de un equipo del pedido —
-              // antes era un `<input type=number>` pelado, otra forma de hacer
-              // exactamente lo mismo.
-              <QtyInput
-                value={s.cantidad}
-                onChange={(v) => onChangeSueltoCantidad(s.equipo_id, Math.max(1, v))}
-                min={1}
-              />
             }
           />
-        ))}
 
-        {/* Lo que se PUEDE sumar, como una fila más de la misma lista (atenuada,
+          {conPromo && (
+            <FilaIncluye
+              icono={<FilaIcono icon={Package} />}
+              titulo={nombrePromo}
+              subtotal={cotiz?.promo}
+              accion={<BotonQuitar label={nombrePromo} onClick={() => onTogglePromo(false)} />}
+            />
+          )}
+
+          {pinturaReciente && (
+            <FilaIncluye
+              icono={<FilaIcono icon={Paintbrush} />}
+              titulo="Recién pintado"
+              subtotal={cotiz?.pintura_reciente}
+              accion={<BotonQuitar label="Recién pintado" onClick={() => onTogglePintura(false)} />}
+            />
+          )}
+
+          {sueltos.map((s) => (
+            <FilaIncluye
+              key={s.equipo_id}
+              icono={<EquipoThumb src={s.foto_url} alt={s.nombre} className="h-10 w-10 shrink-0" />}
+              titulo={s.nombre}
+              subtotal={cotiz?.sueltos.find((cs) => cs.equipo_id === s.equipo_id)?.subtotal}
+              accion={<BotonQuitar label={s.nombre} onClick={() => onRemoveSuelto(s.equipo_id)} />}
+              controles={
+                // Mismo stepper del DS que usa la fila de un equipo del pedido —
+                // antes era un `<input type=number>` pelado, otra forma de hacer
+                // exactamente lo mismo.
+                <QtyInput
+                  value={s.cantidad}
+                  onChange={(v) => onChangeSueltoCantidad(s.equipo_id, Math.max(1, v))}
+                  min={1}
+                />
+              }
+            />
+          ))}
+
+          {/* Lo que se PUEDE sumar, como una fila más de la misma lista (atenuada,
             con + en vez de ✕, bajo su propio rótulo). El precio que muestran es
             el de lista que ya resolvió el backend (`estudio.promo.precio` /
             `precio_pintura_reciente`) — el front no lo calcula, solo lo muestra
             (MEMORIA 2026-06-29); al agregarlas, la línea pasa arriba con su
             plata cotizada. */}
-        {hayDisponibles && <FilaRotulo>Se le puede sumar</FilaRotulo>}
+          {hayDisponibles && <FilaRotulo>Se le puede sumar</FilaRotulo>}
 
-        {!conPromo && estudio.promo_combo_id && (
-          <FilaIncluye
-            atenuado
-            icono={<FilaIcono icon={Package} />}
-            titulo={nombrePromo}
-            subtotal={estudio.promo?.precio}
-            accion={<BotonSumar label={nombrePromo} onClick={() => onTogglePromo(true)} />}
-          />
-        )}
+          {!conPromo && estudio.promo_combo_id && (
+            <FilaIncluye
+              atenuado
+              icono={<FilaIcono icon={Package} />}
+              titulo={nombrePromo}
+              subtotal={estudio.promo?.precio}
+              accion={<BotonSumar label={nombrePromo} onClick={() => onTogglePromo(true)} />}
+            />
+          )}
 
-        {!pinturaReciente && (
-          <FilaIncluye
-            atenuado
-            icono={<FilaIcono icon={Paintbrush} />}
-            titulo="Recién pintado"
-            subtotal={estudio.precio_pintura_reciente || 0}
-            accion={<BotonSumar label="Recién pintado" onClick={() => onTogglePintura(true)} />}
-          />
-        )}
+          {!pinturaReciente && (
+            <FilaIncluye
+              atenuado
+              icono={<FilaIcono icon={Paintbrush} />}
+              titulo="Recién pintado"
+              subtotal={estudio.precio_pintura_reciente || 0}
+              accion={<BotonSumar label="Recién pintado" onClick={() => onTogglePintura(true)} />}
+            />
+          )}
 
-        {/* Sumar equipo suelto — ÚLTIMA fila de la lista: es lo último que se
+          {/* Sumar equipo suelto — ÚLTIMA fila de la lista: es lo último que se
             agrega, no lo primero que se lee (antes abría la sección y tapaba al
             turno; después quedó afuera de la lista, como una caja aparte). */}
-        <li className="px-2.5 py-2">
-          <EquipoComboSearch
-            existing={existingAsDraftItems}
-            stockMap={{}}
-            onAdd={onAddSuelto}
-            placeholder="Buscar equipo para sumar…"
-          />
-        </li>
-      </ul>
-    </Field>
+          <li className="px-2.5 py-2">
+            <EquipoComboSearch
+              existing={existingAsDraftItems}
+              stockMap={{}}
+              onAdd={onAddSuelto}
+              placeholder="Buscar equipo para sumar…"
+            />
+          </li>
+        </ul>
+      </Field>
+    </div>
   );
 }
