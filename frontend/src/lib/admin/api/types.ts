@@ -1123,6 +1123,13 @@ export type PedidoPago = {
   monto: number;
   concepto: string | null;
   fecha: string;
+  /** A quién entró la plata y cómo. El backend los devuelve desde siempre
+   *  (`SELECT * FROM alquiler_pagos`) y el modal de cobro OBLIGA a elegirlos,
+   *  pero el tipo no los declaraba y la ficha del pedido no los mostraba: se
+   *  elegía "Cobró: Tincho / efectivo" y quedaba invisible acá, había que
+   *  irse a Finanzas para saber quién tiene esa plata. */
+  destinatario?: string | null;
+  metodo?: string | null;
   created_at?: string;
   created_by?: string | null;
   anulado?: boolean;

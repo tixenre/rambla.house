@@ -54,7 +54,7 @@ import { FacturaBadge } from "@/design-system/ui/FacturaBadge";
 import { Spinner } from "@/design-system/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ESTADO_DOT } from "@/design-system/ui/estado-color";
-import { adminApi, ESTADO_LABEL, type PedidoEstado } from "@/lib/admin/api";
+import { adminApi, ESTADO_LABEL, type PedidoEstado, type PedidoPago } from "@/lib/admin/api";
 import { formatARS, formatFechaCorta, fmtArs } from "@/lib/format";
 import {
   useFacturacionArca,
@@ -68,14 +68,10 @@ export function PagoRow({
   pago,
   pedidoId,
 }: {
-  pago: {
-    id: number;
-    monto: number;
-    concepto: string | null;
-    fecha: string;
-    anulado?: boolean;
-    anulado_motivo?: string | null;
-  };
+  // El tipo canónico, no una copia local recortada: la copia venía sin
+  // `destinatario`/`metodo` (que el backend SÍ devuelve) y por eso no había
+  // forma de mostrarlos sin que TypeScript los rechazara.
+  pago: PedidoPago;
   pedidoId: number;
 }) {
   const qc = useQueryClient();
@@ -96,6 +92,11 @@ export function PagoRow({
       <span className="text-muted-foreground">
         <span className={cn(pago.anulado && "line-through")}>
           {pago.concepto || "Pago"} · {formatFechaCorta(pago.fecha)}
+          {/* Quién cobró y cómo: el modal OBLIGA a elegirlos y el backend los
+              guarda, pero acá no se veían — para saber quién tiene la plata
+              había que salir a Finanzas. */}
+          {pago.destinatario ? ` · ${pago.destinatario}` : ""}
+          {pago.metodo ? ` (${pago.metodo})` : ""}
         </span>
         {pago.anulado && pago.anulado_motivo && (
           <span className="text-destructive"> · Anulado: {pago.anulado_motivo}</span>
