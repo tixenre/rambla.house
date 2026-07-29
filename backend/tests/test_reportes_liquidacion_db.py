@@ -37,12 +37,12 @@ pytestmark = [
     ),
 ]
 
-# Equipos: Rambla, Pablo, Tincho. Pedidos. Ids altos para no chocar con datos.
-E_RAMBLA, E_PABLO, E_TINCHO = 9_300_001, 9_300_002, 9_300_003
+# Equipos: Rental, Pablo, Tincho. Pedidos. Ids altos para no chocar con datos.
+E_RENTAL, E_PABLO, E_TINCHO = 9_300_001, 9_300_002, 9_300_003
 P_CRUCE, P_PARCIAL, P_MIXTO, P_LEGACY, P_SOBRE, P_PREJUNIO, P_SUBTOTAL_CERO = (
     9_300_101, 9_300_102, 9_300_103, 9_300_104, 9_300_105, 9_300_106, 9_300_107,
 )
-ALL_EQ = (E_RAMBLA, E_PABLO, E_TINCHO)
+ALL_EQ = (E_RENTAL, E_PABLO, E_TINCHO)
 ALL_PED = (P_CRUCE, P_PARCIAL, P_MIXTO, P_LEGACY, P_SOBRE, P_PREJUNIO, P_SUBTOTAL_CERO)
 
 
@@ -93,7 +93,7 @@ def setup():
     conn = get_db()
     try:
         _limpiar(conn)
-        _equipo(conn, E_RAMBLA, "Equipo Rambla", "Rambla")
+        _equipo(conn, E_RENTAL, "Equipo Rental", "Rental")
         _equipo(conn, E_PABLO, "Equipo Pablo", "Pablo")
         _equipo(conn, E_TINCHO, "Equipo Tincho", "Tincho")
 
@@ -103,25 +103,25 @@ def setup():
         _pago(conn, P_CRUCE, 60000, "2026-06-03T10:00:00", "saldo")
 
         # P_PARCIAL: total 100k, solo 40k pagado → NO saldado → no aparece.
-        _pedido(conn, P_PARCIAL, 100000, [(E_RAMBLA, 100000)], monto_pagado=40000)
+        _pedido(conn, P_PARCIAL, 100000, [(E_RENTAL, 100000)], monto_pagado=40000)
         _pago(conn, P_PARCIAL, 40000, "2026-06-10T10:00:00", "seña")
 
-        # P_MIXTO: total 100k, 2 equipos (Rambla 60k + Pablo 40k), saldado en junio.
-        _pedido(conn, P_MIXTO, 100000, [(E_RAMBLA, 60000), (E_PABLO, 40000)], monto_pagado=100000)
+        # P_MIXTO: total 100k, 2 equipos (Rental 60k + Pablo 40k), saldado en junio.
+        _pedido(conn, P_MIXTO, 100000, [(E_RENTAL, 60000), (E_PABLO, 40000)], monto_pagado=100000)
         _pago(conn, P_MIXTO, 100000, "2026-06-15T10:00:00", "pago total")
 
         # P_LEGACY: marcado pagado por la columna SIN ledger → debe caer en reconciliación.
-        _pedido(conn, P_LEGACY, 50000, [(E_RAMBLA, 50000)], monto_pagado=50000)
+        _pedido(conn, P_LEGACY, 50000, [(E_RENTAL, 50000)], monto_pagado=50000)
 
         # P_SOBRE: cobrado 80k pero el total quedó en 50k (editado a la baja tras cobrar)
         # → sobrepagado, debe caer en reconciliación. Saldado en julio (mes neutral
         # para no contaminar las aserciones de junio).
-        _pedido(conn, P_SOBRE, 50000, [(E_RAMBLA, 50000)], monto_pagado=80000)
+        _pedido(conn, P_SOBRE, 50000, [(E_RENTAL, 50000)], monto_pagado=80000)
         _pago(conn, P_SOBRE, 80000, "2026-07-20T10:00:00", "pago")
 
         # P_PREJUNIO: alquiler de MAYO (antes del clean start), pagado 100% en JUNIO.
         # NO debe contar para la liquidación: el corte es por fecha del alquiler.
-        _pedido(conn, P_PREJUNIO, 100000, [(E_RAMBLA, 100000)], monto_pagado=100000,
+        _pedido(conn, P_PREJUNIO, 100000, [(E_RENTAL, 100000)], monto_pagado=100000,
                 fecha_desde="2026-05-15T08:00:00")
         _pago(conn, P_PREJUNIO, 100000, "2026-06-20T10:00:00", "pago")
 
@@ -159,10 +159,10 @@ def test_cruce_se_atribuye_al_mes_de_saldado(setup):
     # En JUNIO sí aparece completo (saldó el 3/6), repartido 50/45/5 (es de Pablo).
     junio = _liquidar("2026-06-01", "2026-06-30")
     pb = junio["resumen"]["por_beneficiario"]
-    # P_CRUCE (Pablo 100k → 50/45/5) + P_MIXTO (Rambla 60k→100% + Pablo 40k→50/45/5).
-    # Pablo: 50000 + 20000 = 70000; Rambla: 45000 + 60000 + 18000 = 123000; Tincho: 5000 + 2000 = 7000.
+    # P_CRUCE (Pablo 100k → 50/45/5) + P_MIXTO (Rental 60k→100% + Pablo 40k→50/45/5).
+    # Pablo: 50000 + 20000 = 70000; Rental: 45000 + 60000 + 18000 = 123000; Tincho: 5000 + 2000 = 7000.
     assert pb["Pablo"] == 70000, pb
-    assert pb["Rambla"] == 123000, pb
+    assert pb["Rental"] == 123000, pb
     assert pb["Tincho"] == 7000, pb
 
 
@@ -233,8 +233,8 @@ def test_pedidos_detalle_incluye_cliente_y_numero_pedido(setup):
     assert pablo_ped[P_CRUCE]["monto"] == 100000
     assert pablo_ped[P_MIXTO]["monto"] == 40000  # su parte del pedido mixto, no los 100k
 
-    rambla_ped = {p["pedido_id"]: p for p in duenos["Rambla"]["pedidos_detalle"]}
-    assert rambla_ped[P_MIXTO]["monto"] == 60000  # la parte de Rambla del mismo pedido
+    rental_ped = {p["pedido_id"]: p for p in duenos["Rental"]["pedidos_detalle"]}
+    assert rental_ped[P_MIXTO]["monto"] == 60000  # la parte de Rental del mismo pedido
 
 
 def test_reconciliacion_caza_pagado_sin_ledger(setup):
@@ -276,7 +276,7 @@ def test_reconciliacion_caza_desglose_divergente_del_pedido():
         _limpiar_local(conn)
         conn.execute(
             "INSERT INTO equipos (id, nombre, cantidad, dueno) VALUES (%s,%s,%s,%s)",
-            (E_DIV, "Equipo desglose divergente", 5, "Rambla"),
+            (E_DIV, "Equipo desglose divergente", 5, "Rental"),
         )
         # 1 ítem, 1 jornada, precio_jornada=50000, cobro_modo='jornada' → el
         # desglose recalculado (sin descuento) da monto_neto=50000. Pero
@@ -343,7 +343,7 @@ def test_reconciliacion_no_marca_falso_positivo_con_descuento_de_cliente():
         _limpiar_local(conn)
         conn.execute(
             "INSERT INTO equipos (id, nombre, cantidad, dueno) VALUES (%s,%s,%s,%s)",
-            (E_OK, "Equipo descuento cliente OK", 5, "Rambla"),
+            (E_OK, "Equipo descuento cliente OK", 5, "Rental"),
         )
         conn.execute(
             """INSERT INTO alquileres (id, cliente_nombre, estado, fecha_desde, fecha_hasta,

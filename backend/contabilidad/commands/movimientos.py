@@ -34,14 +34,14 @@ humano (Pablo/Tincho) tiene su plata en un banco propio, fuera del sistema — s
   que mover — no tienen sentido de negocio ahí.
 - **`transferencia`/`ajuste` siguen permitidos sin restricción**: `transferencia` DEBE poder tocar
   una cuenta `socio` (así funciona `commands/rendicion.py::saldar`, que arma transferencias
-  Caja↔Fondo Rambla); un `ajuste` contra una cuenta `socio` puede ser una corrección legítima de
+  Caja↔Fondo Rental); un `ajuste` contra una cuenta `socio` puede ser una corrección legítima de
   arranque de cuenta corriente.
 - **`gasto` está PERMITIDO a propósito contra una cuenta `socio`** (como origen — nunca tuvo
-  destino): es el caso "el socio pagó un gasto de Rambla con su propia plata". Ni
+  destino): es el caso "el socio pagó un gasto de Rental con su propia plata". Ni
   `gastos_por_categoria` ni `ganancia_neta` (`queries/pyl.py`) filtran por tipo de cuenta origen
   — solo por moneda — así que un `gasto` con origen una cuenta de socio **cuenta en el P&L
   categorizado** y a la vez **baja la deuda del socio** (`egresos` resta en la fórmula de cuenta
-  corriente de `queries/saldos.py`: Rambla ahora le debe eso). Un solo movimiento cubre el caso
+  corriente de `queries/saldos.py`: Rental ahora le debe eso). Un solo movimiento cubre el caso
   completo, sin código extra más allá de dejarlo pasar la validación.
 
 Fijado por `test_retiro_aporte_bloqueados_contra_cuenta_socio` (bloqueo) y

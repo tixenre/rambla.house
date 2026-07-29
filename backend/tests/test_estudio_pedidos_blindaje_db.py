@@ -74,7 +74,7 @@ def db_setup():
         _limpiar(conn)
         conn.execute(
             "INSERT INTO equipos (id, nombre, cantidad, visible_catalogo, dueno, es_recurso_interno) "
-            "VALUES (%s,%s,1,0,'Rambla',TRUE)",
+            "VALUES (%s,%s,1,0,'Rental',TRUE)",
             (EQ_CENTINELA_ID, "Estudio (espacio) — test blindaje"),
         )
         conn.execute(

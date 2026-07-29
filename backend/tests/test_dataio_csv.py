@@ -38,7 +38,7 @@ def test_equipos_csv_header_y_specs_colapsadas():
     rows = [{
         "id": 1, "nombre": "Sony FX3", "marca": "Sony", "modelo": "FX3",
         "categorias": "Cámaras", "cantidad": 2, "precio_jornada": 30000,
-        "precio_usd": 6000.0, "dueno": "Rambla", "estado": "operativo",
+        "precio_usd": 6000.0, "dueno": "Rental", "estado": "operativo",
         "visible_catalogo": 1, "serie": None,
         "fecha_compra": datetime.date(2024, 3, 15),
         "specs": "Sensor: Full-frame; Montura: E",

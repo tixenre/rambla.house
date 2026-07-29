@@ -598,7 +598,7 @@ def _validar_reemplazo_items_taller(conn, pedido_id: int, items_nuevos: list["Pe
     reemplazo DESCARTE el/los ítem(s) AUTO-generados por
     `_regenerar_pedidos_taller` (`services/talleres/commands/economia.py`) —
     perderlos desatribuiría esa plata en silencio de la economía de
-    Estudio/Rambla, y el próximo recálculo de la edición no los repone (solo
+    Estudio/Rental, y el próximo recálculo de la edición no los repone (solo
     borra-y-recrea meses SIN plata pagada, ver esa función).
 
     Identifica el/los ítem(s) auto por su FORMA actual en la base (no

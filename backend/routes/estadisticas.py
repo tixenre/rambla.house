@@ -127,7 +127,7 @@ def compute_estadisticas(conn) -> dict:
     por_dueno = conn.execute(f"""
         WITH {_PRORRATEO_CTE}
         SELECT
-            COALESCE(e.dueno, 'Rambla')    AS dueno,
+            COALESCE(e.dueno, 'Rental')    AS dueno,
             SUM(p.monto_total * pi.subtotal::numeric / NULLIF(t.suma_items, 0)) AS total_ars,
             COUNT(*)                       AS items
         FROM alquiler_items pi
@@ -135,7 +135,7 @@ def compute_estadisticas(conn) -> dict:
         JOIN equipos e ON e.id = pi.equipo_id
         JOIN tot t ON t.pedido_id = p.id
         WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
-        GROUP BY COALESCE(e.dueno, 'Rambla')
+        GROUP BY COALESCE(e.dueno, 'Rental')
         ORDER BY total_ars DESC
     """).fetchall()
 

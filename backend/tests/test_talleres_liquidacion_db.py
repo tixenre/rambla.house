@@ -6,7 +6,7 @@ ya resolvió este problema, Talleres reusa el MISMO mecanismo genérico).
 Un pedido `tipo='taller'` con 2 líneas — uso del Estudio (`equipo_id` de un
 equipo con `dueno='Estudio'`) y uso de equipos de alquiler (línea
 personalizada, `equipo_id=NULL`) — se atribuye 100% genérico vía
-`equipos.dueno` en `filas_atribucion` (`COALESCE(dueno,'Rambla')`): CERO
+`equipos.dueno` en `filas_atribucion` (`COALESCE(dueno,'Rental')`): CERO
 código de atribución nuevo. Y tras extender las 7 exclusiones de
 `compute_estadisticas` a también `'taller'`, ese mismo pedido no debe
 ensuciar ninguna tarjeta de rental.
@@ -92,12 +92,12 @@ def _insertar(conn):
     )
     conn.execute(
         """INSERT INTO alquiler_pagos (pedido_id, monto, concepto, destinatario, metodo, fecha)
-           VALUES (%s, %s, 'pago', 'Rambla', 'transferencia', %s)""",
+           VALUES (%s, %s, 'pago', 'Rental', 'transferencia', %s)""",
         (P_TALLER_MIXTO, TOTAL, f"{MES}-05T09:00:00"),
     )
 
 
-def test_liquidacion_taller_atribuye_estudio_y_rambla_db(conn):
+def test_liquidacion_taller_atribuye_estudio_y_rental_db(conn):
     from reportes.cierres import rango_mes
     from reportes.liquidacion import liquidar
     from reportes.reconciliacion import reconciliar
@@ -108,7 +108,7 @@ def test_liquidacion_taller_atribuye_estudio_y_rambla_db(conn):
 
     por_dueno = {d["dueno"]: d["monto_generado"] for d in data["por_dueno"]}
     assert por_dueno["Estudio"] == VALOR_ESTUDIO
-    assert por_dueno["Rambla"] == VALOR_EQUIPOS
+    assert por_dueno["Rental"] == VALOR_EQUIPOS
 
     # "Estudio" sigue siendo un dueño válido — no aparece como huérfano.
     rep = reconciliar(conn)

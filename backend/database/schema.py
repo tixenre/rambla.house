@@ -83,7 +83,7 @@ def _init_db_schema(conn):
             fecha_compra     DATE,
             serie            TEXT,
             bh_url           TEXT,
-            dueno            TEXT DEFAULT 'Rambla',
+            dueno            TEXT DEFAULT 'Rental',
             visible_catalogo INTEGER DEFAULT 1,
             estado           TEXT DEFAULT 'operativo',
             created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -1272,7 +1272,7 @@ def _init_db_schema(conn):
         INSERT INTO cuentas (nombre, tipo, socio, moneda, orden) VALUES
             ('Caja Tincho', 'socio', 'Tincho', 'ARS', 1),
             ('Caja Pablo',  'socio', 'Pablo',  'ARS', 2),
-            ('Fondo Rambla','fondo', 'Rambla',  'ARS', 5),
+            ('Fondo Rental','fondo', 'Rental',  'ARS', 5),
             ('Caja Estudio','fondo', 'Estudio', 'ARS', 6)
         ON CONFLICT DO NOTHING
     """)
@@ -1282,11 +1282,11 @@ def _init_db_schema(conn):
     # pero su socio sigue en idx_cuentas_socio → el ON CONFLICT (nombre) no lo
     # atrapaba y el seed reventaba con UniqueViolation en cada boot (#932). Sin
     # target, salta ante CUALQUIER choque → idempotente de verdad.
-    # Rambla también cobra (default): la caja Fondo Rambla representa al cobrador
-    # 'Rambla'. Backfill para BDs que ya tenían la caja con socio NULL (migración
+    # Rental también cobra (default): la caja Fondo Rental representa al cobrador
+    # 'Rental'. Backfill para BDs que ya tenían la caja con socio NULL (migración
     # c3d4e5f6a7b8). Idempotente.
     conn.execute(
-        "UPDATE cuentas SET socio = 'Rambla' WHERE nombre = 'Fondo Rambla' AND socio IS NULL"
+        "UPDATE cuentas SET socio = 'Rental' WHERE nombre = 'Fondo Rental' AND socio IS NULL"
     )
     conn.execute("""
         CREATE TABLE IF NOT EXISTS gasto_categorias (
@@ -1659,7 +1659,7 @@ def _init_db_schema(conn):
         )
     """)
     # Promo combo (#1283 Fase 5): reemplaza al pack curado por un equipo real
-    # tipo='combo' (dueno='Rambla', oculto del catálogo) — el precio deriva de
+    # tipo='combo' (dueno='Rental', oculto del catálogo) — el precio deriva de
     # sus componentes (precio_combo) en vez de un `pack_precio` fijo suelto.
     # NULL = todavía no se creó (el pack sigue siendo el mecanismo vigente,
     # ⏰ LEGACY hasta que la Fase 8 lo retire). ON DELETE SET NULL: si el combo
@@ -1956,7 +1956,7 @@ def _init_db_schema(conn):
     # Estudio y/o equipos de alquiler, con un valor que el admin tipea a mano
     # (no se deriva de asistencia real) — `_regenerar_pedidos_taller` los
     # traduce en ítems del pedido mensual, atribuidos automático vía
-    # `equipos.dueno` (Estudio / Rambla), igual que hace el Estudio con sus
+    # `equipos.dueno` (Estudio / Rental), igual que hace el Estudio con sus
     # slots fijos. La matrícula/curso en sí NO tiene columna — se tipea como
     # línea personalizada dentro del pedido ya generado.
     conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS usa_estudio BOOLEAN NOT NULL DEFAULT FALSE")

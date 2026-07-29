@@ -1115,8 +1115,8 @@ class PromoCrearBody(BaseModel):
 @limiter.limit(ADMIN_WRITE_LIMIT)
 def crear_promo_desde_pack(body: PromoCrearBody, request: Request):
     """Crea la promo (combo) del Estudio a partir del pack curado actual
-    (`estudio_pack_equipos`): un equipo real `tipo='combo'`, `dueno='Rambla'`
-    (no los dueños tradicionales — es plata de Rambla, no de terceros),
+    (`estudio_pack_equipos`): un equipo real `tipo='combo'`, `dueno='Rental'`
+    (no los dueños tradicionales — es plata de Rental, no de terceros),
     `visible_catalogo=0` (oculto del catálogo público, solo se ofrece desde el
     Estudio/back-office). El precio objetivo (default = `pack_precio` actual)
     se clava vía un descuento % uniforme en sus componentes

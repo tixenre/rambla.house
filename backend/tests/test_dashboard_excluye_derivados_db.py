@@ -103,7 +103,7 @@ def setup(monkeypatch):
 
         # Pedido de RENTAL real, sale y vuelve HOY — tiene que seguir apareciendo.
         conn.execute(
-            "INSERT INTO equipos (id, nombre, cantidad, dueno) VALUES (%s, 'Cámara test dashboard', 1, 'Rambla')",
+            "INSERT INTO equipos (id, nombre, cantidad, dueno) VALUES (%s, 'Cámara test dashboard', 1, 'Rental')",
             (EQ_RENTAL,),
         )
         conn.execute(

@@ -2,7 +2,7 @@
 
 Economía separada: el Estudio pasa a ser un cobrador más (`COBRADORES`) y una
 parte más de la rendición (`PARTES`), con su propia caja real (`Caja Estudio`,
-`tipo='fondo'`, `socio='Estudio'` — mismo puente 1:1 que Fondo Rambla). Nada de
+`tipo='fondo'`, `socio='Estudio'` — mismo puente 1:1 que Fondo Rental). Nada de
 esto es un caso especial: es la constante generalizada a una 4ta fila, y estos
 tests lo confirman contra la DB real (la matemática pura ya está cubierta en
 `test_contabilidad_rendicion.py`/`test_contabilidad_saldos.py`).
@@ -94,7 +94,7 @@ def test_caja_estudio_seed_existe_como_fondo_de_estudio(conn):
 
 
 def test_cobro_de_estudio_alimenta_su_caja(conn):
-    # Mismo mecanismo que Fondo Rambla: un cobro con destinatario='Estudio' cae
+    # Mismo mecanismo que Fondo Rental: un cobro con destinatario='Estudio' cae
     # en su caja SOLO por derivación (sin cargar ningún movimiento a mano).
     base = _saldo(conn, "Caja Estudio")
     _pedido_y_pago(conn, 90000, "Estudio")
@@ -102,10 +102,10 @@ def test_cobro_de_estudio_alimenta_su_caja(conn):
 
 
 def test_el_cobro_de_estudio_no_toca_otras_cajas(conn):
-    base_rambla = _saldo(conn, "Fondo Rambla")
+    base_rental = _saldo(conn, "Fondo Rental")
     base_tincho = _saldo(conn, "Caja Tincho")
     _pedido_y_pago(conn, 90000, "Estudio")
-    assert _saldo(conn, "Fondo Rambla") == base_rambla
+    assert _saldo(conn, "Fondo Rental") == base_rental
     assert _saldo(conn, "Caja Tincho") == base_tincho
 
 

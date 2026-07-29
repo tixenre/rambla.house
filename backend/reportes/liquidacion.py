@@ -69,7 +69,7 @@ def filas_atribucion(conn, desde: str, hasta: str) -> list[dict]:
     proporcional no tiene base — antes eso daba `NULL` (vía `NULLIF`) y la plata
     del pedido desaparecía en silencio del reporte. Fix: en ese caso se reparte
     el `monto_total` **en partes iguales** entre los ítems del pedido (fallback
-    explícito, no "a Rambla" — no hay forma de saber a qué dueño atribuirlo sin
+    explícito, no "a Rental" — no hay forma de saber a qué dueño atribuirlo sin
     una base de prorrateo real), garantizando que la plata nunca se pierda."""
     from database import row_to_dict
     sql = f"""
@@ -98,7 +98,7 @@ def filas_atribucion(conn, desde: str, hasta: str) -> list[dict]:
                COALESCE(pp.numero_pedido, pp.id,
                         al.numero_pedido, al.id)                  AS numero_pedido,
                COALESCE(c.nombre || ' ' || c.apellido, al.cliente_nombre) AS cliente,
-               COALESCE(e.dueno, 'Rambla')                        AS dueno,
+               COALESCE(e.dueno, 'Rental')                        AS dueno,
                COALESCE(e.nombre, pi.nombre_libre)                AS equipo,
                CASE
                    WHEN t.suma_items = 0 THEN al.monto_total::numeric / t.cant_items

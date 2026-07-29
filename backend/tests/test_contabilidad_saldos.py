@@ -34,18 +34,18 @@ class TestValidarCuenta:
         with pytest.raises(ValueError):
             validar_cuenta({"nombre": "X", "tipo": "billetera"})
 
-    def test_fondo_rambla_como_cobrador_ok(self):
-        # Rambla también cobra: el Fondo Rambla (tipo fondo) la representa.
-        validar_cuenta({"nombre": "Fondo Rambla", "tipo": "fondo", "socio": "Rambla"})
+    def test_fondo_rental_como_cobrador_ok(self):
+        # Rental también cobra: el Fondo Rental (tipo fondo) la representa.
+        validar_cuenta({"nombre": "Fondo Rental", "tipo": "fondo", "socio": "Rental"})
 
     def test_rechaza_cobrador_invalido(self):
         with pytest.raises(ValueError):
             validar_cuenta({"nombre": "X", "tipo": "caja", "socio": "Mariano"})
 
-    def test_socio_caja_con_rambla_falla(self):
-        # Una caja de tipo 'socio' es de un socio humano, no de Rambla.
+    def test_socio_caja_con_rental_falla(self):
+        # Una caja de tipo 'socio' es de un socio humano, no de Rental.
         with pytest.raises(ValueError):
-            validar_cuenta({"nombre": "Caja X", "tipo": "socio", "socio": "Rambla"})
+            validar_cuenta({"nombre": "Caja X", "tipo": "socio", "socio": "Rental"})
 
     def test_rechaza_socio_invalido(self):
         with pytest.raises(ValueError):
@@ -67,7 +67,7 @@ class TestValidarCuenta:
             validar_cuenta({"nombre": "X", "tipo": "caja", "moneda": "EUR"})
 
     def test_cobradores_son_los_cuatro(self):
-        assert set(COBRADORES) == {"Pablo", "Tincho", "Rambla", "Estudio"}
+        assert set(COBRADORES) == {"Pablo", "Tincho", "Rental", "Estudio"}
 
 
 class TestCalcularSaldos:
@@ -76,7 +76,7 @@ class TestCalcularSaldos:
             {"id": 1, "nombre": "Caja Tincho", "tipo": "socio", "socio": "Tincho", "saldo_inicial": 0},
             {"id": 2, "nombre": "Caja Pablo", "tipo": "socio", "socio": "Pablo", "saldo_inicial": 0},
             {"id": 3, "nombre": "Efectivo", "tipo": "caja", "socio": None, "saldo_inicial": 50000},
-            {"id": 5, "nombre": "Fondo Rambla", "tipo": "fondo", "socio": None, "saldo_inicial": 0},
+            {"id": 5, "nombre": "Fondo Rental", "tipo": "fondo", "socio": None, "saldo_inicial": 0},
         ]
 
     def test_ingreso_derivado_va_a_la_caja_del_socio(self):
@@ -106,9 +106,9 @@ class TestCalcularSaldos:
         # Efectivo: 50000 − 25000 (gasto) = 25000
         assert by["Efectivo"]["saldo"] == 25000
         assert by["Efectivo"]["egresos"] == 25000
-        # Fondo Rambla: 0 + 100000 (transf in) = 100000
-        assert by["Fondo Rambla"]["saldo"] == 100000
-        assert by["Fondo Rambla"]["entradas"] == 100000
+        # Fondo Rental: 0 + 100000 (transf in) = 100000
+        assert by["Fondo Rental"]["saldo"] == 100000
+        assert by["Fondo Rental"]["entradas"] == 100000
 
     def test_ingreso_de_socio_sin_caja_se_ignora(self):
         # Un destinatario que no tiene caja en la lista no rompe ni se pierde
@@ -144,13 +144,13 @@ class TestCalcularSaldos:
 
 class TestCuentaCorrienteSocio:
     """Pablo/Tincho son cuentas corrientes: deuda = arranque + cobró − su parte ± rendiciones.
-    Rambla (Fondo) es una caja de plata real (su parte NO se resta)."""
+    Rental (Fondo) es una caja de plata real (su parte NO se resta)."""
 
     def _cuentas(self):
         return [
             {"id": 1, "nombre": "Pablo", "tipo": "socio", "socio": "Pablo", "saldo_inicial": 601000},
             {"id": 2, "nombre": "Tincho", "tipo": "socio", "socio": "Tincho", "saldo_inicial": 30000},
-            {"id": 5, "nombre": "Fondo Rambla", "tipo": "fondo", "socio": "Rambla", "saldo_inicial": 0},
+            {"id": 5, "nombre": "Fondo Rental", "tipo": "fondo", "socio": "Rental", "saldo_inicial": 0},
         ]
 
     def test_arranque_es_deuda(self):
@@ -172,7 +172,7 @@ class TestCuentaCorrienteSocio:
         assert by["Pablo"]["estado"] == "deudor"
 
     def test_se_da_vuelta_a_acreedor(self):
-        # Si su parte supera arranque+cobró → Rambla le debe (acreedor, saldo negativo).
+        # Si su parte supera arranque+cobró → Rental le debe (acreedor, saldo negativo).
         by = {
             f["nombre"]: f for f in calcular_saldos(self._cuentas(), [], {}, {"Pablo": 700000})
         }
@@ -187,20 +187,20 @@ class TestCuentaCorrienteSocio:
         assert by["Pablo"]["estado"] == "saldado"
 
     def test_rendir_baja_la_deuda_y_entra_a_la_caja(self):
-        # Pablo rinde 100000 (transfiere de su cuenta corriente al Fondo Rambla):
+        # Pablo rinde 100000 (transfiere de su cuenta corriente al Fondo Rental):
         # su deuda baja y el Fondo (caja real) recibe la plata.
         movs = [{"monto": 100000, "cuenta_origen_id": 1, "cuenta_destino_id": 5}]
         by = {f["nombre"]: f for f in calcular_saldos(self._cuentas(), movs, {}, {})}
         assert by["Pablo"]["saldo"] == 501000  # 601000 − 100000
-        assert by["Fondo Rambla"]["saldo"] == 100000
+        assert by["Fondo Rental"]["saldo"] == 100000
 
-    def test_rambla_es_caja_no_cuenta_corriente(self):
-        # El Fondo Rambla representa a Rambla pero es CAJA: su parte no se resta,
+    def test_rental_es_caja_no_cuenta_corriente(self):
+        # El Fondo Rental representa a Rental pero es CAJA: su parte no se resta,
         # lo que cobra suma como cash real.
         by = {
             f["nombre"]: f
-            for f in calcular_saldos(self._cuentas(), [], {"Rambla": 374000}, {"Rambla": 999})
+            for f in calcular_saldos(self._cuentas(), [], {"Rental": 374000}, {"Rental": 999})
         }
-        assert by["Fondo Rambla"]["es_cuenta_corriente"] is False
-        assert by["Fondo Rambla"]["su_parte"] == 0
-        assert by["Fondo Rambla"]["saldo"] == 374000
+        assert by["Fondo Rental"]["es_cuenta_corriente"] is False
+        assert by["Fondo Rental"]["su_parte"] == 0
+        assert by["Fondo Rental"]["saldo"] == 374000

@@ -10,10 +10,10 @@ from routes.reportes import _split_emails, _periodo_label
 
 
 _DATA = {
-    "beneficiarios": ["Rambla", "Pablo"],
-    "resumen": {"por_beneficiario": {"Rambla": 120000, "Pablo": 80000}, "total": 200000},
+    "beneficiarios": ["Rental", "Pablo"],
+    "resumen": {"por_beneficiario": {"Rental": 120000, "Pablo": 80000}, "total": 200000},
     "por_mes": [
-        {"mes": "2026-06", "por_beneficiario": {"Rambla": 120000, "Pablo": 80000}, "total": 200000},
+        {"mes": "2026-06", "por_beneficiario": {"Rental": 120000, "Pablo": 80000}, "total": 200000},
     ],
     "por_dueno": [
         {
@@ -28,7 +28,7 @@ _DATA = {
 
 def test_html_incluye_beneficiarios_y_total():
     html = _liquidacion_html(_DATA, "junio de 2026")
-    assert "Rambla" in html
+    assert "Rental" in html
     assert "Pablo" in html
     assert "Cámara A" in html
     assert "junio de 2026" in html
@@ -120,7 +120,7 @@ _STATS = {
         {"mes": "2026-05", "total_ars": 1_620_000, "crecimiento_pct": 14.9},
     ],
     "por_dueno": [
-        {"dueno": "Rambla", "total_ars": 5_100_000, "items": 140},
+        {"dueno": "Rental", "total_ars": 5_100_000, "items": 140},
         {"dueno": "Pablo", "total_ars": 2_300_000, "items": 60},
         {"dueno": "Tincho", "total_ars": 1_050_000, "items": 28},
     ],
