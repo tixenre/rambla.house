@@ -584,7 +584,58 @@ function PedidoEditorPage() {
                   Desvincular
                 </button>
               </div>
-            ) : (
+            ) : null}
+
+            {/* Verificación de identidad: la ACCIÓN, pegada al badge "Sin
+                verificar" de la tarjeta de arriba. Vivía en su propio bloque
+                del rail ("Identidad del cliente") que repetía ese mismo estado
+                a dos columnas de distancia (el dueño: "esto me parece
+                redundante, le sacaría lo de la identidad a la columna de la
+                derecha"). El estado se lee UNA vez, en la tarjeta; acá queda
+                solo lo que la tarjeta no tenía: generar/copiar el link. */}
+            {clienteSinVerificar &&
+              (linkVerif ? (
+                <div className="mb-3 space-y-1.5">
+                  <p className="text-xs text-muted-foreground">Mandá este link al cliente:</p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      readOnly
+                      value={linkVerif}
+                      aria-label="Link de verificación de identidad"
+                      className="flex-1 truncate font-mono text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(linkVerif);
+                        setCopiadoLink(true);
+                        setTimeout(() => setCopiadoLink(false), 2000);
+                      }}
+                      className="flex h-9 shrink-0 items-center gap-1 rounded-md border hairline bg-surface px-2.5 text-xs text-ink transition-colors hover:bg-accent/30"
+                    >
+                      {copiadoLink ? (
+                        <Check className="h-3.5 w-3.5 text-verde-ink" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                      {copiadoLink ? "Copiado" : "Copiar"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mb-3"
+                  disabled={generandoLink}
+                  onClick={() => void handleGenerarLink()}
+                >
+                  <ShieldCheck className="mr-1 h-4 w-4" />
+                  {generandoLink ? "Generando…" : "Generar link de verificación"}
+                </Button>
+              ))}
+
+            {!datos.cliente_id && (
               // Sin ficha: buscar una, o cargar el contacto a mano abajo. Estos
               // 3 inputs son SOLO para este caso — con ficha vinculada, editarlos
               // acá no servía de nada: el contacto es en vivo (2026-06-06) y la
@@ -861,13 +912,11 @@ function PedidoEditorPage() {
                       descuentos y demás?"). El desglose de cómo se llega al
                       número vive en la sección que lo genera; el rail resume
                       las dos áreas. Misma pieza que usa el turno del Estudio
-                      → las dos secciones cierran igual. Sin `brutoLabel`
-                      propio ("· N jornadas"): la cantidad de jornadas ya se ve
-                      en la píldora "N JORNADAS" de la banda Retiro/Devolución
-                      de arriba — repetirla acá era la misma info dos veces
-                      (el dueño: "el 1 jornada me parece redundante"). Cae al
-                      default de `TotalSeccion` ("Bruto" a secas), igual que
-                      ya hace el turno del Estudio.
+                      → las dos secciones cierran igual. La primera fila dice
+                      "Subtotal" a secas: el sufijo "· N jornadas" que tenía
+                      repetía la píldora "N JORNADAS" de la banda
+                      Retiro/Devolución de arriba (el dueño: "el 1 jornada me
+                      parece redundante").
                       El `DescuentoControl` va COMO PROP, dentro de la fila
                       "Descuento" — antes era un bloque suelto arriba del
                       ledger, o sea el control y su resultado separados
@@ -939,55 +988,6 @@ function PedidoEditorPage() {
             />
           </RailSection>
 
-          {/* Identidad del cliente (solo cuando tiene ficha vinculada sin verificar) */}
-          {clienteSinVerificar && (
-            <RailSection label="Identidad del cliente">
-              <div className="flex items-center gap-1.5 text-ink text-sm mb-2">
-                <ShieldAlert className="h-4 w-4 shrink-0" />
-                <span>Sin verificar</span>
-              </div>
-              {linkVerif ? (
-                <div className="space-y-1.5">
-                  <p className="text-xs text-muted-foreground">Mandá este link al cliente:</p>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      readOnly
-                      value={linkVerif}
-                      className="flex-1 font-mono text-xs truncate"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void navigator.clipboard.writeText(linkVerif);
-                        setCopiadoLink(true);
-                        setTimeout(() => setCopiadoLink(false), 2000);
-                      }}
-                      className="flex items-center gap-1 rounded-md border hairline bg-surface px-2.5 py-1.5 text-xs text-ink hover:bg-accent/30 transition-colors shrink-0 h-[30px]"
-                    >
-                      {copiadoLink ? (
-                        <Check className="h-3.5 w-3.5 text-verde-ink" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
-                      {copiadoLink ? "Copiado" : "Copiar"}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  disabled={generandoLink}
-                  onClick={() => void handleGenerarLink()}
-                >
-                  <ShieldCheck className="h-4 w-4 mr-1" />
-                  {generandoLink ? "Generando…" : "Generar link de verificación"}
-                </Button>
-              )}
-            </RailSection>
-          )}
-
           {/* Desglose — vivo via useCotizacion. Con turnos del Estudio
               vinculados se lee en DOS PARTES (pedido del dueño: "ordenaría
               mejor este resumen, con dos partes como el alquiler de equipos y
@@ -996,7 +996,14 @@ function PedidoEditorPage() {
               combinado lo resuelve el backend (`totales.combinado`), nunca el
               front. Sin turnos, `combinado` es null y el bloque queda como
               siempre: bruto → descuento → neto → IVA → total. */}
-          <RailSection label="Desglose">
+          {/* UN SOLO BLOQUE de plata: desglose → cobranza → factura (pedido
+              del dueño: "¿podemos unir visualmente estas dos cosas? Que esté
+              el desglose, registrar pago y facturar como un bloque más
+              coherente entre sí"). Antes eran 3 `RailSection` de primer nivel,
+              cada una con su línea dura arriba, así que la plata del pedido se
+              leía como tres temas distintos. Ahora es una sola sección con
+              sub-partes separadas por un borde suave. */}
+          <RailSection label="Plata del pedido">
             <div className="space-y-1 text-sm">
               {/* RESUMEN, no desglose: los dos montos por área, el total, y el
                   IVA solo si aplica (pedido del dueño: "en el resumen de la
@@ -1037,66 +1044,76 @@ function PedidoEditorPage() {
               )}
               <BdRow l="Total" v={fmtArs(combinado.totalCombinado)} strong />
             </div>
-          </RailSection>
 
-          {/* Cobranza — combinada con los turnos del Estudio vinculados
-              (#1308): sin turnos, `combinado.*` es un pass-through exacto de
-              pagadoMonto/total/restante (cero cambio visual). */}
-          <RailSection label="Cobranza">
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-xs text-muted-foreground">
-                {fmtArs(combinado.pagadoCombinado)} de {fmtArs(combinado.totalCombinado)}
-                {combinado.pagadoCombinado === 0 ? " · sin seña" : ""}
-              </span>
-              <span
-                className={cn(
-                  "font-mono text-xs font-semibold",
-                  combinado.pagadoCombinado >= combinado.totalCombinado &&
+            {/* Cobranza — combinada con los turnos del Estudio vinculados
+                (#1308): sin turnos, `combinado.*` es un pass-through exacto de
+                pagadoMonto/total/restante (cero cambio visual). */}
+            <div className="border-t hairline pt-3">
+              <RailSection label="Cobranza" anidada>
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {fmtArs(combinado.pagadoCombinado)} de {fmtArs(combinado.totalCombinado)}
+                    {combinado.pagadoCombinado === 0 ? " · sin seña" : ""}
+                  </span>
+                  <span
+                    className={cn(
+                      "font-mono text-xs font-semibold",
+                      combinado.pagadoCombinado >= combinado.totalCombinado &&
+                        combinado.totalCombinado > 0
+                        ? "text-verde-ink"
+                        : "text-destructive",
+                    )}
+                  >
+                    {combinado.pagadoCombinado >= combinado.totalCombinado &&
                     combinado.totalCombinado > 0
-                    ? "text-verde-ink"
-                    : "text-destructive",
-                )}
-              >
-                {combinado.pagadoCombinado >= combinado.totalCombinado &&
-                combinado.totalCombinado > 0
-                  ? "pagado"
-                  : `resta ${fmtArs(combinado.restaCombinado)}`}
-              </span>
-            </div>
-            <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className={cn(
-                  "h-full transition-colors",
+                      ? "pagado"
+                      : `resta ${fmtArs(combinado.restaCombinado)}`}
+                  </span>
+                </div>
+                <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={cn(
+                      "h-full transition-colors",
+                      combinado.pagadoCombinado >= combinado.totalCombinado &&
+                        combinado.totalCombinado > 0
+                        ? "bg-verde"
+                        : "bg-amber",
+                    )}
+                    style={{
+                      width: `${
+                        combinado.totalCombinado
+                          ? Math.min(
+                              100,
+                              (combinado.pagadoCombinado / combinado.totalCombinado) * 100,
+                            )
+                          : 0
+                      }%`,
+                    }}
+                  />
+                </div>
+                {(p.pagos ?? []).map((pago) => (
+                  <PagoRow key={pago.id} pago={pago} pedidoId={p.id} />
+                ))}
+                {!(
                   combinado.pagadoCombinado >= combinado.totalCombinado &&
-                    combinado.totalCombinado > 0
-                    ? "bg-verde"
-                    : "bg-amber",
+                  combinado.totalCombinado > 0
+                ) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full mt-2"
+                    disabled={p.estado === "cancelado"}
+                    onClick={() => setOpenPagoModal(true)}
+                  >
+                    <Coins className="h-4 w-4 mr-1" /> Registrar pago
+                  </Button>
                 )}
-                style={{
-                  width: `${
-                    combinado.totalCombinado
-                      ? Math.min(100, (combinado.pagadoCombinado / combinado.totalCombinado) * 100)
-                      : 0
-                  }%`,
-                }}
-              />
+              </RailSection>
             </div>
-            {(p.pagos ?? []).map((pago) => (
-              <PagoRow key={pago.id} pago={pago} pedidoId={p.id} />
-            ))}
-            {!(
-              combinado.pagadoCombinado >= combinado.totalCombinado && combinado.totalCombinado > 0
-            ) && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full mt-2"
-                disabled={p.estado === "cancelado"}
-                onClick={() => setOpenPagoModal(true)}
-              >
-                <Coins className="h-4 w-4 mr-1" /> Registrar pago
-              </Button>
-            )}
+
+            <div className="border-t hairline pt-3">
+              <FacturacionRailSection pedidoId={p.id} estadoPedido={p.estado} />
+            </div>
           </RailSection>
 
           {/* Documentos */}
@@ -1133,9 +1150,6 @@ function PedidoEditorPage() {
               <Mail className="h-4 w-4 mr-1" /> Enviar por mail
             </Button>
           </RailSection>
-
-          {/* Factura ARCA */}
-          <FacturacionRailSection pedidoId={p.id} estadoPedido={p.estado} />
 
           {/* Eliminar pedido */}
           <RailSection label="Zona peligrosa">

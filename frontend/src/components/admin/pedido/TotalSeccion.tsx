@@ -1,5 +1,5 @@
 /**
- * TotalSeccion — el cierre de plata de una sección del pedido: bruto →
+ * TotalSeccion — el cierre de plata de una sección del pedido: subtotal →
  * descuento → total.
  *
  * Fuente única de la FORMA de ese bloque. Lo usan "Alquiler de equipos" y cada
@@ -16,7 +16,6 @@ import { type ReactNode } from "react";
 import { fmtArs } from "@/lib/format";
 
 export function TotalSeccion({
-  brutoLabel = "Bruto",
   bruto,
   descuentoLabel,
   descuentoPct,
@@ -33,7 +32,6 @@ export function TotalSeccion({
    *  colapsa a "Total" cuando no hay descuento. */
   descuentoControl,
 }: {
-  brutoLabel?: string;
   bruto: number;
   descuentoLabel?: string;
   descuentoPct?: number;
@@ -62,7 +60,7 @@ export function TotalSeccion({
       <div className="grid grid-cols-[1fr_auto] gap-x-2 gap-y-1">
         {hayDescuento && (
           <>
-            <span className="text-right text-muted-foreground">{brutoLabel}</span>
+            <span className="text-right text-muted-foreground">Subtotal</span>
             <span className="text-right font-mono tabular-nums text-muted-foreground">
               {fmtArs(bruto)}
             </span>

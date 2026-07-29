@@ -390,9 +390,23 @@ export function FacturacionTargetSection({
   );
 }
 
-export function RailSection({ label, children }: { label: string; children: React.ReactNode }) {
+export function RailSection({
+  label,
+  /** `true` = sin la línea/padding de arriba: para una sub-parte DENTRO de otra
+   *  `RailSection` (ej. Cobranza y Factura, que viven bajo "Plata del pedido"
+   *  — pedido del dueño: "¿podemos unir visualmente estas dos cosas? Que esté
+   *  el desglose, registrar pago y facturar como un bloque más coherente entre
+   *  sí"). El separador entre sub-partes lo pone el contenedor, más suave que
+   *  el corte de primer nivel. */
+  anidada = false,
+  children,
+}: {
+  label: string;
+  anidada?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="border-t hairline pt-4 first:border-t-0 first:pt-0">
+    <div className={cn(!anidada && "border-t hairline pt-4 first:border-t-0 first:pt-0")}>
       <div className="t-eyebrow mb-2">{label}</div>
       <div className="space-y-2">{children}</div>
     </div>
@@ -690,7 +704,7 @@ export function FacturacionRailSection({
   const f = useFacturacionArca(pedidoId, estadoPedido);
 
   return (
-    <RailSection label="Factura ARCA">
+    <RailSection label="Factura ARCA" anidada>
       {f.q.isLoading && <div className="text-xs text-muted-foreground">Cargando…</div>}
 
       {f.principal && (
