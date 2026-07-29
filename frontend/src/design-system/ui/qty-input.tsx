@@ -24,8 +24,11 @@ export function QtyInput({
   size = "md",
   className,
 }: QtyInputProps) {
-  const btnH = size === "sm" ? "h-7 w-7" : "h-9 w-9";
-  const inputH = size === "sm" ? "h-7 w-10" : "h-9 w-11";
+  // 44px táctil en mobile, denso en desktop (gate de PROTOCOLO / Apple HIG,
+  // MEMORIA 2026-06-05). El stepper es de lo MÁS tocado de la pantalla de
+  // pedidos y venía en 28-36px.
+  const btnH = size === "sm" ? "h-11 w-11 md:h-7 md:w-7" : "h-11 w-11 md:h-9 md:w-9";
+  const inputH = size === "sm" ? "h-11 w-11 md:h-7 md:w-10" : "h-11 w-12 md:h-9 md:w-11";
   const iconSz = size === "sm" ? "h-2.5 w-2.5" : "h-3 w-3";
 
   function decrement() {
@@ -92,7 +95,7 @@ export function QtyInput({
         onChange={handleChange}
         onBlur={handleBlur}
         className={cn(
-          "rounded-md border text-center font-mono text-sm tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring p-0",
+          "rounded-md border p-0 text-center font-mono text-base tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:text-sm",
           inputH,
           error
             ? "border-destructive text-destructive"

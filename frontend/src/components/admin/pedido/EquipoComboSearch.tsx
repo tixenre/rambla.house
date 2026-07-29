@@ -131,6 +131,10 @@ export function EquipoComboSearch({
         onFocus={() => setOpen(true)}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
+        // El placeholder NO es un nombre accesible (desaparece al tipear y los
+        // lectores de pantalla no lo garantizan): sin esto el buscador se oía
+        // como un campo de texto sin nombre. Se reusa el mismo texto.
+        aria-label={placeholder}
       />
 
       {open && (

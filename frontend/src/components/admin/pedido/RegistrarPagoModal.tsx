@@ -198,6 +198,7 @@ export function RegistrarPagoModal({
             { value: "saldo", label: "Saldo total" },
             { value: "otro", label: "Otro" },
           ]}
+          ariaLabel="Monto a cobrar"
         />
 
         {/* Monto */}
@@ -232,7 +233,7 @@ export function RegistrarPagoModal({
             value={concepto}
             onChange={(e) => setConcepto(e.target.value)}
             placeholder="Seña, saldo final…"
-            className="h-9 text-sm"
+            className="h-9 text-base md:text-sm"
           />
         </div>
 
@@ -249,12 +250,15 @@ export function RegistrarPagoModal({
             type="date"
             value={fecha}
             onChange={(e) => setFecha(e.target.value)}
-            className="h-9 text-sm"
+            className="h-9 text-base md:text-sm"
           />
         </div>
 
         {/* Destinatario + método */}
-        <div className="grid grid-cols-2 gap-3">
+        {/* `grid-cols-1` de base: a 375px las dos columnas quedaban de ~146px
+            y el SegmentedControl de "Cobró" (4 opciones) tenía que partirse en
+            chips de 2×2 de ~28px. Una sola columna en mobile, dos desde `sm`. */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <div className="space-y-1">
             <Label className="font-mono text-2xs uppercase tracking-[0.15em] text-muted-foreground">
               Cobró
@@ -263,6 +267,7 @@ export function RegistrarPagoModal({
               value={destinatario}
               onChange={setDestinatario}
               options={DESTINATARIOS_PAGO.map((d) => ({ value: d, label: d }))}
+              ariaLabel="Quién cobró"
             />
           </div>
           <div className="space-y-1">
@@ -273,6 +278,7 @@ export function RegistrarPagoModal({
               value={metodo}
               onChange={setMetodo}
               options={METODOS_PAGO.map((m) => ({ value: m, label: m }))}
+              ariaLabel="Método de pago"
             />
           </div>
         </div>

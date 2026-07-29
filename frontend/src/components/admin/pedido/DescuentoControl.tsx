@@ -70,7 +70,8 @@ export function DescuentoControl({
           { value: "pct", label: "%" },
           { value: "monto", label: "$" },
         ]}
-        className="w-[68px] shrink-0"
+        ariaLabel="Unidad del descuento: porcentaje o pesos"
+        className="w-[96px] shrink-0 md:w-[68px]"
       />
       {value.tipo === "monto" ? (
         <MoneyInput

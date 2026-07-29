@@ -608,7 +608,7 @@ function PedidoEditorPage() {
                 <button
                   type="button"
                   onClick={() => setDatos((d) => d && { ...d, cliente_id: null })}
-                  className="shrink-0 rounded-md border hairline px-2.5 py-1 text-xs text-muted-foreground hover:border-ink hover:text-ink"
+                  className="inline-flex h-11 shrink-0 items-center rounded-md border hairline px-2.5 text-xs text-muted-foreground hover:border-ink hover:text-ink md:h-7"
                 >
                   Desvincular
                 </button>
@@ -698,6 +698,7 @@ function PedidoEditorPage() {
                   <div className="space-y-1">
                     <FieldLabel>Nombre</FieldLabel>
                     <Input
+                      aria-label="Nombre del cliente"
                       value={datos.cliente_nombre}
                       onChange={(e) =>
                         setDatos((d) => d && { ...d, cliente_nombre: e.target.value })
@@ -707,6 +708,7 @@ function PedidoEditorPage() {
                   <div className="space-y-1">
                     <FieldLabel>Teléfono</FieldLabel>
                     <Input
+                      aria-label="Teléfono del cliente"
                       value={datos.cliente_telefono}
                       onChange={(e) =>
                         setDatos((d) => d && { ...d, cliente_telefono: e.target.value })
@@ -716,6 +718,7 @@ function PedidoEditorPage() {
                   <div className="space-y-1 sm:col-span-2">
                     <FieldLabel>Email</FieldLabel>
                     <Input
+                      aria-label="Email del cliente"
                       value={datos.cliente_email}
                       placeholder="—"
                       onChange={(e) =>
@@ -1004,6 +1007,7 @@ function PedidoEditorPage() {
           <Section variant="card" tone="elevated" icon={FileText} title="Notas internas">
             <Textarea
               value={datos.notas}
+              aria-label="Notas internas del pedido"
               placeholder="Notas para el equipo de Rambla…"
               onChange={(e) => setDatos((d) => d && { ...d, notas: e.target.value })}
               className="min-h-[88px] resize-y"
@@ -1176,7 +1180,7 @@ function PedidoEditorPage() {
                     href={`${pedidoPdfUrl(p.id, doc.kind)}?format=html`}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 rounded-md border hairline px-2 py-1 font-mono text-xs text-muted-foreground hover:text-ink hover:border-ink"
+                    className="inline-flex h-11 items-center gap-1 rounded-md border hairline px-2 font-mono text-xs text-muted-foreground hover:border-ink hover:text-ink md:h-7"
                     title={`Ver ${doc.label}`}
                   >
                     <Eye className="h-3 w-3" />
@@ -1184,7 +1188,12 @@ function PedidoEditorPage() {
                   </a>
                   <a
                     href={pedidoPdfUrl(p.id, doc.kind)}
-                    className="inline-flex items-center justify-center h-7 w-7 rounded-md border hairline text-muted-foreground hover:text-ink hover:border-ink"
+                    // `aria-label` además del `title`: es un link SOLO con
+                    // ícono (el hermano "Ver" sí tiene texto), y `title` no es
+                    // un nombre accesible confiable. h-11 en mobile (gate de
+                    // 44px), denso en desktop como el resto del rail.
+                    aria-label={`Descargar ${doc.label} PDF`}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-md border hairline text-muted-foreground hover:border-ink hover:text-ink md:h-7 md:w-7"
                     title={`Descargar ${doc.label} PDF`}
                   >
                     <Download className="h-3 w-3" />

@@ -270,7 +270,7 @@ function BandaFranja({
             aria-label="Fecha del turno"
             value={fecha}
             onChange={(e) => onChangeFecha(e.target.value)}
-            className="mt-0.5 h-9 w-full max-w-[150px] font-mono text-sm tabular-nums"
+            className="mt-0.5 h-11 w-full max-w-[150px] md:h-9 font-mono text-base tabular-nums md:text-sm"
           />
         </div>
         <div className="min-w-0">
@@ -279,7 +279,7 @@ function BandaFranja({
             aria-label="Hora de inicio"
             value={start}
             onChange={(e) => onChangeStart(e.target.value)}
-            className="mt-0.5 h-9 w-full max-w-[110px] rounded-md border hairline bg-surface-elevated px-1.5 font-mono text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-ring"
+            className="mt-0.5 h-11 w-full max-w-[110px] md:h-9 rounded-md border hairline bg-surface-elevated px-1.5 font-mono text-base tabular-nums focus:outline-none md:text-sm focus:ring-2 focus:ring-ring"
           >
             {slots.map((s) => (
               <option key={s.value} value={s.value}>
@@ -297,7 +297,7 @@ function BandaFranja({
               min={minHoras}
               value={horas}
               onChange={(e) => onChangeHoras(Number(e.target.value) || 0)}
-              className="h-9 w-16 text-center font-mono text-sm tabular-nums"
+              className="h-11 w-16 text-center md:h-9 font-mono text-base tabular-nums md:text-sm"
             />
             <span className="t-eyebrow">{horas === 1 ? "hora" : "horas"}</span>
           </div>
@@ -413,7 +413,7 @@ export function EstudioIncluyeList({
                 value={espacioOverride}
                 onChange={(e) => onChangeEspacioOverride(e.target.value)}
                 placeholder={String((estudio.precio_hora || 0) * horas)}
-                className="h-9 w-24 text-right text-sm"
+                className="h-11 w-24 text-right md:h-9 text-base md:text-sm"
               />
             }
           />

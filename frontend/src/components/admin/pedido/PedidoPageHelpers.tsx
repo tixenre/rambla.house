@@ -190,7 +190,7 @@ export function ItemRow({
               value={it.nombre_libre ?? ""}
               placeholder="Descripción (ej. Flete, Operador…)"
               onChange={(e) => updateItem(it.uid, { nombre_libre: e.target.value })}
-              className="h-8 text-sm"
+              className="h-11 text-base md:h-8 md:text-sm"
             />
           ) : (
             <>
@@ -232,7 +232,7 @@ export function ItemRow({
             value={it.precio_jornada}
             ariaLabel="Precio por jornada"
             onCommit={(v) => updateItem(it.uid, { precio_jornada: v })}
-            className="h-9 w-24 text-sm"
+            className="h-11 w-24 text-base md:h-9 md:text-sm"
           />
           {esLibre ? (
             <select
@@ -281,7 +281,7 @@ export function BackLink({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-ink shrink-0"
+      className="inline-flex h-11 shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-ink md:h-auto"
     >
       <ChevronLeft className="h-4 w-4" /> Pedidos
     </button>
@@ -543,12 +543,12 @@ const CONDICION_IVA_CORTA: Record<string, string> = {
 export function FacturaPreviewDialog({ f }: { f: FacturacionArca }) {
   return (
     <AlertDialog open={f.showPreview} onOpenChange={f.setShowPreview}>
-      <AlertDialogContent className="flex h-[94vh] w-fit max-w-[95vw] flex-row overflow-hidden p-0">
+      <AlertDialogContent className="flex h-[94dvh] w-full max-w-[95vw] flex-col overflow-hidden p-0 md:h-[94vh] md:w-fit md:flex-row">
         {/* Columna izquierda: info + chequeos + acciones. Columna derecha: la factura a pantalla
             completa de alto, dimensionada a la proporción REAL del layout elegido (LAYOUT_ASPECT)
             — así no queda el sobrante gris que el propio HTML de arca_fe deja alrededor cuando
             el viewport no matchea el aspecto (ese HTML centra y escala manteniendo proporción). */}
-        <div className="flex w-[360px] shrink-0 flex-col overflow-y-auto border-r hairline">
+        <div className="flex w-full shrink-0 flex-col overflow-y-auto border-b hairline md:w-[360px] md:border-b-0 md:border-r">
           <AlertDialogHeader className="px-5 py-4 text-left">
             <AlertDialogTitle>Confirmar factura</AlertDialogTitle>
             <AlertDialogDescription>
@@ -616,7 +616,7 @@ export function FacturaPreviewDialog({ f }: { f: FacturacionArca }) {
         </div>
 
         <div
-          className="relative h-full shrink-0 overflow-hidden bg-muted"
+          className="relative min-h-[45dvh] w-full shrink-0 overflow-hidden bg-muted md:h-full md:min-h-0 md:w-auto"
           style={{ aspectRatio: LAYOUT_ASPECT[f.layout] ?? LAYOUT_ASPECT.simplificada }}
         >
           {!f.facturaHtmlError && (!f.facturaBlobUrl || !f.facturaIframeReady) && (
