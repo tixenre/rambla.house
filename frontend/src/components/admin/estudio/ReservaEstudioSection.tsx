@@ -18,10 +18,11 @@
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clapperboard } from "lucide-react";
+import { AlertTriangle, Clapperboard } from "lucide-react";
 import { toast } from "sonner";
 
 import { Section } from "@/design-system/composites/Section";
+import { Button } from "@/design-system/ui/button";
 import { Spinner } from "@/design-system/ui/spinner";
 import { SaveIndicator } from "@/components/admin/pedido/PedidoPageHelpers";
 import { TotalSeccion } from "@/components/admin/pedido/TotalSeccion";
@@ -343,6 +344,25 @@ export function ReservaEstudioSection({
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner size="sm" /> Calculando…
             </div>
+          ) : cotizarQ.isError ? (
+            // Antes `cotizarQ.isError` no se leía acá: un fallo de red dejaba
+            // el bloque mostrando el ÚLTIMO total bueno (`keepPreviousData`)
+            // sin ningún aviso de que ya no es de fiar — el Total del turno
+            // podía estar mintiendo en silencio.
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive">
+              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+              <span>
+                No se pudo calcular el total del turno — no es confiable hasta recalcular.
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="ml-auto"
+                onClick={() => void cotizarQ.refetch()}
+              >
+                Reintentar
+              </Button>
+            </div>
           ) : cotiz ? (
             <>
               <TotalSeccion
@@ -358,6 +378,7 @@ export function ReservaEstudioSection({
                     maxMonto={cotiz.bruto_descontable ?? cotiz.monto_total ?? 0}
                     efectivoPct={cotiz.descuento_pct ?? 0}
                     efectivoMonto={cotiz.descuento_monto ?? 0}
+                    disabled={mutation.isPending}
                   />
                 }
                 // onlyError: el indicador general de arriba a la derecha ya

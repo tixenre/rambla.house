@@ -73,6 +73,18 @@ export type Cotizacion = {
    *  él: `monto_total` de un turno es NETO, así que sumar el total CON IVA del
    *  principal a turnos SIN IVA daba menos de lo que factura el comprobante. */
   combinado: CotizacionCombinada | null;
+  /** La factura YA EMITIDA (CAE fijo, inmutable) declaró un neto distinto al
+   *  que el pedido suma HOY (turno agregado/cancelado después de facturar, u
+   *  otro edit post-factura). `null` = sin factura emitida, o coincide. */
+  facturaDesactualizada: FacturaDesactualizada | null;
+};
+
+export type FacturaDesactualizada = {
+  impNetoFacturado: number;
+  netoActual: number;
+  /** `netoActual - impNetoFacturado` — positivo = el pedido vale MÁS hoy que
+   *  lo facturado (típico: se agregó un turno después); negativo = menos. */
+  diferencia: number;
 };
 
 /** Las dos partes de un pedido (equipos + turnos) resueltas como un solo total. */
@@ -119,6 +131,11 @@ type CotizarResp = {
     iva_monto: number;
     total_final: number;
   } | null;
+  factura_desactualizada?: {
+    imp_neto_facturado: number;
+    neto_actual: number;
+    diferencia: number;
+  } | null;
 };
 
 export const COTIZACION_VACIA: Cotizacion = {
@@ -135,6 +152,7 @@ export const COTIZACION_VACIA: Cotizacion = {
   total: 0,
   lineas: [],
   combinado: null,
+  facturaDesactualizada: null,
 };
 
 function adaptar(r: CotizarResp): Cotizacion {
@@ -165,6 +183,13 @@ function adaptar(r: CotizarResp): Cotizacion {
           conIva: r.combinado.con_iva,
           iva: r.combinado.iva_monto,
           total: r.combinado.total_final,
+        }
+      : null,
+    facturaDesactualizada: r.factura_desactualizada
+      ? {
+          impNetoFacturado: r.factura_desactualizada.imp_neto_facturado,
+          netoActual: r.factura_desactualizada.neto_actual,
+          diferencia: r.factura_desactualizada.diferencia,
         }
       : null,
   };

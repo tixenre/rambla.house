@@ -515,3 +515,177 @@ def test_no_se_borra_un_pedido_cuyo_turno_tiene_plata_cobrada(client_con_db, set
     assert r.status_code == 409, r.text
     assert "plata cobrada" in r.json()["detail"]
     assert _existe(PRINCIPAL_ID) and _existe(TURNO_ID), "no se borra nada a medias"
+
+
+# ── _maybe_finalizar no puede adelantar un turno a su principal ─────────────
+
+
+def test_maybe_finalizar_no_adelanta_turno_a_su_principal(client_con_db, setup):
+    """DISCRIMINANTE: sin el gate, un pago DIRECTO al turno (`POST
+    /alquileres/{id}/pagos`, sin pasar por el combinado) que lo completara
+    disparaba `_maybe_finalizar` → UPDATE crudo a 'finalizado', puenteando el
+    cap que `cambiar_estado()` sí aplica a toda transición manual."""
+    from database import get_db
+    from routes.alquileres.detalle import _maybe_finalizar
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE alquileres SET estado='devuelto' WHERE id IN (%s, %s)",
+            (PRINCIPAL_ID, TURNO_ID),
+        )
+        conn.execute(
+            "UPDATE alquileres SET monto_pagado = monto_total WHERE id = %s",
+            (TURNO_ID,),
+        )
+        conn.commit()
+
+        _maybe_finalizar(conn, TURNO_ID)
+        estado = conn.execute(
+            "SELECT estado FROM alquileres WHERE id=%s", (TURNO_ID,)
+        ).fetchone()["estado"]
+        assert estado == "devuelto", "no puede finalizar antes que su principal"
+
+        conn.execute("UPDATE alquileres SET estado='finalizado' WHERE id=%s", (PRINCIPAL_ID,))
+        conn.commit()
+        _maybe_finalizar(conn, TURNO_ID)
+        estado = conn.execute(
+            "SELECT estado FROM alquileres WHERE id=%s", (TURNO_ID,)
+        ).fetchone()["estado"]
+        assert estado == "finalizado", "una vez que el principal finalizó, sí puede"
+    finally:
+        conn.close()
+
+
+# ── delete_pedido serializa contra un pago concurrente ───────────────────────
+
+
+def test_delete_pedido_serializa_contra_pago_concurrente_del_turno(client_con_db, setup):
+    """DISCRIMINANTE del TOCTOU: sin `FOR UPDATE` en el SELECT de "sin plata
+    cobrada", un pago concurrente sobre el turno podía commitear DESPUÉS de
+    que el delete ya leyó `monto_pagado=0` — el 409 nunca disparaba y
+    `alquiler_pagos` (`ON DELETE CASCADE` desde `alquileres`) se llevaba el
+    cobro recién confirmado junto con la fila borrada, en silencio. Con el
+    lock, el delete espera a que el pago commitee y entonces SÍ ve la plata."""
+    import threading
+    import time
+
+    from database import get_db
+    from routes.alquileres.pagos import PagoCreate, _agregar_pago
+    from routes.alquileres.pedidos import _delete_pedido
+
+    orden: list[str] = []
+    pago_insertado = threading.Event()
+    liberar_pago = threading.Event()
+    errores: dict[str, Exception] = {}
+
+    def _pagar_y_retener():
+        conn = get_db()
+        try:
+            _agregar_pago(conn, TURNO_ID, PagoCreate(monto=MONTO_TURNO), "a@test.com")
+            orden.append("A_pago_insertado")
+            pago_insertado.set()
+            liberar_pago.wait(timeout=5)
+            conn.commit()
+            orden.append("A_commiteo")
+        except Exception as e:  # noqa: BLE001
+            errores["A"] = e
+            pago_insertado.set()
+        finally:
+            conn.close()
+
+    def _borrar_turno():
+        pago_insertado.wait(timeout=5)
+        conn = get_db()
+        try:
+            try:
+                _delete_pedido(conn, TURNO_ID)
+                conn.commit()
+                orden.append("B_borro")
+            except Exception as e:
+                conn.rollback()
+                orden.append(f"B_rechazado_{getattr(e, 'status_code', type(e).__name__)}")
+        finally:
+            conn.close()
+
+    ta = threading.Thread(target=_pagar_y_retener)
+    tb = threading.Thread(target=_borrar_turno)
+    ta.start()
+    pago_insertado.wait(timeout=5)
+    tb.start()
+    time.sleep(0.3)  # con el fix, B debería seguir esperando el lock acá.
+    assert not any(o.startswith("B_") for o in orden), (
+        "B no debería poder resolver el delete mientras A retiene el lock del pago"
+    )
+    liberar_pago.set()
+    ta.join(timeout=5)
+    tb.join(timeout=5)
+
+    assert not ta.is_alive() and not tb.is_alive(), "deadlock: algún hilo no terminó"
+    assert not errores, f"errores en los hilos: {errores}"
+    assert "B_rechazado_409" in orden, (
+        f"el delete tiene que frenar con 409 tras ver la plata ya commiteada: {orden}"
+    )
+
+    conn = get_db()
+    try:
+        turno = conn.execute(
+            "SELECT monto_pagado FROM alquileres WHERE id=%s", (TURNO_ID,)
+        ).fetchone()
+        assert turno is not None, "el turno no debería haberse borrado"
+        assert turno["monto_pagado"] == MONTO_TURNO, "el pago no debería haber desaparecido"
+        pago = conn.execute(
+            "SELECT id FROM alquiler_pagos WHERE pedido_id=%s", (TURNO_ID,)
+        ).fetchone()
+        assert pago is not None, "el pago tiene que seguir existiendo en el ledger"
+    finally:
+        conn.close()
+
+
+# ── Factura ya emitida pero el total en vivo cambió después ──────────────────
+
+
+def test_factura_desactualizada_se_detecta_si_el_turno_se_agrega_despues(client_con_db, setup):
+    """DISCRIMINANTE: agregar/pagar un turno DESPUÉS de que la factura del
+    principal ya se emitió (CAE fijo, inmutable) no dejaba ninguna señal — el
+    rail seguía mostrando "Total combinado" en vivo sin avisar que ya no
+    coincide con lo que ARCA autorizó. Observa el neto REAL primero (sin
+    hardcodear jornadas/descuentos) y recién después congela una factura al
+    valor SOLO-principal, para verificar que la diferencia detectada sea
+    exactamente el aporte del turno."""
+    from database import get_db
+
+    payload = {
+        "items": [{"equipo_id": EQ_ID, "cantidad": 1}],
+        "fecha_desde": "2033-06-01",
+        "fecha_hasta": "2033-06-05",
+        "pedido_id": PRINCIPAL_ID,
+    }
+    r0 = client_con_db.post("/api/cotizar", json=payload)
+    assert r0.status_code == 200, r0.text
+    body0 = r0.json()
+    assert body0["factura_desactualizada"] is None, "sin factura emitida, no hay nada que comparar"
+    neto_principal = body0["neto"]
+    neto_combinado = body0["combinado"]["neto"]
+    assert neto_combinado == neto_principal + MONTO_TURNO
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO facturas (pedido_id, emisor, ambiente, cbte_tipo, pto_vta, "
+            "doc_tipo, doc_nro, condicion_iva_receptor, concepto, imp_neto, imp_iva, "
+            "imp_total, moneda, estado) VALUES "
+            "(%s,'rambla','testing',6,1,80,'20000000001',5,1,%s,0,%s,'PES','emitida')",
+            (PRINCIPAL_ID, neto_principal, neto_principal),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    r1 = client_con_db.post("/api/cotizar", json=payload)
+    assert r1.status_code == 200, r1.text
+    fd = r1.json()["factura_desactualizada"]
+    assert fd is not None, "el turno vale plata que la factura ya emitida no incluye"
+    assert fd["imp_neto_facturado"] == neto_principal
+    assert fd["neto_actual"] == neto_combinado
+    assert fd["diferencia"] == MONTO_TURNO

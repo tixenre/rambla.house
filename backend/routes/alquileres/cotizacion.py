@@ -392,6 +392,29 @@ def cotizar(data: CotizarRequest, request: Request):
                     "total_final": shim["total_con_iva"],
                 }
 
+        # ── Factura ya emitida pero el total en vivo cambió después (turno
+        # agregado/cancelado tras facturar, u otro edit post-factura) ──
+        # `get_factura_principal_emitida` es inmutable una vez emitida (CAE ya
+        # autorizado por ARCA) — si el neto que el rail recalcula en vivo ya
+        # no coincide, el admin tiene que verlo ACÁ, no descubrirlo recién en
+        # la reconciliación mensual. Compara contra `combinado["neto"]` cuando
+        # hay turnos (es el neto real que la factura combinada declaró) o el
+        # del principal solo si no los hay.
+        factura_desactualizada = None
+        if pedido_congelado and data.pedido_id:
+            from services.facturacion.repo import get_factura_principal_emitida
+
+            factura_emitida = get_factura_principal_emitida(data.pedido_id, conn)
+            if factura_emitida:
+                neto_actual = combinado["neto"] if combinado else desglose["neto"]
+                imp_neto_facturado = int(factura_emitida.imp_neto)
+                if imp_neto_facturado != neto_actual:
+                    factura_desactualizada = {
+                        "imp_neto_facturado": imp_neto_facturado,
+                        "neto_actual": neto_actual,
+                        "diferencia": neto_actual - imp_neto_facturado,
+                    }
+
         # Cuál descuento ganó (para el label del UI) — misma jerarquía que
         # decidió el pct en `calcular_total`, así nunca puede divergir.
         descuento_origen = resolver_origen_pedido_monto(
@@ -428,5 +451,6 @@ def cotizar(data: CotizarRequest, request: Request):
             "descuento_origen": descuento_origen,
             "lineas": lineas,
             "combinado": combinado,
+            "factura_desactualizada": factura_desactualizada,
             **desglose,
         }

@@ -277,7 +277,7 @@ function PedidoEditorPage() {
     );
   }
 
-  const { datos, setDatos, items, setItems, saveStatus, estadoMut } = draft;
+  const { datos, setDatos, items, setItems, saveStatus, estadoMut, datosMut } = draft;
   const ns = nextStep(p);
   const otrosDestinosPedido = otrosDestinos(p);
   // Ítems/fechas de un turno o slot fijo del Estudio están blindados
@@ -991,6 +991,7 @@ function PedidoEditorPage() {
                         maxMonto={totales.subtotalDescontable}
                         efectivoPct={totales.descuentoPct}
                         efectivoMonto={totales.descuentoMonto}
+                        disabled={datosMut.isPending}
                       />
                     }
                   />
@@ -1053,6 +1054,27 @@ function PedidoEditorPage() {
                 <span>
                   No se pudo recalcular la plata. Los importes de abajo no son confiables — recargá
                   la página antes de cobrar o facturar.
+                </span>
+              </div>
+            )}
+            {/* La factura YA EMITIDA (CAE fijo, inmutable) declaró un neto
+                distinto al que el pedido suma HOY — típico: se agregó/pagó un
+                turno del Estudio DESPUÉS de facturar. Sin este aviso, el rail
+                seguía mostrando "Total combinado" en vivo sin decir que ya no
+                coincide con lo que ARCA autorizó — un gap real que se
+                descubría recién en la reconciliación mensual. */}
+            {totales.facturaDesactualizada && (
+              <div className="mb-2 flex items-start gap-1.5 rounded-md border border-amber/40 bg-amber/5 px-2.5 py-2 text-xs text-ink">
+                {/* eslint-disable-next-line no-restricted-syntax -- amber: paleta categórica de advertencia (Tier 3) */}
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700" />
+                <span>
+                  La factura emitida declara{" "}
+                  {fmtArs(totales.facturaDesactualizada.impNetoFacturado)}, pero el pedido hoy suma{" "}
+                  {fmtArs(totales.facturaDesactualizada.netoActual)}
+                  {totales.facturaDesactualizada.diferencia > 0
+                    ? " (se agregó plata después de facturar)"
+                    : " (se sacó plata después de facturar)"}
+                  . Para cobrar la diferencia hacé una Nota de Crédito y refacturá.
                 </span>
               </div>
             )}
@@ -1167,7 +1189,11 @@ function PedidoEditorPage() {
             </div>
 
             <div className="border-t hairline pt-3">
-              <FacturacionRailSection pedidoId={p.id} estadoPedido={p.estado} />
+              <FacturacionRailSection
+                pedidoId={p.id}
+                estadoPedido={p.estado}
+                plataConfiable={!cotizacionFallo && !stockFallo}
+              />
             </div>
           </RailSection>
 

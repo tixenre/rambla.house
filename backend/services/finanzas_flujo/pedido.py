@@ -133,13 +133,16 @@ def combinar_turnos_vinculados(conn, pedido: dict, *, expandir_periodo: bool = F
     turnos → mail diario al dueño. Hoy el único consumidor es el motor de
     facturación (`services/facturacion/engine.py::_get_pedido`).
 
-    **Suma totales YA congelados, no mergea ítems.** Meter los ítems del turno
-    en `pedido["items"]` y recalcular haría que los descuentos del principal
-    (cliente/jornadas/manual) se apliquen sobre la tarifa negociada del Estudio
+    **Suma totales YA congelados, nunca mergea ítems entre filas.** Cada turno
+    resuelve SU PROPIO bruto/descuento con sus propios ítems + su propio
+    descuento (mismas columnas que un pedido) — nunca se mete un ítem del
+    turno en `pedido["items"]` del principal, que aplicaría los descuentos del
+    principal (cliente/jornadas/manual) sobre la tarifa negociada del Estudio
     — plata cambiada en silencio. Mismo criterio que el pago combinado
     (`routes/alquileres/pagos.py::_agregar_pago_combinado`) y que
-    `frontend/src/lib/pedido-combinado.ts`: se suman `monto_total`/`monto_pagado`
-    persistidos, nada se recotiza.
+    `frontend/src/lib/pedido-combinado.ts`: se suman los RESULTADOS
+    (`monto_total`/`monto_pagado`/`bruto`/`descuento_monto`) ya persistidos o
+    resueltos por fila, nada se recotiza cruzando filas.
 
     **NO toca la base** — `alquileres.monto_total` de cada fila queda intacto
     (cada fila conserva su plata: de eso dependen la liquidación, la economía del
@@ -159,22 +162,45 @@ def combinar_turnos_vinculados(conn, pedido: dict, *, expandir_periodo: bool = F
         # exige `tipo='diaria'`), así que no hay nada que combinar ni recursión posible.
         return pedido
 
-    turnos = conn.execute(
-        "SELECT id, numero_pedido, fecha_desde, fecha_hasta, monto_total, monto_pagado "
-        "FROM alquileres WHERE pedido_principal_id = %s AND estado <> 'cancelado' "
+    turnos_rows = conn.execute(
+        "SELECT * FROM alquileres WHERE pedido_principal_id = %s AND estado <> 'cancelado' "
         "ORDER BY fecha_desde, id",
         (pedido["id"],),
     ).fetchall()
-    if not turnos:
+    if not turnos_rows:
         return pedido
+
+    from database import row_to_dict
+    from services.pedidos_enriquecimiento import _batch_get_alquiler_items
+
+    turnos = [row_to_dict(t) for t in turnos_rows]
+    items_map = _batch_get_alquiler_items(conn, [t["id"] for t in turnos])
 
     extra_total = sum(t["monto_total"] or 0 for t in turnos)
     extra_pagado = sum(t["monto_pagado"] or 0 for t in turnos)
 
-    # El turno no lleva descuento propio (su tarifa ya es la negociada), así que
-    # su aporte entra igual al bruto y al neto — `bruto - descuento == neto` se
-    # mantiene coherente para cualquier consumidor de display.
-    pedido["bruto"] = (pedido.get("bruto") or 0) + extra_total
+    # Un turno puede tener SU PROPIO descuento (mismas columnas que un pedido —
+    # sesión de "descuento por sección" del rail, posterior a cuando se escribió
+    # el supuesto de abajo). "El turno no lleva descuento propio" ya no es
+    # cierto: sumar directo su `monto_total` (ya neto) al `bruto` del principal
+    # dejaba `bruto - descuento_monto != monto_total` para el combinado —
+    # inconsistente para cualquier consumidor de display, aunque hoy ninguno
+    # lea esos dos campos combinados (dormant, no explotado). Se resuelve el
+    # bruto/descuento de CADA turno con la misma `desglose_de_pedido` que el
+    # principal — una sola forma de calcular esos números para cualquier fila
+    # de `alquileres`, sea principal o turno. Se le pasa un perfil sentinel
+    # (nunca None) para no disparar la resolución fiscal en vivo por turno:
+    # bruto/descuento_monto no dependen del perfil impositivo (solo iva_monto/
+    # con_iva, que este combinado ya recalcula aparte más abajo).
+    for t in turnos:
+        t["items"] = items_map.get(t["id"], [])
+        t["cliente_perfil_impuestos"] = pedido.get("cliente_perfil_impuestos") or "consumidor_final"
+        desglose_de_pedido(conn, t)
+    extra_bruto = sum(t["bruto"] for t in turnos)
+    extra_descuento = sum(t["descuento_monto"] for t in turnos)
+
+    pedido["bruto"] = (pedido.get("bruto") or 0) + extra_bruto
+    pedido["descuento_monto"] = (pedido.get("descuento_monto") or 0) + extra_descuento
     pedido["monto_total"] = (pedido.get("monto_total") or 0) + extra_total
     pedido["monto_neto"] = pedido["monto_total"]
     pedido["monto_pagado"] = (pedido.get("monto_pagado") or 0) + extra_pagado

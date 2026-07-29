@@ -658,6 +658,8 @@ export function FacturarButton({
   f,
   className,
   hideWhenUnavailable,
+  disabledExtra,
+  tituloExtra,
 }: {
   f: FacturacionArca;
   className?: string;
@@ -670,6 +672,12 @@ export function FacturarButton({
    * usuario decide qué falta para poder facturar.
    */
   hideWhenUnavailable?: boolean;
+  /** Bloqueo del CALLER (ej. cotización/stock del pedido en falla) — no viene
+   *  de `f` porque el hook no sabe nada del estado de la página que lo aloja.
+   *  Facturar con un total que no se pudo confirmar generaría un comprobante
+   *  legal con la plata equivocada. */
+  disabledExtra?: boolean;
+  tituloExtra?: string;
 }) {
   if (!((!f.principal || f.principal.estado === "error") && !f.q.isLoading)) return null;
   if (hideWhenUnavailable && !f.puedeFacturar) return null;
@@ -678,8 +686,8 @@ export function FacturarButton({
       variant="outline"
       size="sm"
       className={className}
-      disabled={!f.puedeFacturar || f.preview.isPending}
-      title={!f.puedeFacturar ? "No se puede facturar en este estado" : undefined}
+      disabled={!f.puedeFacturar || f.preview.isPending || !!disabledExtra}
+      title={!f.puedeFacturar ? "No se puede facturar en este estado" : tituloExtra}
       onClick={() => {
         f.setShowPreview(true);
         f.preview.mutate(undefined);
@@ -698,11 +706,22 @@ export function FacturarButton({
 export function FacturacionRailSection({
   pedidoId,
   estadoPedido,
+  plataConfiable = true,
 }: {
   pedidoId: number;
   estadoPedido: PedidoEstado;
+  /** `false` cuando la cotización o el stock en vivo del pedido fallaron —
+   *  facturar o anular con un total que no se pudo confirmar es un riesgo
+   *  real (la factura es un documento legal e inmutable, a diferencia de
+   *  "Registrar pago" no hay forma de deshacerla sin una Nota de Crédito).
+   *  No bloquea ver/descargar/enviar una factura YA EMITIDA — esa plata ya
+   *  quedó fija, no depende de la cotización en vivo. */
+  plataConfiable?: boolean;
 }) {
   const f = useFacturacionArca(pedidoId, estadoPedido);
+  const motivoBloqueo = !plataConfiable
+    ? "No se pudo confirmar la plata del pedido — recargá la página antes de facturar."
+    : undefined;
 
   return (
     <RailSection label="Factura ARCA" anidada>
@@ -810,7 +829,8 @@ export function FacturacionRailSection({
               variant="outline"
               size="sm"
               className="w-full border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              disabled={f.notaCredito.isPending}
+              disabled={f.notaCredito.isPending || !plataConfiable}
+              title={motivoBloqueo}
               onClick={() => f.notaCredito.mutate(f.principal!.id)}
             >
               <X className="h-3.5 w-3.5 mr-1" />
@@ -820,7 +840,12 @@ export function FacturacionRailSection({
         </div>
       )}
 
-      <FacturarButton f={f} className="w-full" />
+      <FacturarButton
+        f={f}
+        className="w-full"
+        disabledExtra={!plataConfiable}
+        tituloExtra={motivoBloqueo}
+      />
       <FacturaPreviewDialog f={f} />
     </RailSection>
   );

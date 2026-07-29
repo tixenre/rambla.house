@@ -61,6 +61,7 @@ export function MoneyInput({
   step = 100,
   className,
   ariaLabel,
+  disabled,
 }: {
   value: number;
   onChange: (v: number) => void;
@@ -69,6 +70,7 @@ export function MoneyInput({
   step?: number;
   className?: string;
   ariaLabel?: string;
+  disabled?: boolean;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   const pendingCursorDigits = useRef<number | null>(null);
@@ -132,6 +134,7 @@ export function MoneyInput({
       }}
       className={cn("tabular-nums", className)}
       aria-label={ariaLabel}
+      disabled={disabled}
     />
   );
 }

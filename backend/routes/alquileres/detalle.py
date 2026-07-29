@@ -26,16 +26,34 @@ def _es_historico(fuente: str | None) -> bool:
 
 
 def _maybe_finalizar(conn, pedido_id: int):
-    """Si el pedido está 'devuelto' y monto_pagado >= monto_total → 'finalizado'."""
+    """Si el pedido está 'devuelto' y monto_pagado >= monto_total → 'finalizado'.
+
+    Turno vinculado: no puede finalizar antes que su principal. Sin este
+    chequeo, un pago DIRECTO al turno (`POST /alquileres/{turno_id}/pagos`,
+    sin pasar por el pago combinado) que lo completara disparaba este UPDATE
+    crudo y lo adelantaba en el flujo — el mismo cap que `cambiar_estado()`
+    ya aplica a toda transición MANUAL (`_turno_supera_a_principal`,
+    `transiciones.py`), pero este camino de auto-finalizar nunca pasaba por
+    ahí. Hoy es inalcanzable desde la UI (la página de un turno redirige al
+    principal y las listas lo excluyen), pero el endpoint HTTP en sí no tenía
+    ninguna defensa."""
     p = conn.execute(
-        "SELECT estado, monto_total, monto_pagado FROM alquileres WHERE id=%s", (pedido_id,)
+        "SELECT estado, monto_total, monto_pagado, pedido_principal_id "
+        "FROM alquileres WHERE id=%s", (pedido_id,)
     ).fetchone()
     if not p:
         return
-    if (p["estado"] == "devuelto"
+    if not (p["estado"] == "devuelto"
             and (p["monto_pagado"] or 0) >= (p["monto_total"] or 0)
             and (p["monto_total"] or 0) > 0):
-        conn.execute("UPDATE alquileres SET estado='finalizado' WHERE id=%s", (pedido_id,))
+        return
+    if p["pedido_principal_id"] is not None:
+        principal = conn.execute(
+            "SELECT estado FROM alquileres WHERE id=%s", (p["pedido_principal_id"],)
+        ).fetchone()
+        if not principal or principal["estado"] != "finalizado":
+            return
+    conn.execute("UPDATE alquileres SET estado='finalizado' WHERE id=%s", (pedido_id,))
 
 
 def _get_alquiler_items(conn, pedido_id: int) -> list[dict]:

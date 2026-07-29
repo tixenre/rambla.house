@@ -368,3 +368,43 @@ def test_sin_turnos_vinculados_no_hay_combinado(client_con_db, setup):
     )
     assert r.status_code == 200, r.text
     assert r.json()["combinado"] is None
+
+
+def test_get_pedido_combina_bruto_y_descuento_del_turno_no_solo_el_neto(client_con_db, setup):
+    """DISCRIMINANTE (`services/facturacion/engine._get_pedido`, vía
+    `combinar_turnos_vinculados`): antes de este fix, el combinado sumaba
+    directo el `monto_total` (ya neto) del turno al `bruto` del principal sin
+    nunca tocar `descuento_monto` — con un turno que tiene SU PROPIO
+    descuento, eso hacía que `bruto` reportara de MENOS (el neto del turno,
+    no su bruto real) y `descuento_monto` nunca sumara el aporte del turno.
+    La resta `bruto - descuento_monto` seguía dando el neto correcto por
+    coincidencia (los dos números erraban por el mismo monto) — por eso este
+    test verifica los valores ABSOLUTOS, no solo la resta."""
+    from database import get_db
+    from services.facturacion.engine import _get_pedido
+
+    turno_id = _crear_turno(client_con_db)
+    r = client_con_db.patch(
+        f"/api/admin/estudio/reservas/{turno_id}", json={"descuento_pct": 25}
+    )
+    assert r.status_code == 200, r.text
+    assert _fila(turno_id)["monto_total"] == 15_000  # 20.000 − 25%
+
+    conn = get_db()
+    try:
+        pedido = _get_pedido(conn, PEDIDO_PRINCIPAL_ID)
+    finally:
+        conn.close()
+
+    # El principal de este fixture no tiene ítems propios — todo el combinado
+    # viene del turno, aislando exactamente lo que se está probando.
+    assert pedido["monto_total"] == 15_000
+    assert pedido["bruto"] == 20_000, (
+        "el bruto combinado tiene que ser el BRUTO real del turno (20.000), "
+        "no su neto ya descontado (15.000)"
+    )
+    assert pedido["descuento_monto"] == 5_000, (
+        "el descuento propio del turno (25% de 20.000) tiene que sumar al "
+        "descuento_monto combinado, no perderse"
+    )
+    assert pedido["bruto"] - pedido["descuento_monto"] == pedido["monto_total"]

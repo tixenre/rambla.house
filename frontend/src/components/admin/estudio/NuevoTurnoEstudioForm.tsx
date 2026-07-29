@@ -218,7 +218,13 @@ export function NuevoTurnoEstudioForm({
   //     backend rechaza, no se reintenta en loop; recién vuelve a intentar
   //     cuando se cambia algo.
   const claveAlta = JSON.stringify(cotizarParams);
-  const cotizacionAlDia = JSON.stringify(cotizarDebounced) === claveAlta && !cotizarQ.isFetching;
+  // `!cotizarQ.isError`: sin este chequeo, un fallo de red en ESTA combinación
+  // de valores podía dejar `cotiz` mostrando `espacio_disponible` de la última
+  // combinación buena (placeholder de `keepPreviousData`) — el auto-alta
+  // reservaría a ciegas contra una disponibilidad que ya no es de fiar, en vez
+  // de simplemente esperar a que el fetch se recupere.
+  const cotizacionAlDia =
+    JSON.stringify(cotizarDebounced) === claveAlta && !cotizarQ.isFetching && !cotizarQ.isError;
   const intentadoRef = useRef<string | null>(null);
 
   useEffect(() => {
@@ -349,6 +355,13 @@ export function NuevoTurnoEstudioForm({
             <div className="flex items-center gap-2 text-muted-foreground">
               <Spinner size="sm" /> Calculando…
             </div>
+          ) : cotizarQ.isError ? (
+            // Antes: `cotizarQ.isError` no se leía acá — un fallo de red dejaba
+            // el bloque en blanco (sin `cotiz` todavía) o mostrando el ÚLTIMO
+            // total bueno sin avisar que ya no es de fiar (keepPreviousData).
+            <p className="text-xs text-destructive">
+              No se pudo calcular el total de este turno. Probá de nuevo.
+            </p>
           ) : cotiz ? (
             <div className="space-y-1">
               <div className="flex justify-between font-semibold text-ink">
@@ -367,7 +380,11 @@ export function NuevoTurnoEstudioForm({
       {/* En "inline" no hay botón de crear (el turno se crea solo): lo único
           que va al pie es el motivo por el que TODAVÍA no se creó. */}
       {chrome === "inline" &&
-        (cotiz && !cotiz.espacio_disponible ? (
+        (cotizarQ.isError ? (
+          <p className="text-xs text-destructive">
+            No se pudo calcular el total de este turno — no se va a crear hasta que se recupere.
+          </p>
+        ) : cotiz && !cotiz.espacio_disponible ? (
           <p className="text-xs text-destructive">
             El espacio no está disponible: {cotiz.espacio_motivo}. Elegí otra franja.
           </p>

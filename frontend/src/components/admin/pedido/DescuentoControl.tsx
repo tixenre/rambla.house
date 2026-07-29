@@ -35,6 +35,11 @@ export function DescuentoControl({
   efectivoPct,
   efectivoMonto,
   className,
+  /** Mientras el autosave de ESTE valor está en vuelo: sin esto, dos
+   *  ediciones rápidas disparan dos PATCH y el que responde último pisa al
+   *  que responde primero con un valor más viejo — una regresión silenciosa,
+   *  no solo un dato stale en pantalla. */
+  disabled,
 }: {
   value: DescuentoManual;
   onChange: (next: DescuentoManual) => void;
@@ -42,6 +47,7 @@ export function DescuentoControl({
   efectivoPct: number;
   efectivoMonto: number;
   className?: string;
+  disabled?: boolean;
 }) {
   return (
     // Sin wrapper ni label propios: este control ya NO es un bloque aparte —
@@ -72,6 +78,7 @@ export function DescuentoControl({
         ]}
         ariaLabel="Unidad del descuento: porcentaje o pesos"
         className="w-[96px] shrink-0 md:w-[68px]"
+        disabled={disabled}
       />
       {value.tipo === "monto" ? (
         <MoneyInput
@@ -82,6 +89,7 @@ export function DescuentoControl({
           className="w-[112px]"
           ariaLabel="Descuento $ manual"
           onChange={(v) => onChange({ ...value, monto: v })}
+          disabled={disabled}
         />
       ) : (
         <div className="relative w-[84px]">
@@ -92,6 +100,7 @@ export function DescuentoControl({
             step={0.1}
             aria-label="Descuento % manual"
             value={value.pct}
+            disabled={disabled}
             className="pr-7"
             // Seleccionar el valor entero al enfocar: sin esto, arrancar en
             // 0 y tipear "2" insertaba el dígito DESPUÉS del cero ("02") en

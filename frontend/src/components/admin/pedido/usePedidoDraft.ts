@@ -497,6 +497,12 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
     isSubmitting: clienteMut.isPending,
     /** null si se puede enviar; string con la razón si no. */
     submitBlockedReason,
+    /** Expuesta para deshabilitar un control puntual (ej. el descuento del
+     *  alquiler) mientras SU autosave está en vuelo — evita el doble-submit
+     *  donde una edición nueva dispara un segundo PATCH antes de que el
+     *  primero responda, y el que responde último pisa al que responde
+     *  primero con datos más viejos. */
+    datosMut,
   };
 }
 
