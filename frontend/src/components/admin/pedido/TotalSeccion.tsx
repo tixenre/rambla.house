@@ -39,35 +39,37 @@ export function TotalSeccion({
   const hayDescuento = (descuentoMonto ?? 0) > 0;
   return (
     <div className="rounded-lg border hairline bg-muted/20 p-3 text-sm">
-      {/* justify-end, no justify-between: el label va PEGADO a su número,
-          los dos juntos contra el borde derecho — no repartidos en las dos
-          puntas de la fila (el dueño: "este texto al lado de los números,
-          ¿me explico? justificado a la derecha"). */}
-      <div className="space-y-1">
+      {/* Grid de 2 columnas, no filas `flex` independientes: cada fila
+          anterior se auto-anchaba a su propio contenido ("Bruto · 1
+          jornada" vs "Descuento manual · 20%" vs "Total" tienen largos
+          distintos), así que aunque las tres estaban pegadas a la derecha,
+          arrancaban en puntos distintos — se veía dentado, no alineado (el
+          dueño: "¿podemos alinear mejor las cosas?"). Con `grid-cols-[1fr_auto]`
+          + `text-right` en las dos columnas, los LABELS terminan todos en la
+          MISMA x (columna 1, ancha) y los VALORES también (columna 2, ajustada
+          al más largo) — recién ahí el bloque lee como una columna prolija,
+          no una fila por fila. */}
+      <div className="grid grid-cols-[1fr_auto] gap-x-2 gap-y-1">
         {hayDescuento && (
           <>
-            <div className="flex items-center justify-end gap-2 text-muted-foreground">
-              <span>{brutoLabel}</span>
-              <span className="font-mono tabular-nums">{fmtArs(bruto)}</span>
-            </div>
-            <div className="flex items-center justify-end gap-2 text-muted-foreground">
-              <span>
-                {descuentoLabel ?? "Descuento"}
-                {descuentoPct ? ` · ${descuentoPct}%` : ""}
-              </span>
-              <span className="font-mono tabular-nums text-destructive">
-                – {fmtArs(descuentoMonto ?? 0)}
-              </span>
-            </div>
+            <span className="text-right text-muted-foreground">{brutoLabel}</span>
+            <span className="text-right font-mono tabular-nums text-muted-foreground">
+              {fmtArs(bruto)}
+            </span>
+            <span className="text-right text-muted-foreground">
+              {descuentoLabel ?? "Descuento"}
+              {descuentoPct ? ` · ${descuentoPct}%` : ""}
+            </span>
+            <span className="text-right font-mono tabular-nums text-destructive">
+              – {fmtArs(descuentoMonto ?? 0)}
+            </span>
           </>
         )}
-        <div className="flex items-center justify-end gap-2 font-semibold text-ink">
-          <span>Total</span>
-          <span className="flex items-center gap-2 font-mono tabular-nums">
-            {trailing}
-            {fmtArs(total)}
-          </span>
-        </div>
+        <span className="text-right font-semibold text-ink">Total</span>
+        <span className="flex items-center justify-end gap-2 font-mono tabular-nums font-semibold text-ink">
+          {trailing}
+          {fmtArs(total)}
+        </span>
       </div>
     </div>
   );

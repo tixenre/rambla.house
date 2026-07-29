@@ -884,9 +884,14 @@ function PedidoEditorPage() {
                       descuentos y demás?"). El desglose de cómo se llega al
                       número vive en la sección que lo genera; el rail resume
                       las dos áreas. Misma pieza que usa el turno del Estudio
-                      → las dos secciones cierran igual. */}
+                      → las dos secciones cierran igual. Sin `brutoLabel`
+                      propio ("· N jornadas"): la cantidad de jornadas ya se ve
+                      en la píldora "N JORNADAS" de la banda Retiro/Devolución
+                      de arriba — repetirla acá era la misma info dos veces
+                      (el dueño: "el 1 jornada me parece redundante"). Cae al
+                      default de `TotalSeccion` ("Bruto" a secas), igual que
+                      ya hace el turno del Estudio. */}
                   <TotalSeccion
-                    brutoLabel={`Bruto · ${jornadas} jornada${jornadas !== 1 ? "s" : ""}`}
                     bruto={totales.subtotal}
                     descuentoLabel={
                       descuentoLabel(totales.descuentoOrigen, jornadas, datos.cliente_nombre) ||
