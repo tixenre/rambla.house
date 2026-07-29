@@ -658,7 +658,11 @@ function PedidoEditorPage() {
               variant="card"
               tone="elevated"
               icon={Box}
-              title={esTaller ? "Taller" : "Alquiler"}
+              // "Alquiler de equipos" y no "Alquiler" a secas: es el nombre del
+              // área (el mismo que usa el menú público) y hace pareja con
+              // "Turnos del Estudio" — las dos secciones dicen QUÉ son, no una
+              // el qué y la otra el cuándo.
+              title={esTaller ? "Taller" : "Alquiler de equipos"}
               contentClassName="space-y-3"
               actions={
                 esTaller ? undefined : !datos.fecha_desde || !datos.fecha_hasta ? (
