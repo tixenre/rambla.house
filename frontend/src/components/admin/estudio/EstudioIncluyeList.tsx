@@ -149,7 +149,12 @@ function FilaIncluye({
     <li
       className={cn(
         "flex flex-wrap items-center gap-x-3 gap-y-2 px-2.5 py-2",
-        atenuado && "bg-muted/15",
+        // Lo disponible se lee como "todavía no": fondo hundido + todo el
+        // contenido atenuado. El gris del texto solo no alcanzaba — el dueño
+        // seguía viendo las dos filas como incluidas ("parece que siempre
+        // está"), así que el estado se marca con VARIAS señales a la vez
+        // (fondo, opacidad, "+ $" en vez de "$", y el rótulo de arriba).
+        atenuado && "bg-muted/40 opacity-90",
       )}
     >
       <div className="flex min-w-[160px] flex-1 items-center gap-2">
@@ -168,17 +173,32 @@ function FilaIncluye({
         <div
           className={cn(
             "w-24 text-right font-mono text-sm tabular-nums",
-            atenuado ? "text-muted-foreground" : "font-semibold text-ink",
+            atenuado ? "font-normal text-muted-foreground" : "font-semibold text-ink",
           )}
         >
           {subtotal === undefined ? (
             <span className="text-muted-foreground">…</span>
+          ) : atenuado ? (
+            // "+ $X" = cuánto SUMARÍA, no cuánto se está cobrando.
+            `+ ${formatARS(subtotal)}`
           ) : (
             formatARS(subtotal)
           )}
         </div>
         <div className="flex w-9 shrink-0 justify-end">{accion}</div>
       </div>
+    </li>
+  );
+}
+
+/** Rótulo que parte la lista en dos: arriba lo que el turno incluye, abajo lo
+ *  que se le puede sumar. Es la señal más barata y más fuerte de todas — con un
+ *  encabezado que dice "se le puede sumar", ninguna fila de abajo se puede leer
+ *  como ya incluida. */
+function FilaRotulo({ children }: { children: ReactNode }) {
+  return (
+    <li className="bg-muted/40 px-2.5 py-1.5">
+      <span className="t-eyebrow">{children}</span>
     </li>
   );
 }
@@ -234,6 +254,7 @@ export function EstudioIncluyeList({
   // Un solo nombre para la promo: la fila incluida, la disponible y los
   // aria-label de ✕/+ tienen que decir exactamente lo mismo.
   const nombrePromo = estudio.promo?.nombre || "Pack";
+  const hayDisponibles = (!conPromo && !!estudio.promo_combo_id) || !pinturaReciente;
 
   const existingAsDraftItems: DraftItem[] = useMemo(
     () =>
@@ -349,11 +370,13 @@ export function EstudioIncluyeList({
         ))}
 
         {/* Lo que se PUEDE sumar, como una fila más de la misma lista (atenuada,
-            con + en vez de ✕). El precio que muestran es el de lista que ya
-            resolvió el backend (`estudio.promo.precio` /
+            con + en vez de ✕, bajo su propio rótulo). El precio que muestran es
+            el de lista que ya resolvió el backend (`estudio.promo.precio` /
             `precio_pintura_reciente`) — el front no lo calcula, solo lo muestra
             (MEMORIA 2026-06-29); al agregarlas, la línea pasa arriba con su
             plata cotizada. */}
+        {hayDisponibles && <FilaRotulo>Se le puede sumar</FilaRotulo>}
+
         {!conPromo && estudio.promo_combo_id && (
           <FilaIncluye
             atenuado
