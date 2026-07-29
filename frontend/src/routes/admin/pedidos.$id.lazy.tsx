@@ -930,7 +930,7 @@ function PedidoEditorPage() {
               <BdRow
                 l={combinado.turnos.length > 0 ? "Total del pedido" : "Total"}
                 v={fmtArs(total)}
-                strong
+                strong={combinado.turnos.length === 0}
               />
               {combinado.turnos.length > 0 && (
                 <>
