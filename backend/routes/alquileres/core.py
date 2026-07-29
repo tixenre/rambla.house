@@ -481,6 +481,17 @@ def _apply_pedido_datos(conn, id: int, data: "PedidoDatos", es_admin: bool = Fal
     for _k in ("fecha_desde", "fecha_hasta"):
         if _k in payload and not payload[_k]:
             payload[_k] = None
+    # `cliente_nombre` es NOT NULL: el "sin cliente" se representa con cadena
+    # VACÍA, nunca con NULL. El autosave del editor manda
+    # `cliente_nombre: d.cliente_nombre || null` (`usePedidoDraft.ts`), así que
+    # un pedido todavía sin cliente asignado mandaba `None` y tumbaba el
+    # guardado ENTERO con un `NotNullViolation` → 500, aunque lo único que se
+    # estuviera cambiando fuera la fecha (bug real reportado por el dueño: "no
+    # puedo cambiar la fecha"). Se normaliza acá, en la puerta compartida por
+    # el admin Y las propuestas del portal, para que ningún caller pueda
+    # volver a romperlo. Candado: `test_pedido_sin_cliente_guarda_db.py`.
+    if "cliente_nombre" in payload and payload["cliente_nombre"] is None:
+        payload["cliente_nombre"] = ""
 
     if es_pedido_derivado(p) and (
         ("fecha_desde" in payload and _fecha_cambia(p["fecha_desde"], payload["fecha_desde"]))
