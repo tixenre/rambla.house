@@ -122,6 +122,11 @@ export const estudioAdminApi = {
      *  del chequeo de disponibilidad (si no, siempre se vería "ocupado" por
      *  su propia franja). Omitir en una reserva nueva. */
     pedido_id?: number;
+    /** Tarifa NEGOCIADA del espacio (lo que el admin tipeó en la fila
+     *  "Espacio"). Sin esto la cotización devolvía el precio de LISTA aunque
+     *  el guardado persistiera la negociada — la pantalla mostraba un número
+     *  distinto al que se iba a cobrar. Omitir → precio de lista. */
+    espacio_monto?: number | null;
   }) => {
     const sp = new URLSearchParams({
       fecha: params.fecha,
@@ -132,6 +137,7 @@ export const estudioAdminApi = {
       sueltos_json: JSON.stringify(params.sueltos ?? []),
     });
     if (params.pedido_id != null) sp.set("pedido_id", String(params.pedido_id));
+    if (params.espacio_monto != null) sp.set("espacio_monto", String(params.espacio_monto));
     return authedJson<EstudioCotizacion>(`/api/admin/estudio/reservas/cotizar?${sp.toString()}`);
   },
   createReserva: (data: EstudioReservaCreateInput) =>

@@ -1555,13 +1555,22 @@ def cotizar_reserva_estudio(
     pintura_reciente: bool = False,
     sueltos_json: str = Query("[]"),
     pedido_id: Optional[int] = None,
+    espacio_monto: Optional[int] = None,
 ):
     """Desglose de plata de una reserva ANTES de crearla — no muta nada (el
     front no calcula plata, MEMORIA 2026-06-29). `sueltos_json` es
     `[{"equipo_id":N,"cantidad":N}]` codificado. `pedido_id`: al cotizar la
     EDICIÓN de un turno ya existente, se excluye a sí mismo del chequeo de
     disponibilidad — si no, un turno siempre se vería "ocupado" por su propia
-    franja (bug real encontrado al verificar el editor: #1283 Fase 6)."""
+    franja (bug real encontrado al verificar el editor: #1283 Fase 6).
+
+    `espacio_monto`: tarifa NEGOCIADA del espacio, la que el admin tipea en la
+    fila "Espacio". Sin esto, la cotización siempre devolvía el precio de LISTA
+    (`precio_hora * horas`) aunque el guardado persistiera la negociada — o sea,
+    la pantalla mostraba un número distinto al que se iba a cobrar (la misma
+    clase de desfasaje del pedido #445). Es un override explícito del admin, no
+    un cálculo del front: se usa tal cual, igual que lo hace `editar_reserva` al
+    persistirlo. `None` → precio de lista, como siempre."""
     require_admin(request)
     try:
         sueltos_raw = json.loads(sueltos_json)
@@ -1576,7 +1585,11 @@ def cotizar_reserva_estudio(
         fecha_desde, fecha_hasta = _franja_estudio(estudio, fecha, start, horas)
 
         con_promo = bool(con_promo) and bool(estudio["promo_combo_id"])
-        espacio_monto = (estudio["precio_hora"] or 0) * horas
+        espacio_monto = (
+            espacio_monto
+            if espacio_monto is not None and espacio_monto >= 0
+            else (estudio["precio_hora"] or 0) * horas
+        )
         # Mismo resolutor de precios que `_crear_pedido_estudio`/`editar_reserva`
         # (services.estudio.commands.reserva) — acá sin validar stock ni insertar
         # nada (preview puro, sin pedido_id todavía).

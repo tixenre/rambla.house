@@ -114,8 +114,11 @@ export function NuevoTurnoEstudioForm({
       con_promo: conPromo,
       pintura_reciente: pinturaReciente,
       sueltos: sueltosInput,
+      // Misma tarifa que se persiste al crear (más abajo) — la fila "Espacio" y
+      // el Total muestran lo que se va a cobrar, no el precio de lista.
+      espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
     }),
-    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput],
+    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput, espacioOverride],
   );
   const cotizarDebounced = useDebouncedValue(cotizarParams, 400);
 

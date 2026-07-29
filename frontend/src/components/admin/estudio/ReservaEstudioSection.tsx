@@ -115,8 +115,12 @@ export function ReservaEstudioSection({
       // Excluye el propio turno del chequeo de disponibilidad — si no,
       // siempre se vería "ocupado" por su propia franja.
       pedido_id: pedido.id,
+      // La MISMA tarifa que se va a persistir al guardar (línea de abajo) —
+      // así lo que muestra la fila "Espacio" y el Total es lo que se cobra, no
+      // el precio de lista.
+      espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
     }),
-    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput, pedido.id],
+    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput, pedido.id, espacioOverride],
   );
   const cotizarDebounced = useDebouncedValue(cotizarParams, 400);
 
