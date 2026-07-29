@@ -1,12 +1,15 @@
 /**
- * EstudioIncluyeList — "qué incluye este turno" como un solo listado: Espacio
- * (siempre, franja horaria + precio editables INLINE en la misma fila) +
- * Pack + Recién pintado (chips para agregar/quitar, se muestran como fila
- * una vez agregados) + Equipos sueltos. Reemplaza los switches sueltos + el
- * campo de override separado + el desglose por-componente duplicado — una
- * sola forma de ver y tocar cada línea, con su precio en vivo al lado (el
- * front no calcula plata, MEMORIA 2026-06-29: los precios de Pack/Pintura/
- * sueltos vienen de `cotiz`, ya resuelto por el backend).
+ * EstudioIncluyeList — "qué incluye este turno" como UNA sola lista, sin nada
+ * suelto alrededor: Espacio (siempre, franja horaria + precio editables INLINE
+ * en la misma fila) + Pack + Recién pintado + Equipos sueltos, cada uno como
+ * una fila —incluido lo que TODAVÍA NO está agregado, que aparece atenuado con
+ * un + en la misma columna donde lo incluido tiene su ✕—, y el buscador de
+ * equipos como última fila. Reemplaza los switches sueltos + el campo de
+ * override separado + el desglose por-componente duplicado + los chips dashed
+ * de add-on: una sola forma de ver y tocar cada línea, con su precio al lado
+ * (el front no calcula plata, MEMORIA 2026-06-29: los precios vienen de
+ * `cotiz` —o del config del Estudio para lo disponible—, resueltos por el
+ * backend).
  *
  * El buscador de sueltos replica la misma lógica que "Equipos" del pedido:
  * SIEMPRE visible, sin colapsar detrás de ningún chip/toggle (el dueño lo
@@ -30,8 +33,10 @@
 import { useMemo, type ReactNode } from "react";
 import { Clapperboard, Package, Paintbrush, Plus, X } from "lucide-react";
 
+import { IconButton } from "@/design-system/ui/icon-button";
 import { Input } from "@/design-system/ui/input";
 import { QtyInput } from "@/design-system/ui/qty-input";
+import { cn } from "@/lib/utils";
 import { formatARS } from "@/lib/format";
 import { buildTimeSlots } from "@/lib/estudio-slots";
 import { type Equipo, type EstudioConfig, type EstudioCotizacion } from "@/lib/admin/api";
@@ -54,25 +59,33 @@ export type SueltoLocal = {
   cantidad: number;
 };
 
-function AddChip({
-  label,
-  icon: Icon,
-  onClick,
-}: {
-  label: string;
-  icon: typeof Package;
-  onClick: () => void;
-}) {
+/** ✕ de una línea incluida — mismo `IconButton` del DS que usa el ✕ de una
+ *  fila de "Equipos" (antes acá era un `<button>` pelado de 16px: otra forma de
+ *  hacer lo mismo, con un tap target mucho más chico). */
+function BotonQuitar({ label, onClick }: { label: string; onClick: () => void }) {
   return (
-    <button
-      type="button"
+    <IconButton
+      aria-label={`Quitar ${label}`}
       onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-md border border-dashed hairline px-2.5 py-1.5 text-xs text-muted-foreground transition hover:bg-muted/30 hover:text-ink"
+      className="shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
     >
-      <Plus className="h-3 w-3 shrink-0" />
-      <Icon className="h-3.5 w-3.5 shrink-0" />
-      <span className="truncate">{label}</span>
-    </button>
+      <X className="h-4 w-4" />
+    </IconButton>
+  );
+}
+
+/** + de una línea todavía NO incluida — ocupa exactamente la misma columna que
+ *  el ✕, así una fila disponible y una incluida son la misma fila con la acción
+ *  invertida (y el ojo no tiene que re-aprender el layout). */
+function BotonSumar({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <IconButton
+      aria-label={`Agregar ${label}`}
+      onClick={onClick}
+      className="shrink-0 text-muted-foreground hover:text-ink"
+    >
+      <Plus className="h-4 w-4" />
+    </IconButton>
   );
 }
 
@@ -98,16 +111,25 @@ function FilaIcono({ icon: Icon }: { icon: typeof Package }) {
  * alineaba verticalmente → se leía como un formulario, no como una lista.
  *
  * La clave de la alineación son las DOS columnas finales de ancho fijo
- * (subtotal + hueco del ✕): como el bloque de controles va `justify-end`, los
- * subtotales quedan a la misma altura y en la misma columna aunque cada fila
- * tenga controles distintos adelante.
+ * (subtotal + hueco de la acción): como el bloque de controles va
+ * `justify-end`, los subtotales quedan a la misma altura y en la misma columna
+ * aunque cada fila tenga controles distintos adelante.
+ *
+ * Sirve para las DOS clases de fila (#1308, pedido del dueño: "el pack, el
+ * pintado y un equipo, ¿los podemos hacer como una lista? así como está el
+ * botón del +, pero en lista, más prolijo"): lo que YA está incluido (✕ para
+ * sacarlo) y lo que se PUEDE sumar (`atenuado`, + para agregarlo). Antes lo
+ * disponible eran dos chips dashed sueltos debajo de la lista y un buscador a
+ * ancho completo más abajo — tres lenguajes visuales distintos para lo mismo, y
+ * con la lista casi vacía costaba ver qué era parte del turno y qué no.
  */
 function FilaIncluye({
   icono,
   titulo,
   controles,
   subtotal,
-  onQuitar,
+  accion,
+  atenuado = false,
 }: {
   icono: ReactNode;
   titulo: ReactNode;
@@ -115,37 +137,47 @@ function FilaIncluye({
   controles?: ReactNode;
   /** Plata de la línea, ya resuelta por el backend. `undefined` → "…". */
   subtotal?: number;
-  /** Sin handler → fila que no se puede quitar (el espacio), pero conserva el
-   *  hueco para no desalinear la columna. */
-  onQuitar?: () => void;
+  /** Botón de la última columna (✕ para quitar, + para sumar). Sin acción, la
+   *  columna queda vacía pero PRESENTE (el espacio no se puede quitar) — si no,
+   *  su subtotal se correría respecto del resto. */
+  accion?: ReactNode;
+  /** Fila todavía no incluida en el turno: se atenúa y su plata es el precio de
+   *  lista (cuánto sumaría), no una línea ya cotizada. */
+  atenuado?: boolean;
 }) {
   return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-2 px-2.5 py-2">
+    <li
+      className={cn(
+        "flex flex-wrap items-center gap-x-3 gap-y-2 px-2.5 py-2",
+        atenuado && "bg-muted/15",
+      )}
+    >
       <div className="flex min-w-[160px] flex-1 items-center gap-2">
         {icono}
-        <div className="min-w-0 flex-1 truncate text-sm text-ink">{titulo}</div>
+        <div
+          className={cn(
+            "min-w-0 flex-1 truncate text-sm",
+            atenuado ? "text-muted-foreground" : "text-ink",
+          )}
+        >
+          {titulo}
+        </div>
       </div>
       <div className="ml-auto flex flex-wrap items-center justify-end gap-x-2 gap-y-1.5">
         {controles}
-        <div className="w-24 text-right font-mono text-sm font-semibold tabular-nums text-ink">
+        <div
+          className={cn(
+            "w-24 text-right font-mono text-sm tabular-nums",
+            atenuado ? "text-muted-foreground" : "font-semibold text-ink",
+          )}
+        >
           {subtotal === undefined ? (
             <span className="text-muted-foreground">…</span>
           ) : (
             formatARS(subtotal)
           )}
         </div>
-        <div className="flex w-8 justify-end">
-          {onQuitar && (
-            <button
-              type="button"
-              onClick={onQuitar}
-              aria-label={`Quitar ${typeof titulo === "string" ? titulo : "línea"}`}
-              className="text-muted-foreground hover:text-destructive"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          )}
-        </div>
+        <div className="flex w-9 shrink-0 justify-end">{accion}</div>
       </div>
     </li>
   );
@@ -194,6 +226,10 @@ export function EstudioIncluyeList({
     () => buildTimeSlots(estudio.open_hour, estudio.close_hour, estudio.min_horas || 1),
     [estudio.open_hour, estudio.close_hour, estudio.min_horas],
   );
+
+  // Un solo nombre para la promo: la fila incluida, la disponible y los
+  // aria-label de ✕/+ tienen que decir exactamente lo mismo.
+  const nombrePromo = estudio.promo?.nombre || "Pack";
 
   const existingAsDraftItems: DraftItem[] = useMemo(
     () =>
@@ -273,9 +309,9 @@ export function EstudioIncluyeList({
         {conPromo && (
           <FilaIncluye
             icono={<FilaIcono icon={Package} />}
-            titulo={estudio.promo?.nombre || "Pack"}
+            titulo={nombrePromo}
             subtotal={cotiz?.promo}
-            onQuitar={() => onTogglePromo(false)}
+            accion={<BotonQuitar label={nombrePromo} onClick={() => onTogglePromo(false)} />}
           />
         )}
 
@@ -284,7 +320,7 @@ export function EstudioIncluyeList({
             icono={<FilaIcono icon={Paintbrush} />}
             titulo="Recién pintado"
             subtotal={cotiz?.pintura_reciente}
-            onQuitar={() => onTogglePintura(false)}
+            accion={<BotonQuitar label="Recién pintado" onClick={() => onTogglePintura(false)} />}
           />
         )}
 
@@ -294,7 +330,7 @@ export function EstudioIncluyeList({
             icono={<EquipoThumb src={s.foto_url} alt={s.nombre} className="h-10 w-10 shrink-0" />}
             titulo={s.nombre}
             subtotal={cotiz?.sueltos.find((cs) => cs.equipo_id === s.equipo_id)?.subtotal}
-            onQuitar={() => onRemoveSuelto(s.equipo_id)}
+            accion={<BotonQuitar label={s.nombre} onClick={() => onRemoveSuelto(s.equipo_id)} />}
             controles={
               // Mismo stepper del DS que usa la fila de un equipo del pedido —
               // antes era un `<input type=number>` pelado, otra forma de hacer
@@ -307,39 +343,45 @@ export function EstudioIncluyeList({
             }
           />
         ))}
+
+        {/* Lo que se PUEDE sumar, como una fila más de la misma lista (atenuada,
+            con + en vez de ✕). El precio que muestran es el de lista que ya
+            resolvió el backend (`estudio.promo.precio` /
+            `precio_pintura_reciente`) — el front no lo calcula, solo lo muestra
+            (MEMORIA 2026-06-29); al agregarlas, la línea pasa arriba con su
+            plata cotizada. */}
+        {!conPromo && estudio.promo_combo_id && (
+          <FilaIncluye
+            atenuado
+            icono={<FilaIcono icon={Package} />}
+            titulo={nombrePromo}
+            subtotal={estudio.promo?.precio}
+            accion={<BotonSumar label={nombrePromo} onClick={() => onTogglePromo(true)} />}
+          />
+        )}
+
+        {!pinturaReciente && (
+          <FilaIncluye
+            atenuado
+            icono={<FilaIcono icon={Paintbrush} />}
+            titulo="Recién pintado"
+            subtotal={estudio.precio_pintura_reciente || 0}
+            accion={<BotonSumar label="Recién pintado" onClick={() => onTogglePintura(true)} />}
+          />
+        )}
+
+        {/* Sumar equipo suelto — ÚLTIMA fila de la lista: es lo último que se
+            agrega, no lo primero que se lee (antes abría la sección y tapaba al
+            turno; después quedó afuera de la lista, como una caja aparte). */}
+        <li className="px-2.5 py-2">
+          <EquipoComboSearch
+            existing={existingAsDraftItems}
+            stockMap={{}}
+            onAdd={onAddSuelto}
+            placeholder="Buscar equipo para sumar…"
+          />
+        </li>
       </ul>
-
-      {/* Add-ons: una sola fila compacta de chips, no dos botones a ancho
-          completo — espeja el "+ Agregar línea personalizada" de "Equipos". */}
-      {(!conPromo && estudio.promo_combo_id) || !pinturaReciente ? (
-        <div className="mt-2 flex flex-wrap gap-2">
-          {!conPromo && estudio.promo_combo_id && (
-            <AddChip
-              icon={Package}
-              label={estudio.promo?.nombre || "Pack"}
-              onClick={() => onTogglePromo(true)}
-            />
-          )}
-          {!pinturaReciente && (
-            <AddChip
-              icon={Paintbrush}
-              label="Recién pintado"
-              onClick={() => onTogglePintura(true)}
-            />
-          )}
-        </div>
-      ) : null}
-
-      {/* Sumar equipo suelto — AL FINAL: es lo último que se agrega, no lo
-          primero que se lee. Antes abría la sección y tapaba al turno. */}
-      <div className="mt-2">
-        <EquipoComboSearch
-          existing={existingAsDraftItems}
-          stockMap={{}}
-          onAdd={onAddSuelto}
-          placeholder="Buscar equipo para sumar…"
-        />
-      </div>
     </Field>
   );
 }
