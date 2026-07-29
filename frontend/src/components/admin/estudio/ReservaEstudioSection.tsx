@@ -163,7 +163,15 @@ export function ReservaEstudioSection({
           duration: 7000,
         });
       }
-      qc.invalidateQueries({ queryKey: ["admin", "pedido", pedido.id] });
+      // El PATCH ya devolvió el turno actualizado: se ESCRIBE en la caché en
+      // vez de invalidar. Invalidar disparaba un GET del pedido entero por cada
+      // guardado —y como el caller invalidaba la misma key, salían dos— y con
+      // él un re-render de toda la pantalla: eso es lo que se sentía como que
+      // "se recarga la página".
+      qc.setQueryData(["admin", "pedido", pedido.id], actualizado);
+      // Estas son de OTRAS pantallas (agenda/lista del Estudio): no están
+      // montadas acá, así que invalidarlas no dispara ningún fetch ahora —
+      // solo marca que están viejas para cuando se abran.
       qc.invalidateQueries({ queryKey: ["admin", "estudio", "reservas"] });
       qc.invalidateQueries({ queryKey: ["admin", "estudio", "agenda"] });
       onSaved?.(actualizado);

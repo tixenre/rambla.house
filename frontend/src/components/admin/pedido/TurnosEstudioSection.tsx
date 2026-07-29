@@ -104,8 +104,32 @@ function TurnoVinculadoCard({
           <X className="h-4 w-4" />
         </IconButton>
       }
-      onSaved={() => {
-        qc.invalidateQueries({ queryKey: ["admin", "pedido", turnoId] });
+      // La plata del turno vive DUPLICADA en la pantalla: en su tarjeta y en el
+      // rail del pedido (que suma el "Total combinado"). Al guardar, se parchea
+      // la entrada de este turno dentro del pedido principal con lo que acaba
+      // de contestar el servidor — así el rail queda al día EN EL ACTO y sin
+      // pedir nada. Antes no se tocaba: editabas la tarifa a $333.000 y el rail
+      // seguía diciendo $120.000 hasta recargar (plata mintiendo en pantalla).
+      onSaved={(actualizado) => {
+        qc.setQueryData(["admin", "pedido", pedidoPrincipalId], (prev?: Pedido) =>
+          prev
+            ? {
+                ...prev,
+                turnos_estudio_vinculados: (prev.turnos_estudio_vinculados ?? []).map((t) =>
+                  t.id === turnoId
+                    ? {
+                        ...t,
+                        estado: actualizado.estado,
+                        fecha_desde: actualizado.fecha_desde,
+                        fecha_hasta: actualizado.fecha_hasta,
+                        monto_total: actualizado.monto_total,
+                        monto_pagado: actualizado.monto_pagado,
+                      }
+                    : t,
+                ),
+              }
+            : prev,
+        );
       }}
     />
   );
