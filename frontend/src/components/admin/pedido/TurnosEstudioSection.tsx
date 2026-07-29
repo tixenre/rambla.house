@@ -23,7 +23,7 @@
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clapperboard, X } from "lucide-react";
+import { Clapperboard, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Section } from "@/design-system/composites/Section";
@@ -113,6 +113,14 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
     queryFn: () => estudioAdminApi.get(),
   });
   const turnos = pedido.turnos_estudio_vinculados ?? [];
+  // Con la sección vacía, el compose de un turno nuevo se ve IGUAL que un turno
+  // ya cargado ("Espacio", su franja, su precio) → parecía que el pedido ya
+  // tenía uno (lo reportó el dueño). Vacío ⇒ se muestra un estado vacío
+  // explícito con su botón; recién ahí aparece el compose. Con al menos un
+  // turno cargado el compose sigue SIEMPRE visible debajo, como se pidió
+  // cuando se sacó el modal — ahí no hay ambigüedad posible.
+  const [componiendo, setComponiendo] = useState(false);
+  const mostrarCompose = turnos.length > 0 || componiendo;
 
   return (
     <Section variant="card" tone="elevated" icon={Clapperboard} title="Turnos del Estudio">
@@ -125,7 +133,18 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
           </div>
         )}
 
-        {estudioQ.data && (
+        {!mostrarCompose && (
+          <button
+            type="button"
+            onClick={() => setComponiendo(true)}
+            className="flex w-full items-center justify-center gap-2 rounded-md border border-dashed hairline px-3 py-4 text-sm text-muted-foreground transition hover:bg-muted/30 hover:text-ink"
+          >
+            <Plus className="h-4 w-4 shrink-0" />
+            Agregar un turno del Estudio
+          </button>
+        )}
+
+        {mostrarCompose && estudioQ.data && (
           <NuevoTurnoEstudioForm
             key={composeKey}
             chrome="inline"
@@ -139,7 +158,7 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
               qc.invalidateQueries({ queryKey: ["admin", "pedido", pedido.id] });
               setComposeKey((k) => k + 1);
             }}
-            onCancel={() => {}}
+            onCancel={() => setComponiendo(false)}
           />
         )}
       </div>

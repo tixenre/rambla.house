@@ -16,14 +16,14 @@
  * `EstudioIncluyeList` absorbe como parte de la fila "Espacio" (#1308: ya no
  * hay un grid Fecha/Hora/Horas aparte acá, quedaba duplicado con el del alta).
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clapperboard } from "lucide-react";
 import { toast } from "sonner";
 
 import { Section } from "@/design-system/composites/Section";
-import { Button } from "@/design-system/ui/button";
 import { Spinner } from "@/design-system/ui/spinner";
+import { SaveIndicator } from "@/components/admin/pedido/PedidoPageHelpers";
 import { formatARS } from "@/lib/format";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { espacioOverrideInicial } from "@/lib/estudio-slots";
@@ -130,19 +130,28 @@ export function ReservaEstudioSection({
     enabled: !!fecha && !!start && horas >= (estudio.min_horas || 1),
   });
 
+  // Lo que se persiste, serializado — la unidad de comparación del autosave.
+  const payload = useMemo(
+    () => ({
+      fecha,
+      start,
+      horas,
+      con_promo: conPromo,
+      pintura_reciente: pinturaReciente,
+      sueltos: sueltosInput,
+      espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
+    }),
+    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput, espacioOverride],
+  );
+  const payloadKey = useMemo(() => JSON.stringify(payload), [payload]);
+  /** Último payload que la base ya tiene. `null` = recién hidratado, todavía no
+   *  sabemos cuál es (lo fija el primer pase del efecto de autosave). */
+  const guardadoRef = useRef<string | null>(null);
+
   const mutation = useMutation({
-    mutationFn: () =>
-      estudioAdminApi.updateReserva(pedido.id, {
-        fecha,
-        start,
-        horas,
-        con_promo: conPromo,
-        pintura_reciente: pinturaReciente,
-        sueltos: sueltosInput,
-        espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
-      }),
+    mutationFn: () => estudioAdminApi.updateReserva(pedido.id, payload),
     onSuccess: (actualizado) => {
-      toast.success("Turno actualizado");
+      guardadoRef.current = payloadKey;
       if (actualizado.promo_advertencia) {
         toast.warning("La promo se reservó incompleta", {
           description: actualizado.promo_advertencia,
@@ -185,6 +194,33 @@ export function ReservaEstudioSection({
   const cotiz = cotizarQ.data;
   const puedeGuardar = !!fecha && !!start && horas >= (estudio.min_horas || 1);
 
+  // Autosave con debounce — TODO lo demás del pedido se guarda solo (decisión
+  // del dueño: "todo en el pedido se autosalva, creo que es mejor así"), así
+  // que un botón "Guardar cambios" acá era la única cosa de la pantalla que
+  // había que acordarse de apretar. Mismo patrón que `usePedidoDraft`: se
+  // compara contra lo último que la base confirmó y se dispara pasado el
+  // debounce. El primer pase tras hidratar solo REGISTRA el estado actual (no
+  // guarda): venía de la base, ya está guardado.
+  useEffect(() => {
+    if (!puedeGuardar) return;
+    if (guardadoRef.current === null) {
+      guardadoRef.current = payloadKey;
+      return;
+    }
+    if (guardadoRef.current === payloadKey) return;
+    const t = setTimeout(() => mutation.mutate(), 700);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- autosave con debounce: dispara por el payload; incluir `mutation` reiniciaría el timer en cada render
+  }, [payloadKey, puedeGuardar]);
+
+  const saveStatus = mutation.isPending
+    ? "saving"
+    : mutation.isError
+      ? "error"
+      : guardadoRef.current !== null && guardadoRef.current !== payloadKey
+        ? "dirty"
+        : "saved";
+
   return (
     <Section variant="card" tone="elevated" icon={Clapperboard} title="Reserva del Estudio">
       <div className="space-y-4">
@@ -209,7 +245,9 @@ export function ReservaEstudioSection({
           cotiz={cotiz}
         />
 
-        {/* Total en vivo — el front no calcula, solo muestra (2026-06-29). */}
+        {/* Total en vivo — el front no calcula, solo muestra (2026-06-29). El
+            estado del guardado va acá al lado: se guarda solo, pero tiene que
+            poder verse que se guardó. */}
         <div className="rounded-lg border hairline bg-muted/20 p-3 text-sm">
           {cotizarQ.isLoading ? (
             <div className="flex items-center gap-2 text-muted-foreground">
@@ -217,9 +255,12 @@ export function ReservaEstudioSection({
             </div>
           ) : cotiz ? (
             <div className="space-y-1">
-              <div className="flex justify-between font-semibold text-ink">
+              <div className="flex items-center justify-between gap-2 font-semibold text-ink">
                 <span>Total</span>
-                <span>{formatARS(cotiz.monto_total)}</span>
+                <span className="flex items-center gap-2">
+                  <SaveIndicator status={saveStatus} />
+                  {formatARS(cotiz.monto_total)}
+                </span>
               </div>
               {!cotiz.espacio_disponible && (
                 <p className="mt-1 text-xs text-destructive">
@@ -229,15 +270,6 @@ export function ReservaEstudioSection({
             </div>
           ) : null}
         </div>
-
-        <Button
-          onClick={() => mutation.mutate()}
-          disabled={!puedeGuardar || mutation.isPending}
-          className="w-full"
-        >
-          {mutation.isPending ? <Spinner size="sm" className="mr-1.5" /> : null}
-          Guardar cambios
-        </Button>
       </div>
     </Section>
   );
