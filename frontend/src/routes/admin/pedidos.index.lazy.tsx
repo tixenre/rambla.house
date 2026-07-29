@@ -33,6 +33,7 @@ import { Skeleton } from "@/design-system/ui/skeleton";
 import { CountBadge } from "@/design-system/ui/count-badge";
 import { adminApi, ESTADO_LABEL, type Pedido } from "@/lib/admin/api";
 import { etiquetaPedido, nextStep, type EstadoPedido } from "@/lib/pedido-estados";
+import { combinarTotales, etiquetaTurno } from "@/lib/pedido-combinado";
 import { esPedidoEstudio } from "@/lib/tipos-pedido";
 import { EquipoThumb } from "@/components/admin/pedido/EquipoThumb";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
@@ -633,9 +634,16 @@ function PreviewPane({ id, onOpen }: { id: number | null; onOpen: (id: number) =
     );
   }
 
-  const pagado = p.monto_pagado ?? 0;
-  const total = p.monto_total ?? 0;
-  const saldo = Math.max(0, total - pagado);
+  // Plata COMBINADA: el pedido + sus turnos del Estudio (#1308). Sin esto el
+  // panel mostraba solo la fila del principal — un pedido de "2 horas de
+  // estudio y nada más" se veía como $0 con "Sin equipos cargados", sin rastro
+  // de las horas ni de su plata (el dueño lo reportó: "en esta view no se ven
+  // los turnos"). Misma fuente única que usa el rail del editor.
+  const turnosVinculados = p.turnos_estudio_vinculados ?? [];
+  const combinado = combinarTotales(p.monto_total ?? 0, p.monto_pagado ?? 0, turnosVinculados);
+  const pagado = combinado.pagadoCombinado;
+  const total = combinado.totalCombinado;
+  const saldo = combinado.restaCombinado;
   const jornadas = p.cantidad_jornadas ?? 1;
   const nItems = p.items?.length ?? 0;
   const fuente = fuenteLabel(p.fuente);
@@ -799,6 +807,31 @@ function PreviewPane({ id, onOpen }: { id: number | null; onOpen: (id: number) =
             )}
           </ul>
         </div>
+
+        {/* Turnos del Estudio — solo lectura: el turno se administra en la
+            página del pedido, acá se ve QUÉ hay y CUÁNTO suma (si no, la plata
+            del panel no cierra con lo que muestra). Se nombran por su franja,
+            nunca por un "#N": son parte del pedido, no ventas aparte. */}
+        {turnosVinculados.length > 0 && (
+          <div className="card-elevated">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b hairline">
+              <span className="t-eyebrow">Turnos del Estudio · {turnosVinculados.length}</span>
+            </div>
+            <ul className="divide-y hairline">
+              {combinado.turnos.map((t) => (
+                <li key={t.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-dashed hairline text-muted-foreground/60">
+                    <Clapperboard className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1 truncate text-sm text-ink">{etiquetaTurno(t)}</div>
+                  <div className="shrink-0 font-mono text-sm tabular-nums text-ink">
+                    {fmtArs(t.monto_total ?? 0)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       {/* Modales (quick-actions inline) */}

@@ -22,7 +22,10 @@ from pedidos_vinculados import SIN_PRINCIPAL_SQL, es_turno_vinculado
 from rate_limit import limiter, ADMIN_WRITE_LIMIT
 from services.email import send_email
 from services.facturacion.repo import pedidos_con_factura_emitida
-from services.pedidos_enriquecimiento import _batch_count_turnos_vinculados
+from services.pedidos_enriquecimiento import (
+    _batch_count_turnos_vinculados,
+    _batch_plata_turnos_vinculados,
+)
 from reservas import validar_stock as _check_stock
 from routes.alquileres.core import (
     router,
@@ -191,11 +194,21 @@ def list_pedidos(
             ).fetchall():
                 pendientes.add(r["pedido_id"])
 
+        turnos_plata_map = _batch_plata_turnos_vinculados(conn, pedido_ids)
+
         for p in pedidos:
             p["items"] = items_map.get(p["id"], [])
             p["tiene_solicitud_pendiente"] = p["id"] in pendientes
             p["facturado"] = p["id"] in facturados
             p["turnos_vinculados_count"] = turnos_count_map.get(p["id"], 0)
+            # La plata del turno se SUMA a la del pedido (#1308: una sola venta).
+            # `monto_total`/`monto_pagado` de la fila quedan pisados con el
+            # combinado — es lo que la lista tiene que leer para no contradecir
+            # al detalle, a la factura y a Cuentas por cobrar, que ya combinan.
+            t_total, t_pagado = turnos_plata_map.get(p["id"], (0, 0))
+            if t_total or t_pagado:
+                p["monto_total"] = (p["monto_total"] or 0) + t_total
+                p["monto_pagado"] = (p["monto_pagado"] or 0) + t_pagado
 
         return {
             "total": total,

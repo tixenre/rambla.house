@@ -215,3 +215,34 @@ def test_historial_de_cliente_consolida_el_turno_en_el_principal(client_con_db, 
     assert PEDIDO_PRINCIPAL_ID + 1 not in por_id, "el turno vinculado ya no es fila propia"
     assert por_id[PEDIDO_PRINCIPAL_ID]["monto_total"] == 50000 + 30000
     assert por_id[PEDIDO_PRINCIPAL_ID]["turnos_estudio"] == 1
+
+
+def test_la_fila_de_la_lista_suma_la_plata_del_turno(client_con_db, setup):
+    """Discrimina: sin la consolidación, la lista mostraba SOLO el monto del
+    principal (50.000) para un pedido que en su detalle, en la factura y en
+    Cuentas por cobrar vale 80.000 — media verdad de plata, la misma clase de
+    bug que el rail que mentía al editar la tarifa del turno."""
+    _crear_turno(client_con_db, 1, 30000, 5000)
+
+    r = client_con_db.get("/api/alquileres", params={"q": "listpedidos"})
+    assert r.status_code == 200, r.text
+    principal = next(p for p in r.json()["items"] if p["id"] == PEDIDO_PRINCIPAL_ID)
+    assert principal["monto_total"] == 80000, "50.000 del pedido + 30.000 del turno"
+    assert principal["monto_pagado"] == 15000, "10.000 del pedido + 5.000 cobrados del turno"
+
+
+def test_un_turno_cancelado_no_suma_a_la_fila(client_con_db, setup):
+    """Mismo filtro que el badge, el pago combinado y la factura combinada."""
+    _crear_turno(client_con_db, 1, 30000, 0, estado="cancelado")
+
+    r = client_con_db.get("/api/alquileres", params={"q": "listpedidos"})
+    principal = next(p for p in r.json()["items"] if p["id"] == PEDIDO_PRINCIPAL_ID)
+    assert principal["monto_total"] == 50000
+
+
+def test_un_pedido_sin_turnos_no_cambia(client_con_db, setup):
+    """Guarda: la consolidación no tiene que tocar al resto de la lista."""
+    r = client_con_db.get("/api/alquileres", params={"q": "listpedidos"})
+    principal = next(p for p in r.json()["items"] if p["id"] == PEDIDO_PRINCIPAL_ID)
+    assert principal["monto_total"] == 50000
+    assert principal["monto_pagado"] == 10000
