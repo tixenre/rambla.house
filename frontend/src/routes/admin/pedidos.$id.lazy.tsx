@@ -357,7 +357,6 @@ function PedidoEditorPage() {
   const totales = cotizacionQ.data;
   const total = totales.total;
   const pagadoMonto = p.monto_pagado ?? 0;
-  const restante = Math.max(0, total - pagadoMonto);
 
   // Combinado con los turnos del Estudio vinculados (#1308). Lo COBRADO se
   // suma acá (son montos ya cobrados, no una regla de plata); el TOTAL viene
@@ -1161,7 +1160,15 @@ function PedidoEditorPage() {
       <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 flex items-center gap-2 px-4 py-2.5 border-t hairline bg-surface-elevated safe-b">
         <div>
           <div className="t-eyebrow">Total</div>
-          <div className="font-mono text-base font-semibold tabular-nums">{fmtArs(total)}</div>
+          {/* `combinado.totalCombinado`, no `total`: en mobile esta barra ES el
+              total del pedido (el rail no se ve), así que tiene que incluir los
+              turnos del Estudio igual que él. Con `total` mostraba solo la
+              parte de equipos — un pedido de $337.590 se anunciaba como
+              $185.130 justo arriba del botón de confirmar. Sin turnos los dos
+              valores son idénticos. */}
+          <div className="font-mono text-base font-semibold tabular-nums">
+            {fmtArs(combinado.totalCombinado)}
+          </div>
         </div>
         <SaveIndicator status={saveStatus} />
         <div className="ml-auto flex items-center gap-2">
