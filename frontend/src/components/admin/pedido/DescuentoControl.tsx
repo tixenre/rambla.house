@@ -44,80 +44,73 @@ export function DescuentoControl({
   className?: string;
 }) {
   return (
-    // Sin label propio (ni acá ni en ninguno de los dos usos, "Alquiler de
-    // equipos" y el turno del Estudio): el ledger de `TotalSeccion` de abajo
-    // ya dice "Descuento [X] · N%" en cuanto hay uno — un eyebrow acá arriba
-    // anunciando lo mismo era el mismo aviso dos veces (el dueño, dos
-    // pedidos seguidos: "sacale ese texto" / "este también bórralo").
-    <div className={cn("block", className)}>
-      {/* justify-end: alineado a la derecha con los números de arriba/abajo
-          (bruto/descuento/total en `TotalSeccion` son todos flex
-          justify-between, con el valor pegado al borde derecho) — el pedido
-          del dueño: "todo el total, descuentos y demás, alineado a la
-          derecha con los números". Antes el control quedaba flotando a la
-          izquierda, con el resto de la fila vacío. */}
-      <div className="flex items-center justify-end gap-2">
-        <SegmentedControl
-          value={value.tipo}
-          onChange={(v) =>
-            onChange(
-              // Convertir al equivalente del OTRO campo (el % y el $ efectivos
-              // que ya muestra el desglose, calculados por el backend) en vez
-              // de resetear a 0 — cambiar de unidad no debería perder el
-              // descuento actual. El campo que se deja de usar se resetea (sin
-              // esto queda un valor "fantasma" que podía reaparecer si el admin
-              // volvía a tocar el selector).
-              v === "monto"
-                ? { tipo: "monto", monto: efectivoMonto, pct: 0 }
-                : { tipo: "pct", pct: efectivoPct, monto: 0 },
-            )
-          }
-          options={[
-            { value: "pct", label: "%" },
-            { value: "monto", label: "$" },
-          ]}
-          className="w-20 shrink-0"
+    // Sin wrapper ni label propios: este control ya NO es un bloque aparte —
+    // se renderiza IN PLACE, dentro de la fila "Descuento" del ledger de
+    // `TotalSeccion` (pedido del dueño: "¿podemos unificar esos dos campos?
+    // ... y el modificador de descuento, in place"). Antes eran dos cosas
+    // separadas diciendo lo mismo: un control arriba y una fila abajo con el
+    // resultado. Ahora la fila ES el control.
+    <div className={cn("flex items-center gap-1.5", className)}>
+      <SegmentedControl
+        value={value.tipo}
+        onChange={(v) =>
+          onChange(
+            // Convertir al equivalente del OTRO campo (el % y el $ efectivos
+            // que ya muestra el desglose, calculados por el backend) en vez
+            // de resetear a 0 — cambiar de unidad no debería perder el
+            // descuento actual. El campo que se deja de usar se resetea (sin
+            // esto queda un valor "fantasma" que podía reaparecer si el admin
+            // volvía a tocar el selector).
+            v === "monto"
+              ? { tipo: "monto", monto: efectivoMonto, pct: 0 }
+              : { tipo: "pct", pct: efectivoPct, monto: 0 },
+          )
+        }
+        options={[
+          { value: "pct", label: "%" },
+          { value: "monto", label: "$" },
+        ]}
+        className="w-[68px] shrink-0"
+      />
+      {value.tipo === "monto" ? (
+        <MoneyInput
+          min={0}
+          max={maxMonto}
+          step={100}
+          value={value.monto}
+          className="w-[112px]"
+          ariaLabel="Descuento $ manual"
+          onChange={(v) => onChange({ ...value, monto: v })}
         />
-        {value.tipo === "monto" ? (
-          <MoneyInput
+      ) : (
+        <div className="relative w-[84px]">
+          <Input
+            type="number"
             min={0}
-            max={maxMonto}
-            step={100}
-            value={value.monto}
-            className="max-w-[140px]"
-            ariaLabel="Descuento $ manual"
-            onChange={(v) => onChange({ ...value, monto: v })}
+            max={100}
+            step={0.1}
+            aria-label="Descuento % manual"
+            value={value.pct}
+            className="pr-7"
+            // Seleccionar el valor entero al enfocar: sin esto, arrancar en
+            // 0 y tipear "2" insertaba el dígito DESPUÉS del cero ("02") en
+            // vez de reemplazarlo — el cero visible quedaba pegado hasta
+            // borrarlo a mano (lo reportó el dueño). Con el texto
+            // seleccionado, la primera tecla lo reemplaza entero, como
+            // espera cualquiera al ver un campo numérico en 0.
+            onFocus={(e) => e.currentTarget.select()}
+            onChange={(e) =>
+              onChange({
+                ...value,
+                pct: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
+              })
+            }
           />
-        ) : (
-          <div className="relative max-w-[140px]">
-            <Input
-              type="number"
-              min={0}
-              max={100}
-              step={0.1}
-              aria-label="Descuento % manual"
-              value={value.pct}
-              className="pr-7"
-              // Seleccionar el valor entero al enfocar: sin esto, arrancar en
-              // 0 y tipear "2" insertaba el dígito DESPUÉS del cero ("02") en
-              // vez de reemplazarlo — el cero visible quedaba pegado hasta
-              // borrarlo a mano (lo reportó el dueño). Con el texto
-              // seleccionado, la primera tecla lo reemplaza entero, como
-              // espera cualquiera al ver un campo numérico en 0.
-              onFocus={(e) => e.currentTarget.select()}
-              onChange={(e) =>
-                onChange({
-                  ...value,
-                  pct: Math.max(0, Math.min(100, Number(e.target.value) || 0)),
-                })
-              }
-            />
-            <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-              %
-            </span>
-          </div>
-        )}
-      </div>
+          <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
+            %
+          </span>
+        </div>
+      )}
     </div>
   );
 }

@@ -855,29 +855,7 @@ function PedidoEditorPage() {
                 // separar los equipos de la parte contable?"). Mismo patrón
                 // ya usado para el mismo tipo de corte en
                 // `contabilidad.reporte.lazy.tsx`, no uno nuevo.
-                <div className="border-t-2 border-ink/35 pt-4 space-y-3">
-                  <DescuentoControl
-                    value={{
-                      tipo: datos.descuento_manual_tipo,
-                      pct: datos.descuento_pct,
-                      monto: datos.descuento_manual_monto,
-                    }}
-                    onChange={(next) =>
-                      setDatos(
-                        (d) =>
-                          d && {
-                            ...d,
-                            descuento_manual_tipo: next.tipo,
-                            descuento_pct: next.pct,
-                            descuento_manual_monto: next.monto,
-                          },
-                      )
-                    }
-                    maxMonto={totales.subtotalDescontable}
-                    efectivoPct={totales.descuentoPct}
-                    efectivoMonto={totales.descuentoMonto}
-                  />
-
+                <div className="border-t-2 border-ink/35 pt-4">
                   {/* Total del ÁREA, acá y no solo en el rail (pedido del
                       dueño: "¿podemos poner un total por área, con los
                       descuentos y demás?"). El desglose de cómo se llega al
@@ -889,7 +867,12 @@ function PedidoEditorPage() {
                       de arriba — repetirla acá era la misma info dos veces
                       (el dueño: "el 1 jornada me parece redundante"). Cae al
                       default de `TotalSeccion` ("Bruto" a secas), igual que
-                      ya hace el turno del Estudio. */}
+                      ya hace el turno del Estudio.
+                      El `DescuentoControl` va COMO PROP, dentro de la fila
+                      "Descuento" — antes era un bloque suelto arriba del
+                      ledger, o sea el control y su resultado separados
+                      diciendo lo mismo ("¿podemos unificar esos dos campos?
+                      ... y el modificador de descuento, in place"). */}
                   <TotalSeccion
                     bruto={totales.subtotal}
                     descuentoLabel={
@@ -899,6 +882,29 @@ function PedidoEditorPage() {
                     descuentoPct={totales.descuentoPct}
                     descuentoMonto={totales.descuentoMonto}
                     total={totales.totalNeto}
+                    descuentoControl={
+                      <DescuentoControl
+                        value={{
+                          tipo: datos.descuento_manual_tipo,
+                          pct: datos.descuento_pct,
+                          monto: datos.descuento_manual_monto,
+                        }}
+                        onChange={(next) =>
+                          setDatos(
+                            (d) =>
+                              d && {
+                                ...d,
+                                descuento_manual_tipo: next.tipo,
+                                descuento_pct: next.pct,
+                                descuento_manual_monto: next.monto,
+                              },
+                          )
+                        }
+                        maxMonto={totales.subtotalDescontable}
+                        efectivoPct={totales.descuentoPct}
+                        efectivoMonto={totales.descuentoMonto}
+                      />
+                    }
                   />
                 </div>
               )}

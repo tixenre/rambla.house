@@ -327,32 +327,18 @@ export function ReservaEstudioSection({
             contable (pedido del dueño: "una línea horizontal más ancha para
             separar los equipos de la parte contable"); las dos secciones son
             gemelas, la frontera tiene que leerse igual en las dos. */}
-        <div className="border-t-2 border-ink/35 pt-4 space-y-3">
-          {/* Descuento propio del turno (#1308) — acá adentro, igual que el de
-              los equipos vive dentro de "Alquiler de equipos" (pedido del
-              dueño: "¿podemos hacer que los descuentos estén en la
-              sección?"). Es la MISMA pieza (`DescuentoControl`), no una
-              copia. */}
-          <DescuentoControl
-            // Sin `label`: primero se sacó el paréntesis "(0 = sin
-            // descuento)" (explicación redundante — en 0, `TotalSeccion` ya
-            // esconde bruto/descuento y deja solo el Total). Después el
-            // dueño pidió sacar el label ENTERO ("sacale ese texto") — el
-            // ledger de abajo ya dice "Descuento del turno · X%" en cuanto
-            // hay uno, un eyebrow acá arriba anunciando lo mismo era la
-            // misma info dos veces.
-            value={descuento}
-            onChange={setDescuento}
-            maxMonto={cotiz?.bruto_descontable ?? cotiz?.monto_total ?? 0}
-            efectivoPct={cotiz?.descuento_pct ?? 0}
-            efectivoMonto={cotiz?.descuento_monto ?? 0}
-          />
-
+        <div className="border-t-2 border-ink/35 pt-4">
           {/* Total en vivo — el front no calcula, solo muestra (2026-06-29).
               Sin wrapper propio: `TotalSeccion` ya pone su propio recuadro;
               acá arriba había un `<div>` viejo con ESA MISMA caja, sobrante
               de antes de extraer el componente — quedaba una caja adentro de
-              otra caja (lo vio el dueño: "veo doble recuadro"). */}
+              otra caja (lo vio el dueño: "veo doble recuadro"). El descuento
+              propio del turno (#1308) va COMO PROP, dentro de la fila
+              "Descuento del turno" del ledger — antes era un bloque suelto
+              arriba, o sea el control y su resultado separados diciendo lo
+              mismo ("¿podemos unificar esos dos campos? ... y el modificador
+              de descuento, in place"). Es la MISMA pieza que usa "Alquiler de
+              equipos", no una copia. */}
           {cotizarQ.isLoading ? (
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <Spinner size="sm" /> Calculando…
@@ -365,6 +351,15 @@ export function ReservaEstudioSection({
                 descuentoPct={cotiz.descuento_pct}
                 descuentoMonto={cotiz.descuento_monto}
                 total={cotiz.monto_total}
+                descuentoControl={
+                  <DescuentoControl
+                    value={descuento}
+                    onChange={setDescuento}
+                    maxMonto={cotiz.bruto_descontable ?? cotiz.monto_total ?? 0}
+                    efectivoPct={cotiz.descuento_pct ?? 0}
+                    efectivoMonto={cotiz.descuento_monto ?? 0}
+                  />
+                }
                 // onlyError: el indicador general de arriba a la derecha ya
                 // cubre "está todo guardado" — repetir "Guardado"/"Sin
                 // guardar"/"Guardando…" acá abajo leía como el mismo aviso,

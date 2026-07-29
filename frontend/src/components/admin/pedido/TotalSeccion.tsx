@@ -24,6 +24,14 @@ export function TotalSeccion({
   total,
   /** Ej. el indicador de guardado del turno, al lado del número grande. */
   trailing,
+  /** El editor del descuento (`DescuentoControl`), renderizado IN PLACE en la
+   *  fila "Descuento" — no como un bloque aparte arriba (pedido del dueño:
+   *  "¿podemos unificar esos dos campos? ... y el modificador de descuento,
+   *  in place"). Cuando viene, las tres filas se muestran SIEMPRE (aunque el
+   *  descuento sea 0): la fila ES la superficie de edición, esconderla
+   *  escondería el control. Sin él, el bloque sigue siendo solo lectura y
+   *  colapsa a "Total" cuando no hay descuento. */
+  descuentoControl,
 }: {
   brutoLabel?: string;
   bruto: number;
@@ -32,11 +40,13 @@ export function TotalSeccion({
   descuentoMonto?: number;
   total: number;
   trailing?: ReactNode;
+  descuentoControl?: ReactNode;
 }) {
-  // Sin descuento, "Bruto" y "Total" serían el mismo número dos veces — se
-  // muestra solo el Total. Las tres líneas aparecen recién cuando hay algo
-  // que explicar.
-  const hayDescuento = (descuentoMonto ?? 0) > 0;
+  // Sin descuento NI control, "Bruto" y "Total" serían el mismo número dos
+  // veces — se muestra solo el Total. Con control, las tres filas van siempre
+  // (si no, el editor desaparecería justo cuando el descuento vale 0, que es
+  // exactamente cuando hace falta para ponerlo).
+  const hayDescuento = (descuentoMonto ?? 0) > 0 || !!descuentoControl;
   return (
     <div className="rounded-lg border hairline bg-muted/20 p-3 text-sm">
       {/* Grid de 2 columnas, no filas `flex` independientes: cada fila
@@ -56,9 +66,17 @@ export function TotalSeccion({
             <span className="text-right font-mono tabular-nums text-muted-foreground">
               {fmtArs(bruto)}
             </span>
-            <span className="text-right text-muted-foreground">
-              {descuentoLabel ?? "Descuento"}
-              {descuentoPct ? ` · ${descuentoPct}%` : ""}
+            {/* El label y el control comparten la celda: `flex-wrap` para que
+                en pantallas angostas el control baje solo en vez de desbordar.
+                El sufijo "· N%" se muestra SOLO en modo lectura — con el
+                control presente, el input ya muestra ese número (o el $), y
+                repetirlo al lado sería la misma cifra dos veces. */}
+            <span className="flex flex-wrap items-center justify-end gap-x-2 gap-y-1.5 text-right text-muted-foreground">
+              <span>
+                {descuentoLabel ?? "Descuento"}
+                {!descuentoControl && descuentoPct ? ` · ${descuentoPct}%` : ""}
+              </span>
+              {descuentoControl}
             </span>
             <span className="text-right font-mono tabular-nums text-destructive">
               – {fmtArs(descuentoMonto ?? 0)}
