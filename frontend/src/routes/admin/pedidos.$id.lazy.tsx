@@ -355,6 +355,12 @@ function PedidoEditorPage() {
 
   // Totales vivos desde useCotizacion
   const totales = cotizacionQ.data;
+  // `isError` NO se descarta: el hook lo expone justo para esto. Al fallar el
+  // recálculo (el endpoint está limitado a 30/min y esta pantalla recotiza en
+  // cada tecleo, así que un 429 es el camino esperado) `data` cae a
+  // COTIZACION_VACIA y TODA la plata de la pantalla se muestra en $0 — igual
+  // que un pedido que realmente vale $0. Se avisa en vez de mentir.
+  const cotizacionFallo = cotizacionQ.isError;
   const total = totales.total;
   const pagadoMonto = p.monto_pagado ?? 0;
 
@@ -381,6 +387,11 @@ function PedidoEditorPage() {
   // stockMap: { equipo_id → libres tras TODO el draft } (con signo; negativo =
   // faltan unidades). hasOverstock lo deriva el hook con la misma regla.
   const { stockMap, hasOverstock } = dispo;
+  // Idem stock: si la consulta falla, `stockMap` queda vacío y `hasOverstock`
+  // en false — o sea, "el servicio se cayó" se veía EXACTAMENTE igual que
+  // "hay stock de todo", con el badge verde, en la pantalla cuyo trabajo es
+  // evitar el doble booking.
+  const stockFallo = dispo.query.isError;
 
   // Las líneas se identifican por `uid` (las personalizadas no tienen equipo_id).
   const updateItem = (uid: string, patch: Partial<DraftItem>) =>
@@ -518,6 +529,24 @@ function PedidoEditorPage() {
                 estudio={estudioQ.data}
                 onSaved={() => qc.invalidateQueries({ queryKey: ["admin", "pedido", pedidoId] })}
               />
+            ) : estudioQ.isError ? (
+              // Sin esta rama, un fallo de `estudioQ` dejaba el skeleton para
+              // SIEMPRE: toda la superficie editable de un pedido del Estudio
+              // no aparecía nunca, sin decir por qué.
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+                <span className="text-destructive">
+                  No se pudo cargar la configuración del Estudio.
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={() => void estudioQ.refetch()}
+                >
+                  Reintentar
+                </Button>
+              </div>
             ) : (
               <Skeleton className="h-64 w-full rounded-xl" />
             ))}
@@ -737,6 +766,13 @@ function PedidoEditorPage() {
                 esTaller ? undefined : !datos.fecha_desde || !datos.fecha_hasta ? (
                   <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-destructive">
                     <AlertTriangle className="h-3 w-3" /> sin fechas
+                  </span>
+                ) : stockFallo ? (
+                  // "No pude consultar" ≠ "hay de todo". Antes este caso caía
+                  // al verde de abajo (mapa vacío → hasOverstock false) y el
+                  // badge afirmaba stock OK sin haber podido chequear nada.
+                  <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-muted-foreground">
+                    <AlertTriangle className="h-3 w-3" /> stock sin verificar
                   </span>
                 ) : hasOverstock ? (
                   <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-destructive">
@@ -1004,6 +1040,18 @@ function PedidoEditorPage() {
               leía como tres temas distintos. Ahora es una sola sección con
               sub-partes separadas por un borde suave. */}
           <RailSection label="Plata del pedido">
+            {/* Si el recálculo falló, TODOS los números de abajo son $0 por
+                COTIZACION_VACIA — indistinguibles de un pedido que vale $0.
+                El aviso va arriba de todo, antes que los importes. */}
+            {cotizacionFallo && (
+              <div className="mb-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  No se pudo recalcular la plata. Los importes de abajo no son confiables — recargá
+                  la página antes de cobrar o facturar.
+                </span>
+              </div>
+            )}
             <div className="space-y-1 text-sm">
               {/* RESUMEN, no desglose: los dos montos por área, el total, y el
                   IVA solo si aplica (pedido del dueño: "en el resumen de la
@@ -1102,7 +1150,10 @@ function PedidoEditorPage() {
                     variant="outline"
                     size="sm"
                     className="w-full mt-2"
-                    disabled={p.estado === "cancelado"}
+                    // También con la cotización caída: el modal se abre
+                    // prellenado con el saldo, y con COTIZACION_VACIA ese
+                    // saldo es 0 — cobrar desde ahí registraría un pago mal.
+                    disabled={p.estado === "cancelado" || cotizacionFallo}
                     onClick={() => setOpenPagoModal(true)}
                   >
                     <Coins className="h-4 w-4 mr-1" /> Registrar pago

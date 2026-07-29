@@ -23,10 +23,11 @@
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Clapperboard, Plus, X } from "lucide-react";
+import { AlertTriangle, Clapperboard, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Section } from "@/design-system/composites/Section";
+import { Button } from "@/design-system/ui/button";
 import { IconButton } from "@/design-system/ui/icon-button";
 import { Spinner } from "@/design-system/ui/spinner";
 import { adminApi, estudioAdminApi, type Pedido } from "@/lib/admin/api";
@@ -89,6 +90,29 @@ function TurnoVinculadoCard({
     },
     onError: (e: Error) => toast.error("No se pudo eliminar el turno", { description: e.message }),
   });
+
+  // El error va ANTES del spinner: con `isError`, `isLoading` es false y
+  // `data` undefined, así que el guard de abajo daba true y la tarjeta giraba
+  // para siempre, sin mensaje ni forma de reintentar.
+  if (turnoQ.isError || estudioQ.isError) {
+    return (
+      <div className="flex flex-wrap items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+        <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+        <span className="text-destructive">No se pudo cargar este turno.</span>
+        <Button
+          variant="outline"
+          size="sm"
+          className="ml-auto"
+          onClick={() => {
+            void turnoQ.refetch();
+            void estudioQ.refetch();
+          }}
+        >
+          Reintentar
+        </Button>
+      </div>
+    );
+  }
 
   if (turnoQ.isLoading || estudioQ.isLoading || !turnoQ.data || !estudioQ.data) {
     return (
@@ -236,6 +260,24 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
             }}
             onCancel={() => setComponiendo(false)}
           />
+        ) : estudioQ.isError ? (
+          // Sin esta rama el botón quedaba MUERTO: clickearlo ponía
+          // `componiendo=true` y, como `estudioQ.data` era undefined, volvía a
+          // renderizar el mismo botón — sin formulario, sin error, sin nada.
+          <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-3 text-sm">
+            <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+            <span className="text-destructive">
+              No se pudo cargar la configuración del Estudio — no se puede agregar un turno ahora.
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              onClick={() => void estudioQ.refetch()}
+            >
+              Reintentar
+            </Button>
+          </div>
         ) : (
           /* Mismo lugar y forma que "Agregar línea personalizada" de Equipos. */
           <button

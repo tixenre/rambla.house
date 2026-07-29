@@ -333,13 +333,29 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
     // está en vuelo. Cuando la mutación complete, su isPending pasa a false,
     // este effect se re-ejecuta con el pedido fresco de onSuccess, y entonces
     // sí actualizamos.
-    if (!datosMut.isPending) {
+    // `isError` en el guard, además de `isPending`: si el guardado FALLÓ, el
+    // servidor sigue teniendo el valor viejo y `pedido` no cambió (onSuccess
+    // nunca corrió). Sin este chequeo, al pasar la mutación de pending→error
+    // este mismo effect se re-ejecutaba y pisaba la edición del usuario con
+    // el valor viejo del server: el campo volvía solo mientras el cartel
+    // decía "Error al guardar" — el texto y la pantalla contradiciéndose, y
+    // el trabajo perdido. Manteniendo lo local, el próximo tecleo reintenta
+    // (mutate() resetea isError) y el estado "error" queda visible hasta que
+    // efectivamente guarde.
+    if (!datosMut.isPending && !datosMut.isError) {
       setDatos((cur) => (cur && shallowDatosEq(cur, d) ? cur : d));
     }
-    if (!itemsMut.isPending) {
+    if (!itemsMut.isPending && !itemsMut.isError) {
       setItems((cur) => (cur && shallowItemsEq(cur, it) ? cur : it));
     }
-  }, [pedido, datosMut.isPending, itemsMut.isPending, keepDateTime]);
+  }, [
+    pedido,
+    datosMut.isPending,
+    datosMut.isError,
+    itemsMut.isPending,
+    itemsMut.isError,
+    keepDateTime,
+  ]);
 
   // ── Autosave debounced ─────────────────────────────────────────────────
   // Admin: dos efectos separados (datos / items) que dispatchean a sus mutations.
@@ -347,12 +363,27 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
   const autosaveAdmin = mode === "admin" && submitMode === "autosave";
   const autosaveCliente = mode === "cliente" && submitMode === "autosave";
 
+  // Payload pendiente de enviar. Si se navega antes de que corra el debounce,
+  // el efecto de unmount lo flushea — sino el cambio se pierde en silencio.
+  // `pendingFlushRef` es el del cliente (datos+ítems en una sola mutation);
+  // el admin tiene dos mutations separadas, así que lleva un ref por cada una.
+  const pendingFlushRef = useRef<{ d: DraftDatos; its: DraftItem[] } | null>(null);
+  const pendingDatosRef = useRef<DraftDatos | null>(null);
+  const pendingItemsRef = useRef<DraftItem[] | null>(null);
+
   useEffect(() => {
     if (!autosaveAdmin) return;
     if (!pedido || !datos || !serverRef.current) return;
-    if (shallowDatosEq(datos, serverRef.current.datos)) return;
+    if (shallowDatosEq(datos, serverRef.current.datos)) {
+      pendingDatosRef.current = null;
+      return;
+    }
+    // Se anota el payload para el flush de unmount (ver abajo): si el admin
+    // navega dentro de la ventana del debounce, el cambio se manda igual.
+    pendingDatosRef.current = datos;
     const t = setTimeout(() => {
       datosMut.mutate(datos);
+      pendingDatosRef.current = null;
     }, DEBOUNCE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- autosave con debounce: dispara por datos/pedido/flag; incluir datosMut reiniciaría el timer en cada render
@@ -373,17 +404,14 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
     // autoguardar todavía — dispararía el 422 "necesita un nombre" mientras
     // el usuario recién hace foco en el input, antes de tipear una letra.
     if (items.some((it) => it.equipo_id == null && !(it.nombre_libre ?? "").trim())) return;
+    pendingItemsRef.current = items;
     const t = setTimeout(() => {
       itemsMut.mutate(items);
+      pendingItemsRef.current = null;
     }, DEBOUNCE_MS);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- autosave con debounce: dispara por items/pedido/flag; incluir itemsMut reiniciaría el timer en cada render
   }, [items, pedido?.id, autosaveAdmin]);
-
-  // Payload pendiente de enviar (autosave cliente). Si el cliente navega
-  // antes del debounce, el efecto de unmount lo flushea — sino se pierde
-  // el cambio silenciosamente.
-  const pendingFlushRef = useRef<{ d: DraftDatos; its: DraftItem[] } | null>(null);
 
   useEffect(() => {
     if (!autosaveCliente) return;
@@ -405,14 +433,27 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
     // eslint-disable-next-line react-hooks/exhaustive-deps -- autosave con debounce: dispara por datos/items/pedido/flag; incluir clienteMut reiniciaría el timer en cada render
   }, [datos, items, pedido?.id, autosaveCliente]);
 
-  // Flush en unmount: si quedó un cambio sin enviar (el cliente navegó
-  // antes del debounce), lo disparamos best-effort sin debounce. El
-  // efecto se monta una vez; el cleanup corre sólo al desmontar.
+  // Flush en unmount: si quedó un cambio sin enviar (se navegó antes del
+  // debounce), lo disparamos best-effort sin debounce. El efecto se monta una
+  // vez; el cleanup corre sólo al desmontar.
+  //
+  // Antes solo cubría al CLIENTE: `pendingFlushRef` se escribía únicamente en
+  // el autosave del cliente, así que en admin el ref era siempre null y los
+  // últimos 700ms de cualquier edición se perdían al navegar (volver a la
+  // lista justo después de tipear). Ahora las tres mutations tienen su flush.
   useEffect(() => {
     return () => {
       if (pendingFlushRef.current) {
         clienteMut.mutate(pendingFlushRef.current);
         pendingFlushRef.current = null;
+      }
+      if (pendingDatosRef.current) {
+        datosMut.mutate(pendingDatosRef.current);
+        pendingDatosRef.current = null;
+      }
+      if (pendingItemsRef.current) {
+        itemsMut.mutate(pendingItemsRef.current);
+        pendingItemsRef.current = null;
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- flush best-effort solo al desmontar (efecto mount-once); deps vacías a propósito
