@@ -91,7 +91,7 @@ import { computeJornadas, parseDateTimeParts, toLocalISO } from "@/lib/rental-da
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useCotizacion, descuentoLabel } from "@/lib/cotizacion";
-import { combinarTotales, etiquetaTurno } from "@/lib/pedido-combinado";
+import { combinarTotales } from "@/lib/pedido-combinado";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { fmtArs } from "@/lib/format";
 import { nombreCliente } from "@/lib/cliente-nombre";
@@ -993,9 +993,19 @@ function PedidoEditorPage() {
                 l={esTaller ? "Taller" : "Alquiler de equipos"}
                 v={fmtArs(totales.totalNeto)}
               />
+              {/* "Estudio" a secas, sin fecha/hora: la franja exacta YA se ve
+                  en la sección "Turnos del Estudio" de arriba — repetirla acá
+                  era el mismo dato dos veces (el dueño: "ese detalle de fecha
+                  y hora me parece redundante"). Con más de un turno vinculado
+                  se numeran (no hay otro identificador liviano y comparable al
+                  de "Alquiler de equipos" de la fila de arriba). */}
               {hayTurnos &&
-                combinado.turnos.map((t) => (
-                  <BdRow key={t.id} l={etiquetaTurno(t)} v={fmtArs(t.monto_total)} />
+                combinado.turnos.map((t, i) => (
+                  <BdRow
+                    key={t.id}
+                    l={combinado.turnos.length > 1 ? `Estudio ${i + 1}` : "Estudio"}
+                    v={fmtArs(t.monto_total)}
+                  />
                 ))}
 
               <div className="border-t hairline my-1" />

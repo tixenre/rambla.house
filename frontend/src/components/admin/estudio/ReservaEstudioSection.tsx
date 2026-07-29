@@ -334,32 +334,41 @@ export function ReservaEstudioSection({
           efectivoMonto={cotiz?.descuento_monto ?? 0}
         />
 
-        {/* Total en vivo — el front no calcula, solo muestra (2026-06-29). El
-            estado del guardado va acá al lado: se guarda solo, pero tiene que
-            poder verse que se guardó. */}
-        <div className="rounded-lg border hairline bg-muted/20 p-3 text-sm">
-          {cotizarQ.isLoading ? (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <Spinner size="sm" /> Calculando…
-            </div>
-          ) : cotiz ? (
-            <>
-              <TotalSeccion
-                bruto={cotiz.bruto ?? 0}
-                descuentoLabel="Descuento del turno"
-                descuentoPct={cotiz.descuento_pct}
-                descuentoMonto={cotiz.descuento_monto}
-                total={cotiz.monto_total}
-                trailing={<SaveIndicator status={saveStatus} />}
-              />
-              {!cotiz.espacio_disponible && (
-                <p className="mt-1 text-xs text-destructive">
-                  El espacio no está disponible: {cotiz.espacio_motivo}
-                </p>
-              )}
-            </>
-          ) : null}
-        </div>
+        {/* Total en vivo — el front no calcula, solo muestra (2026-06-29).
+            Sin wrapper propio: `TotalSeccion` ya pone su propio recuadro; acá
+            arriba había un `<div>` viejo con ESA MISMA caja, sobrante de antes
+            de extraer el componente — quedaba una caja adentro de otra caja
+            (lo vio el dueño: "veo doble recuadro"). */}
+        {cotizarQ.isLoading ? (
+          <div className="flex items-center gap-2 border-t hairline pt-3 text-sm text-muted-foreground">
+            <Spinner size="sm" /> Calculando…
+          </div>
+        ) : cotiz ? (
+          <>
+            <TotalSeccion
+              bruto={cotiz.bruto ?? 0}
+              descuentoLabel="Descuento del turno"
+              descuentoPct={cotiz.descuento_pct}
+              descuentoMonto={cotiz.descuento_monto}
+              total={cotiz.monto_total}
+              // hideWhenSaved: el "Guardado" general de arriba a la derecha ya
+              // cubre la sensación de "está todo guardado"; repetirlo acá cada
+              // vez que este turno terminaba de autoguardarse leía como el
+              // mismo aviso dos veces (el dueño lo notó: "¿es necesario el
+              // guardado ese? ¿no está el general arriba a la derecha?"). Son
+              // técnicamente autosaves DISTINTOS (este PATCHea el turno, no el
+              // pedido) — por eso no se saca el indicador entero: "Guardando…"
+              // y "Error al guardar" siguen siendo información real que el de
+              // arriba no puede dar. Solo se calla el estado de reposo.
+              trailing={<SaveIndicator status={saveStatus} hideWhenSaved />}
+            />
+            {!cotiz.espacio_disponible && (
+              <p className="text-xs text-destructive">
+                El espacio no está disponible: {cotiz.espacio_motivo}
+              </p>
+            )}
+          </>
+        ) : null}
       </div>
     </Section>
   );
