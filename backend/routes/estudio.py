@@ -1605,7 +1605,7 @@ def cotizar_reserva_estudio(
         # Mismo resolutor de precios que `_crear_pedido_estudio`/`editar_reserva`
         # (services.estudio.commands.reserva) — acá sin validar stock ni insertar
         # nada (preview puro, sin pedido_id todavía).
-        promo_precio, monto_extra, precios_sueltos = _precio_promo_y_sueltos(
+        promo_precio, precios_sueltos = _precio_promo_y_sueltos(
             conn, estudio, con_promo, sueltos,
         )
         pintura_precio = (estudio["precio_pintura_reciente"] or 0) if pintura_reciente else 0

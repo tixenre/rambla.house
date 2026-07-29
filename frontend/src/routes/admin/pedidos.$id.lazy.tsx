@@ -116,6 +116,7 @@ import { esPedidoEstudio, esPedidoDerivado, esPedidoTaller } from "@/lib/tipos-p
 import { ReservaEstudioSection } from "@/components/admin/estudio/ReservaEstudioSection";
 import { TurnosEstudioSection } from "@/components/admin/pedido/TurnosEstudioSection";
 import { DescuentoControl } from "@/components/admin/pedido/DescuentoControl";
+import { TotalSeccion } from "@/components/admin/pedido/TotalSeccion";
 
 export const Route = createLazyFileRoute("/admin/pedidos/$id")({
   component: PedidoEditorRoute,
@@ -372,6 +373,11 @@ function PedidoEditorPage() {
    *  con la cotización) — si no, el rail arrancaría en una parte y saltaría a
    *  dos en cuanto contestara el backend. */
   const hayTurnos = turnosVinculados.length > 0;
+  /** Neto e IVA del RESUMEN: los del combinado cuando hay turnos, los del
+   *  pedido solo cuando no. Los dos salen del backend — el front nunca aplica
+   *  el 21% (MEMORIA 2026-06-29). */
+  const netoResumen = hayTurnos ? (totales.combinado?.totalNeto ?? 0) : totales.totalNeto;
+  const ivaResumen = hayTurnos ? (totales.combinado?.iva ?? 0) : totales.iva;
 
   // stockMap: { equipo_id → libres tras TODO el draft } (con signo; negativo =
   // faltan unidades). hasOverstock lo deriva el hook con la misma regla.
@@ -843,7 +849,7 @@ function PedidoEditorPage() {
                   descuento (2026-07-28 — el de jornadas/cliente no le aplica),
                   así que ni se ofrece. */}
               {!esTaller && !esEstudio && (
-                <div className="border-t hairline pt-3">
+                <div className="border-t hairline pt-3 space-y-3">
                   <DescuentoControl
                     value={{
                       tipo: datos.descuento_manual_tipo,
@@ -864,6 +870,24 @@ function PedidoEditorPage() {
                     maxMonto={totales.subtotalDescontable}
                     efectivoPct={totales.descuentoPct}
                     efectivoMonto={totales.descuentoMonto}
+                  />
+
+                  {/* Total del ÁREA, acá y no solo en el rail (pedido del
+                      dueño: "¿podemos poner un total por área, con los
+                      descuentos y demás?"). El desglose de cómo se llega al
+                      número vive en la sección que lo genera; el rail resume
+                      las dos áreas. Misma pieza que usa el turno del Estudio
+                      → las dos secciones cierran igual. */}
+                  <TotalSeccion
+                    brutoLabel={`Bruto · ${jornadas} jornada${jornadas !== 1 ? "s" : ""}`}
+                    bruto={totales.subtotal}
+                    descuentoLabel={
+                      descuentoLabel(totales.descuentoOrigen, jornadas, datos.cliente_nombre) ||
+                      "Descuento"
+                    }
+                    descuentoPct={totales.descuentoPct}
+                    descuentoMonto={totales.descuentoMonto}
+                    total={totales.totalNeto}
                   />
                 </div>
               )}
@@ -957,58 +981,33 @@ function PedidoEditorPage() {
               siempre: bruto → descuento → neto → IVA → total. */}
           <RailSection label="Desglose">
             <div className="space-y-1 text-sm">
-              {hayTurnos && <div className="t-eyebrow pt-0.5">Alquiler de equipos</div>}
+              {/* RESUMEN, no desglose: los dos montos por área, el total, y el
+                  IVA solo si aplica (pedido del dueño: "en el resumen de la
+                  derecha, los dos montos discriminados, un total, y el + IVA
+                  si es necesario"). El bruto/descuento de cada área ya se ven
+                  dentro de SU sección (`TotalSeccion`) — repetirlos acá era
+                  escribir el mismo desglose dos veces, y además obligaba a
+                  inventar un label de jornadas para un taller o un turno, cuyo
+                  rango de fechas no son jornadas reales. */}
               <BdRow
-                // Taller: el rango es el mes contable, no jornadas reales
-                // (las clases reales ya se muestran arriba) — "N jornadas"
-                // acá sería el mismo tipo de invención que el "31 jornadas"
-                // original del pedido #445. Estudio: la franja es horaria
-                // (arriba, en `ReservaEstudioSection`) — "N jornadas" tampoco
-                // describe un turno de unas pocas horas.
-                l={
-                  esTaller || esEstudioReal
-                    ? "Bruto"
-                    : `Bruto · ${jornadas} jornada${jornadas !== 1 ? "s" : ""}`
-                }
-                v={fmtArs(totales.subtotal)}
+                l={esTaller ? "Taller" : "Alquiler de equipos"}
+                v={fmtArs(totales.totalNeto)}
               />
-              {totales.descuentoPct > 0 && (
-                <BdRow
-                  l={`${
-                    descuentoLabel(totales.descuentoOrigen, jornadas, datos.cliente_nombre) ||
-                    "Descuento"
-                  } · ${totales.descuentoPct}%`}
-                  v={`– ${fmtArs(totales.descuentoMonto)}`}
-                  neg
-                />
-              )}
-              <BdRow l="Neto" v={fmtArs(totales.totalNeto)} />
-
-              {hayTurnos && (
-                <>
-                  <div className="t-eyebrow pt-2">Turnos del Estudio</div>
-                  {combinado.turnos.map((t) => (
-                    <BdRow key={t.id} l={etiquetaTurno(t)} v={fmtArs(t.monto_total)} />
-                  ))}
-                  {combinado.turnos.length > 1 && (
-                    <BdRow l="Neto" v={fmtArs(totales.combinado?.turnosTotal ?? 0)} />
-                  )}
-                </>
-              )}
+              {hayTurnos &&
+                combinado.turnos.map((t) => (
+                  <BdRow key={t.id} l={etiquetaTurno(t)} v={fmtArs(t.monto_total)} />
+                ))}
 
               <div className="border-t hairline my-1" />
-              {/* "Neto total" y no "Neto" a secas: arriba ya hay un "Neto" por
-                  parte — dos filas con el mismo label a la misma altura y
-                  números distintos se leían como un error. */}
-              {hayTurnos && <BdRow l="Neto total" v={fmtArs(totales.combinado?.totalNeto ?? 0)} />}
-              <BdRow
-                l={`IVA ${totales.conIva ? "21%" : ""}`}
-                v={
-                  totales.conIva
-                    ? fmtArs(hayTurnos ? (totales.combinado?.iva ?? 0) : totales.iva)
-                    : "— sin IVA"
-                }
-              />
+              {/* Con IVA se muestra el neto para que el total se explique
+                  (neto + IVA = total); sin IVA, neto y total son el mismo
+                  número y va una sola línea. */}
+              {totales.conIva && (
+                <>
+                  <BdRow l="Neto" v={fmtArs(netoResumen)} />
+                  <BdRow l="IVA 21%" v={fmtArs(ivaResumen)} />
+                </>
+              )}
               <BdRow l="Total" v={fmtArs(combinado.totalCombinado)} strong />
             </div>
           </RailSection>

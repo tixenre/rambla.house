@@ -247,6 +247,19 @@ function BandaFranja({
   accion?: ReactNode;
 }) {
   return (
+    // Mismo shell que la píldora retiro→devolución del rental
+    // (`pedidos.$id.lazy.tsx`, la banda "Retiro"/"Devolución" que abre
+    // `DateRangePickerModal`): idéntico contenedor (`rounded-lg border hairline
+    // bg-surface-elevated px-3.5 py-2.5`), ícono `h-4 w-4 self-start mt-0.5`,
+    // `t-eyebrow` como label y valores en `font-mono tabular-nums` — para que
+    // las dos bandas se lean como la MISMA pieza visual (lo pidió el dueño:
+    // "unificar visualmente esos dos selectores de fechas"). Quedan
+    // deliberadamente distintas en UNA cosa, que no se puede igualar sin
+    // mentir sobre la interacción: acá son 3 controles EDITABLES inline (el
+    // turno se define ahí mismo); el rental es un botón que abre un modal
+    // (sus fechas se eligen en un selector de rango aparte). El valor sigue
+    // viéndose como el mismo tipo de dato — solo cambia si hace falta abrir
+    // algo más para tocarlo.
     <div className="@container flex items-start gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5">
       <Clapperboard className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
       <div className="grid min-w-0 flex-1 grid-cols-1 gap-x-6 gap-y-2 @xl:grid-cols-3">
@@ -257,7 +270,7 @@ function BandaFranja({
             aria-label="Fecha del turno"
             value={fecha}
             onChange={(e) => onChangeFecha(e.target.value)}
-            className="mt-0.5 h-9 w-full max-w-[150px] text-sm"
+            className="mt-0.5 h-9 w-full max-w-[150px] font-mono text-sm tabular-nums"
           />
         </div>
         <div className="min-w-0">
@@ -266,7 +279,7 @@ function BandaFranja({
             aria-label="Hora de inicio"
             value={start}
             onChange={(e) => onChangeStart(e.target.value)}
-            className="mt-0.5 h-9 w-full max-w-[110px] rounded-md border hairline bg-surface-elevated px-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+            className="mt-0.5 h-9 w-full max-w-[110px] rounded-md border hairline bg-surface-elevated px-1.5 font-mono text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-ring"
           >
             {slots.map((s) => (
               <option key={s.value} value={s.value}>
@@ -284,7 +297,7 @@ function BandaFranja({
               min={minHoras}
               value={horas}
               onChange={(e) => onChangeHoras(Number(e.target.value) || 0)}
-              className="h-9 w-16 text-center text-sm"
+              className="h-9 w-16 text-center font-mono text-sm tabular-nums"
             />
             <span className="t-eyebrow">{horas === 1 ? "hora" : "horas"}</span>
           </div>

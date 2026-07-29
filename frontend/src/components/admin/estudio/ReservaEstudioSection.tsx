@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { Section } from "@/design-system/composites/Section";
 import { Spinner } from "@/design-system/ui/spinner";
 import { SaveIndicator } from "@/components/admin/pedido/PedidoPageHelpers";
+import { TotalSeccion } from "@/components/admin/pedido/TotalSeccion";
 import { DescuentoControl, type DescuentoManual } from "@/components/admin/pedido/DescuentoControl";
 import { formatARS } from "@/lib/format";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
@@ -342,38 +343,21 @@ export function ReservaEstudioSection({
               <Spinner size="sm" /> Calculando…
             </div>
           ) : cotiz ? (
-            <div className="space-y-1">
-              {/* Con descuento se muestran las tres líneas (bruto → descuento →
-                  neto) para que el número final se explique solo; sin
-                  descuento queda el "Total" de siempre, una sola línea. Los
-                  tres los resuelve el backend. */}
-              {(cotiz.descuento_monto ?? 0) > 0 && (
-                <>
-                  <div className="flex items-center justify-between gap-2 text-muted-foreground">
-                    <span>Bruto</span>
-                    <span className="font-mono tabular-nums">{formatARS(cotiz.bruto ?? 0)}</span>
-                  </div>
-                  <div className="flex items-center justify-between gap-2 text-muted-foreground">
-                    <span>Descuento · {cotiz.descuento_pct}%</span>
-                    <span className="font-mono tabular-nums text-destructive">
-                      – {formatARS(cotiz.descuento_monto ?? 0)}
-                    </span>
-                  </div>
-                </>
-              )}
-              <div className="flex items-center justify-between gap-2 font-semibold text-ink">
-                <span>Total</span>
-                <span className="flex items-center gap-2">
-                  <SaveIndicator status={saveStatus} />
-                  {formatARS(cotiz.monto_total)}
-                </span>
-              </div>
+            <>
+              <TotalSeccion
+                bruto={cotiz.bruto ?? 0}
+                descuentoLabel="Descuento del turno"
+                descuentoPct={cotiz.descuento_pct}
+                descuentoMonto={cotiz.descuento_monto}
+                total={cotiz.monto_total}
+                trailing={<SaveIndicator status={saveStatus} />}
+              />
               {!cotiz.espacio_disponible && (
                 <p className="mt-1 text-xs text-destructive">
                   El espacio no está disponible: {cotiz.espacio_motivo}
                 </p>
               )}
-            </div>
+            </>
           ) : null}
         </div>
       </div>

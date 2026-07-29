@@ -61,23 +61,24 @@ class SueltoItem(BaseModel):
 
 def _precio_promo_y_sueltos(
     conn, estudio, con_promo: bool, sueltos: list,
-) -> tuple[int, int, dict[int, int]]:
+) -> tuple[int, dict[int, int]]:
     """Resuelve el precio de la promo + de cada suelto vía la fuente única
     `precio_jornada_efectivo` (MEMORIA 2026-06-29 — el front no calcula
-    plata; esto tampoco calcula nada propio, solo suma lo que esa fuente
+    plata; esto tampoco calcula nada propio, solo lee lo que esa fuente
     devuelve). Puro cálculo de lectura, sin validar stock ni insertar nada —
-    compartido por `_crear_pedido_estudio` (necesita el total ANTES de
+    compartido por `_crear_pedido_estudio` (necesita los precios ANTES de
     insertar el pedido), `editar_reserva` y `cotizar_reserva_estudio`
-    (`routes/estudio.py`, preview sin pedido_id). Devuelve `(promo_precio,
-    monto_extra, precios_sueltos)`: `monto_extra` ya suma promo + sueltos×cantidad."""
+    (`routes/estudio.py`, preview sin pedido_id).
+
+    Devuelve `(promo_precio, precios_sueltos)`. Devolvía además un
+    `monto_extra` (promo + sueltos×cantidad) que quedó muerto al pasar el
+    total del turno por `total_turno_estudio` — el único que suma es ese, y
+    suma TODAS las líneas (incluido el espacio) vía `calcular_total`."""
     promo_precio = precio_jornada_efectivo(conn, estudio["promo_combo_id"]) or 0 if con_promo else 0
-    monto_extra = promo_precio
     precios_sueltos: dict[int, int] = {}
     for s in sueltos:
-        precio = precio_jornada_efectivo(conn, s.equipo_id) or 0
-        precios_sueltos[s.equipo_id] = precio
-        monto_extra += precio * s.cantidad
-    return promo_precio, monto_extra, precios_sueltos
+        precios_sueltos[s.equipo_id] = precio_jornada_efectivo(conn, s.equipo_id) or 0
+    return promo_precio, precios_sueltos
 
 
 def total_turno_estudio(
@@ -288,7 +289,7 @@ def _crear_pedido_estudio(
     espacio_monto_final = (
         espacio_monto if espacio_monto is not None else (estudio["precio_hora"] or 0) * horas
     )
-    promo_precio, monto_extra, precios_sueltos = _precio_promo_y_sueltos(
+    promo_precio, precios_sueltos = _precio_promo_y_sueltos(
         conn, estudio, con_promo, sueltos,
     )
     pintura_precio = (estudio["precio_pintura_reciente"] or 0) if pintura_reciente else 0
@@ -503,7 +504,7 @@ def editar_reserva(
     # mismos dos helpers que `_crear_pedido_estudio` — ver
     # `_validar_e_insertar_promo_sueltos` para el porqué del orden
     # validar-antes-de-insertar.
-    promo_precio, monto_extra, precios_sueltos = _precio_promo_y_sueltos(
+    promo_precio, precios_sueltos = _precio_promo_y_sueltos(
         conn, estudio, con_promo, sueltos_finales,
     )
     pintura_precio = (estudio["precio_pintura_reciente"] or 0) if pintura_reciente else 0
