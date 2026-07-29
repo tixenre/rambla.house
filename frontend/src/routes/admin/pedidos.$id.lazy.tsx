@@ -849,7 +849,14 @@ function PedidoEditorPage() {
                   descuento (2026-07-28 — el de jornadas/cliente no le aplica),
                   así que ni se ofrece. */}
               {!esTaller && !esEstudio && (
-                <div className="border-t hairline pt-3 space-y-3">
+                // `border-t-2 border-ink/15`, no `border-t hairline`: separa
+                // "qué se alquila" (equipos, línea personalizada) de "la
+                // parte contable" (descuento + total) — el dueño la vio muy
+                // fina ("¿podemos hacer una línea horizontal más ancha para
+                // separar los equipos de la parte contable?"). Mismo patrón
+                // ya usado para el mismo tipo de corte en
+                // `contabilidad.reporte.lazy.tsx`, no uno nuevo.
+                <div className="border-t-2 border-ink/15 pt-4 space-y-3">
                   <DescuentoControl
                     value={{
                       tipo: datos.descuento_manual_tipo,

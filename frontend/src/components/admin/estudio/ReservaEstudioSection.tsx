@@ -321,54 +321,64 @@ export function ReservaEstudioSection({
           cotiz={cotiz}
         />
 
-        {/* Descuento propio del turno (#1308) — acá adentro, igual que el de
-            los equipos vive dentro de "Alquiler de equipos" (pedido del dueño:
-            "¿podemos hacer que los descuentos estén en la sección?"). Es la
-            MISMA pieza (`DescuentoControl`), no una copia. */}
-        <DescuentoControl
-          label="Descuento del turno (0 = sin descuento)"
-          value={descuento}
-          onChange={setDescuento}
-          maxMonto={cotiz?.bruto_descontable ?? cotiz?.monto_total ?? 0}
-          efectivoPct={cotiz?.descuento_pct ?? 0}
-          efectivoMonto={cotiz?.descuento_monto ?? 0}
-        />
+        {/* Descuento + total del turno, separados de "Qué incluye" por una
+            línea más marcada — misma frontera (`border-t-2 border-ink/15`)
+            que "Alquiler de equipos" usa entre sus equipos y su parte
+            contable (pedido del dueño: "una línea horizontal más ancha para
+            separar los equipos de la parte contable"); las dos secciones son
+            gemelas, la frontera tiene que leerse igual en las dos. */}
+        <div className="border-t-2 border-ink/15 pt-4 space-y-3">
+          {/* Descuento propio del turno (#1308) — acá adentro, igual que el de
+              los equipos vive dentro de "Alquiler de equipos" (pedido del
+              dueño: "¿podemos hacer que los descuentos estén en la
+              sección?"). Es la MISMA pieza (`DescuentoControl`), no una
+              copia. */}
+          <DescuentoControl
+            label="Descuento del turno (0 = sin descuento)"
+            value={descuento}
+            onChange={setDescuento}
+            maxMonto={cotiz?.bruto_descontable ?? cotiz?.monto_total ?? 0}
+            efectivoPct={cotiz?.descuento_pct ?? 0}
+            efectivoMonto={cotiz?.descuento_monto ?? 0}
+          />
 
-        {/* Total en vivo — el front no calcula, solo muestra (2026-06-29).
-            Sin wrapper propio: `TotalSeccion` ya pone su propio recuadro; acá
-            arriba había un `<div>` viejo con ESA MISMA caja, sobrante de antes
-            de extraer el componente — quedaba una caja adentro de otra caja
-            (lo vio el dueño: "veo doble recuadro"). */}
-        {cotizarQ.isLoading ? (
-          <div className="flex items-center gap-2 border-t hairline pt-3 text-sm text-muted-foreground">
-            <Spinner size="sm" /> Calculando…
-          </div>
-        ) : cotiz ? (
-          <>
-            <TotalSeccion
-              bruto={cotiz.bruto ?? 0}
-              descuentoLabel="Descuento del turno"
-              descuentoPct={cotiz.descuento_pct}
-              descuentoMonto={cotiz.descuento_monto}
-              total={cotiz.monto_total}
-              // hideWhenSaved: el "Guardado" general de arriba a la derecha ya
-              // cubre la sensación de "está todo guardado"; repetirlo acá cada
-              // vez que este turno terminaba de autoguardarse leía como el
-              // mismo aviso dos veces (el dueño lo notó: "¿es necesario el
-              // guardado ese? ¿no está el general arriba a la derecha?"). Son
-              // técnicamente autosaves DISTINTOS (este PATCHea el turno, no el
-              // pedido) — por eso no se saca el indicador entero: "Guardando…"
-              // y "Error al guardar" siguen siendo información real que el de
-              // arriba no puede dar. Solo se calla el estado de reposo.
-              trailing={<SaveIndicator status={saveStatus} hideWhenSaved />}
-            />
-            {!cotiz.espacio_disponible && (
-              <p className="text-xs text-destructive">
-                El espacio no está disponible: {cotiz.espacio_motivo}
-              </p>
-            )}
-          </>
-        ) : null}
+          {/* Total en vivo — el front no calcula, solo muestra (2026-06-29).
+              Sin wrapper propio: `TotalSeccion` ya pone su propio recuadro;
+              acá arriba había un `<div>` viejo con ESA MISMA caja, sobrante
+              de antes de extraer el componente — quedaba una caja adentro de
+              otra caja (lo vio el dueño: "veo doble recuadro"). */}
+          {cotizarQ.isLoading ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Spinner size="sm" /> Calculando…
+            </div>
+          ) : cotiz ? (
+            <>
+              <TotalSeccion
+                bruto={cotiz.bruto ?? 0}
+                descuentoLabel="Descuento del turno"
+                descuentoPct={cotiz.descuento_pct}
+                descuentoMonto={cotiz.descuento_monto}
+                total={cotiz.monto_total}
+                // onlyError: el indicador general de arriba a la derecha ya
+                // cubre "está todo guardado" — repetir "Guardado"/"Sin
+                // guardar"/"Guardando…" acá abajo leía como el mismo aviso,
+                // dos veces (el dueño lo notó dos veces seguidas: primero por
+                // "Guardado" en reposo, después por "Sin guardar" mientras
+                // tipeaba). Son técnicamente autosaves DISTINTOS (este
+                // PATCHea el turno, no el pedido) — pero esas transiciones
+                // duran bien menos de un segundo, no hace falta narrarlas.
+                // Lo único que el general NO puede avisar es un error real de
+                // ESTE PATCH, así que es lo único que sigue en pantalla.
+                trailing={<SaveIndicator status={saveStatus} onlyError />}
+              />
+              {!cotiz.espacio_disponible && (
+                <p className="text-xs text-destructive">
+                  El espacio no está disponible: {cotiz.espacio_motivo}
+                </p>
+              )}
+            </>
+          ) : null}
+        </div>
       </div>
     </Section>
   );

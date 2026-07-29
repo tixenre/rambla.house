@@ -290,18 +290,20 @@ export function BackLink({ onClick }: { onClick: () => void }) {
 
 export function SaveIndicator({
   status,
-  /** Calla el estado "Guardado" de reposo — para un indicador LOCAL (ej. el
-   *  total de un turno del Estudio) cuando la pantalla ya tiene un indicador
-   *  GENERAL propio (el de arriba a la derecha, que cubre el autosave del
-   *  pedido) y mostrar el mismo "✓ Guardado" en dos lugares a la vez lee como
-   *  el mismo aviso repetido. "Guardando…"/"Sin guardar"/"Error al guardar"
-   *  siguen mostrándose igual — son información real que el general no da
-   *  (autosaves de recursos distintos). Default `false`: no cambia nada para
-   *  el indicador general de la página. */
-  hideWhenSaved = false,
+  /** Calla TODO salvo un error — para un indicador LOCAL (ej. el total de un
+   *  turno del Estudio) cuando la pantalla ya tiene un indicador GENERAL
+   *  propio (el de arriba a la derecha, que cubre el autosave del pedido).
+   *  Un primer intento solo callaba "Guardado" pero dejaba "Sin guardar"/
+   *  "Guardando…" — el dueño lo notó igual ("¿por qué aparecen estos textos
+   *  aún?"): son transiciones de menos de un segundo (debounce 700ms + un
+   *  PATCH rápido), no hace falta narrarlas — la señal real y accionable es
+   *  solo el ERROR (el general no puede darla: son autosaves de recursos
+   *  distintos, este PATCHea el turno, no el pedido). Default `false`: no
+   *  cambia nada para el indicador general de la página. */
+  onlyError = false,
 }: {
   status: string;
-  hideWhenSaved?: boolean;
+  onlyError?: boolean;
 }) {
   const map: Record<string, { tx: string; cls: string }> = {
     saving: { tx: "Guardando…", cls: "text-muted-foreground" },
@@ -312,7 +314,7 @@ export function SaveIndicator({
   };
   const s = map[status] ?? map.idle;
   if (!s.tx) return null;
-  if (hideWhenSaved && status === "saved") return null;
+  if (onlyError && status !== "error") return null;
   return (
     <span className={cn("inline-flex items-center gap-1 font-mono text-xs", s.cls)}>
       {status === "saved" && <Check className="h-3 w-3" />}

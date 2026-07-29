@@ -54,7 +54,13 @@ export function DescuentoControl({
        de un solo input. */
     <div className={cn("block", className)}>
       <span className="block t-eyebrow mb-1">{label}</span>
-      <div className="flex items-center gap-2">
+      {/* justify-end: alineado a la derecha con los números de arriba/abajo
+          (bruto/descuento/total en `TotalSeccion` son todos flex
+          justify-between, con el valor pegado al borde derecho) — el pedido
+          del dueño: "todo el total, descuentos y demás, alineado a la
+          derecha con los números". Antes el control quedaba flotando a la
+          izquierda, con el resto de la fila vacío. */}
+      <div className="flex items-center justify-end gap-2">
         <SegmentedControl
           value={value.tipo}
           onChange={(v) =>
