@@ -294,6 +294,12 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
       toast.success("Estado actualizado");
       qc.setQueryData(["admin", "pedido", p.id], p);
       qc.invalidateQueries({ queryKey: ["admin", "pedidos"] });
+      // El descuento (cliente + jornadas) pasa de seguir al cliente EN VIVO a
+      // leer el snapshot congelado apenas el pedido deja 'solicitado'
+      // (`pedido_congelado` en `cotizacion.py`) — sin invalidar acá, el
+      // Desglose podía seguir mostrando el descuento viejo justo después de
+      // confirmar, hasta que otra edición no relacionada limpiara la caché.
+      qc.invalidateQueries({ queryKey: ["cotizar"] });
       // Cascada a turnos del Estudio vinculados (#1308, "avanzan juntos"): ya
       // corrió en el backend — acá solo refrescamos cada turno tocado (su
       // propia query, si está montada en TurnosEstudioSection) y avisamos si
