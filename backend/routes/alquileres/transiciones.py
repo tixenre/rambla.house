@@ -267,7 +267,13 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
 
     updates: dict = {"estado": estado_nuevo}
     numero_asignado = False
-    if estado_nuevo == "confirmado" and not p["numero_pedido"]:
+    # El número se asigna al entrar a CUALQUIER estado real del camino feliz, no
+    # solo a `confirmado`: un borrador nace sin número (es un presupuesto rápido,
+    # no una venta — ver `create_pedido`), así que el momento en que deja de ser
+    # borrador es cuando pasa a ser un pedido de verdad y necesita su número.
+    # `cancelado`/`borrador` quedan afuera (no están en `FLOW`): un borrador
+    # descartado no consume un número de la secuencia.
+    if estado_nuevo in FLOW and not p["numero_pedido"]:
         from routes.alquileres.detalle import _next_numero_pedido
         updates["numero_pedido"] = _next_numero_pedido(conn)
         numero_asignado = True

@@ -125,3 +125,22 @@ export function otrosDestinos(p: PedidoTransicionable): EstadoPedido[] {
   const candidatos = transiciones(p.estado).filter((e) => e !== "cancelado" && e !== siguiente);
   return [...candidatos].sort((a, b) => FLOW.indexOf(a) - FLOW.indexOf(b));
 }
+
+/**
+ * Cómo se identifica un pedido en pantalla. Un BORRADOR no tiene
+ * `numero_pedido`: es un presupuesto rápido, no una venta (decisión del dueño)
+ * — mostrar su id interno como "#425" lo hacía pasar por un pedido real, que es
+ * justamente la confusión que se quiso sacar.
+ *
+ * Los registros históricos/manuales sin número (que NO son borradores)
+ * conservan el fallback de siempre al id — ahí el "#" sigue siendo la mejor
+ * referencia disponible.
+ */
+export function etiquetaPedido(p: {
+  id: number;
+  numero_pedido?: number | null;
+  estado?: string;
+}): string {
+  if (p.numero_pedido) return `#${p.numero_pedido}`;
+  return p.estado === "borrador" ? "Borrador" : `#${p.id}`;
+}

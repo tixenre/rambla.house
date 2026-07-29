@@ -1277,7 +1277,11 @@ export type PedidoHistorialItem = {
 };
 
 export type PedidosListResp = {
+  /** Filas totales del filtro — la verdad de la PAGINACIÓN, incluye borradores. */
   total: number;
+  /** Cuántas de esas filas son borradores. Un borrador es un presupuesto rápido,
+   *  no una venta: se lista igual, pero no suma al "N pedidos" del header. */
+  borradores?: number;
   page: number;
   per_page: number;
   items: Pedido[];

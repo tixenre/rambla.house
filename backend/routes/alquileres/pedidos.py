@@ -138,6 +138,13 @@ def list_pedidos(
             order += ", p.numero_pedido DESC NULLS LAST"
 
         total = conn.execute(f"SELECT COUNT(*) FROM alquileres p {where}", params).fetchone()[0]
+        # Los borradores se cuentan APARTE: son presupuestos rápidos, no ventas
+        # (decisión del dueño) — siguen listándose junto al resto, pero el
+        # "N pedidos" del header no los suma. `total` NO cambia: es la verdad de
+        # la paginación (cuántas filas hay para recorrer), no un número de negocio.
+        borradores = conn.execute(
+            f"SELECT COUNT(*) FROM alquileres p {where} AND p.estado = 'borrador'", params
+        ).fetchone()[0]
         rows  = conn.execute(
             f"SELECT p.* FROM alquileres p {where} ORDER BY {order} LIMIT %s OFFSET %s",
             params + [per_page, offset]
@@ -173,7 +180,13 @@ def list_pedidos(
             p["facturado"] = p["id"] in facturados
             p["turnos_vinculados_count"] = turnos_count_map.get(p["id"], 0)
 
-        return {"total": total, "page": page, "per_page": per_page, "items": pedidos}
+        return {
+            "total": total,
+            "borradores": borradores,
+            "page": page,
+            "per_page": per_page,
+            "items": pedidos,
+        }
 
 
 @router.get("/alquileres/{id}")

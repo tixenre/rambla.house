@@ -185,7 +185,13 @@ def create_pedido(data: PedidoCreate, background: Optional[BackgroundTasks] = No
                              (_ADVISORY_NS_PEDIDO, _eid))
 
             estado_inicial = data.estado if data.estado in {"borrador", "solicitado"} else "solicitado"
-            next_num = _next_numero_pedido(conn)
+            # Un BORRADOR nace SIN número de pedido: es un presupuesto rápido
+            # (decisión del dueño), no una venta — no debe consumir un número de
+            # la secuencia ni parecer un pedido real en pantalla. Lo recibe recién
+            # cuando pasa a un estado real de `FLOW`
+            # (`transiciones.cambiar_estado`). El resto de los pedidos lo reciben
+            # acá, como siempre.
+            next_num = None if estado_inicial == "borrador" else _next_numero_pedido(conn)
             # `fuente`: distingue quién originó el pedido para que el label del admin
             # ("back-office" vs "portal del cliente") sea confiable — antes esta columna
             # nunca se escribía acá y todo caía al default 'sistema' de la tabla, así que

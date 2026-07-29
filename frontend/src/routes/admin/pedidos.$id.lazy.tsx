@@ -100,7 +100,7 @@ import { nombreCliente } from "@/lib/cliente-nombre";
 import { EquipoComboSearch } from "@/components/admin/pedido/EquipoComboSearch";
 import { EnviarDocsDialog, DOCS_PEDIDO } from "@/components/admin/pedido/EnviarDocsDialog";
 import { RegistrarPagoModal } from "@/components/admin/pedido/RegistrarPagoModal";
-import { FLOW, transiciones, nextStep, otrosDestinos } from "@/lib/pedido-estados";
+import { FLOW, transiciones, nextStep, otrosDestinos, etiquetaPedido } from "@/lib/pedido-estados";
 import {
   PagoRow,
   ItemRow,
@@ -442,9 +442,7 @@ function PedidoEditorPage() {
           <span className="font-display text-lg text-ink truncate">
             {p.cliente_nombre || "Sin cliente"}
           </span>
-          <span className="font-mono text-xs text-muted-foreground">
-            #{p.numero_pedido ?? p.id}
-          </span>
+          <span className="font-mono text-xs text-muted-foreground">{etiquetaPedido(p)}</span>
           <EstadoBadge estado={p.estado} label={ESTADO_LABEL[p.estado]} />
         </div>
         <div className="ml-auto flex items-center gap-2">
@@ -1224,7 +1222,7 @@ function PedidoEditorPage() {
       <AlertDialog open={askCancel} onOpenChange={setAskCancel}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Cancelar pedido #{p.numero_pedido ?? p.id}</AlertDialogTitle>
+            <AlertDialogTitle>Cancelar {etiquetaPedido(p)}</AlertDialogTitle>
             <AlertDialogDescription>
               El pedido pasa a estado <strong>Cancelado</strong> y libera el stock reservado. Queda
               en el historial (no se borra). Podés volver a eliminarlo definitivamente si hace

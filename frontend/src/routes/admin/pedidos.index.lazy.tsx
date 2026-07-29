@@ -32,7 +32,7 @@ import { SearchInput } from "@/design-system/ui/search-input";
 import { Skeleton } from "@/design-system/ui/skeleton";
 import { CountBadge } from "@/design-system/ui/count-badge";
 import { adminApi, ESTADO_LABEL, type Pedido } from "@/lib/admin/api";
-import { nextStep, type EstadoPedido } from "@/lib/pedido-estados";
+import { etiquetaPedido, nextStep, type EstadoPedido } from "@/lib/pedido-estados";
 import { esPedidoEstudio } from "@/lib/tipos-pedido";
 import { EquipoThumb } from "@/components/admin/pedido/EquipoThumb";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
@@ -176,8 +176,14 @@ function PedidosPage() {
   const raw = useMemo(() => pedidosQ.data?.items ?? [], [pedidosQ.data]);
 
   // Conteo de activos para el chip de estado.
+  // El badge de "Activos" cuenta PEDIDOS reales: un borrador es un presupuesto
+  // rápido, no una venta activa (sigue listándose dentro de la pestaña, pero no
+  // infla el número que el admin lee de un vistazo).
   const activosCount = useMemo(
-    () => raw.filter((p) => p.estado !== "finalizado" && p.estado !== "cancelado").length,
+    () =>
+      raw.filter(
+        (p) => p.estado !== "finalizado" && p.estado !== "cancelado" && p.estado !== "borrador",
+      ).length,
     [raw],
   );
 
@@ -199,6 +205,17 @@ function PedidosPage() {
       ? selectedId
       : (items[0]?.id ?? null);
   const total = pedidosQ.data?.total ?? 0;
+  // Los borradores se listan igual, pero NO son ventas: son presupuestos
+  // rápidos. El "N pedidos" del header cuenta solo lo real y los nombra aparte,
+  // para que un par de borradores sueltos no inflen el número del negocio.
+  const borradores = pedidosQ.data?.borradores ?? 0;
+  const totalReales = Math.max(0, total - borradores);
+  const resumenConteo = borradores
+    ? `${totalReales} en total · ${borradores} borrador${borradores === 1 ? "" : "es"}.`
+    : `${totalReales} en total.`;
+  // Los que se ven AHORA (después del filtro de pestaña/día) — el contador de
+  // la barra del listado cuenta filas visibles, no el universo del filtro.
+  const borradoresVisibles = items.filter((p) => p.estado === "borrador").length;
 
   const openEditor = (id: number) =>
     navigate({ to: "/admin/pedidos/$id", params: { id: String(id) } });
@@ -223,7 +240,7 @@ function PedidosPage() {
       description={
         <>
           Reservas activas y solicitudes de cambio de tus clientes.{" "}
-          {pedidosQ.isLoading ? "Cargando…" : `${total} en total.`}
+          {pedidosQ.isLoading ? "Cargando…" : resumenConteo}
         </>
       }
       actions={
@@ -304,7 +321,12 @@ function PedidosPage() {
           {/* Barra del listado: contador + acciones (eliminar el seleccionado · ancho del panel) */}
           <div className="flex items-center gap-1 px-3 py-2 border-b hairline bg-surface-elevated shrink-0">
             <span className="t-eyebrow">
-              {items.length} pedido{items.length !== 1 ? "s" : ""}
+              {/* Mismo criterio que el header: los borradores se listan pero se
+                  nombran aparte — no son "pedidos". */}
+              {items.length - borradoresVisibles} pedido
+              {items.length - borradoresVisibles !== 1 ? "s" : ""}
+              {borradoresVisibles > 0 &&
+                ` · ${borradoresVisibles} borrador${borradoresVisibles === 1 ? "" : "es"}`}
             </span>
             <div className="flex-1" />
             <button
@@ -349,7 +371,7 @@ function PedidosPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Eliminar pedido #{selPedido?.numero_pedido ?? selId}
+              Eliminar {selPedido ? etiquetaPedido(selPedido) : "pedido"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {selPedido?.cliente_nombre ? `${selPedido.cliente_nombre} · ` : ""}Se borran también
@@ -396,7 +418,7 @@ function PedidosPage() {
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <div className="mb-0.5 flex items-center gap-1.5 t-eyebrow">
-                  <span>#{p.numero_pedido ?? p.id}</span>
+                  <span>{etiquetaPedido(p)}</span>
                   <TurnosVinculadosTag count={p.turnos_vinculados_count ?? 0} />
                 </div>
                 <div className="truncate font-medium text-ink">
@@ -509,7 +531,7 @@ function MasterList({
                   />
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
-                  <span>#{p.numero_pedido ?? p.id}</span>
+                  <span>{etiquetaPedido(p)}</span>
                   <span>·</span>
                   {hoyTag(p) ?? (
                     <span className="truncate tabular-nums">
@@ -627,7 +649,7 @@ function PreviewPane({ id, onOpen }: { id: number | null; onOpen: (id: number) =
               <EstadoBadge estado={p.estado} label={ESTADO_LABEL[p.estado]} />
             </div>
             <div className="mt-1 font-mono text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
-              <span>Pedido #{p.numero_pedido ?? p.id}</span>
+              <span>Pedido {etiquetaPedido(p)}</span>
               {creadoHace(p.created_at) && (
                 <>
                   <span>·</span>
