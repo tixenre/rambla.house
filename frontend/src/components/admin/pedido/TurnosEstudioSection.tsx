@@ -102,9 +102,11 @@ function TurnoVinculadoCard({
     <ReservaEstudioSection
       pedido={turnoQ.data}
       estudio={estudioQ.data}
-      // El ✕ vive en el ENCABEZADO de la tarjeta del turno. Antes flotaba en
-      // una fila propia debajo, sin nada que lo anclara — el dueño no lo
-      // encontraba ("ahora no puedo quitar el turno").
+      // Sin encabezado propio: el de la sección ("Turnos del Estudio") ya lo
+      // dice, y dos títulos iguales pegados es ruido. El ✕ cae arriba a la
+      // derecha de la banda de tiempo — el mismo lugar que en un turno todavía
+      // sin crear, así la ✕ está siempre donde uno la busca.
+      anidada
       accion={
         <IconButton
           aria-label="Quitar el turno del pedido"

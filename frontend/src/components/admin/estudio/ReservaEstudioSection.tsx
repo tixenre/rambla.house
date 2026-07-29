@@ -45,14 +45,21 @@ export function ReservaEstudioSection({
   pedido,
   estudio,
   accion,
+  anidada = false,
   onSaved,
 }: {
   pedido: Pedido;
   estudio: EstudioConfig;
-  /** Acción del encabezado de la tarjeta — hoy, el ✕ que saca el turno del
-   *  pedido. Va en el header (slot `actions` del `Section`) y no como una fila
-   *  colgada abajo, que era donde estaba y no se encontraba. */
+  /** El ✕ que saca el turno del pedido. Dónde cae depende de `anidada`: en el
+   *  encabezado propio, o —si no lo hay— arriba a la derecha de la banda de
+   *  tiempo, el mismo lugar donde lo tiene un turno todavía sin crear. */
   accion?: ReactNode;
+  /** Montada DENTRO de "Turnos del Estudio" (la página de un pedido de
+   *  alquiler): sin encabezado propio. Con él se veían dos títulos pegados
+   *  diciendo lo mismo, con el mismo ícono — "Turnos del Estudio" arriba y
+   *  "Reserva del Estudio" adentro (lo reportó el dueño: "esto lo veo
+   *  redundante"). El recuadro queda: separa un turno del siguiente. */
+  anidada?: boolean;
   onSaved?: (pedido: Pedido) => void;
 }) {
   const qc = useQueryClient();
@@ -238,12 +245,15 @@ export function ReservaEstudioSection({
     <Section
       variant="card"
       tone="elevated"
-      icon={Clapperboard}
-      title="Reserva del Estudio"
-      actions={accion}
+      // Anidada: sin ícono ni título → el `Section` no dibuja encabezado (solo
+      // el recuadro), y el ✕ baja a la banda de tiempo.
+      icon={anidada ? undefined : Clapperboard}
+      title={anidada ? "" : "Reserva del Estudio"}
+      actions={anidada ? undefined : accion}
     >
       <div className="space-y-4">
         <EstudioIncluyeList
+          accion={anidada ? accion : undefined}
           estudio={estudio}
           fecha={fecha}
           onChangeFecha={setFecha}

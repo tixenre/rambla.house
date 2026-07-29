@@ -775,38 +775,41 @@ function PreviewPane({ id, onOpen }: { id: number | null; onOpen: (id: number) =
           </div>
         </div>
 
-        {/* Equipos */}
-        <div className="card-elevated">
-          <div className="flex items-center justify-between px-4 py-2.5 border-b hairline">
-            <span className="t-eyebrow">Equipos · {nItems}</span>
-            {nItems > 0 && <span className="t-eyebrow">precio / jornada</span>}
+        {/* Equipos — el bloque NO se muestra vacío (pedido del dueño: "si no
+            hay equipos, o no hay turnos, que no se muestren"). Este panel es
+            de lectura rápida: una caja que solo dice "Sin equipos cargados" no
+            informa nada que el "Equipos · 0" del encabezado no dijera, y hace
+            scrollear de gratis. Cargar equipos se hace en el editor, no acá. */}
+        {nItems > 0 && (
+          <div className="card-elevated">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b hairline">
+              <span className="t-eyebrow">Equipos · {nItems}</span>
+              <span className="t-eyebrow">precio / jornada</span>
+            </div>
+            <ul className="divide-y hairline">
+              {(p.items ?? []).map((it) => (
+                <li key={it.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <EquipoThumb
+                    src={it.foto_url}
+                    alt={it.nombre_publico || it.nombre}
+                    className="h-9 w-9 shrink-0"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm text-ink truncate">
+                      {it.nombre_publico || it.nombre}
+                    </div>
+                    {it.marca && (
+                      <div className="font-mono text-xs text-muted-foreground">{it.marca}</div>
+                    )}
+                  </div>
+                  <div className="font-mono text-sm tabular-nums text-ink shrink-0">
+                    {it.cantidad}× {fmtArs(it.precio_jornada)}
+                  </div>
+                </li>
+              ))}
+            </ul>
           </div>
-          <ul className="divide-y hairline">
-            {(p.items ?? []).map((it) => (
-              <li key={it.id} className="flex items-center gap-3 px-4 py-2.5">
-                <EquipoThumb
-                  src={it.foto_url}
-                  alt={it.nombre_publico || it.nombre}
-                  className="h-9 w-9 shrink-0"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm text-ink truncate">{it.nombre_publico || it.nombre}</div>
-                  {it.marca && (
-                    <div className="font-mono text-xs text-muted-foreground">{it.marca}</div>
-                  )}
-                </div>
-                <div className="font-mono text-sm tabular-nums text-ink shrink-0">
-                  {it.cantidad}× {fmtArs(it.precio_jornada)}
-                </div>
-              </li>
-            ))}
-            {nItems === 0 && (
-              <li className="px-4 py-6 text-center text-sm text-muted-foreground">
-                Sin equipos cargados.
-              </li>
-            )}
-          </ul>
-        </div>
+        )}
 
         {/* Turnos del Estudio — solo lectura: el turno se administra en la
             página del pedido, acá se ve QUÉ hay y CUÁNTO suma (si no, la plata
