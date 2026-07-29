@@ -358,9 +358,16 @@ export function BackLink({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
+      aria-label="Volver a Pedidos"
       className="inline-flex h-11 shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-ink md:h-auto"
     >
-      <ChevronLeft className="h-4 w-4" /> Pedidos
+      <ChevronLeft className="h-4 w-4" />
+      {/* Oculto bajo `sm`: en el topbar del pedido, "Pedidos" + el nombre del
+          cliente + el #N + el badge de estado + el indicador de guardado +
+          el botón de WhatsApp no entraban en 375px sin recortarse — este
+          texto es el candidato más seguro para no mostrar (el ícono solo ya
+          comunica "volver", y `aria-label` lo mantiene accesible). */}
+      <span className="hidden sm:inline">Pedidos</span>
     </button>
   );
 }

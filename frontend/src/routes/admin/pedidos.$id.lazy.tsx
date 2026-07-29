@@ -463,17 +463,28 @@ function PedidoEditorPage() {
 
   return (
     <div className="flex flex-col min-h-0">
-      {/* Topbar del editor */}
+      {/* Topbar del editor. A 375px, "Pedidos" + nombre + #N + badge + guardado
+          + WhatsApp no entraban sin recortarse contra `overflow-x: clip`
+          global (el botón de WhatsApp quedaba inalcanzable al tacto) — el
+          texto de `BackLink` ya se oculta bajo `sm`; acá se hace lo mismo con
+          el #N (menos esencial que el nombre/estado) y se fija qué SÍ puede
+          encogerse (el nombre, con `truncate`) vs qué no (badge/guardado/
+          WhatsApp, `shrink-0` explícito — antes dependían del comportamiento
+          default del flex, que los encogía de forma impredecible). */}
       <header className="flex items-center gap-3 px-4 md:px-6 py-3 border-b hairline bg-surface-elevated">
         <BackLink onClick={goList} />
-        <div className="min-w-0 flex items-center gap-2">
-          <span className="font-display text-lg text-ink truncate">
+        <div className="min-w-0 flex flex-1 items-center gap-2">
+          <span className="min-w-0 truncate font-display text-lg text-ink">
             {p.cliente_nombre || "Sin cliente"}
           </span>
-          <span className="font-mono text-xs text-muted-foreground">{etiquetaPedido(p)}</span>
-          <EstadoBadge estado={p.estado} label={ESTADO_LABEL[p.estado]} />
+          <span className="hidden shrink-0 font-mono text-xs text-muted-foreground sm:inline">
+            {etiquetaPedido(p)}
+          </span>
+          <span className="shrink-0">
+            <EstadoBadge estado={p.estado} label={ESTADO_LABEL[p.estado]} />
+          </span>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <SaveIndicator status={saveStatus} />
           <WhatsAppButton pedido={p} phone={p.cliente_telefono} variant="icon" />
         </div>
