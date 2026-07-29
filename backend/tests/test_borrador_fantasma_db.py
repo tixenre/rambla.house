@@ -180,3 +180,55 @@ def test_borrar_un_borrador_lo_borra_de_verdad(client_con_db, setup):
         ).fetchone() is None
     finally:
         conn.close()
+
+
+def test_los_borradores_van_PRIMERO_en_la_lista(client_con_db, setup):
+    """Discrimina: con el orden viejo ("sin número al final") un borrador caía
+    detrás de TODOS los pedidos numerados — o sea, fuera de la primera página
+    con volumen real. El dueño no los encontraba ("este borrador no me aparece
+    en el listado")."""
+    _crear(client_con_db, "solicitado")
+    _crear(client_con_db, "solicitado")
+    b = _crear(client_con_db, "borrador")
+
+    d = client_con_db.get("/api/alquileres", params={"q": MARCA_Q}).json()
+    ids = [x["id"] for x in d["items"]]
+    assert ids[0] == b["id"], f"el borrador tiene que abrir la lista, quedó en {ids.index(b['id'])}"
+    # y los numerados siguen ordenados entre ellos como siempre (desc)
+    numerados = [x["numero_pedido"] for x in d["items"] if x["numero_pedido"] is not None]
+    assert numerados == sorted(numerados, reverse=True)
+
+
+def test_el_mas_nuevo_de_los_borradores_va_arriba(client_con_db, setup):
+    """Sin número no hay con qué desempatar: manda la fecha de creación."""
+    from database import get_db
+
+    b1 = _crear(client_con_db, "borrador")
+    b2 = _crear(client_con_db, "borrador")
+    # `created_at` tiene resolución de microsegundos pero los dos se crean en el
+    # mismo instante de test — se separa a mano para que el orden sea inequívoco.
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE alquileres SET created_at = created_at - INTERVAL '1 hour' WHERE id = %s",
+            (b1["id"],),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    d = client_con_db.get("/api/alquileres", params={"q": MARCA_Q}).json()
+    ids = [x["id"] for x in d["items"]]
+    assert ids[0] == b2["id"] and ids[1] == b1["id"], ids
+
+
+def test_se_pueden_pedir_SOLO_los_borradores(client_con_db, setup):
+    """El filtro de la pestaña "Borradores" del listado."""
+    _crear(client_con_db, "borrador")
+    _crear(client_con_db, "solicitado")
+
+    d = client_con_db.get(
+        "/api/alquileres", params={"q": MARCA_Q, "estado": "borrador"}
+    ).json()
+    assert d["total"] == 1
+    assert [x["estado"] for x in d["items"]] == ["borrador"]

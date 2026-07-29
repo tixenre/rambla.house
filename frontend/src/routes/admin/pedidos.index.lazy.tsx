@@ -117,11 +117,15 @@ function fuenteLabel(fuente: string | null): string | null {
   return map[fuente] ?? fuente;
 }
 
-type EstadoFilter = "activos" | "solicitado" | "confirmado" | "cerrados" | "todos";
+type EstadoFilter = "activos" | "solicitado" | "confirmado" | "borrador" | "cerrados" | "todos";
 const ESTADO_FILTERS: { id: EstadoFilter; label: string }[] = [
   { id: "activos", label: "Activos" },
   { id: "solicitado", label: "Solicitados" },
   { id: "confirmado", label: "Confirmados" },
+  // Los presupuestos rápidos tienen su propia pestaña: no son ventas (no entran
+  // en "Activos" ni suman al "N pedidos"), pero son lo que uno está armando —
+  // pedido del dueño: "un filtro para que solo haya borradores".
+  { id: "borrador", label: "Borradores" },
   { id: "cerrados", label: "Cerrados" },
   { id: "todos", label: "Todos" },
 ];
@@ -196,6 +200,7 @@ function PedidosPage() {
       return raw.filter((p) => p.estado === "finalizado" || p.estado === "cancelado");
     if (estadoF === "solicitado") return raw.filter((p) => p.estado === "solicitado");
     if (estadoF === "confirmado") return raw.filter((p) => p.estado === "confirmado");
+    if (estadoF === "borrador") return raw.filter((p) => p.estado === "borrador");
     return raw;
   }, [raw, dayFilter, estadoF]);
 
@@ -302,6 +307,9 @@ function PedidosPage() {
                   {f.label}
                   {f.id === "activos" && (
                     <span className="font-mono text-2xs tabular-nums">{activosCount}</span>
+                  )}
+                  {f.id === "borrador" && borradores > 0 && (
+                    <span className="font-mono text-2xs tabular-nums">{borradores}</span>
                   )}
                 </button>
               ))}
@@ -418,7 +426,10 @@ function PedidosPage() {
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <div className="mb-0.5 flex items-center gap-1.5 t-eyebrow">
-                  <span>{etiquetaPedido(p)}</span>
+                  {/* Un borrador no tiene número: su etiqueta sería "Borrador",
+                      lo mismo que ya dice el badge de la derecha. Se omite en
+                      vez de escribirlo dos veces en la misma fila. */}
+                  {p.estado !== "borrador" && <span>{etiquetaPedido(p)}</span>}
                   <TurnosVinculadosTag count={p.turnos_vinculados_count ?? 0} />
                 </div>
                 <div className="truncate font-medium text-ink">
@@ -531,8 +542,15 @@ function MasterList({
                   />
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
-                  <span>{etiquetaPedido(p)}</span>
-                  <span>·</span>
+                  {/* Un borrador no tiene número: su etiqueta diría "Borrador",
+                      lo mismo que el badge de arriba. Se omite (con su "·") en
+                      vez de repetirlo en la misma fila. */}
+                  {p.estado !== "borrador" && (
+                    <>
+                      <span>{etiquetaPedido(p)}</span>
+                      <span>·</span>
+                    </>
+                  )}
                   {hoyTag(p) ?? (
                     <span className="truncate tabular-nums">
                       {fechaDia(p.fecha_desde)} → {fechaDia(p.fecha_hasta)}
@@ -649,10 +667,12 @@ function PreviewPane({ id, onOpen }: { id: number | null; onOpen: (id: number) =
               <EstadoBadge estado={p.estado} label={ESTADO_LABEL[p.estado]} />
             </div>
             <div className="mt-1 font-mono text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
-              <span>Pedido {etiquetaPedido(p)}</span>
+              {/* "Pedido Borrador" no dice nada que el badge de arriba no diga:
+                  para un borrador esta línea arranca directo en cuándo se creó. */}
+              {p.estado !== "borrador" && <span>Pedido {etiquetaPedido(p)}</span>}
               {creadoHace(p.created_at) && (
                 <>
-                  <span>·</span>
+                  {p.estado !== "borrador" && <span>·</span>}
                   <span>creado {creadoHace(p.created_at)}</span>
                 </>
               )}

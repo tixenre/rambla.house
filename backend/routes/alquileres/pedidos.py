@@ -130,9 +130,26 @@ def list_pedidos(
 
         col = SORT_COLS.get(sort_by, "p.numero_pedido")
         direction = "ASC" if sort_dir == "asc" else "DESC"
-        # Poner "Registro manual" (sin número de pedido) al final.
-        has_numero = "(p.numero_pedido IS NOT NULL)"
-        order = f"{has_numero} DESC, {col} {direction} NULLS LAST"
+        # Tres grupos, en este orden:
+        #   0. BORRADORES — son lo que se está armando ahora mismo, y desde que
+        #      nacen sin número (2026-07-29) caían en el mismo saco que los
+        #      registros manuales viejos: al fondo de todo, después de ~200
+        #      pedidos, o sea fuera de la primera página. El dueño no los
+        #      encontraba ("este borrador no me aparece en el listado").
+        #   1. Los pedidos con número — la lista de siempre.
+        #   2. "Registro manual" sin número — histórico, al final, como estaba.
+        grupo = (
+            "(CASE WHEN p.estado = 'borrador' THEN 0"
+            "      WHEN p.numero_pedido IS NOT NULL THEN 1 ELSE 2 END)"
+        )
+        # Dentro de los borradores, el más nuevo primero (no tienen número con
+        # el cual desempatar). El CASE deja NULL para todo lo demás → con NULLS
+        # LAST empatan entre sí y caen al criterio de siempre, así el orden del
+        # resto de la lista queda EXACTAMENTE como estaba.
+        recientes_borrador = "(CASE WHEN p.estado = 'borrador' THEN p.created_at END)"
+        order = (
+            f"{grupo} ASC, {recientes_borrador} DESC NULLS LAST, {col} {direction} NULLS LAST"
+        )
         # secundario: número descendente para desempate
         if col != "p.numero_pedido":
             order += ", p.numero_pedido DESC NULLS LAST"
