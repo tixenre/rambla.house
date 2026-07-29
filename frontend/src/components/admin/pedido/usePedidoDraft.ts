@@ -362,7 +362,13 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
     if (!autosaveAdmin) return;
     if (!pedido || !items || !serverRef.current) return;
     if (shallowItemsEq(items, serverRef.current.items)) return;
-    if (items.length === 0) return;
+    // OJO: acá NO va un `if (items.length === 0) return`. Lo había, y hacía que
+    // sacar el ÚLTIMO equipo no se guardara nunca: la pantalla quedaba en "Sin
+    // guardar" para siempre y el cambio se perdía al recargar (lo reportó el
+    // dueño). Quedarse sin equipos es un estado legítimo —un borrador que se
+    // está armando, o un pedido cuyo contenido son horas de Estudio— y quién
+    // puede quedar vacío lo decide el backend (`_puede_quedar_sin_items`), no
+    // un guard mudo del front: si no puede, contesta 400 y se ve el error.
     // Línea personalizada recién agregada, todavía sin nombre (#805): no
     // autoguardar todavía — dispararía el 422 "necesita un nombre" mientras
     // el usuario recién hace foco en el input, antes de tipear una letra.

@@ -644,6 +644,35 @@ def _validar_reemplazo_items_taller(conn, pedido_id: int, items_nuevos: list["Pe
         )
 
 
+def _puede_quedar_sin_items(conn, p) -> bool:
+    """¿Este pedido puede quedarse con CERO ítems de alquiler?
+
+    Sí en dos casos, y en los dos "vacío" no significa "pedido sin contenido":
+
+    1. **Borrador** — es un presupuesto rápido que se está armando (misma
+       excepción que ya hacía `create_pedido`: un borrador nace vacío). Sacar el
+       último equipo mientras se piensa es normal; obligar a dejar uno hacía que
+       el auto-guardado no pudiera persistir el cambio y la pantalla quedara en
+       "Sin guardar" para siempre (lo reportó el dueño: "cuando saco un equipo,
+       no se guarda").
+    2. **Tiene un turno del Estudio vinculado** (#1308) — el contenido del
+       pedido son esas horas de estudio; que no haya equipos es un pedido
+       perfectamente válido ("2 horas de estudio y nada más").
+
+    Un pedido de primera clase, ya solicitado y sin turnos, SIGUE necesitando al
+    menos un ítem: ahí vacío sí es un pedido sin nada.
+    """
+    if p["estado"] == "borrador":
+        return True
+    # Mismo filtro que usan el pago combinado (`pagos.py`) y la factura
+    # combinada (`finanzas_flujo.pedido`): un turno cancelado ya no es contenido.
+    row = conn.execute(
+        "SELECT 1 FROM alquileres WHERE pedido_principal_id = %s AND estado <> 'cancelado' LIMIT 1",
+        (p["id"],),
+    ).fetchone()
+    return row is not None
+
+
 def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
     """Reemplaza los ítems del pedido por `items`. Recalcula subtotales y monto.
 
@@ -670,7 +699,7 @@ def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
         )
     if es_pedido_taller(p):
         _validar_reemplazo_items_taller(conn, id, items)
-    if not items:
+    if not items and not _puede_quedar_sin_items(conn, p):
         raise HTTPException(400, "Debe tener al menos un ítem")
 
     d0 = to_datetime(p["fecha_desde"]) if p["fecha_desde"] else None
