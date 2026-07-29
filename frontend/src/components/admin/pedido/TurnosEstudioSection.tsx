@@ -28,19 +28,8 @@ import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 
 import { Section } from "@/design-system/composites/Section";
-import { Button } from "@/design-system/ui/button";
 import { Spinner } from "@/design-system/ui/spinner";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/design-system/ui/alert-dialog";
 import { adminApi, estudioAdminApi, type Pedido } from "@/lib/admin/api";
 import { transiciones } from "@/lib/pedido-estados";
 import { ReservaEstudioSection } from "@/components/admin/estudio/ReservaEstudioSection";
@@ -48,7 +37,6 @@ import { NuevoTurnoEstudioForm } from "@/components/admin/estudio/NuevoTurnoEstu
 
 function TurnoVinculadoCard({ turnoId }: { turnoId: number }) {
   const qc = useQueryClient();
-  const [askCancel, setAskCancel] = useState(false);
   const estudioQ = useQuery({
     queryKey: ["admin", "estudio"],
     queryFn: () => estudioAdminApi.get(),
@@ -62,7 +50,9 @@ function TurnoVinculadoCard({ turnoId }: { turnoId: number }) {
   // turno en su propia pantalla y buscar "Zona peligrosa". Misma primitiva
   // que usa esa pantalla (setPedidoEstado → cambiar_estado), sin endpoint
   // nuevo: el motor ya excluye un turno cancelado de la cascada de estado y
-  // del reparto de pago combinado (#1308, D4/D6).
+  // del reparto de pago combinado (#1308, D4/D6). Sin diálogo de confirmación
+  // — la ✕ es instantánea, igual que sacar un suelto en `EstudioIncluyeList`:
+  // el gesto de sacarlo ya comunica que se cancela.
   const cancelarMut = useMutation({
     mutationFn: () => adminApi.setPedidoEstado(turnoId, "cancelado"),
     onSuccess: (t) => {
@@ -72,7 +62,6 @@ function TurnoVinculadoCard({ turnoId }: { turnoId: number }) {
         qc.invalidateQueries({ queryKey: ["admin", "pedido", t.pedido_principal_id] });
       }
       qc.invalidateQueries({ queryKey: ["admin", "pedidos"] });
-      setAskCancel(false);
     },
     onError: (e: Error) => toast.error("No se pudo cancelar", { description: e.message }),
   });
@@ -111,39 +100,17 @@ function TurnoVinculadoCard({ turnoId }: { turnoId: number }) {
           Abrir turno #{turnoQ.data.numero_pedido ?? turnoId} en su propia pantalla ↗
         </Link>
         {puedeCancelar && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="ml-auto border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={() => setAskCancel(true)}
+          <button
+            type="button"
+            onClick={() => cancelarMut.mutate()}
+            disabled={cancelarMut.isPending}
+            title="Cancelar turno"
+            className="ml-auto text-muted-foreground hover:text-destructive disabled:opacity-50"
           >
-            <X className="h-4 w-4 mr-1" /> Cancelar turno
-          </Button>
+            <X className="h-4 w-4" />
+          </button>
         )}
       </div>
-
-      <AlertDialog open={askCancel} onOpenChange={setAskCancel}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>
-              Cancelar turno #{turnoQ.data.numero_pedido ?? turnoId}
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              El turno pasa a estado <strong>Cancelado</strong> y libera el espacio reservado. Queda
-              en el historial (no se borra).
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Volver</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => cancelarMut.mutate()}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
-              Cancelar turno
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

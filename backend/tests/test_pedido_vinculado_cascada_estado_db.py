@@ -9,6 +9,12 @@ un turno ya más avanzado no retrocede, y un destino fuera de `FLOW`
 avanzar (bloqueado por una validación de negocio), el principal NO se
 revierte — queda en `turnos_vinculados_sin_avanzar` como advertencia.
 
+Además (mismo archivo, misma fixture): un turno NO puede transicionar por su
+cuenta a un paso de `FLOW` más avanzado que el de su principal ACTUAL — mismo
+criterio que el stock de equipos, que no se reserva en firme hasta que el
+pedido confirma. Puede igualar al principal (ej. re-confirmarse tras la
+cascada) pero no superarlo.
+
 OPT-IN y SEGURO POR DEFECTO (mismo gating que los demás *_db.py):
     DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test \
       RESERVAS_DB_TEST=1 SECRET_KEY=dev \
@@ -235,14 +241,16 @@ def test_cascada_no_sube_de_un_turno_al_principal(client_con_db, setup):
     """Transicionar un turno DIRECTO no debe mover al principal — discrimina
     una implementación que confunda 'cascada a los hijos' con 'cascada al
     padre' (ej. leer `pedido_principal_id` de la fila transicionada en vez de
-    buscar filas que APUNTEN a ella)."""
+    buscar filas que APUNTEN a ella). Usa 'cancelado' (fuera de FLOW, no
+    afectado por el gate de `test_turno_no_puede_superar_a_su_principal`) para
+    aislar esta verificación de esa otra regla."""
     from database import get_db
 
     turno_id = _crear_turno(client_con_db, "2031-06-02", estado="solicitado")
 
-    r = client_con_db.patch(f"/api/alquileres/{turno_id}", json={"estado": "confirmado"})
+    r = client_con_db.patch(f"/api/alquileres/{turno_id}", json={"estado": "cancelado"})
     assert r.status_code == 200, r.text
-    assert r.json()["estado"] == "confirmado"
+    assert r.json()["estado"] == "cancelado"
 
     conn = get_db()
     try:
@@ -251,6 +259,40 @@ def test_cascada_no_sube_de_un_turno_al_principal(client_con_db, setup):
         )
     finally:
         conn.close()
+
+
+def test_turno_no_puede_superar_a_su_principal_en_flow(client_con_db, setup):
+    """Un turno no puede confirmarse (ni avanzar más) antes que su pedido
+    principal — mismo criterio que el stock de equipos, que no se reserva en
+    firme hasta que el pedido confirma (pedido del dueño). Discrimina: sin el
+    gate, esta transición directa succede con 200 pese a que el principal
+    sigue en 'solicitado'."""
+    turno_id = _crear_turno(client_con_db, "2031-06-02", estado="solicitado")
+
+    r = client_con_db.patch(f"/api/alquileres/{turno_id}", json={"estado": "confirmado"})
+    assert r.status_code == 400, r.text
+
+
+def test_turno_puede_igualar_pero_no_superar_al_principal(client_con_db, setup):
+    """El principal avanza a 'confirmado' (cascada empuja al turno al mismo
+    nivel) — desde ahí, re-confirmar el turno (mismo nivel) sigue permitido,
+    pero saltar a 'retirado' (un paso más que el principal) se bloquea."""
+    from database import get_db
+
+    turno_id = _crear_turno(client_con_db, "2031-06-02", estado="solicitado")
+    client_con_db.patch(f"/api/alquileres/{PEDIDO_PRINCIPAL_ID}", json={"estado": "confirmado"})
+
+    conn = get_db()
+    try:
+        assert _estado_de(conn, turno_id) == "confirmado", "la cascada ya lo debería haber igualado"
+    finally:
+        conn.close()
+
+    r = client_con_db.patch(f"/api/alquileres/{turno_id}", json={"estado": "confirmado"})
+    assert r.status_code == 200, r.text
+
+    r2 = client_con_db.patch(f"/api/alquileres/{turno_id}", json={"estado": "retirado"})
+    assert r2.status_code == 400, r2.text
 
 
 def test_cascada_multiples_turnos_resultados_mixtos(client_con_db, setup):

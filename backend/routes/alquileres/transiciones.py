@@ -113,6 +113,35 @@ def _cascada_turnos_vinculados(conn, pedido_id: int, estado_nuevo: str, actor: s
     return advertencias
 
 
+def _turno_supera_a_principal(conn, p, estado_nuevo: str) -> str | None:
+    """Un turno vinculado no puede transicionar por su cuenta a un paso de
+    `FLOW` más avanzado que el de su pedido principal ACTUAL — mismo criterio
+    que el stock de equipos, que no se reserva en firme hasta que el pedido
+    confirma (pedido del dueño): si el principal no llegó a `estado_nuevo`,
+    el turno tampoco puede. Puede igualar al principal (ej. re-confirmarse
+    tras la cascada) pero no superarlo. `cancelado`/`borrador` (fuera de
+    `FLOW`) no se gatean acá — siguen siendo manuales e independientes
+    (D6, mismo criterio que `_cascada_turnos_vinculados`).
+
+    Devuelve el mensaje de error, o None si la transición es válida."""
+    principal_id = p["pedido_principal_id"]
+    if principal_id is None or estado_nuevo not in FLOW:
+        return None
+    principal = conn.execute(
+        "SELECT estado FROM alquileres WHERE id=%s", (principal_id,)
+    ).fetchone()
+    if not principal:
+        return None
+    idx_destino = FLOW.index(estado_nuevo)
+    idx_principal = FLOW.index(principal["estado"]) if principal["estado"] in FLOW else -1
+    if idx_destino > idx_principal:
+        return (
+            f"El turno no puede pasar a '{estado_nuevo}' antes que su pedido "
+            f"principal (que sigue en '{principal['estado']}')."
+        )
+    return None
+
+
 def _tiene_factura_activa(conn, pedido_id: int) -> bool:
     return bool(conn.execute(
         "SELECT 1 FROM facturas WHERE pedido_id=%s AND estado IN ('pendiente','emitida')",
@@ -191,6 +220,10 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
             400,
             f"No se puede pasar de '{estado_actual}' a '{estado_nuevo}'.",
         )
+
+    error_principal = _turno_supera_a_principal(conn, p, estado_nuevo)
+    if error_principal:
+        raise HTTPException(400, error_principal)
 
     if estado_nuevo == "borrador" and estado_actual != "borrador":
         if (p["monto_pagado"] or 0) > 0:
