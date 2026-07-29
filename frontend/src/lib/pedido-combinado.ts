@@ -11,7 +11,28 @@
  * El total del PRINCIPAL sigue siendo el vivo de `useCotizacion`
  * (`respetarPrecioItem: true`) — esta función no lo toca, solo lo suma.
  */
+import { format } from "date-fns";
+import { es } from "date-fns/locale";
+
 import type { PedidoGeneradoEdicion } from "@/lib/admin/api";
+
+/**
+ * Cómo se nombra un turno del Estudio DENTRO de su pedido — por su franja,
+ * nunca por un "#N" (#1308: "no quiero dobles pedidos fantasmas"). El turno es
+ * una parte del pedido, no una venta aparte: lo que lo identifica para el admin
+ * es cuándo es. Fuente única — la usan el rail del Desglose y el modal de pago,
+ * para que la misma cosa se llame igual en las dos pantallas.
+ */
+export function etiquetaTurno(t: {
+  fecha_desde?: string | null;
+  fecha_hasta?: string | null;
+}): string {
+  if (!t.fecha_desde) return "Estudio";
+  const desde = new Date(t.fecha_desde);
+  const dia = format(desde, "d MMM", { locale: es });
+  const hasta = t.fecha_hasta ? ` a ${format(new Date(t.fecha_hasta), "HH:mm")}` : "";
+  return `Estudio · ${dia} ${format(desde, "HH:mm")}${hasta}`;
+}
 
 export type TurnoConResta = PedidoGeneradoEdicion & { resta: number };
 

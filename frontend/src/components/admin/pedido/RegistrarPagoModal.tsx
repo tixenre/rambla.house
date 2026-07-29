@@ -24,7 +24,7 @@ import {
   type RepartoPagoLinea,
 } from "@/lib/admin/api";
 import { fmtArs } from "@/lib/format";
-import { combinarTotales } from "@/lib/pedido-combinado";
+import { combinarTotales, etiquetaTurno } from "@/lib/pedido-combinado";
 
 export function RegistrarPagoModal({
   pedidoId,
@@ -182,7 +182,7 @@ export function RegistrarPagoModal({
               <div>Pedido: resta {fmtArs(Math.max(0, total - pagado))}</div>
               {combinado.turnos.map((t) => (
                 <div key={t.id}>
-                  Turno #{t.numero_pedido ?? t.id}: resta {fmtArs(t.resta)}
+                  {etiquetaTurno(t)}: resta {fmtArs(t.resta)}
                 </div>
               ))}
             </div>

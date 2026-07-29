@@ -10,7 +10,7 @@ consumidores reales: detalle admin, PDF/mail, portal cliente, y el motor de
 facturación (`services/facturacion/engine.py`).
 """
 from database import to_datetime
-from services.precios import calcular_total, jornadas_periodo
+from services.precios import IVA_PCT, calcular_total, jornadas_periodo
 
 
 def desglose_de_pedido(conn, pedido: dict) -> dict:
@@ -115,4 +115,104 @@ def desglose_de_pedido(conn, pedido: dict) -> dict:
         descuento_manual_tipo, descuento_manual_pct, descuento_manual_monto,
         descuento_cliente_pct, descuento_jornadas_pct,
     )
+    return pedido
+
+
+def combinar_turnos_vinculados(conn, pedido: dict, *, expandir_periodo: bool = False) -> dict:
+    """Suma al desglose del pedido la plata de sus turnos del Estudio vinculados
+    (`pedido_principal_id`, #1308) — mutación in-place, se corre DESPUÉS de
+    `desglose_de_pedido`. Un pedido de alquiler y su turno del Estudio son UNA
+    sola venta de cara al cliente ("cobrar una sola cosa y facturar", pedido del
+    dueño): esta función es la que hace que un consumidor pueda preguntar "cuánto
+    sale TODO este pedido" sin saber que por debajo son dos filas.
+
+    **Opt-in, nunca default.** `desglose_de_pedido` sigue siendo por-fila a
+    propósito: el chequeo `desglose_divergente` (`reportes/reconciliacion.py`)
+    valida fila por fila que `desglose(items) == monto_total`, así que un
+    desglose combinado por default marcaría divergente a todo principal con
+    turnos → mail diario al dueño. Hoy el único consumidor es el motor de
+    facturación (`services/facturacion/engine.py::_get_pedido`).
+
+    **Suma totales YA congelados, no mergea ítems.** Meter los ítems del turno
+    en `pedido["items"]` y recalcular haría que los descuentos del principal
+    (cliente/jornadas/manual) se apliquen sobre la tarifa negociada del Estudio
+    — plata cambiada en silencio. Mismo criterio que el pago combinado
+    (`routes/alquileres/pagos.py::_agregar_pago_combinado`) y que
+    `frontend/src/lib/pedido-combinado.ts`: se suman `monto_total`/`monto_pagado`
+    persistidos, nada se recotiza.
+
+    **NO toca la base** — `alquileres.monto_total` de cada fila queda intacto
+    (cada fila conserva su plata: de eso dependen la liquidación, la economía del
+    Estudio y la reconciliación). La combinación es de LECTURA.
+
+    Filtro de turnos: `estado <> 'cancelado'`, byte-idéntico al del pago
+    combinado — así lo facturado y lo cobrado cierran entre sí.
+
+    `expandir_periodo=True` estira además `fecha_desde`/`fecha_hasta` para
+    cubrir la franja de los turnos. Es SOLO para el comprobante fiscal (que
+    declara el período de servicio de todo lo que factura); en una pantalla
+    las fechas del alquiler tienen que seguir siendo las del alquiler — la
+    franja del Estudio se muestra aparte, no estirando el rango de días.
+    """
+    if pedido.get("pedido_principal_id") is not None:
+        # Es un turno: nunca puede ser principal de otro (`_resolver_pedido_principal`
+        # exige `tipo='diaria'`), así que no hay nada que combinar ni recursión posible.
+        return pedido
+
+    turnos = conn.execute(
+        "SELECT id, numero_pedido, fecha_desde, fecha_hasta, monto_total, monto_pagado "
+        "FROM alquileres WHERE pedido_principal_id = %s AND estado <> 'cancelado' "
+        "ORDER BY fecha_desde, id",
+        (pedido["id"],),
+    ).fetchall()
+    if not turnos:
+        return pedido
+
+    extra_total = sum(t["monto_total"] or 0 for t in turnos)
+    extra_pagado = sum(t["monto_pagado"] or 0 for t in turnos)
+
+    # El turno no lleva descuento propio (su tarifa ya es la negociada), así que
+    # su aporte entra igual al bruto y al neto — `bruto - descuento == neto` se
+    # mantiene coherente para cualquier consumidor de display.
+    pedido["bruto"] = (pedido.get("bruto") or 0) + extra_total
+    pedido["monto_total"] = (pedido.get("monto_total") or 0) + extra_total
+    pedido["monto_neto"] = pedido["monto_total"]
+    pedido["monto_pagado"] = (pedido.get("monto_pagado") or 0) + extra_pagado
+
+    # IVA recalculado sobre el neto COMBINADO con el perfil fiscal del PRINCIPAL:
+    # el turno no tiene perfil propio (el INSERT del Estudio no copia
+    # `perfil_fiscal_id`/`productora_id`) y un comprobante tiene un solo receptor
+    # → una sola alícuota. Misma fórmula que `services.precios.calcular_total`.
+    pedido["iva_monto"] = (
+        int(round(pedido["monto_total"] * IVA_PCT / 100)) if pedido.get("con_iva") else 0
+    )
+    pedido["total_con_iva"] = pedido["monto_total"] + pedido["iva_monto"]
+
+    if expandir_periodo:
+        # Solo para el comprobante fiscal: el período declarado cubre también la
+        # franja del turno, que puede caer fuera del rango de días del alquiler.
+        validas_desde = [
+            to_datetime(f)
+            for f in [pedido.get("fecha_desde"), *(t["fecha_desde"] for t in turnos)]
+            if f
+        ]
+        validas_hasta = [
+            to_datetime(f)
+            for f in [pedido.get("fecha_hasta"), *(t["fecha_hasta"] for t in turnos)]
+            if f
+        ]
+        if validas_desde:
+            pedido["fecha_desde"] = min(validas_desde)
+        if validas_hasta:
+            pedido["fecha_hasta"] = max(validas_hasta)
+
+    pedido["turnos_combinados"] = [
+        {
+            "pedido_id": t["id"],
+            "fecha_desde": t["fecha_desde"],
+            "fecha_hasta": t["fecha_hasta"],
+            "monto_total": t["monto_total"] or 0,
+        }
+        for t in turnos
+    ]
     return pedido

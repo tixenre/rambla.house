@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, Query
 
 from database import get_db, now_ar, row_to_dict
 from auth.guards import require_admin
+from pedidos_vinculados import SIN_PRINCIPAL_SQL
 from tipos_pedido import TIPOS_SIN_RETIRO_SQL
 
 router = APIRouter()
@@ -23,12 +24,18 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
     manana  = (hoy_date + datetime.timedelta(days=1)).isoformat()
     mes_ini = hoy[:7] + "-01"
     with get_db() as conn:
+        # `SIN_PRINCIPAL_SQL` en los conteos y listas de PEDIDOS: un turno del
+        # Estudio vinculado no es un pedido aparte (#1308) — su principal ya está
+        # en la lista. `ingresos_mes` (una SUM sin identidad) y el `calendario`
+        # (agenda real del espacio) NO lo llevan a propósito: ahí la fila del
+        # turno aporta plata/ocupación reales que no están duplicadas.
         pendientes = conn.execute(
-            "SELECT COUNT(*) FROM alquileres WHERE estado='solicitado'"
+            f"SELECT COUNT(*) FROM alquileres WHERE estado='solicitado' AND {SIN_PRINCIPAL_SQL}"
         ).fetchone()[0]
 
         activos = conn.execute(
-            "SELECT COUNT(*) FROM alquileres WHERE estado IN ('confirmado','retirado') AND fecha_hasta >= %s", (hoy,)
+            "SELECT COUNT(*) FROM alquileres WHERE estado IN ('confirmado','retirado') "
+            f"AND fecha_hasta >= %s AND {SIN_PRINCIPAL_SQL}", (hoy,)
         ).fetchone()[0]
 
         salen_hoy = conn.execute(f"""
@@ -36,6 +43,7 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
             FROM alquileres p
             WHERE estado IN ('confirmado','retirado')
               AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
+              AND p.{SIN_PRINCIPAL_SQL}
               AND p.fecha_desde::date = %s
             ORDER BY p.fecha_desde
         """, (hoy,)).fetchall()
@@ -44,6 +52,7 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
             SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
             WHERE estado IN ('confirmado','retirado') AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
+              AND p.{SIN_PRINCIPAL_SQL}
               AND p.fecha_hasta::date = %s
             ORDER BY p.fecha_hasta
         """, (hoy,)).fetchall()
@@ -52,6 +61,7 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
             SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
             WHERE estado IN ('confirmado','retirado') AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
+              AND p.{SIN_PRINCIPAL_SQL}
               AND p.fecha_hasta::date = %s
             ORDER BY p.fecha_hasta
         """, (manana,)).fetchall()

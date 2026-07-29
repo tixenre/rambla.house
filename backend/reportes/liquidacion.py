@@ -85,8 +85,18 @@ def filas_atribucion(conn, desde: str, hasta: str) -> list[dict]:
             GROUP BY pedido_id
         )
         SELECT r.fecha_saldado::date                              AS fecha,
-               al.id                                              AS pedido_id,
-               COALESCE(al.numero_pedido, al.id)                  AS numero_pedido,
+               -- Un turno del Estudio vinculado NO es un pedido aparte en el
+               -- reporte (#1308): su aporte se agrupa bajo el pedido principal,
+               -- que es la venta real. La ATRIBUCIÓN por dueño no se toca (el
+               -- ítem centinela sigue atribuyendo al Estudio) — se consolida
+               -- solo quién "es" el pedido. Trade-off aceptado: si el principal
+               -- y su turno saldan en MESES distintos (pagos parciales, o un
+               -- turno agregado después de cobrar), el mismo pedido aparece en
+               -- los dos meses y el conteo multi-mes sobre-cuenta en 1 — vale
+               -- más que mostrarle al dueño un pedido fantasma todos los meses.
+               COALESCE(al.pedido_principal_id, al.id)            AS pedido_id,
+               COALESCE(pp.numero_pedido, pp.id,
+                        al.numero_pedido, al.id)                  AS numero_pedido,
                COALESCE(c.nombre || ' ' || c.apellido, al.cliente_nombre) AS cliente,
                COALESCE(e.dueno, 'Rambla')                        AS dueno,
                COALESCE(e.nombre, pi.nombre_libre)                AS equipo,
@@ -99,6 +109,7 @@ def filas_atribucion(conn, desde: str, hasta: str) -> list[dict]:
         JOIN alquiler_items pi ON pi.pedido_id = al.id
         LEFT JOIN equipos e ON e.id = pi.equipo_id
         LEFT JOIN clientes c ON c.id = al.cliente_id
+        LEFT JOIN alquileres pp ON pp.id = al.pedido_principal_id
         JOIN tot t ON t.pedido_id = al.id
     """
     rows = conn.execute(sql, (desde, hasta)).fetchall()

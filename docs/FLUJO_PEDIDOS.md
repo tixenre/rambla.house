@@ -154,3 +154,32 @@ de equipos sueltos).
 **Puente Talleres → Pedidos:** la pestaña "Precios y pago" de una edición de taller lista los
 pedidos mensuales que generó (`GET /admin/ediciones/{id}/pedidos`), cada uno linkeando de vuelta a
 su página real — para administrar el cobro sin salir de Talleres.
+
+### El turno del Estudio vinculado a un pedido de alquiler (#1308)
+
+Un pedido de alquiler puede llevar horas del Estudio: se agregan desde la sección **"Turnos del
+Estudio"** de su propia página. Por debajo eso crea una fila aparte en `alquileres`
+(`tipo='estudio'` + `pedido_principal_id` apuntando al pedido), porque una franja horaria y un rango
+de días son granularidades de tiempo incompatibles en las mismas columnas — y porque la economía del
+Estudio se atribuye distinto.
+
+**Pero eso es un detalle interno: no es un pedido.** Pedido del dueño, textual: *"no quiero dobles
+pedidos fantasmas… quiero cobrar una sola cosa y facturar y establecer el estado"*. En consecuencia,
+un turno vinculado:
+
+| Se comporta como… | Cómo |
+|---|---|
+| **Un solo estado** | La cascada arrastra el turno al mismo paso de `FLOW` que su principal, y el gate `_turno_supera_a_principal` le impide adelantarse — si el pedido no confirmó, el turno tampoco. |
+| **Un solo cobro** | `_agregar_pago_combinado` reparte un pago entre el pedido y sus turnos (satura el principal primero). |
+| **Una sola factura** | `finanzas_flujo.pedido.combinar_turnos_vinculados` suma su plata al importe del comprobante del principal; facturar el turno solo da 400. |
+| **Una sola fila en pantalla** | Se excluye (con su plata consolidada en el principal) de: lista de pedidos, cuentas por cobrar, portal del cliente, historial del cliente, dashboard y liquidación. Su página propia redirige al pedido real. |
+| **Un solo mail** | No dispara recordatorio de retiro ni mail de confirmación propios. |
+
+**Dónde SÍ se ve la fila, porque ahí no es ruido:** la agenda (calendario admin, feed iCal, agenda
+del Estudio — es ocupación real del espacio), la economía del Estudio (estadísticas y atribución por
+dueño — es una unidad de negocio propia) y el export contable / backup (`dataio`, que también
+exporta `tipo` + el vínculo por número de pedido para no revivirlo desvinculado al restaurar).
+
+Un turno del Estudio **suelto** (sin `pedido_principal_id`, dado de alta desde la agenda) sigue
+siendo un pedido de primera clase en todas esas superficies. El eje es la columna, no el `tipo`:
+fuente única `backend/pedidos_vinculados.py`, guard `test_pedidos_vinculados_source_scan.py`.

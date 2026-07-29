@@ -2,12 +2,25 @@
 
 Distinto del eje de `tipos_pedido.py` (que clasifica por `alquileres.tipo`):
 acá el filtro es "¿esta fila es un turno del Estudio vinculado a otro pedido,
-o es un pedido de primera clase?" — un turno vinculado (`pedido_principal_id`
-no-null) se administra desde la página de su principal ("Turnos del Estudio")
-y no debe listarse como venta propia en el worklist operativo de pedidos, pero
-sigue siendo una fila real de `alquileres` con su propia plata/agenda en las
-superficies donde eso importa (historial del cliente, export contable,
-backup, calendario) — no se excluye ahí.
+o es un pedido de primera clase?".
+
+**Un turno vinculado (`pedido_principal_id` no-null) NO es un pedido de cara a
+nadie** (#1308, pedido explícito del dueño: "no quiero dobles pedidos
+fantasmas... cobrar una sola cosa y facturar y establecer el estado"). Existe
+como fila aparte por una sola razón: su granularidad de tiempo (una franja
+horaria) es incompatible con el rango de días de un alquiler, y su economía
+pertenece al Estudio. Pero en toda superficie donde lo mira un humano se
+excluye la fila y **se consolida su plata en el principal**: lista de pedidos,
+cuentas por cobrar, portal del cliente, historial del cliente, dashboard,
+recordatorios, liquidación (identidad) y la factura (una sola, con el importe
+combinado — `finanzas_flujo.pedido.combinar_turnos_vinculados`).
+
+**Dónde SÍ sigue apareciendo la fila**, porque ahí no es ruido sino un hecho
+real que se perdería: la **agenda** (calendario admin, feed iCal, agenda del
+Estudio — es ocupación real del espacio), la **economía del Estudio**
+(`estadisticas.py`, atribución por dueño en liquidación — el Estudio es una
+unidad de negocio propia) y el **export contable / backup** (`dataio`, que
+además exporta el vínculo para no revivirlo como pedido suelto al restaurar).
 
 Vive en su propio módulo, no dentro de `tipos_pedido.py`: ese archivo está
 scopeado por su propio docstring a la columna `tipo`, y su guard mecánico

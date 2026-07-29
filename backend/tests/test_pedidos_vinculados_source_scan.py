@@ -14,20 +14,36 @@ import re
 
 import pytest
 
+import clientes.queries.historial as clientes_historial
+import jobs.recordatorios as jobs_recordatorios
 import pedidos_vinculados
 import routes.alquileres.pedidos as alquileres_pedidos
+import routes.cliente_portal.pedidos as portal_pedidos
+import routes.dashboard as admin_dashboard
 import routes.equipos.dashboard as equipos_dashboard
 
 pytestmark = pytest.mark.unit
 
 _LITERAL = re.compile(r"pedido_principal_id\s+IS\s+(?:NOT\s+)?NULL", re.IGNORECASE)
 
+# Todo módulo que filtre por el eje `pedido_principal_id` va acá — es el candado
+# que evita que la próxima superficie que oculte (o muestre) un turno vinculado
+# lo haga con un literal suelto en vez de la constante compartida.
+_CONSUMIDORES = [
+    alquileres_pedidos,
+    equipos_dashboard,
+    portal_pedidos,
+    clientes_historial,
+    jobs_recordatorios,
+    admin_dashboard,
+]
+
 
 def _codigo_sin_comentarios(src: str) -> str:
     return "\n".join(line for line in src.splitlines() if not line.strip().startswith("#"))
 
 
-@pytest.mark.parametrize("modulo", [alquileres_pedidos, equipos_dashboard])
+@pytest.mark.parametrize("modulo", _CONSUMIDORES)
 def test_modulo_no_reimplementa_el_literal(modulo):
     src = _codigo_sin_comentarios(inspect.getsource(modulo))
     m = _LITERAL.search(src)
@@ -46,6 +62,26 @@ def test_equipos_dashboard_usa_la_constante_compartida():
     src = inspect.getsource(equipos_dashboard)
     assert "SIN_PRINCIPAL_SQL" in src
     assert "TURNO_VINCULADO_SQL" in src
+
+
+@pytest.mark.parametrize("modulo", _CONSUMIDORES)
+def test_modulo_importa_la_constante(modulo):
+    """No alcanza con no reimplementar el literal: el módulo tiene que estar
+    filtrando de verdad. Si alguien saca el filtro de una de estas superficies,
+    el turno vinculado vuelve a asomar como pedido propio ahí."""
+    src = inspect.getsource(modulo)
+    assert "SIN_PRINCIPAL_SQL" in src, (
+        f"{modulo.__name__} está en la lista de consumidores del eje pero no usa "
+        "SIN_PRINCIPAL_SQL — ¿se removió el filtro de turnos vinculados?"
+    )
+
+
+def test_recordatorios_filtra_por_el_eje_y_no_por_tipo_estudio():
+    """El recordatorio de retiro excluye el turno VINCULADO, no `tipo='estudio'`:
+    un turno del Estudio suelto es un evento real y debe seguir recibiéndolo."""
+    src = inspect.getsource(jobs_recordatorios._pedidos_para_retiro)
+    assert "SIN_PRINCIPAL_SQL" in src
+    assert "'estudio'" not in src
 
 
 class TestEsTurnoVinculado:

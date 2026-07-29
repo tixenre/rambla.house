@@ -1,4 +1,10 @@
-import { createLazyFileRoute, useNavigate, useParams, Link } from "@tanstack/react-router";
+import {
+  createLazyFileRoute,
+  Navigate,
+  useNavigate,
+  useParams,
+  Link,
+} from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
@@ -86,7 +92,7 @@ import { computeJornadas, parseDateTimeParts, toLocalISO } from "@/lib/rental-da
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useCotizacion, descuentoLabel } from "@/lib/cotizacion";
-import { combinarTotales } from "@/lib/pedido-combinado";
+import { combinarTotales, etiquetaTurno } from "@/lib/pedido-combinado";
 import { SegmentedControl } from "@/design-system/ui/segmented-control";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { fmtArs } from "@/lib/format";
@@ -250,6 +256,18 @@ function PedidoEditorPage() {
           <Skeleton className="h-96 w-full rounded-xl" />
         </div>
       </div>
+    );
+  }
+
+  // Un turno del Estudio vinculado NO tiene página propia (#1308, "no quiero
+  // dobles pedidos fantasmas"): es la misma venta que su pedido principal y se
+  // administra desde ahí, en la sección "Turnos del Estudio". Los links viejos
+  // (feed iCal, historiales, un tab guardado) aterrizan igual — en el pedido
+  // real. Sin loop posible: un principal nunca es turno de otro
+  // (`_resolver_pedido_principal` exige `tipo='diaria'`).
+  if (p.pedido_principal) {
+    return (
+      <Navigate to="/admin/pedidos/$id" params={{ id: String(p.pedido_principal.id) }} replace />
     );
   }
 
@@ -452,25 +470,8 @@ function PedidoEditorPage() {
             </div>
           )}
 
-          {/* Breadcrumb de vuelta — este turno se creó desde la sección
-              "Turnos del Estudio" de otro pedido (#1308). */}
-          {p.pedido_principal && (
-            <div className="flex items-start gap-2 rounded-lg border hairline bg-muted/20 px-3 py-2.5 text-sm">
-              <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                Turno vinculado al pedido{" "}
-                <Link
-                  to="/admin/pedidos/$id"
-                  params={{ id: String(p.pedido_principal.id) }}
-                  className="underline text-ink"
-                >
-                  #{p.pedido_principal.numero_pedido ?? p.pedido_principal.id}
-                </Link>
-                {p.pedido_principal.cliente_nombre ? ` (${p.pedido_principal.cliente_nombre})` : ""}
-                .
-              </div>
-            </div>
-          )}
+          {/* (El breadcrumb "Turno vinculado al pedido #N" se retiró: un turno
+              vinculado ya no llega hasta acá — redirige a su principal, arriba.) */}
 
           {/* Banner slot fijo del Estudio — su verdad es el slot recurrente,
               no este pedido (que es solo una muestra mensual). A diferencia
@@ -935,15 +936,7 @@ function PedidoEditorPage() {
               {combinado.turnos.length > 0 && (
                 <>
                   {combinado.turnos.map((t) => (
-                    <BdRow
-                      key={t.id}
-                      l={`Turno #${t.numero_pedido ?? t.id}${
-                        t.fecha_desde
-                          ? ` · ${format(new Date(t.fecha_desde), "d MMM", { locale: es })}`
-                          : ""
-                      }`}
-                      v={fmtArs(t.monto_total)}
-                    />
+                    <BdRow key={t.id} l={etiquetaTurno(t)} v={fmtArs(t.monto_total)} />
                   ))}
                   <div className="border-t hairline my-1" />
                   <BdRow l="Total combinado" v={fmtArs(combinado.totalCombinado)} strong />

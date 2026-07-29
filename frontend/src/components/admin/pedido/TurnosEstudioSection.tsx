@@ -24,7 +24,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clapperboard, X } from "lucide-react";
-import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 
 import { Section } from "@/design-system/composites/Section";
@@ -86,19 +85,13 @@ function TurnoVinculadoCard({ turnoId }: { turnoId: number }) {
         }}
       />
       <div className="flex items-center gap-2 px-1">
-        {/* El estado puede haber cambiado SOLO (cascada #1308, "avanzan
-            juntos" desde el pedido principal) sin que el admin haya tocado
-            esta tarjeta — visible acá para no depender de abrir la pantalla
-            propia del turno. `ReservaEstudioSection` no lo muestra (la
-            página standalone del turno ya tiene su propio FlowStrip). */}
-        <EstadoBadge estado={turnoQ.data.estado} />
-        <Link
-          to="/admin/pedidos/$id"
-          params={{ id: String(turnoId) }}
-          className="text-xs text-muted-foreground underline hover:text-ink"
-        >
-          Abrir turno #{turnoQ.data.numero_pedido ?? turnoId} en su propia pantalla ↗
-        </Link>
+        {/* Cancelado es el único estado del turno que puede diferir del pedido:
+            la cascada lo arrastra hacia adelante y el gate le impide adelantarse
+            (#1308), así que mostrar su estado en el camino feliz sería repetir
+            el del pedido. El link "Abrir turno #N en su propia pantalla" se
+            retiró: el turno no es un pedido aparte y ya no tiene pantalla
+            propia — se administra acá. */}
+        {turnoQ.data.estado === "cancelado" && <EstadoBadge estado="cancelado" />}
         {puedeCancelar && (
           <button
             type="button"

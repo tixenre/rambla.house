@@ -257,6 +257,16 @@ class Alquiler(_Base):
     estado: str = "solicitado"
     fecha_desde: str
     fecha_hasta: str
+    # Familia del pedido (`tipos_pedido.py`) — sin esto, un ciclo export→import
+    # devolvía TODO como 'diaria': un turno del Estudio o un pedido de taller
+    # revivían como alquiler normal, con su rango contable leído como fechas
+    # reales.
+    tipo: str = "diaria"
+    # Vínculo a un pedido principal (#1308) — por NÚMERO, no por id: los ids
+    # difieren entre ambientes (mismo criterio que `equipo_slug` en los items).
+    # Se resuelve en una segunda pasada del import, porque el principal puede
+    # venir después que su turno en el archivo.
+    pedido_principal_numero: int | None = None
     # Montos
     monto_total: int = 0
     monto_pagado: int = 0

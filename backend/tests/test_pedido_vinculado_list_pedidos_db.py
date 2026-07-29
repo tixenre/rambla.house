@@ -200,11 +200,18 @@ def test_cuentas_por_cobrar_ignora_turno_cancelado(client_con_db, setup):
     assert fila["pendiente"] == 40000  # solo el saldo propio del principal
 
 
-def test_historial_de_cliente_sigue_mostrando_las_2_filas(client_con_db, setup):
-    """NO se toca — es información real de la cuenta del cliente, no ruido."""
+def test_historial_de_cliente_consolida_el_turno_en_el_principal(client_con_db, setup):
+    """CAMBIO DE CRITERIO (#1308, pedido explícito del dueño: "no quiero dobles
+    pedidos fantasmas"): antes esta superficie mostraba las 2 filas a propósito
+    ("es información real de la cuenta"). Ahora muestra UNA sola — la del pedido
+    real — con la plata del turno ya adentro, para que el total gastado no
+    quede por debajo de lo que el cliente pagó."""
     _crear_turno(client_con_db, 1, 30000, 0)
     r = client_con_db.get(f"/api/clientes/{CLIENTE_ID}/pedidos")
     assert r.status_code == 200, r.text
-    ids = {p["id"] for p in r.json()}
-    assert PEDIDO_PRINCIPAL_ID in ids
-    assert PEDIDO_PRINCIPAL_ID + 1 in ids
+    por_id = {p["id"]: p for p in r.json()}
+
+    assert PEDIDO_PRINCIPAL_ID in por_id
+    assert PEDIDO_PRINCIPAL_ID + 1 not in por_id, "el turno vinculado ya no es fila propia"
+    assert por_id[PEDIDO_PRINCIPAL_ID]["monto_total"] == 50000 + 30000
+    assert por_id[PEDIDO_PRINCIPAL_ID]["turnos_estudio"] == 1

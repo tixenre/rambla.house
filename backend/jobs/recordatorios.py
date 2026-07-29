@@ -24,6 +24,7 @@ from datetime import timedelta
 
 from database import get_db, now_ar, row_to_dict
 from jobs.recordatorios_config import resolve as _resolve_config
+from pedidos_vinculados import SIN_PRINCIPAL_SQL
 from routes.alquileres import _get_alquiler_items, _pedido_email_context
 from services.email import send_email
 from tipos_pedido import TIPOS_SIN_RETIRO_SQL
@@ -54,6 +55,16 @@ def _pedidos_para_retiro(conn, hoy, dias_antes: int) -> list[dict]:
     `_regenerar_pedidos_slot`), así que el filtro de abajo ya los excluye EN LA
     PRÁCTICA; este filtro es explícito a propósito, para no depender de esa
     coincidencia si algún día alguno de los dos empieza a llevar un email real.
+
+    `SIN_PRINCIPAL_SQL` (`pedidos_vinculados.py`) excluye los turnos del Estudio
+    VINCULADOS a un pedido de alquiler (#1308): son una sola venta con su
+    principal, que ya manda su propio recordatorio — sin este filtro el cliente
+    recibía DOS mails, uno de ellos por un "pedido" que para él no existe. Acá
+    la coincidencia de `cliente_email` NO salva: el turno vinculado hereda
+    forzosamente el email del principal (`_resolver_pedido_principal`) y la
+    cascada lo deja en `confirmado`. Es por el EJE, no por `tipo`: un turno del
+    Estudio SUELTO (sin principal) sí es un evento propio y sigue recibiendo su
+    recordatorio.
     """
     dia_ini = (hoy + timedelta(days=dias_antes)).replace(
         hour=0, minute=0, second=0, microsecond=0
@@ -68,6 +79,7 @@ def _pedidos_para_retiro(conn, hoy, dias_antes: int) -> list[dict]:
         FROM alquileres a
         WHERE a.estado IN ({ph})
           AND a.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
+          AND a.{SIN_PRINCIPAL_SQL}
           AND a.fecha_desde >= %s
           AND a.fecha_desde <  %s
           AND a.cliente_email IS NOT NULL

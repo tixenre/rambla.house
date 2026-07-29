@@ -376,10 +376,13 @@ def export_alquileres(conn) -> list[dict]:
         SELECT a.numero_pedido, a.cliente_nombre, a.cliente_telefono,
                a.estado, a.fecha_desde, a.fecha_hasta, a.monto_total,
                a.monto_pagado, a.descuento_pct, a.notas, a.fuente,
+               a.tipo,
+               pp.numero_pedido AS pedido_principal_numero,
                a.id AS alquiler_id,
                c.email AS cliente_email
         FROM alquileres a
         LEFT JOIN clientes c ON c.id = a.cliente_id
+        LEFT JOIN alquileres pp ON pp.id = a.pedido_principal_id
         WHERE a.numero_pedido IS NOT NULL
         ORDER BY a.numero_pedido
     """).fetchall()
@@ -445,6 +448,12 @@ def export_alquileres(conn) -> list[dict]:
                 estado=r["estado"] or "solicitado",
                 fecha_desde=_to_iso(r["fecha_desde"]) or "",
                 fecha_hasta=_to_iso(r["fecha_hasta"]) or "",
+                tipo=r["tipo"] or "diaria",
+                pedido_principal_numero=(
+                    int(r["pedido_principal_numero"])
+                    if r["pedido_principal_numero"] is not None
+                    else None
+                ),
                 monto_total=int(r["monto_total"] or 0),
                 monto_pagado=int(r["monto_pagado"] or 0),
                 descuento_pct=float(r["descuento_pct"] or 0.0),
