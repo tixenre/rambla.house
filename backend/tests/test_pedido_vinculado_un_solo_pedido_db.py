@@ -466,3 +466,52 @@ def test_liquidacion_agrupa_el_turno_bajo_el_numero_del_principal(client_con_db,
     # Ninguna fila se identifica con el turno: todas caen bajo el principal.
     assert all(f["pedido_id"] == PRINCIPAL_ID for f in del_set)
     assert all(f["numero_pedido"] == 949910 for f in del_set)
+
+
+# ── Borrar el principal se lleva sus turnos ──────────────────────────────────
+
+
+def _existe(pedido_id: int) -> bool:
+    from database import get_db
+
+    conn = get_db()
+    try:
+        return conn.execute(
+            "SELECT 1 FROM alquileres WHERE id = %s", (pedido_id,)
+        ).fetchone() is not None
+    finally:
+        conn.close()
+
+
+def test_borrar_el_principal_se_lleva_su_turno(client_con_db, setup):
+    """Discrimina: la FK es `ON DELETE SET NULL`, así que sin el borrado en
+    cascada el turno SOBREVIVÍA solo —con su número y su estado— y volvía a la
+    lista como un pedido más. Ese es el "doble pedido fantasma" (uno con número
+    y otro sin) que reportó el dueño después de borrar el pedido que los unía."""
+    r = client_con_db.delete(f"/api/alquileres/{PRINCIPAL_ID}")
+    assert r.status_code == 204, r.text
+    assert not _existe(PRINCIPAL_ID)
+    assert not _existe(TURNO_ID), "el turno vinculado tiene que irse con su pedido"
+    # El turno SUELTO no se toca: es un pedido de primera clase del Estudio.
+    assert _existe(TURNO_SUELTO_ID)
+
+
+def test_no_se_borra_un_pedido_cuyo_turno_tiene_plata_cobrada(client_con_db, setup):
+    """La plata cobrada no desaparece en silencio: si el turno tiene un cobro,
+    se frena TODO el borrado (ni el pedido ni el turno), igual que la ✕ del
+    turno suelto."""
+    from database import get_db
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE alquileres SET monto_pagado = 10000 WHERE id = %s", (TURNO_ID,)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    r = client_con_db.delete(f"/api/alquileres/{PRINCIPAL_ID}")
+    assert r.status_code == 409, r.text
+    assert "plata cobrada" in r.json()["detail"]
+    assert _existe(PRINCIPAL_ID) and _existe(TURNO_ID), "no se borra nada a medias"

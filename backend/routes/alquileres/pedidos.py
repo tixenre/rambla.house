@@ -237,6 +237,32 @@ def delete_pedido(id: int, request: Request):
                     409,
                     "Este turno ya tiene plata cobrada. Anulá el pago antes de sacarlo del pedido.",
                 )
+            # Los turnos del Estudio vinculados se van CON el pedido (#1308). La
+            # FK es `ON DELETE SET NULL`, así que sin esto el turno sobrevivía
+            # solo, con su propio número y su propio estado → volvía a aparecer
+            # en la lista como un pedido más: el "doble pedido fantasma" que toda
+            # esta iniciativa vino a matar (el dueño lo reportó viendo uno con
+            # número y otro sin, después de borrar el pedido que los unía).
+            # Un turno vinculado no es una venta aparte: es contenido del pedido,
+            # como un ítem — si se borra el pedido, se borra su contenido.
+            turnos = conn.execute(
+                "SELECT id, numero_pedido, monto_pagado FROM alquileres "
+                "WHERE pedido_principal_id = %s",
+                (id,),
+            ).fetchall()
+            # Misma línea roja que la ✕ de un turno suelto: la plata cobrada no
+            # se borra en silencio. Si algún turno tiene cobros, se frena TODO el
+            # borrado (no se borra el pedido a medias).
+            if any((t["monto_pagado"] or 0) > 0 for t in turnos):
+                raise HTTPException(
+                    409,
+                    "El turno del Estudio de este pedido ya tiene plata cobrada. "
+                    "Anulá el pago antes de borrar el pedido.",
+                )
+            for t in turnos:
+                conn.execute("DELETE FROM alquiler_items WHERE pedido_id=%s", (t["id"],))
+                conn.execute("DELETE FROM alquiler_pagos WHERE pedido_id=%s", (t["id"],))
+                conn.execute("DELETE FROM alquileres     WHERE id=%s", (t["id"],))
             # Borrar ítems, pagos e historicos asociados (FK cascade si está activada, pero por las dudas)
             conn.execute("DELETE FROM alquiler_items  WHERE pedido_id=%s", (id,))
             conn.execute("DELETE FROM alquiler_pagos  WHERE pedido_id=%s", (id,))
