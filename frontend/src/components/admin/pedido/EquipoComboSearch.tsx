@@ -29,6 +29,7 @@ const MAX_VISIBLE = 50;
 export function EquipoComboSearch({
   existing,
   stockMap,
+  stockConfiable = true,
   onAdd,
   placeholder = "Buscar para añadir equipos…",
   className,
@@ -36,6 +37,16 @@ export function EquipoComboSearch({
   existing: DraftItem[];
   /** equipo_id → libres tras TODO el draft (backend, kits expandidos; con signo). */
   stockMap: Record<string, number>;
+  /** `false` cuando `stockMap` no es un dato real (ej. el buscador de sueltos
+   *  de un turno del Estudio, que no tiene un endpoint de disponibilidad por
+   *  franja horaria todavía): sin esto, el fallback naive de `disponibleDe`
+   *  ("cantidad total del equipo menos lo ya cargado EN ESTA lista", que
+   *  ignora cualquier otra reserva superpuesta) se mostraba como si fuera la
+   *  verdad — "5 libres" mintiendo cuando en realidad podían estar todas
+   *  ocupadas en esa franja. El gate real sigue siendo el 409 del backend al
+   *  guardar (los sueltos son stock DURO); acá solo se deja de fingir
+   *  certeza que no existe. */
+  stockConfiable?: boolean;
   onAdd: (eq: Equipo) => void;
   placeholder?: string;
   className?: string;
@@ -107,7 +118,7 @@ export function EquipoComboSearch({
     } else if (e.key === "Enter") {
       e.preventDefault();
       const eq = visibles[focusedIdx];
-      if (eq && disponibleDe(eq) > 0) onAdd(eq);
+      if (eq && (!stockConfiable || disponibleDe(eq) > 0)) onAdd(eq);
     } else if (e.key === "Escape") {
       setOpen(false);
       setFocusedIdx(-1);
@@ -149,7 +160,7 @@ export function EquipoComboSearch({
             <ul ref={listRef} role="listbox" id="equipo-combo-list" className="divide-y hairline">
               {visibles.map((eq, idx) => {
                 const disponible = disponibleDe(eq);
-                const sinStock = disponible <= 0;
+                const sinStock = stockConfiable && disponible <= 0;
                 const isFocused = idx === focusedIdx;
                 return (
                   <li
@@ -203,7 +214,11 @@ export function EquipoComboSearch({
                             : "bg-muted text-muted-foreground",
                         )}
                       >
-                        {sinStock ? "sin stock" : `${disponible} libres`}
+                        {!stockConfiable
+                          ? "stock sin verificar"
+                          : sinStock
+                            ? "sin stock"
+                            : `${disponible} libres`}
                       </span>
                       <Plus
                         className={cn(

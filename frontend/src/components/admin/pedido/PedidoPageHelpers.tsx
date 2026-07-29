@@ -91,10 +91,14 @@ export function PagoRow({
 }) {
   const qc = useQueryClient();
   const invalidateId = invalidatePedidoId ?? pedidoId;
+  const [askAnular, setAskAnular] = useState(false);
+  const [motivo, setMotivo] = useState("");
   const delMut = useMutation({
     mutationFn: (motivo: string) => adminApi.anularPago(pedidoId, pago.id, motivo),
     onSuccess: () => {
       toast.success("Pago anulado");
+      setAskAnular(false);
+      setMotivo("");
       qc.invalidateQueries({ queryKey: ["admin", "pedido", invalidateId] });
       qc.invalidateQueries({ queryKey: ["admin", "pedidos"] });
     },
@@ -127,10 +131,7 @@ export function PagoRow({
           <IconButton
             aria-label="Anular pago"
             size="xs"
-            onClick={() => {
-              const motivo = window.prompt("Motivo de la anulación del pago:");
-              if (motivo && motivo.trim()) delMut.mutate(motivo.trim());
-            }}
+            onClick={() => setAskAnular(true)}
             disabled={delMut.isPending}
             className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
           >
@@ -138,6 +139,43 @@ export function PagoRow({
           </IconButton>
         )}
       </div>
+      {/* AlertDialog, no window.prompt: es la única confirmación de esta
+          página que todavía usaba el prompt nativo del browser — el resto
+          (cancelar/eliminar pedido, cliente sin verificar) ya usa este mismo
+          componente. */}
+      <AlertDialog
+        open={askAnular}
+        onOpenChange={(open) => {
+          setAskAnular(open);
+          if (!open) setMotivo("");
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Anular pago de {formatARS(pago.monto)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              Queda tachado en el ledger con el motivo — la plata no se borra, se marca anulada.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            autoFocus
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            placeholder="Motivo de la anulación…"
+            aria-label="Motivo de la anulación"
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!motivo.trim()}
+              onClick={() => delMut.mutate(motivo.trim())}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Anular pago
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -152,6 +190,7 @@ export function ItemRow({
   jornadas,
   updateItem,
   removeItem,
+  disabled = false,
 }: {
   it: DraftItem;
   /** Libres del equipo tras TODO el draft (backend, expansión de kits incluida).
@@ -160,9 +199,19 @@ export function ItemRow({
   jornadas: number;
   updateItem: (uid: string, patch: Partial<DraftItem>) => void;
   removeItem: (uid: string) => void;
+  /** Solo-lectura real (no solo `updateItem`/`removeItem` no-op): un pedido
+   *  `estudio_fijo` muestra esta lista pero su verdad es el slot recurrente
+   *  — sin esto, el stepper/precio/quitar se veían perfectamente interactivos
+   *  y no hacían nada al tocarlos, sin ningún indicio visual de por qué. */
+  disabled?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: it.uid,
+    // `estudio_fijo`: el `onDragEnd` del `DndContext` padre ya es no-op acá,
+    // pero sin esto el grip seguía arrastrando la fila LOCALMENTE (el drag
+    // visual de dnd-kit no depende de `onDragEnd`) para volver a su lugar
+    // apenas se soltaba — interactivo en apariencia, sin ningún efecto real.
+    disabled,
   });
   const esLibre = it.equipo_id == null;
   // El backend ya descontó el draft completo (incluida esta línea y los kits
@@ -185,7 +234,11 @@ export function ItemRow({
         <IconButton
           aria-label="Reordenar línea"
           size="lg"
-          className="-ml-2 w-9 shrink-0 text-muted-foreground/60 hover:text-ink cursor-grab touch-none active:cursor-grabbing"
+          disabled={disabled}
+          className={cn(
+            "-ml-2 w-9 shrink-0 text-muted-foreground/60 touch-none",
+            disabled ? "cursor-not-allowed" : "cursor-grab hover:text-ink active:cursor-grabbing",
+          )}
           {...attributes}
           {...listeners}
         >
@@ -207,6 +260,7 @@ export function ItemRow({
             <Input
               value={it.nombre_libre ?? ""}
               placeholder="Descripción (ej. Flete, Operador…)"
+              disabled={disabled}
               onChange={(e) => updateItem(it.uid, { nombre_libre: e.target.value })}
               className="h-11 text-base md:h-8 md:text-sm"
             />
@@ -241,6 +295,8 @@ export function ItemRow({
           onChange={(v) => updateItem(it.uid, { cantidad: v })}
           min={1}
           error={overstock}
+          disabled={disabled}
+          ariaLabel={`Cantidad de ${it.nombre_publico || it.nombre || it.nombre_libre || "esta línea"}`}
         />
 
         {/* Precio editable por jornada */}
@@ -249,16 +305,18 @@ export function ItemRow({
             min={0}
             value={it.precio_jornada}
             ariaLabel="Precio por jornada"
+            disabled={disabled}
             onCommit={(v) => updateItem(it.uid, { precio_jornada: v })}
             className="h-11 w-24 text-base md:h-9 md:text-sm"
           />
           {esLibre ? (
             <select
               value={it.cobro_modo ?? "jornada"}
+              disabled={disabled}
               onChange={(e) =>
                 updateItem(it.uid, { cobro_modo: e.target.value as "jornada" | "fijo" })
               }
-              className="h-9 rounded-md border hairline bg-surface-elevated px-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-9 rounded-md border hairline bg-surface-elevated px-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
               aria-label="Modo de cobro"
             >
               <option value="jornada">/jornada</option>
@@ -285,6 +343,7 @@ export function ItemRow({
         <IconButton
           aria-label="Quitar línea"
           onClick={() => removeItem(it.uid)}
+          disabled={disabled}
           className="shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
         >
           <X className="h-4 w-4" />
@@ -696,6 +755,14 @@ export function FacturarButton({
   disabledExtra?: boolean;
   tituloExtra?: string;
 }) {
+  // `f.q.isError` incluido acá (no solo `isLoading`): sin esto, un fetch de
+  // `GET /admin/facturas/{pedidoId}` que fallara dejaba `f.principal`
+  // undefined (mismo shape que "nunca se facturó") y el botón mostraba
+  // "Facturar" como si el pedido estuviera limpio — indistinguible de la
+  // verdad real ("no sabemos si ya tiene factura"). Mejor no mostrar nada acá
+  // (el error visible vive en `FacturacionRailSection`, que sí tiene lugar
+  // para explicarlo + un Reintentar) que invitar a facturar a ciegas.
+  if (f.q.isError) return null;
   if (!((!f.principal || f.principal.estado === "error") && !f.q.isLoading)) return null;
   if (hideWhenUnavailable && !f.puedeFacturar) return null;
   return (
@@ -743,6 +810,24 @@ export function FacturacionRailSection({
   return (
     <RailSection label="Factura ARCA" anidada>
       {f.q.isLoading && <div className="text-xs text-muted-foreground">Cargando…</div>}
+
+      {/* Sin esto, un fetch caído se veía IDÉNTICO a "este pedido nunca se
+          facturó" — ni rastro de que el chequeo falló, con "Facturar"
+          disponible como si no hubiera nada que perder de vista. */}
+      {f.q.isError && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span>No se pudo consultar si este pedido ya tiene factura.</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            onClick={() => void f.q.refetch()}
+          >
+            Reintentar
+          </Button>
+        </div>
+      )}
 
       {f.principal && (
         <div className="space-y-1.5">

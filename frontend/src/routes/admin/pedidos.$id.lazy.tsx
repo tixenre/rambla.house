@@ -5,10 +5,9 @@ import {
   useParams,
   Link,
 } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  ChevronLeft,
   User,
   Calendar,
   Box,
@@ -17,15 +16,12 @@ import {
   AlertTriangle,
   Coins,
   Plus,
-  Minus,
   X,
   Mail,
   Eye,
   Download,
   Info,
   Trash2,
-  GripVertical,
-  Tag,
   ShieldAlert,
   ShieldCheck,
   Copy,
@@ -257,7 +253,10 @@ function PedidoEditorPage() {
     return (
       <div className="p-6 space-y-4 max-w-5xl mx-auto">
         <Skeleton className="h-7 w-64" />
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
+        {/* `340px`, no `320px`: tiene que matchear el grid real de abajo (línea
+            ~479) — un ancho de columna distinto entre el skeleton y el
+            contenido real hace que todo salte al terminar de cargar. */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-5">
           <Skeleton className="h-96 w-full rounded-xl" />
           <Skeleton className="h-96 w-full rounded-xl" />
         </div>
@@ -911,6 +910,11 @@ function PedidoEditorPage() {
                           jornadas={jornadas}
                           updateItem={esEstudio ? () => {} : updateItem}
                           removeItem={esEstudio ? () => {} : removeItem}
+                          // `estudio_fijo`: esta lista es de solo lectura real
+                          // (su verdad es el slot recurrente, no este pedido)
+                          // — sin esto, el stepper/precio/quitar se veían
+                          // interactivos y no hacían nada al tocarlos.
+                          disabled={esEstudio}
                         />
                       ))}
                     </ul>

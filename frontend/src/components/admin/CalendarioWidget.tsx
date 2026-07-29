@@ -473,7 +473,11 @@ export function CalendarioWidget({
     <div className="space-y-3">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
         <div className="font-display text-lg md:text-xl text-ink">{headerLabel}</div>
-        <div className="flex items-center gap-2">
+        {/* `flex-wrap`: `size="icon"` creció de 36 a 44px (gate táctil mobile)
+            — a 320px esta fila ya no entraba en una sola línea sin recorte.
+            Envolver a una segunda línea es un fallback seguro; a 375px+ (el
+            ancho real que importa) sigue entrando en una sola fila. */}
+        <div className="flex flex-wrap items-center gap-2">
           {!hideViewSwitch && (
             <SegmentedControl
               variant="pill"

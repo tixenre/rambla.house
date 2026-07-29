@@ -30,6 +30,7 @@ import { Section } from "@/design-system/composites/Section";
 import { Button } from "@/design-system/ui/button";
 import { IconButton } from "@/design-system/ui/icon-button";
 import { Spinner } from "@/design-system/ui/spinner";
+import { fmtArs } from "@/lib/format";
 import { adminApi, estudioAdminApi, type Pedido } from "@/lib/admin/api";
 import { ReservaEstudioSection } from "@/components/admin/estudio/ReservaEstudioSection";
 import { NuevoTurnoEstudioForm } from "@/components/admin/estudio/NuevoTurnoEstudioForm";
@@ -193,12 +194,32 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
   // permanente sería una fila fantasma que se lee como un turno más y que,
   // con el alta automática, se pondría a crear turnos sola.
   const [componiendo, setComponiendo] = useState(false);
+  // Total agregado — solo con 2+ turnos: con uno solo, su propia tarjeta ya
+  // muestra el total y repetirlo acá sería el mismo número dos veces (mismo
+  // criterio que "Equipos · N" no se convierte en "Total $X" salvo que sume
+  // más de una línea con montos distintos que valga la pena agregar).
+  const totalTurnos = turnos.reduce((acc, t) => acc + (t.monto_total || 0), 0);
 
   return (
-    <Section variant="card" tone="elevated" icon={Clapperboard} title="Turnos del Estudio">
+    <Section
+      variant="card"
+      tone="elevated"
+      icon={Clapperboard}
+      title="Turnos del Estudio"
+      actions={
+        turnos.length > 1 ? (
+          <span className="font-mono text-xs text-muted-foreground">
+            {turnos.length} turnos · {fmtArs(totalTurnos)}
+          </span>
+        ) : undefined
+      }
+    >
       <div className="space-y-4">
         {turnos.length > 0 && (
           <div className="space-y-4">
+            {/* "Turnos · N" — mismo eyebrow que "Equipos · N" en la sección
+                gemela; con 2+ también arriba (`actions`) el total agregado. */}
+            <div className="t-eyebrow">Turnos · {turnos.length}</div>
             {turnos.map((t) => (
               <TurnoVinculadoCard
                 key={t.id}

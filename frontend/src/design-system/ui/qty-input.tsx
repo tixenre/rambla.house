@@ -13,6 +13,12 @@ export interface QtyInputProps {
   /** "sm" = h-7 botones (más compacto). "md" = h-9 (default). */
   size?: "sm" | "md";
   className?: string;
+  disabled?: boolean;
+  /** Nombre accesible del input central — default "Cantidad". Con 2+
+   *  steppers en la misma lista (ej. varios sueltos), todos anunciaban
+   *  "Cantidad" idéntico sin decir de qué — pasá algo como "Cantidad de
+   *  {nombre del equipo}" para distinguirlos. */
+  ariaLabel?: string;
 }
 
 export function QtyInput({
@@ -23,6 +29,8 @@ export function QtyInput({
   error = false,
   size = "md",
   className,
+  disabled = false,
+  ariaLabel = "Cantidad",
 }: QtyInputProps) {
   // 44px táctil en mobile, denso en desktop (gate de PROTOCOLO / Apple HIG,
   // MEMORIA 2026-06-05). El stepper es de lo MÁS tocado de la pantalla de
@@ -80,7 +88,7 @@ export function QtyInput({
         type="button"
         aria-label="Restar uno"
         onClick={decrement}
-        disabled={value <= min}
+        disabled={disabled || value <= min}
         className={cn(buttonVariants({ variant: "outline", size: "icon" }), btnH)}
       >
         <Minus className={iconSz} />
@@ -90,12 +98,13 @@ export function QtyInput({
         min={min}
         max={max}
         value={draft}
-        aria-label="Cantidad"
+        aria-label={ariaLabel}
+        disabled={disabled}
         onFocus={() => setFocused(true)}
         onChange={handleChange}
         onBlur={handleBlur}
         className={cn(
-          "rounded-md border p-0 text-center font-mono text-base tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:text-sm",
+          "rounded-md border p-0 text-center font-mono text-base tabular-nums focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring md:text-sm disabled:cursor-not-allowed disabled:opacity-60",
           inputH,
           error
             ? "border-destructive text-destructive"
@@ -106,7 +115,7 @@ export function QtyInput({
         type="button"
         aria-label="Sumar uno"
         onClick={increment}
-        disabled={max !== undefined && value >= max}
+        disabled={disabled || (max !== undefined && value >= max)}
         className={cn(buttonVariants({ variant: "outline", size: "icon" }), btnH)}
       >
         <Plus className={iconSz} />

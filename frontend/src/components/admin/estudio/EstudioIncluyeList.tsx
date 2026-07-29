@@ -491,6 +491,13 @@ export function EstudioIncluyeList({
             <EquipoComboSearch
               existing={existingAsDraftItems}
               stockMap={{}}
+              // Sin un endpoint de disponibilidad por franja horaria para el
+              // Estudio todavía: `stockMap={{}}` no es "sin datos", es
+              // "no hay dato real" — `stockConfiable=false` evita que el
+              // fallback (cantidad total del equipo) se muestre como si
+              // fuera la verdad. El stock real lo sigue enforzando el 409
+              // del backend al guardar (los sueltos son stock duro).
+              stockConfiable={false}
               onAdd={onAddSuelto}
               placeholder="Buscar equipo para sumar…"
             />
