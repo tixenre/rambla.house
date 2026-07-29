@@ -88,10 +88,23 @@ export type PedidoTransicionable = {
   fecha_desde?: string | null;
   fecha_hasta?: string | null;
   items?: { length: number } | null;
+  /** Para el gate de salida de borrador: alcanza con la ficha vinculada O un
+   *  nombre cargado a mano ("alguien que llamó"). */
+  cliente_id?: number | null;
+  cliente_nombre?: string | null;
 };
 
 /** Motivo por el que un destino está bloqueado (faltan fechas / sin equipos) — espeja la validación del backend. */
 export function blockReason(p: PedidoTransicionable, target: EstadoPedido): string | null {
+  // Salir de BORRADOR: el presupuesto rápido se vuelve un pedido real (saca
+  // número, entra en Solicitados, se puede cobrar y facturar) → necesita tener
+  // algo y alguien. Criterio del dueño (2026-07-29); el freno de verdad está en
+  // el backend (`transiciones.cambiar_estado`), esto es para que el botón lo
+  // diga ANTES de apretarlo en vez de fallar después.
+  if (p.estado === "borrador" && target !== "borrador" && target !== "cancelado") {
+    if (!p.cliente_id && !(p.cliente_nombre ?? "").trim()) return "sin cliente";
+    if (!p.items?.length) return "sin equipos";
+  }
   const needs: EstadoPedido[] = ["confirmado", "retirado", "devuelto", "finalizado"];
   if (needs.includes(target)) {
     if (!p.fecha_desde || !p.fecha_hasta) return "faltan fechas";

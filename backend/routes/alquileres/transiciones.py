@@ -231,6 +231,42 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
         if _tiene_factura_activa(conn, pedido_id):
             raise HTTPException(400, "No se puede volver a borrador: el pedido ya tiene una factura activa.")
 
+    # Salir de BORRADOR = el presupuesto rápido se vuelve un pedido real: saca
+    # número, entra en la cola de Solicitados, se puede confirmar/cobrar/
+    # facturar. Para eso hace falta tener algo y alguien (criterio del dueño,
+    # 2026-07-29 — vio un pedido pasado a solicitud sin ninguna de las dos:
+    # "no sé si debería poderse"). Sin cliente no hay a quién llamar ni a quién
+    # facturarle; sin equipos no hay nada que entregar.
+    #
+    # SOLO en esta transición, a propósito: los pedidos que nacen ya reales
+    # (Estudio, taller, importados históricos) nunca pasan por acá, así que
+    # este gate no puede romperlos.
+    # Salir de BORRADOR = el presupuesto rápido se vuelve un pedido real: saca
+    # número, entra en la cola de Solicitados, se puede confirmar/cobrar/
+    # facturar. Para eso hace falta tener algo y alguien (criterio del dueño,
+    # 2026-07-29 — vio un pedido pasado a solicitud sin ninguna de las dos:
+    # "no sé si debería poderse"). Sin cliente no hay a quién llamar ni a quién
+    # facturarle; sin equipos no hay nada que entregar.
+    #
+    # SOLO en esta transición, a propósito: los pedidos que nacen ya reales
+    # (Estudio, taller, importados históricos) nunca pasan por acá, así que
+    # este gate no puede romperlos. `cancelado` queda afuera (no está en FLOW):
+    # descartar un presupuesto que no llegó a nada siempre tiene que poder.
+    if estado_actual == "borrador" and estado_nuevo != "borrador" and estado_nuevo in FLOW:
+        if not (p["cliente_id"] or (p["cliente_nombre"] or "").strip()):
+            raise HTTPException(
+                400,
+                "Elegí un cliente (o cargá un nombre a mano) antes de sacarlo de borrador.",
+            )
+        tiene_items = conn.execute(
+            "SELECT 1 FROM alquiler_items WHERE pedido_id = %s LIMIT 1", (pedido_id,)
+        ).fetchone()
+        if not tiene_items:
+            raise HTTPException(
+                400,
+                "Agregá al menos un equipo antes de sacarlo de borrador.",
+            )
+
     fuente_es_historica = bool(p["fuente"]) and p["fuente"].endswith("historico")
 
     if estado_nuevo in ESTADOS_REQUIEREN_FECHAS and not fuente_es_historica:

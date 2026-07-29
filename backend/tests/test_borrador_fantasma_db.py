@@ -232,3 +232,57 @@ def test_se_pueden_pedir_SOLO_los_borradores(client_con_db, setup):
     ).json()
     assert d["total"] == 1
     assert [x["estado"] for x in d["items"]] == ["borrador"]
+
+
+# ── Salir de borrador exige tener algo y alguien ─────────────────────────────
+
+
+def _crear_vacio(client, **campos):
+    """Borrador sin cliente y sin ítems (lo que el dueño pudo pasar a solicitud)."""
+    body = {
+        "estado": "borrador",
+        "fecha_desde": "2034-10-01",
+        "fecha_hasta": "2034-10-03",
+        "items": [],
+    }
+    body.update(campos)
+    r = client.post("/api/alquileres", json=body)
+    assert r.status_code in (200, 201), r.text
+    return r.json()
+
+
+def test_un_borrador_sin_cliente_no_sale_de_borrador(client_con_db, setup):
+    """Discrimina: antes esto devolvía 200 y el pedido entraba en la cola de
+    Solicitados sin nadie a quien llamar, gastando un número (el dueño lo vio:
+    "pude pasar el pedido a solicitud, sin cliente, y no sé si debería
+    poderse"). Criterio elegido: cliente + al menos un equipo."""
+    p = _crear_vacio(client_con_db)
+    r = client_con_db.patch(f"/api/alquileres/{p['id']}", json={"estado": "solicitado"})
+    assert r.status_code == 400, r.text
+    assert "cliente" in r.json()["detail"].lower()
+    # y sigue siendo borrador, sin número
+    d = client_con_db.get(f"/api/alquileres/{p['id']}").json()
+    assert d["estado"] == "borrador" and d["numero_pedido"] is None
+
+
+def test_un_borrador_con_cliente_pero_sin_equipos_tampoco_sale(client_con_db, setup):
+    p = _crear_vacio(client_con_db, cliente_nombre=f"{MARCA_Q} alguien que llamó")
+    r = client_con_db.patch(f"/api/alquileres/{p['id']}", json={"estado": "solicitado"})
+    assert r.status_code == 400, r.text
+    assert "equipo" in r.json()["detail"].lower()
+
+
+def test_con_cliente_y_equipos_sale_normal(client_con_db, setup):
+    """El nombre a mano alcanza — no hace falta una ficha vinculada."""
+    p = _crear(client_con_db, "borrador")  # trae 1 ítem y cliente_nombre
+    r = client_con_db.patch(f"/api/alquileres/{p['id']}", json={"estado": "solicitado"})
+    assert r.status_code == 200, r.text
+    assert r.json()["numero_pedido"] is not None
+
+
+def test_un_borrador_vacio_igual_se_puede_cancelar(client_con_db, setup):
+    """Descartar un presupuesto que no llegó a nada no puede quedar bloqueado
+    por el gate — `cancelado` está fuera de FLOW."""
+    p = _crear_vacio(client_con_db)
+    r = client_con_db.patch(f"/api/alquileres/{p['id']}", json={"estado": "cancelado"})
+    assert r.status_code == 200, r.text
