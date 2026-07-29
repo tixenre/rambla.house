@@ -577,8 +577,8 @@ jobs:
           cd backend
           # pedido_principal_id (#1308): el turno hereda SIEMPRE el cliente del
           # pedido principal (ignora lo que mande el request); solo se puede
-          # vincular a un pedido tipo='diaria'; borrar el principal desvincula,
-          # no borra el turno.
+          # vincular a un pedido tipo='diaria'; borrar el principal se lleva el
+          # turno (no lo deja huérfano volviendo a la lista como pedido propio).
           export SECRET_KEY=ci-test-secret-not-for-production
           export ADMIN_EMAILS=admin@test.com
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test

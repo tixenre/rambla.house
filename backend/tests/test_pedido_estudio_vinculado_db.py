@@ -210,7 +210,18 @@ def test_detalle_del_principal_lista_el_turno_vinculado(client_con_db, setup):
     assert detalle_turno["pedido_principal"]["cliente_nombre"] == "Principal Vinculado"
 
 
-def test_borrar_el_principal_no_borra_el_turno_solo_lo_desvincula(client_con_db, setup):
+def test_borrar_el_principal_se_lleva_el_turno(client_con_db, setup):
+    """CAMBIO DE CONDUCTA (2026-07-29). Este test afirmaba lo contrario: que
+    borrar el pedido solo DESVINCULABA el turno (el `ON DELETE SET NULL` de la
+    FK) y lo dejaba vivo. En la práctica eso resucitaba el doble pedido
+    fantasma: el turno sobrevivía con su propio número, su propio estado y su
+    "RETIRA HOY", y volvía a la lista como un pedido más — el dueño lo reportó
+    viendo dos filas, "uno con número y otro no".
+
+    Un turno vinculado no es una venta aparte: es contenido del pedido, como un
+    ítem. Si se borra el pedido, se borra su contenido. El turno del Estudio
+    SUELTO (sin principal) no cambia — sigue siendo un pedido de primera clase.
+    """
     r = client_con_db.post(
         "/api/admin/estudio/reservas",
         json={
@@ -224,17 +235,13 @@ def test_borrar_el_principal_no_borra_el_turno_solo_lo_desvincula(client_con_db,
     r_del = client_con_db.delete(f"/api/alquileres/{PEDIDO_PRINCIPAL_ID}")
     assert r_del.status_code == 204
 
-    detalle_turno = client_con_db.get(f"/api/alquileres/{turno_id}")
-    assert detalle_turno.status_code == 200, "el turno no debería haberse borrado en cascada"
-    assert detalle_turno.json()["pedido_principal"] is None
+    assert client_con_db.get(f"/api/alquileres/{turno_id}").status_code == 404
 
     from database import get_db
 
     conn = get_db()
     try:
-        row = conn.execute(
-            "SELECT pedido_principal_id FROM alquileres WHERE id=%s", (turno_id,)
-        ).fetchone()
+        row = conn.execute("SELECT 1 FROM alquileres WHERE id=%s", (turno_id,)).fetchone()
     finally:
         conn.close()
-    assert row["pedido_principal_id"] is None
+    assert row is None, "el turno vinculado tiene que irse con su pedido, no quedar huérfano"
