@@ -47,12 +47,26 @@ export function combinarTotales(
   totalPrincipal: number,
   pagadoPrincipal: number,
   turnos: PedidoGeneradoEdicion[],
+  /**
+   * Total combinado YA RESUELTO por el backend (`/api/cotizar` → `combinado`).
+   * Cuando el pedido cotiza en vivo hay que pasarlo: `monto_total` de un turno
+   * es NETO (sin IVA) y `totalPrincipal` viene CON IVA, así que sumarlos crudo
+   * da MENOS de lo que factura el comprobante (que aplica el IVA sobre el neto
+   * combinado, `finanzas_flujo.pedido.combinar_turnos_vinculados`). El backend
+   * resuelve el IVA sobre el neto combinado y este parámetro lo trae ya hecho.
+   *
+   * Se omite donde los dos lados son de la MISMA naturaleza y sumar es exacto:
+   * la lista de pedidos (netos persistidos, sin IVA en pantalla).
+   */
+  totalCombinadoResuelto?: number | null,
 ): TotalesCombinados {
   const turnosConResta: TurnoConResta[] = turnos.map((t) => ({
     ...t,
     resta: Math.max(0, (t.monto_total ?? 0) - (t.monto_pagado ?? 0)),
   }));
-  const totalCombinado = totalPrincipal + turnos.reduce((acc, t) => acc + (t.monto_total ?? 0), 0);
+  const totalCombinado =
+    totalCombinadoResuelto ??
+    totalPrincipal + turnos.reduce((acc, t) => acc + (t.monto_total ?? 0), 0);
   const pagadoCombinado =
     pagadoPrincipal + turnos.reduce((acc, t) => acc + (t.monto_pagado ?? 0), 0);
   return {

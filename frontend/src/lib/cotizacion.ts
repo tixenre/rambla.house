@@ -67,6 +67,24 @@ export type Cotizacion = {
   total: number;
   /** Detalle por equipo (para el caján/teasers; el front lo muestra, no lo calcula). */
   lineas: CotizacionLinea[];
+  /** Pedido + sus turnos del Estudio vinculados como UNA sola venta (#1308).
+   *  `null` cuando el pedido no tiene turnos (el caso normal). El IVA acá es el
+   *  del neto COMBINADO, resuelto por el backend — el front no puede sumarlo
+   *  él: `monto_total` de un turno es NETO, así que sumar el total CON IVA del
+   *  principal a turnos SIN IVA daba menos de lo que factura el comprobante. */
+  combinado: CotizacionCombinada | null;
+};
+
+/** Las dos partes de un pedido (equipos + turnos) resueltas como un solo total. */
+export type CotizacionCombinada = {
+  /** Σ de los `monto_total` (netos) de los turnos vinculados no cancelados. */
+  turnosTotal: number;
+  /** Neto de las dos partes: `totalNeto` del pedido + `turnosTotal`. */
+  totalNeto: number;
+  conIva: boolean;
+  iva: number;
+  /** El número grande de la pantalla: neto combinado + su IVA. */
+  total: number;
 };
 
 /** Una línea cruda del backend. */
@@ -94,6 +112,13 @@ type CotizarResp = {
   iva_monto: number;
   total_final: number;
   lineas?: CotizarLineaResp[];
+  combinado?: {
+    turnos_total: number;
+    neto: number;
+    con_iva: boolean;
+    iva_monto: number;
+    total_final: number;
+  } | null;
 };
 
 export const COTIZACION_VACIA: Cotizacion = {
@@ -109,6 +134,7 @@ export const COTIZACION_VACIA: Cotizacion = {
   conIva: false,
   total: 0,
   lineas: [],
+  combinado: null,
 };
 
 function adaptar(r: CotizarResp): Cotizacion {
@@ -132,6 +158,15 @@ function adaptar(r: CotizarResp): Cotizacion {
       bruto: l.bruto,
       neto: l.neto,
     })),
+    combinado: r.combinado
+      ? {
+          turnosTotal: r.combinado.turnos_total,
+          totalNeto: r.combinado.neto,
+          conIva: r.combinado.con_iva,
+          iva: r.combinado.iva_monto,
+          total: r.combinado.total_final,
+        }
+      : null,
   };
 }
 

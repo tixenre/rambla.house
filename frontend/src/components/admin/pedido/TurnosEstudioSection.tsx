@@ -82,6 +82,9 @@ function TurnoVinculadoCard({
       );
       qc.removeQueries({ queryKey: ["admin", "pedido", turnoId] });
       qc.invalidateQueries({ queryKey: ["admin", "pedidos"] });
+      // Igual que al guardar (ver `ReservaEstudioSection`): el total combinado
+      // del rail sale de `/api/cotizar`, cuya caché no sabe de este turno.
+      qc.invalidateQueries({ queryKey: ["cotizar"] });
       onEliminado();
     },
     onError: (e: Error) => toast.error("No se pudo eliminar el turno", { description: e.message }),
@@ -223,6 +226,9 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
               // Otra pantalla (la lista de pedidos muestra el badge 🎬): no está
               // montada acá, invalidarla no dispara nada ahora.
               qc.invalidateQueries({ queryKey: ["admin", "pedidos"] });
+              // El total combinado del rail sí está montado: sale de
+              // `/api/cotizar`, cuya caché no sabe que apareció este turno.
+              qc.invalidateQueries({ queryKey: ["cotizar"] });
               setComposeKey((k) => k + 1);
               // El turno ya existe y se administra en su propia tarjeta: acá no
               // queda nada abierto (si no, el alta automática crearía otro).

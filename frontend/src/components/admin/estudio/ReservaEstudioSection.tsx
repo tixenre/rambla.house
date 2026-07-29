@@ -17,13 +17,14 @@
  * hay un grid Fecha/Hora/Horas aparte acá, quedaba duplicado con el del alta).
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clapperboard } from "lucide-react";
 import { toast } from "sonner";
 
 import { Section } from "@/design-system/composites/Section";
 import { Spinner } from "@/design-system/ui/spinner";
 import { SaveIndicator } from "@/components/admin/pedido/PedidoPageHelpers";
+import { DescuentoControl, type DescuentoManual } from "@/components/admin/pedido/DescuentoControl";
 import { formatARS } from "@/lib/format";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { espacioOverrideInicial } from "@/lib/estudio-slots";
@@ -73,6 +74,15 @@ export function ReservaEstudioSection({
   const [pinturaReciente, setPinturaReciente] = useState(false);
   const [sueltos, setSueltos] = useState<SueltoLocal[]>([]);
   const [espacioOverride, setEspacioOverride] = useState("");
+  // Descuento PROPIO del turno (#1308, decisión del dueño): aparte del de los
+  // equipos, editable acá adentro. Persiste en las columnas de descuento manual
+  // que la fila de `alquileres` ya tiene — un turno ES un pedido, no hace falta
+  // una columna paralela (ver `total_turno_estudio` en el backend).
+  const [descuento, setDescuento] = useState<DescuentoManual>({
+    tipo: "pct",
+    pct: 0,
+    monto: 0,
+  });
 
   // Hidratación — solo al cambiar de pedido, no en cada tecla (mismo criterio
   // que `ReservaDialog`).
@@ -108,6 +118,11 @@ export function ReservaEstudioSection({
     setFecha(pedido.fecha_desde?.slice(0, 10) ?? "");
     setStart(pedido.fecha_desde?.slice(11, 16) ?? "");
     setHoras(horasActuales);
+    setDescuento({
+      tipo: pedido.descuento_manual_tipo === "monto" ? "monto" : "pct",
+      pct: pedido.descuento_pct ?? 0,
+      monto: pedido.descuento_manual_monto ?? 0,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- solo al cambiar de pedido, no en cada campo
   }, [pedido.id]);
 
@@ -131,8 +146,21 @@ export function ReservaEstudioSection({
       // así lo que muestra la fila "Espacio" y el Total es lo que se cobra, no
       // el precio de lista.
       espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
+      descuento_pct: descuento.pct,
+      descuento_manual_tipo: descuento.tipo,
+      descuento_manual_monto: descuento.monto,
     }),
-    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput, pedido.id, espacioOverride],
+    [
+      fecha,
+      start,
+      horas,
+      conPromo,
+      pinturaReciente,
+      sueltosInput,
+      pedido.id,
+      espacioOverride,
+      descuento,
+    ],
   );
   const cotizarDebounced = useDebouncedValue(cotizarParams, 400);
 
@@ -140,6 +168,14 @@ export function ReservaEstudioSection({
     queryKey: ["admin", "estudio", "cotizar", cotizarDebounced],
     queryFn: () => estudioAdminApi.cotizarReserva(cotizarDebounced),
     enabled: !!fecha && !!start && horas >= (estudio.min_horas || 1),
+    // Sin esto los números PESTAÑEAN al tocar cualquier cosa (lo reportó el
+    // dueño al agregar/sacar un add-on): cada cambio arma una queryKey NUEVA,
+    // así que `data` vuelve a `undefined` mientras viaja el request y toda la
+    // plata de la sección (Espacio, el "+ $X" del add-on, el Total) se cae a
+    // "…" y vuelve. Con `keepPreviousData` se muestra el último valor bueno
+    // hasta que llega el nuevo — el MISMO patrón que ya usa `useCotizacion`
+    // para el pedido (lib/cotizacion.ts).
+    placeholderData: keepPreviousData,
   });
 
   // Lo que se persiste, serializado — la unidad de comparación del autosave.
@@ -152,8 +188,11 @@ export function ReservaEstudioSection({
       pintura_reciente: pinturaReciente,
       sueltos: sueltosInput,
       espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
+      descuento_pct: descuento.pct,
+      descuento_manual_tipo: descuento.tipo,
+      descuento_manual_monto: descuento.monto,
     }),
-    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput, espacioOverride],
+    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput, espacioOverride, descuento],
   );
   const payloadKey = useMemo(() => JSON.stringify(payload), [payload]);
   /** Último payload que la base ya tiene. `null` = recién hidratado, todavía no
@@ -181,6 +220,13 @@ export function ReservaEstudioSection({
       // solo marca que están viejas para cuando se abran.
       qc.invalidateQueries({ queryKey: ["admin", "estudio", "reservas"] });
       qc.invalidateQueries({ queryKey: ["admin", "estudio", "agenda"] });
+      // El TOTAL COMBINADO del rail (pedido + turnos, con el IVA sobre el neto
+      // de los dos) lo resuelve `/api/cotizar`, cacheado por el BODY de la
+      // cotización — que solo describe al pedido principal. Editar este turno
+      // no cambia ese body, así que sin invalidar el rail se quedaba mostrando
+      // el total viejo hasta 30s (`staleTime`): medido en el navegador, sumar
+      // un add-on de $35.000 dejaba el Total en $435.600 en vez de $478.550.
+      qc.invalidateQueries({ queryKey: ["cotizar"] });
       onSaved?.(actualizado);
     },
     onError: (e) => toast.error("No se pudo guardar", { description: (e as Error).message }),
@@ -274,6 +320,19 @@ export function ReservaEstudioSection({
           cotiz={cotiz}
         />
 
+        {/* Descuento propio del turno (#1308) — acá adentro, igual que el de
+            los equipos vive dentro de "Alquiler de equipos" (pedido del dueño:
+            "¿podemos hacer que los descuentos estén en la sección?"). Es la
+            MISMA pieza (`DescuentoControl`), no una copia. */}
+        <DescuentoControl
+          label="Descuento del turno (0 = sin descuento)"
+          value={descuento}
+          onChange={setDescuento}
+          maxMonto={cotiz?.bruto_descontable ?? cotiz?.monto_total ?? 0}
+          efectivoPct={cotiz?.descuento_pct ?? 0}
+          efectivoMonto={cotiz?.descuento_monto ?? 0}
+        />
+
         {/* Total en vivo — el front no calcula, solo muestra (2026-06-29). El
             estado del guardado va acá al lado: se guarda solo, pero tiene que
             poder verse que se guardó. */}
@@ -284,6 +343,24 @@ export function ReservaEstudioSection({
             </div>
           ) : cotiz ? (
             <div className="space-y-1">
+              {/* Con descuento se muestran las tres líneas (bruto → descuento →
+                  neto) para que el número final se explique solo; sin
+                  descuento queda el "Total" de siempre, una sola línea. Los
+                  tres los resuelve el backend. */}
+              {(cotiz.descuento_monto ?? 0) > 0 && (
+                <>
+                  <div className="flex items-center justify-between gap-2 text-muted-foreground">
+                    <span>Bruto</span>
+                    <span className="font-mono tabular-nums">{formatARS(cotiz.bruto ?? 0)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-2 text-muted-foreground">
+                    <span>Descuento · {cotiz.descuento_pct}%</span>
+                    <span className="font-mono tabular-nums text-destructive">
+                      – {formatARS(cotiz.descuento_monto ?? 0)}
+                    </span>
+                  </div>
+                </>
+              )}
               <div className="flex items-center justify-between gap-2 font-semibold text-ink">
                 <span>Total</span>
                 <span className="flex items-center gap-2">

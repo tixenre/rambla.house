@@ -69,9 +69,18 @@ export function Section({
     return (
       <section id={id} className={cn("rounded-xl border hairline bg-surface-elevated", className)}>
         {(title || Icon || actions) && (
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b hairline">
-            {Icon && <Icon className="h-4 w-4 text-muted-foreground shrink-0" />}
-            {title && <span className="font-medium text-sm text-ink truncate">{title}</span>}
+          <div className="flex items-center gap-2.5 px-4 py-3 border-b hairline">
+            {Icon && <Icon className="h-[18px] w-[18px] text-muted-foreground shrink-0" />}
+            {/* `font-display text-base`, no `font-medium text-sm`: era el único
+                de los tres tonos cuyo título usaba la fuente de TEXTO al mismo
+                tamaño que su propio contenido — se leía como una línea más del
+                panel, no como su encabezado (lo pidió el dueño: "¿podemos
+                hacer que estos títulos tengan más jerarquía?"). Queda un
+                escalón abajo de `default` (text-lg) y `plain` (text-xl), que
+                es lo correcto: `elevated` es el panel anidado y más denso.
+                Y `<h2>`, no `<span>`: es un encabezado real — un `span` no le
+                daba landmark de sección a un lector de pantalla. */}
+            {title && <h2 className="font-display text-base text-ink truncate">{title}</h2>}
             {actions && <span className="ml-auto shrink-0">{actions}</span>}
           </div>
         )}

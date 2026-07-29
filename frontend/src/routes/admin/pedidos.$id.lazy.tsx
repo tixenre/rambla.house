@@ -52,7 +52,6 @@ import { cn } from "@/lib/utils";
 
 import { Button } from "@/design-system/ui/button";
 import { Input } from "@/design-system/ui/input";
-import { MoneyInput } from "@/design-system/ui/money-input";
 import { Textarea } from "@/design-system/ui/textarea";
 import { Skeleton } from "@/design-system/ui/skeleton";
 import {
@@ -93,7 +92,6 @@ import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useCotizacion, descuentoLabel } from "@/lib/cotizacion";
 import { combinarTotales, etiquetaTurno } from "@/lib/pedido-combinado";
-import { SegmentedControl } from "@/design-system/ui/segmented-control";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { fmtArs } from "@/lib/format";
 import { nombreCliente } from "@/lib/cliente-nombre";
@@ -117,6 +115,7 @@ import { FieldLabel } from "@/design-system/ui/Field";
 import { esPedidoEstudio, esPedidoDerivado, esPedidoTaller } from "@/lib/tipos-pedido";
 import { ReservaEstudioSection } from "@/components/admin/estudio/ReservaEstudioSection";
 import { TurnosEstudioSection } from "@/components/admin/pedido/TurnosEstudioSection";
+import { DescuentoControl } from "@/components/admin/pedido/DescuentoControl";
 
 export const Route = createLazyFileRoute("/admin/pedidos/$id")({
   component: PedidoEditorRoute,
@@ -194,11 +193,17 @@ function PedidoEditorPage() {
     // mismo bloque en la Fase C de descuentos (#1219) — el editor volvió a
     // mostrar el precio de catálogo en vivo en vez del congelado.
     respetarPrecioItem: true,
-    // Pedido con plata congelada (no-presupuesto): el descuento del preview sale
-    // del snapshot del pedido, no del cliente en vivo → el total del editor
-    // coincide con `monto_total` y con la lista. En presupuesto sigue en vivo
-    // (para que el descuento siga al cliente que el admin elija en el builder).
-    pedidoId: p && p.estado !== "solicitado" ? pedidoId : null,
+    // SIEMPRE el id del pedido — quién decide qué hacer con él es el backend.
+    // Para el descuento su criterio no cambió: con plata congelada
+    // (no-presupuesto) lo saca del snapshot del pedido; en `solicitado` lo
+    // ignora y sigue al cliente en vivo (`pedido_congelado = None`), que es
+    // exactamente lo mismo que pasaba cuando el front mandaba `null`.
+    // Lo que sí necesita el id siempre es el TOTAL COMBINADO con los turnos
+    // del Estudio: un pedido en `solicitado` también puede tener turnos, y
+    // ocultándole el id el rail se quedaba sin `combinado` → mostraba
+    // "Neto $0 / IVA $0" y un total que no incluía el IVA del turno (bug real,
+    // visto en el navegador con el pedido #424).
+    pedidoId,
     // Defensa en profundidad (sumado a `key={id}` en `PedidoEditorRoute`,
     // arriba): aunque este panel ya se remonta al cambiar de pedido, el hook
     // en sí queda protegido para cualquier otro consumidor que no lo haga.
@@ -353,12 +358,20 @@ function PedidoEditorPage() {
   const pagadoMonto = p.monto_pagado ?? 0;
   const restante = Math.max(0, total - pagadoMonto);
 
-  // Combinado con los turnos del Estudio vinculados (#1308) — cálculo 100%
-  // frontend, cero query nueva (los montos de cada turno ya vienen en la
-  // respuesta del pedido). Sin turnos vinculados, es un pass-through exacto
-  // de total/pagadoMonto/restante (mismos números, cero cambio visual).
+  // Combinado con los turnos del Estudio vinculados (#1308). Lo COBRADO se
+  // suma acá (son montos ya cobrados, no una regla de plata); el TOTAL viene
+  // resuelto del backend (`totales.combinado`), que aplica el IVA sobre el neto
+  // de las dos partes — sumar el total del principal (con IVA) a los turnos
+  // (netos) daba menos de lo que factura el comprobante. Sin turnos vinculados,
+  // `combinado` es `null` y todo esto es un pass-through exacto de
+  // total/pagadoMonto/restante (mismos números, cero cambio visual).
   const turnosVinculados = p.turnos_estudio_vinculados ?? [];
-  const combinado = combinarTotales(total, pagadoMonto, turnosVinculados);
+  const combinado = combinarTotales(total, pagadoMonto, turnosVinculados, totales.combinado?.total);
+  /** ¿El resumen se lee en dos partes? Sale de la lista de turnos del pedido
+   *  (estable, viene con el payload) y no de `totales.combinado` (que llega
+   *  con la cotización) — si no, el rail arrancaría en una parte y saltaría a
+   *  dos en cuanto contestara el backend. */
+  const hayTurnos = turnosVinculados.length > 0;
 
   // stockMap: { equipo_id → libres tras TODO el draft } (con signo; negativo =
   // faltan unidades). hasOverstock lo deriva el hook con la misma regla.
@@ -821,6 +834,39 @@ function PedidoEditorPage() {
                   <span>Agregar línea personalizada (flete, servicio, etc.)</span>
                 </button>
               )}
+
+              {/* Descuento DEL ALQUILER, acá adentro y no en el rail (pedido del
+                  dueño: "los descuentos creo que deberían ser por sección
+                  también, ¿podemos hacer que los descuentos estén en la
+                  sección?"). Es el descuento de los equipos: el turno del
+                  Estudio tiene el suyo, en su propia sección. Taller: no lleva
+                  descuento (2026-07-28 — el de jornadas/cliente no le aplica),
+                  así que ni se ofrece. */}
+              {!esTaller && !esEstudio && (
+                <div className="border-t hairline pt-3">
+                  <DescuentoControl
+                    value={{
+                      tipo: datos.descuento_manual_tipo,
+                      pct: datos.descuento_pct,
+                      monto: datos.descuento_manual_monto,
+                    }}
+                    onChange={(next) =>
+                      setDatos(
+                        (d) =>
+                          d && {
+                            ...d,
+                            descuento_manual_tipo: next.tipo,
+                            descuento_pct: next.pct,
+                            descuento_manual_monto: next.monto,
+                          },
+                      )
+                    }
+                    maxMonto={totales.subtotalDescontable}
+                    efectivoPct={totales.descuentoPct}
+                    efectivoMonto={totales.descuentoMonto}
+                  />
+                </div>
+              )}
             </Section>
           )}
 
@@ -901,9 +947,17 @@ function PedidoEditorPage() {
             </RailSection>
           )}
 
-          {/* Desglose — vivo via useCotizacion */}
+          {/* Desglose — vivo via useCotizacion. Con turnos del Estudio
+              vinculados se lee en DOS PARTES (pedido del dueño: "ordenaría
+              mejor este resumen, con dos partes como el alquiler de equipos y
+              turnos, y un solo total con IVA"): cada parte con su propio neto,
+              y abajo un único Neto → IVA → Total de las dos juntas. El IVA
+              combinado lo resuelve el backend (`totales.combinado`), nunca el
+              front. Sin turnos, `combinado` es null y el bloque queda como
+              siempre: bruto → descuento → neto → IVA → total. */}
           <RailSection label="Desglose">
             <div className="space-y-1 text-sm">
+              {hayTurnos && <div className="t-eyebrow pt-0.5">Alquiler de equipos</div>}
               <BdRow
                 // Taller: el rango es el mes contable, no jornadas reales
                 // (las clases reales ya se muestran arriba) — "N jornadas"
@@ -929,100 +983,33 @@ function PedidoEditorPage() {
                 />
               )}
               <BdRow l="Neto" v={fmtArs(totales.totalNeto)} />
-              <BdRow
-                l={`IVA ${totales.conIva ? "21%" : ""}`}
-                v={totales.conIva ? fmtArs(totales.iva) : "— sin IVA"}
-              />
-              <div className="border-t hairline my-1" />
-              <BdRow
-                l={combinado.turnos.length > 0 ? "Total del pedido" : "Total"}
-                v={fmtArs(total)}
-                strong={combinado.turnos.length === 0}
-              />
-              {combinado.turnos.length > 0 && (
+
+              {hayTurnos && (
                 <>
+                  <div className="t-eyebrow pt-2">Turnos del Estudio</div>
                   {combinado.turnos.map((t) => (
                     <BdRow key={t.id} l={etiquetaTurno(t)} v={fmtArs(t.monto_total)} />
                   ))}
-                  <div className="border-t hairline my-1" />
-                  <BdRow l="Total combinado" v={fmtArs(combinado.totalCombinado)} strong />
+                  {combinado.turnos.length > 1 && (
+                    <BdRow l="Neto" v={fmtArs(totales.combinado?.turnosTotal ?? 0)} />
+                  )}
                 </>
               )}
-            </div>
-            {/* Div plano, NO <FieldLabel> (que renderiza un <label> nativo):
-                un <label> reenvía cualquier click dentro de su área al PRIMER
-                control enfocable de adentro (acá, el botón "%") — clickear
-                "cerca" del input $ pero todavía dentro del label revertía el
-                selector a "%" solo. Con 2+ controles adentro, un <label> no
-                es seguro; FieldLabel sigue bien para los campos de un solo input. */}
-            <div className="block mt-3">
-              <span className="block t-eyebrow mb-1">Descuento manual (0 = automático)</span>
-              <div className="flex items-center gap-2">
-                <SegmentedControl
-                  value={datos.descuento_manual_tipo}
-                  onChange={(v) =>
-                    setDatos(
-                      (d) =>
-                        d && {
-                          ...d,
-                          descuento_manual_tipo: v as "pct" | "monto",
-                          // Convertir al equivalente del OTRO campo (el % y el
-                          // $ efectivos que ya muestra el desglose, calculados
-                          // por el backend) en vez de resetear a 0 — cambiar
-                          // de unidad no debería perder el descuento actual.
-                          // El campo que se deja de usar se resetea (sin esto
-                          // queda un valor "fantasma" que podía reaparecer si
-                          // el admin volvía a tocar el selector).
-                          ...(v === "monto"
-                            ? { descuento_manual_monto: totales.descuentoMonto, descuento_pct: 0 }
-                            : { descuento_pct: totales.descuentoPct, descuento_manual_monto: 0 }),
-                        },
-                    )
-                  }
-                  options={[
-                    { value: "pct", label: "%" },
-                    { value: "monto", label: "$" },
-                  ]}
-                  className="w-20 shrink-0"
-                />
-                {datos.descuento_manual_tipo === "monto" ? (
-                  <MoneyInput
-                    min={0}
-                    max={totales.subtotalDescontable}
-                    step={100}
-                    value={datos.descuento_manual_monto}
-                    className="max-w-[140px]"
-                    ariaLabel="Descuento $ manual"
-                    onChange={(v) => setDatos((d) => d && { ...d, descuento_manual_monto: v })}
-                  />
-                ) : (
-                  <div className="relative max-w-[140px]">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={0.1}
-                      value={datos.descuento_pct}
-                      className="pr-7"
-                      onChange={(e) =>
-                        setDatos(
-                          (d) =>
-                            d && {
-                              ...d,
-                              descuento_pct: Math.max(
-                                0,
-                                Math.min(100, Number(e.target.value) || 0),
-                              ),
-                            },
-                        )
-                      }
-                    />
-                    <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                      %
-                    </span>
-                  </div>
-                )}
-              </div>
+
+              <div className="border-t hairline my-1" />
+              {/* "Neto total" y no "Neto" a secas: arriba ya hay un "Neto" por
+                  parte — dos filas con el mismo label a la misma altura y
+                  números distintos se leían como un error. */}
+              {hayTurnos && <BdRow l="Neto total" v={fmtArs(totales.combinado?.totalNeto ?? 0)} />}
+              <BdRow
+                l={`IVA ${totales.conIva ? "21%" : ""}`}
+                v={
+                  totales.conIva
+                    ? fmtArs(hayTurnos ? (totales.combinado?.iva ?? 0) : totales.iva)
+                    : "— sin IVA"
+                }
+              />
+              <BdRow l="Total" v={fmtArs(combinado.totalCombinado)} strong />
             </div>
           </RailSection>
 

@@ -1506,7 +1506,16 @@ export type EstudioCotizacion = {
   promo: number;
   sueltos: Array<{ equipo_id: number; cantidad: number; precio_jornada: number; subtotal: number }>;
   pintura_reciente: number;
+  /** NETO: lo que se persiste en `alquileres.monto_total` (ya con el descuento
+   *  del turno aplicado, sin IVA — el IVA lo resuelve el pedido principal). */
   monto_total: number;
+  /** Antes del descuento del turno (#1308). */
+  bruto: number;
+  /** Bruto SIN las líneas de combo (la promo ya trae su propio descuento) — el
+   *  tope real de un descuento en $. */
+  bruto_descontable: number;
+  descuento_pct: number;
+  descuento_monto: number;
   espacio_disponible: boolean;
   espacio_motivo: string | null;
 };
@@ -1536,6 +1545,12 @@ export type EstudioReservaUpdateInput = {
   pintura_reciente?: boolean;
   sueltos?: EstudioSueltoInput[];
   espacio_monto?: number | null;
+  /** Descuento propio del turno (#1308) — reusa las columnas de descuento
+   *  manual que la fila de `alquileres` ya tiene. `undefined` = no tocar lo
+   *  persistido (≠ `espacio_monto`, donde `null` vuelve a precio de lista). */
+  descuento_pct?: number;
+  descuento_manual_tipo?: "pct" | "monto";
+  descuento_manual_monto?: number;
 };
 
 // ── Descuentos por jornadas ──────────────────────────────────────────────────

@@ -18,7 +18,7 @@
  * arriba/en el rail combinado).
  */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
 import { X } from "lucide-react";
 import { toast } from "sonner";
 
@@ -133,6 +133,10 @@ export function NuevoTurnoEstudioForm({
     queryKey: ["admin", "estudio", "cotizar", cotizarDebounced],
     enabled: !!fecha && !!start && horas >= (estudio.min_horas || 1),
     queryFn: () => estudioAdminApi.cotizarReserva(cotizarDebounced),
+    // Mismo antiparpadeo que en `ReservaEstudioSection` (ver ahí el porqué):
+    // la queryKey cambia con cada edición, así que sin esto la plata de la
+    // sección se cae a "…" en cada tecla/toggle mientras viaja el request.
+    placeholderData: keepPreviousData,
   });
 
   const mutation = useMutation({

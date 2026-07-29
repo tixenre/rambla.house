@@ -352,6 +352,46 @@ def cotizar(data: CotizarRequest, request: Request):
             desglose["iva_monto"] = 0
             desglose["total_final"] = desglose["neto"]
 
+        # ── Combinado: el pedido + sus turnos del Estudio vinculados (#1308) ──
+        # El rail muestra UN solo total con IVA para las dos partes. El IVA
+        # sobre el neto combinado es una REGLA DE PLATA, así que la resuelve el
+        # backend (MEMORIA 2026-06-29 — el front no calcula plata): sin esto el
+        # rail sumaba un principal CON IVA a turnos SIN IVA (el `monto_total`
+        # persistido es neto) y mostraba menos de lo que la factura cobra.
+        #
+        # Reusa la MISMA función que arma la factura combinada
+        # (`finanzas_flujo.pedido.combinar_turnos_vinculados`), sobre un dict
+        # con la forma que espera — así el rail y el comprobante no pueden
+        # divergir. Clave ADITIVA (`combinado`): los campos existentes del
+        # desglose siguen siendo los del PRINCIPAL solo, intactos para todos
+        # los demás consumidores. `None` cuando no hay turnos.
+        # `es_admin and pedido_id` (no `pedido_congelado`): un pedido en
+        # `solicitado` también puede tener turnos vinculados y su rail necesita
+        # el mismo total combinado — `pedido_congelado` es `None` ahí a
+        # propósito (sigue el descuento del cliente en vivo), no significa "sin
+        # turnos".
+        combinado = None
+        if es_admin and data.pedido_id:
+            from services.finanzas_flujo.pedido import combinar_turnos_vinculados
+
+            shim = {
+                "id": data.pedido_id,
+                "pedido_principal_id": None,
+                "bruto": desglose["bruto"],
+                "monto_total": desglose["neto"],
+                "monto_pagado": 0,
+                "con_iva": desglose["con_iva"],
+            }
+            combinar_turnos_vinculados(conn, shim)
+            if shim["monto_total"] != desglose["neto"]:
+                combinado = {
+                    "turnos_total": shim["monto_total"] - desglose["neto"],
+                    "neto": shim["monto_total"],
+                    "con_iva": desglose["con_iva"],
+                    "iva_monto": shim["iva_monto"],
+                    "total_final": shim["total_con_iva"],
+                }
+
         # Cuál descuento ganó (para el label del UI) — misma jerarquía que
         # decidió el pct en `calcular_total`, así nunca puede divergir.
         descuento_origen = resolver_origen_pedido_monto(
@@ -387,5 +427,6 @@ def cotizar(data: CotizarRequest, request: Request):
             "subtotal_por_jornada": int(subtotal_por_jornada),
             "descuento_origen": descuento_origen,
             "lineas": lineas,
+            "combinado": combinado,
             **desglose,
         }
