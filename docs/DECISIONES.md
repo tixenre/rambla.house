@@ -3753,10 +3753,119 @@ PDF/imagen", "Qué NO cubre").
   confirmar que el turno sobrevive con el banner ya no visible. Suite completa (2731 unit),
   migración (`test_alembic_upgrade_db.py`), ruff, tsc, eslint, prettier, build en verde. CI verde en
   `dev`.
-- **Alcance y qué NO se tocó.** No se combinó plata ni estado entre el pedido y el turno (cada uno
-  factura/cobra/transiciona independiente, mismo criterio que talleres↔pedidos). No se sincroniza el
-  cliente RETROACTIVAMENTE si el principal cambia de cliente después de crear el turno (cada uno
-  guarda su propio `cliente_id` al momento de vincular) — la garantía es "nunca desincronizado AL
-  CREAR", no "sincronizado para siempre" (documentado, no pedido por el dueño). `backend/reservas/`
-  intacto. El supervisor marca un turno vinculado que use el cliente del request en vez de
-  resolverlo del pedido principal, o un vínculo nuevo a un pedido que no sea `tipo='diaria'`.
+- **Alcance y qué NO se tocó (al momento de esta entrada, 2026-07-28 — ver Corrección abajo).** No se
+  combinó plata ni estado entre el pedido y el turno (cada uno factura/cobra/transiciona
+  independiente, mismo criterio que talleres↔pedidos). No se sincroniza el cliente RETROACTIVAMENTE si
+  el principal cambia de cliente después de crear el turno (cada uno guarda su propio `cliente_id` al
+  momento de vincular) — la garantía es "nunca desincronizado AL CREAR", no "sincronizado para
+  siempre" (documentado, no pedido por el dueño; esto SIGUE vigente). `backend/reservas/` intacto. El
+  supervisor marca un turno vinculado que use el cliente del request en vez de resolverlo del pedido
+  principal, o un vínculo nuevo a un pedido que no sea `tipo='diaria'`.
+- **Corrección (2026-07-29) — la misma iniciativa siguió y cambió dos de las afirmaciones de arriba.**
+  (1) Borrado: commit `e3b1502` ("me sigue generando dos, uno con número y otro no") cambió el
+  borrado de "desvincula sin borrar" (bullet "Tests + verificación" arriba) a "se lleva el turno con
+  él" — un turno vinculado no es una venta aparte, es contenido del pedido, como un ítem. Único freno:
+  si el turno ya tiene plata cobrada, se frena TODO el borrado (409) — misma línea roja que sacar un
+  turno con la ✕. (2) Plata y estado: contra lo que decía el bullet "Alcance" de arriba ("no se
+  combinó plata ni estado"), fases posteriores de #1308 SÍ lo hicieron — `_agregar_pago_combinado`
+  (un "Registrar pago" en el principal reparte entre el principal y sus turnos) y
+  `_cascada_turnos_vinculados` (mover el estado del principal empuja a cada turno al mismo paso de
+  `FLOW`, sin retroceder). Esta corrección queda anotada acá porque esa parte de la iniciativa nunca
+  tuvo su propia entrada de memoria — pendiente si hace falta una entrada dedicada más adelante.
+
+### 2026-07-30 — `backend/services/alquileres/` = motor de pedidos (split de `routes/alquileres/`, CQRS-lite, 4 fases)
+
+- **Por qué ahora.** `routes/alquileres/` había crecido con TODA la lógica de negocio de pedidos —
+  crear, editar ítems/datos, cotizar, pagar, transicionar de estado, armar documentos — mezclada con
+  transporte HTTP (auth, conn/commit, decoradores). Mismo síntoma que motivó los splits previos de
+  `contabilidad/`/`services/estudio/`/`services/talleres/`, pero en el módulo más grande de todos.
+- **Roadmap de 4 fases (issue de tracking #1312), todas move-verbatim (cero cambio de lógica/SQL):**
+  - Fase 0 (`40bec21`) — andamiaje: `services/alquileres/__init__.py` + estructura `queries/`/
+    `commands/` vacía, docstring explicando el molde.
+  - Fase 1 (`8ae950c`) — lecturas a `queries/`: `disponibilidad.py`, `documentos.py`,
+    `cotizacion.py` (`cotizar_carrito`), `detalle.py` (`_get_alquiler_detail` y todo lo que arma).
+  - Fase 2 (`97d6b33`) — pagos + `_delete_pedido` a `commands/pagos.py`/`commands/pedido.py`.
+  - Fase 3 (`7c92b30`) — núcleo de ítems/total a `commands/items.py`
+    (`_apply_pedido_items`/`_apply_pedido_datos`/`_recalcular_total_pedido`).
+  - Fase 4 (`aeb0703`) — la última: máquina de estados (`cambiar_estado`, `TRANSICIONES`/`FLOW`) +
+    creación (`create_pedido`/`create_pedido_retry`) a `commands/transiciones.py`/`commands/creacion.py`.
+- **Invariante CQRS-lite (igual que los 3 splits previos):** `commands/` puede importar de `queries/`;
+  `queries/` NUNCA de `commands/`. Caso real de tensión resuelto: `_resolver_descuentos_snapshot_o_vivo`
+  es lectura pura pero su consumidor histórico es un command (`_apply_pedido_items`) — como TAMBIÉN la
+  necesita `cotizar_carrito` (lectura), vive en `queries/cotizacion.py` y `commands/items.py` la
+  importa de vuelta. Precedente: un helper de lectura pura con un consumidor en `commands/` va a
+  `queries/`, nunca al revés, aunque el consumidor "más importante" sea un command.
+- **`modelos.py` (los Pydantic) se queda en `routes/alquileres/`** — es el contrato HTTP, no lógica de
+  negocio; ningún split previo movió sus modelos Pydantic fuera de las rutas tampoco.
+- **Excepción documentada al invariante "no importa de `routes.*`":** hay un ciclo real
+  `routes.alquileres ↔ routes.cliente_portal` sostenido por imports DIFERIDOS (dentro del cuerpo de
+  función, nunca a nivel de módulo) en ambas direcciones —
+  `services.alquileres.commands.transiciones::cambiar_estado` necesita
+  `routes.cliente_portal.ESTADOS_MODIFICABLES`/`_cancelar_solicitudes_pendientes` de vuelta;
+  `routes/cliente_portal/pedidos.py::cliente_cancelar_pedido` importa `cambiar_estado`. Preservado TAL
+  CUAL — no se rediseñó el ciclo en esta iniciativa; un import a nivel de MÓDULO nuevo ahí rompería el
+  ciclo en tiempo de import.
+- **~57 call-sites externos preservados sin tocar un import:** 8 archivos de producción
+  (`routes/estudio.py`, `routes/talleres.py`, `jobs/recordatorios.py`, `clientes/commands/cliente.py`,
+  todo `routes/cliente_portal/`) + ~33 tests dependían del re-export plano de `routes/alquileres/` —
+  `routes/alquileres/{core,detalle,disponibilidad,documentos,cotizacion,pagos,transiciones,pedidos}.py`
+  quedan como puro re-export/transporte, mismos nombres públicos en los mismos módulos de siempre.
+- **Lo que NO se tocó:** `_delete_pedido` se extrajo SIN agregarle ningún gate nuevo — la decisión de
+  si "Eliminar pedido" necesita bloquear contra `monto_pagado`/stock real sigue abierta (issue #1311,
+  charla aparte). El `FOR UPDATE`/`pg_advisory_xact_lock`/el retry-loop de `create_pedido_retry` se
+  movieron BYTE-IDÉNTICOS — ninguna fase cambió el orden de lock-antes-de-insertar ni el manejo de
+  `DeadlockDetected`.
+- **Verificación.** Cada fase: suite unitaria completa + ruff + tests de integración (Postgres real)
+  de los módulos tocados, en verde antes de pasar a la siguiente. CI verde en `dev` en las 5 fases.
+- El supervisor marca: lógica de pedidos reimplementada fuera del paquete; un `queries/` importando de
+  `commands/`; el import diferido del ciclo `cliente_portal` vuelto un import de módulo; el `FOR
+  UPDATE`/`pg_advisory_xact_lock`/el retry-loop de `create_pedido_retry` tocado o reordenado; un gate
+  nuevo agregado a `_delete_pedido` sin que la decisión de #1311 se haya tomado. Estructura completa →
+  `backend/services/alquileres/CLAUDE.md`.
+
+### 2026-07-29 — Rename de valor "Rambla"→"Rental" en 3 columnas acopladas de contabilidad (#1314)
+
+- **Contexto.** Pedido del dueño: "Rambla" (la marca/empresa) generaba confusión con "Rambla" como
+  VALOR interno del cobrador de un pago / dueño de un equipo / parte de la rendición — sobre todo
+  porque el rental y el Estudio son 2 negocios conjuntos con cuentas reales separadas (rental =
+  MercadoPago de Tincho, Estudio = MercadoPago de Pablo). Se renombra el valor (no la marca "Rambla
+  Rental", que no cambia en ningún lado) a "Rental" — simétrico con "Estudio" — en 3 columnas
+  acopladas por el mismo string: `equipos.dueno`, `cuentas.socio` (+ el nombre real de la cuenta,
+  "Fondo Rambla"→"Fondo Rental"), `alquiler_pagos.destinatario`.
+- **Por qué las 3 juntas, en la misma migración.** `comisiones.repartir(dueno, monto, modelo)` busca
+  `modelo[dueno]` — si se migran solo 2 de las 3, un equipo/cobrador que quedó con el string viejo cae
+  al fallback de reparto ("sin regla, cobra 100% él mismo"), creando una parte fantasma "Rambla"
+  separada de "Rental" en los reportes. Los 3 `UPDATE` van en la misma migración
+  (`23aa6949d4df_rambla_a_rental_rename.py`), todos idempotentes. Si `app_settings.comisiones_modelo`
+  tiene una fila customizada, se le renombra la clave "Rambla"→"Rental" (top-level y anidada en
+  beneficiarios) sin pisar el resto de la configuración del dueño — mismo criterio que el backfill de
+  comisiones de "Estudio" (`t8u9v0w1x2y3`).
+- **Gotcha real encontrado en staging.** `cuentas` es la ÚNICA de las 3 columnas con identidad
+  protegida por UNIQUE (activa) — por `socio` (`idx_cuentas_socio`) Y por `nombre`
+  (`cuentas_nombre_activa_uq`). `init_db()` (esquema en dos capas) corre ANTES que Alembic en cada
+  boot (`main.py::init_db_bg`) y, desde que el código pasó a nombrar "Rental", siembra
+  `('Fondo Rental', 'fondo', 'Rental', ...) ON CONFLICT DO NOTHING` — en una BD que TODAVÍA tenía la
+  fila vieja ("Fondo Rambla"/`socio='Rambla'`, con plata real), ese seed NO choca (nombre/socio
+  distintos todavía) y crea una fila NUEVA vacía en paralelo. Un rename ciego (`UPDATE cuentas SET
+  socio='Rental' WHERE socio='Rambla'`) choca contra esa fila nueva → `UniqueViolation` sobre
+  `idx_cuentas_socio`, la migración ENTERA hace rollback (incluido el rename de `equipos.dueno`, mismo
+  `upgrade()`) — exactamente el síntoma reportado (equipos con dueño "Rambla" no migrado).
+- **Fix: merge, no rename ciego.** Por cada cuenta vieja encontrada (por `socio='Rambla'` O
+  `nombre='Fondo Rambla'` — pueden desincronizarse si el dueño renombró la cuenta a mano sin tocar el
+  cobrador, o viceversa): si YA existe una cuenta activa `socio='Rental'` (sembrada por `init_db()` —
+  nace SIEMPRE vacía, sin movimientos), se mergea la vieja en esa — reasigna `movimientos` (origen y
+  destino), suma `saldo_inicial`, borra la vieja. Si no existe, rename en el lugar como antes. Seguro
+  porque la fila nueva sembrada por `init_db()` nunca tiene movimientos propios que perder.
+- **`init_db()` ya siembra "Rental"/"Fondo Rental" para instalaciones nuevas** — esta migración es
+  específicamente la que arregla una BD que YA tenía los valores viejos. `downgrade()` es no-op
+  (mismo criterio que los rebautizos previos de valor, `t8u9v0w1x2y3`/`c47b6b4e2851`): revertir
+  perdería datos nuevos creados con el valor "Rental".
+- **Verificación.** `test_rambla_a_rental_cuentas_merge_migration_db.py` (Postgres real, opt-in
+  `ALEMBIC_DB_TEST=1`): reproduce el escenario exacto de staging (cuenta vieja con movimientos +
+  saldo real + fila nueva ya sembrada por `init_db()`) y confirma que mergea en vez de chocar, que el
+  resto de la migración (`equipos.dueno`) sí se aplica, y que correr la migración dos veces es
+  idempotente.
+- El supervisor marca: una migración futura que toque `cuentas`/`dueno`/`destinatario` con un
+  `UPDATE` ciego sin chequear si ya existe una fila con el valor destino — el mismo patrón de
+  colisión se repite en cualquier columna con UNIQUE + un valor sembrado por `init_db()` antes de que
+  Alembic corra.

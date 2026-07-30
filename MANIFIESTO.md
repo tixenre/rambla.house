@@ -183,6 +183,7 @@ Puntos de entrada para no grepear:
 | Endpoints backend | `backend/routes/` (`equipos.py`, `clientes.py`, `dashboard.py`, etc.) |
 | **Motor de reservas (sagrado)** | `backend/reservas/` (`estados.py`, `semantics.py`, `disponibilidad.py`, `gate.py`) — disponibilidad + gate `_check_stock`. Ver MEMORIA 2026-05-30 |
 | Familias de pedido (fuente única) | `backend/tipos_pedido.py` — `TIPOS_DERIVADOS`/`TIPOS_SIN_RETIRO`, predicados `es_pedido_derivado()`/`es_pedido_taller()`; espejo `frontend/src/lib/tipos-pedido.ts` |
+| Motor de pedidos | `backend/services/alquileres/` (`queries/`+`commands/`) — crear, editar ítems/datos, cotizar, pagar, transicionar de estado, documentos. `routes/alquileres/` es puro transporte/re-export. Ver su `CLAUDE.md` |
 | Motor del Estudio | `backend/services/estudio/` (`queries/`+`commands/`) — disponibilidad, promo, reserva. Ver su `CLAUDE.md` |
 | Motor de Talleres | `backend/services/talleres/` (`queries/`+`commands/`) — gate de conflicto con Estudio, economía. Ver su `CLAUDE.md` |
 | Configuración (Settings) | `backend/config.py` (fuente de `ADMIN_EMAILS`, etc.) |

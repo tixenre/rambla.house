@@ -32,14 +32,16 @@ export const AREAS = {
     fg: "text-ink",
     accent: "text-estudio",
   },
-  // La vertical de formación: key `escuela`, ruta `/escuela` (SIN CAMBIOS — key/
-  // href/`[data-area="escuela"]` siguen singular, solo cambia el label visible).
-  // Label "escuelas." (plural, 2026-07-30): Rambla no ES la escuela, aloja
-  // distintas entidades/talleres adentro — "escuela." (singular) sonaba a que
+  // La vertical de formación: key `escuela` y `[data-area="escuela"]` (theming)
+  // se quedan singular — son identificadores internos, no texto visible. Lo que
+  // SÍ pasó a plural (2026-07-30): el `label`/`desc`/`eyebrow` visibles Y la
+  // `href` pública (`/escuela` → `/escuelas`) — Rambla no ES la escuela, aloja
+  // distintas entidades/talleres adentro; "escuela." (singular) sonaba a que
   // Rambla fuera la única. Las clases que ofrece se siguen llamando "talleres"
   // — la API `/api/talleres` y la tabla `talleres` NO se renombran (un taller es
-  // un taller; la escuela los ofrece). `/workshops` redirige a `/escuela` (única
-  // redirección; `/talleres` ya no se soporta).
+  // un taller; la escuela los ofrece). `/escuela` y `/workshops` (el nombre más
+  // viejo) redirigen los dos a `/escuelas` — ver `escuela.tsx`/`escuela.index.tsx`/
+  // `escuela.$slug.tsx`/`escuela.sena.$token.tsx` (stubs de redirect).
   escuela: {
     label: "escuelas.",
     desc: "Talleres y workshops",

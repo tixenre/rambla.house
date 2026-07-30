@@ -1166,10 +1166,48 @@ pedido `tipo='diaria'` (400 si no; 404 si no existe). Nueva sección "Turnos del
 de un pedido normal: lista los turnos vinculados reusando `ReservaEstudioSection` inline (misma
 pieza de Fase 2) + un botón "Agregar turno del Estudio" que reusa `ReservaDialog` en modo alta (con
 el picker de cliente oculto, hereda el del pedido). El turno vinculado muestra un banner de vuelta al
-pedido principal. Borrar el pedido principal NO borra el turno, solo lo desvincula (`ON DELETE SET
-NULL`, verificado con un DELETE real seguido de un re-fetch del turno). El supervisor marca un turno
-vinculado que use el cliente_id/nombre del request en vez de resolverlo del pedido principal, o un
-vínculo nuevo a un pedido que no sea `tipo='diaria'`.
+pedido principal. **Corrección (2026-07-29):** un commit posterior de la misma iniciativa (`e3b1502`,
+a partir de un caso real — "me sigue generando dos, uno con número y otro no") cambió el borrado: un
+turno vinculado no es una venta aparte, es contenido del pedido, como un ítem — borrar el pedido
+principal ahora SÍ se lleva su turno vinculado con él (antes solo lo desvinculaba, `ON DELETE SET
+NULL`), salvo que el turno ya tenga plata cobrada, ahí se frena TODO el borrado (409, ni el pedido ni
+el turno se borran). El supervisor marca un turno vinculado que use el cliente_id/nombre del request
+en vez de resolverlo del pedido principal, o un vínculo nuevo a un pedido que no sea `tipo='diaria'`.
+
+### 2026-07-30 — `backend/services/alquileres/` = motor de pedidos (split de `routes/alquileres/`, CQRS-lite, 4 fases)
+
+Toda la lógica de negocio de un pedido (crear, editar ítems/datos, cotizar, pagar, transicionar de
+estado, documentos) salió de `routes/alquileres/` a `services/alquileres/` (`queries/`+`commands/`,
+mismo molde que `contabilidad/`/`services/estudio/`/`services/talleres/`), move-verbatim en 4 fases
+(Fase 0 andamiaje → Fase 1 lecturas → Fase 2 pagos/`_delete_pedido` → Fase 3 ítems/total → Fase 4
+máquina de estados/creación). `routes/alquileres/{core,detalle,disponibilidad,documentos,cotizacion,
+pagos,transiciones,pedidos}.py` quedan como puro re-export/transporte — preserva ~57 call-sites
+externos (8 archivos de producción + ~33 tests) sin tocar un import. Es el split más grande de la
+familia motor-único hasta ahora. Excepción documentada al invariante "no importa de `routes.*`": un
+ciclo real `routes.alquileres ↔ routes.cliente_portal` se sostiene con imports diferidos (dentro del
+cuerpo de función) en ambas direcciones, preservado tal cual — un import a nivel de MÓDULO nuevo ahí
+rompería el ciclo. El supervisor marca: lógica de pedidos reimplementada fuera del paquete; un
+`queries/` importando de `commands/`; el import diferido del ciclo `cliente_portal` vuelto un import
+de módulo; el `FOR UPDATE`/`pg_advisory_xact_lock`/el retry-loop de `create_pedido_retry` tocado o
+reordenado; un gate nuevo agregado a `_delete_pedido` sin que la decisión de #1311 se haya tomado.
+Estructura completa → `backend/services/alquileres/CLAUDE.md`; tracking #1312.
+
+### 2026-07-29 — Rename de valor "Rambla"→"Rental" en 3 columnas acopladas de contabilidad (#1314)
+
+El VALOR interno del cobrador/dueño/parte "Rambla" (no la marca "Rambla Rental", que no cambia en
+ningún lado) pasa a "Rental" — simétrico con "Estudio" — en `equipos.dueno`, `cuentas.socio` (+
+"Fondo Rambla"→"Fondo Rental") y `alquiler_pagos.destinatario`: las 3 van en la MISMA migración
+porque `comisiones.repartir(dueno, monto, modelo)` busca `modelo[dueno]` — migrar solo 2 de las 3 crea
+una parte fantasma en los reportes. **Gotcha real de staging:** `cuentas` es la única con UNIQUE
+(activa) por `socio` Y por `nombre` — `init_db()` corre ANTES que Alembic en cada boot y, con el
+código ya nombrando "Rental", sembraba una fila `Fondo Rental` nueva en paralelo a la vieja `Fondo
+Rambla` (con plata real); un rename ciego chocaba (`UniqueViolation`) e hacía rollback de la
+migración ENTERA, incluido `equipos.dueno` (mismo `upgrade()`). Fix: la cuenta vieja se MERGEA en la
+nueva sembrada por `init_db()` (reasigna `movimientos` + suma `saldo_inicial` + borra la vieja) en
+vez de renombrar ciego — seguro porque la fila nueva siempre nace vacía. El supervisor marca: una
+migración futura que toque `cuentas`/`dueno`/`destinatario` con un `UPDATE` ciego sin chequear si ya
+existe una fila con el valor destino (mismo patrón de colisión se repite en cualquier columna con
+UNIQUE + un valor sembrado por `init_db()` antes que Alembic corra).
 
 ---
 
