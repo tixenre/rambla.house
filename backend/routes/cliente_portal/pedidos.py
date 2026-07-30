@@ -3,8 +3,9 @@
 Crear / cancelar pedido + listar / ver detalle de los pedidos del cliente logueado.
 Registra sus rutas en el router compartido del paquete `routes.cliente_portal`. Los
 helpers compartidos (`require_cliente`, `_proyectar`, `_documentos_disponibles`) viven
-en `core`; cancelar el pedido delega en `routes.alquileres.transiciones.cambiar_estado`
-(única puerta de transición de estado, admin y cliente).
+en `core`; cancelar el pedido delega en
+`services.alquileres.commands.transiciones.cambiar_estado` (única puerta de
+transición de estado, admin y cliente).
 """
 from typing import Optional
 
@@ -202,8 +203,8 @@ def cliente_crear_pedido(
 def cliente_cancelar_pedido(id: int, request: Request):
     """La legalidad de la transición (qué estados puede cancelar un cliente)
     y el auto-cancelado de solicitudes pendientes viven en
-    `routes.alquileres.transiciones.cambiar_estado` — única puerta, la
-    comparte con la transición de estado del admin."""
+    `services.alquileres.commands.transiciones.cambiar_estado` — única puerta,
+    la comparte con la transición de estado del admin."""
     session = require_cliente(request)
     cliente_id = session["cliente_id"]
     with get_db() as conn:
@@ -217,7 +218,7 @@ def cliente_cancelar_pedido(id: int, request: Request):
         ).fetchone()
         if not p:
             raise HTTPException(404, "Pedido no encontrado")
-        from routes.alquileres.transiciones import cambiar_estado
+        from services.alquileres.commands.transiciones import cambiar_estado
         cambiar_estado(
             conn, id, "cancelado", es_admin=False,
             actor=session.get("email") or "cliente",

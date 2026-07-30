@@ -62,8 +62,9 @@ class MinimalFakeConn:
 
 @pytest.fixture
 def fake_db(monkeypatch):
-    """Reemplaza routes.alquileres.core.get_db por una conn fake."""
-    monkeypatch.setattr("routes.alquileres.core.get_db", lambda: MinimalFakeConn())
+    """Reemplaza get_db por una conn fake donde `create_pedido` la resuelve
+    (services.alquileres.commands.creacion, #1312 Fase 4 — antes routes.alquileres.core)."""
+    monkeypatch.setattr("services.alquileres.commands.creacion.get_db", lambda: MinimalFakeConn())
     yield
 
 
