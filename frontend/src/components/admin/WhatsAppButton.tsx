@@ -32,7 +32,9 @@ export function WhatsAppButton({
   className?: string;
 }) {
   const templates = templatesForPedido(pedido);
-  const disabled = !whatsappLink({ phone });
+  // `borrador`: sin compromiso de comunicación hasta que el pedido pasa a
+  // solicitud (docs/FLUJO_PEDIDOS.md) — mismo criterio que "Enviar por mail".
+  const disabled = !whatsappLink({ phone }) || pedido.estado === "borrador";
 
   const open = (message: string) => {
     const url = whatsappLink({ phone, message });

@@ -1210,7 +1210,11 @@ function PedidoEditorPage() {
                     // También con la cotización caída: el modal se abre
                     // prellenado con el saldo, y con COTIZACION_VACIA ese
                     // saldo es 0 — cobrar desde ahí registraría un pago mal.
-                    disabled={p.estado === "cancelado" || cotizacionFallo}
+                    // `borrador`: sin compromiso de ningún tipo (ni siquiera
+                    // plata) hasta que el pedido pasa a solicitud.
+                    disabled={
+                      p.estado === "cancelado" || p.estado === "borrador" || cotizacionFallo
+                    }
                     onClick={() => setOpenPagoModal(true)}
                   >
                     <Coins className="h-4 w-4 mr-1" /> Registrar pago
@@ -1262,6 +1266,9 @@ function PedidoEditorPage() {
               variant="outline"
               size="sm"
               className="w-full mt-2"
+              // `borrador`: sin compromiso de comunicación hasta que el
+              // pedido pasa a solicitud (docs/FLUJO_PEDIDOS.md).
+              disabled={p.estado === "borrador"}
               onClick={() => setOpenMailDialog(true)}
             >
               <Mail className="h-4 w-4 mr-1" /> Enviar por mail
