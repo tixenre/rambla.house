@@ -32,6 +32,23 @@ ya actualizó en código.
 instalaciones nuevas — esta migración es la que arregla una BD que YA tenía
 los valores viejos.
 
+**Gotcha real (encontrado en staging, #1314): `cuentas` es la ÚNICA de las 3
+columnas con identidad protegida por UNIQUE (activa) — por `socio`
+(`idx_cuentas_socio`) Y por `nombre` (`cuentas_nombre_activa_uq`).**
+`init_db()` corre ANTES que esta migración en cada boot (`main.py::init_db_bg`)
+y, desde que el código pasó a nombrar "Rental", siembra
+`('Fondo Rental', 'fondo', 'Rental', ...) ON CONFLICT DO NOTHING` — en una BD
+que TODAVÍA tenía la fila vieja ("Fondo Rambla"/`socio='Rambla'`), ese seed NO
+choca (nombre/socio distintos todavía) y crea una fila NUEVA vacía, en
+paralelo a la vieja que tiene la plata real. Un rename ciego (`UPDATE ... WHERE
+socio = 'Rambla'`) choca contra esa fila nueva → `UniqueViolation`, la
+migración entera hace rollback (incluido el rename de `equipos.dueno`, en el
+mismo `upgrade()`) — exactamente lo que pasó en staging. El fix: en vez de un
+rename ciego, la cuenta vieja se MERGEA en la nueva (reasigna sus
+`movimientos`, suma su `saldo_inicial`, se borra) — seguro porque la fila
+nueva siempre nace vacía (recién sembrada por `init_db()`, sin movimientos).
+Si la nueva no existe todavía, el rename de siempre alcanza.
+
 Revision ID: 23aa6949d4df
 Revises: pv1nc2l3a4d5
 Create Date: 2026-07-29 23:33:57.113933
@@ -49,14 +66,57 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _migrar_cuenta_rambla_a_rental(conn) -> None:
+    """`cuentas` tiene identidad protegida por UNIQUE(activa) en `socio` Y en
+    `nombre` — a diferencia de `equipos.dueno`/`alquiler_pagos.destinatario`
+    (simples labels sin unicidad), acá un rename ciego puede chocar contra una
+    fila ya sembrada por `init_db()` con el nombre nuevo (ver docstring del
+    módulo, #1314). Por cada cuenta vieja encontrada (por `socio='Rambla'` O
+    `nombre='Fondo Rambla'` — pueden desincronizarse si el dueño renombró la
+    cuenta a mano sin tocar el cobrador, o viceversa):
+
+    - Si YA existe una cuenta activa con `socio='Rental'` (sembrada por
+      `init_db()` — nace SIEMPRE vacía, sin movimientos): mergea la vieja en
+      esa — reasigna sus `movimientos` (origen y destino), le suma el
+      `saldo_inicial`, y borra la vieja (ya no tiene nada referenciándola).
+    - Si no existe: rename en el lugar, como antes.
+    """
+    viejas = conn.execute(text(
+        "SELECT id, saldo_inicial FROM cuentas "
+        "WHERE (socio = 'Rambla' OR nombre = 'Fondo Rambla') AND activa"
+    )).fetchall()
+    for vieja_id, vieja_saldo in viejas:
+        nueva = conn.execute(
+            text("SELECT id FROM cuentas WHERE socio = 'Rental' AND activa AND id != :vieja"),
+            {"vieja": vieja_id},
+        ).fetchone()
+        if nueva:
+            nueva_id = nueva[0]
+            conn.execute(
+                text("UPDATE movimientos SET cuenta_origen_id = :nueva WHERE cuenta_origen_id = :vieja"),
+                {"nueva": nueva_id, "vieja": vieja_id},
+            )
+            conn.execute(
+                text("UPDATE movimientos SET cuenta_destino_id = :nueva WHERE cuenta_destino_id = :vieja"),
+                {"nueva": nueva_id, "vieja": vieja_id},
+            )
+            conn.execute(
+                text("UPDATE cuentas SET saldo_inicial = saldo_inicial + :extra WHERE id = :nueva"),
+                {"extra": vieja_saldo, "nueva": nueva_id},
+            )
+            conn.execute(text("DELETE FROM cuentas WHERE id = :vieja"), {"vieja": vieja_id})
+        else:
+            conn.execute(
+                text("UPDATE cuentas SET socio = 'Rental', nombre = 'Fondo Rental' WHERE id = :vieja"),
+                {"vieja": vieja_id},
+            )
+
+
 def upgrade() -> None:
     conn = op.get_bind()
 
     conn.execute(text("UPDATE equipos SET dueno = 'Rental' WHERE dueno = 'Rambla'"))
-    conn.execute(text("UPDATE cuentas SET socio = 'Rental' WHERE socio = 'Rambla'"))
-    conn.execute(text(
-        "UPDATE cuentas SET nombre = 'Fondo Rental' WHERE nombre = 'Fondo Rambla'"
-    ))
+    _migrar_cuenta_rambla_a_rental(conn)
     conn.execute(text(
         "UPDATE alquiler_pagos SET destinatario = 'Rental' WHERE destinatario = 'Rambla'"
     ))
