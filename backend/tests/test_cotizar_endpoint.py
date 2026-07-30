@@ -13,7 +13,7 @@ Estilo unitario (sin TestClient): se llama a la función con un FakeConn y
 import pytest
 from starlette.requests import Request as StarletteRequest
 
-import routes.alquileres.cotizacion as alq
+import services.alquileres.queries.cotizacion as alq
 from routes.alquileres import cotizar, CotizarRequest, CotizarItem
 
 # slowapi valida con isinstance(request, StarletteRequest) → necesita una instancia real.
