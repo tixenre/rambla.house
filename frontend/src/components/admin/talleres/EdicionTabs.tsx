@@ -261,7 +261,7 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
 
       {/* Economía del taller: si usa el Estudio y/o equipos de alquiler, para
           que el pedido mensual auto-generado atribuya esa plata (Estudio →
-          caja Estudio, equipos → Rambla) — ver `_regenerar_pedidos_taller`. */}
+          caja Estudio, equipos → Rental) — ver `_regenerar_pedidos_taller`. */}
       <div className="flex flex-col gap-3 rounded-xl border border-border/50 bg-muted/10 p-4">
         <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
           Economía del taller

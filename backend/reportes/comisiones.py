@@ -15,12 +15,12 @@ from typing import Any
 # Default = reglas dadas por el dueño. Si no hay setting cargado, se usa esto,
 # así el reporte funciona out-of-the-box.
 DEFAULT_MODELO: dict[str, dict[str, float]] = {
-    "Rambla": {"Rambla": 100},
-    "Pablo": {"Pablo": 50, "Rambla": 45, "Tincho": 5},
-    "Tincho": {"Tincho": 50, "Rambla": 45, "Pablo": 5},
+    "Rental": {"Rental": 100},
+    "Pablo": {"Pablo": 50, "Rental": 45, "Tincho": 5},
+    "Tincho": {"Tincho": 50, "Rental": 45, "Pablo": 5},
     # Economía separada del Estudio (#1283): el centinela del espacio tiene
     # dueno='Estudio' — su plata queda 100% para el Estudio, no se reparte
-    # con Rambla/Pablo/Tincho (es otra unidad de negocio, no una comisión).
+    # con Rental/Pablo/Tincho (es otra unidad de negocio, no una comisión).
     "Estudio": {"Estudio": 100},
 }
 

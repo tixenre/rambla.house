@@ -28,12 +28,12 @@ logger = logging.getLogger(__name__)
 
 # Pagos: a quién se cobró (destinatario) y cómo (método). Fuente única de los
 # valores admitidos — la usan la validación del endpoint y la vista de logs.
-# Cualquiera de los tres puede cobrar; el default es Rambla (en transferencia).
+# Cualquiera de los tres puede cobrar; el default es Rental (en transferencia).
 # Cada destinatario mapea a una caja en Contabilidad (Pablo/Tincho → su caja de
-# socio; Rambla → Fondo Rambla), donde la plata cobrada se atribuye sola.
+# socio; Rental → Fondo Rental), donde la plata cobrada se atribuye sola.
 from contabilidad.constants import COBRADORES as DESTINATARIOS_PAGO  # fuente única
 METODOS_PAGO = ("transferencia", "efectivo")
-DESTINATARIO_PAGO_DEFAULT = "Rambla"
+DESTINATARIO_PAGO_DEFAULT = "Rental"
 METODO_PAGO_DEFAULT = "transferencia"
 
 

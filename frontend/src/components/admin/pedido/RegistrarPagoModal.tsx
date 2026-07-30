@@ -41,7 +41,7 @@ export function RegistrarPagoModal({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   /** El pedido es un turno/slot del Estudio (economía separada, #1283) — el
-   *  cobro va por defecto a "Estudio", no a "Rambla". */
+   *  cobro va por defecto a "Estudio", no a "Rental". */
   esEstudio?: boolean;
   /** Turnos del Estudio vinculados a `pedidoId` (#1308) — si hay al menos
    *  uno, el modal cobra el TOTAL COMBINADO y usa `addPagoCombinado` en vez
@@ -57,7 +57,7 @@ export function RegistrarPagoModal({
   // vinculados sin cobrar no mostraba el aviso pese a que parte de lo
   // combinado SÍ es plata del Estudio.
   const hayParteEstudio = esEstudio || turnosVinculados.length > 0;
-  const destinatarioDefault = hayParteEstudio ? "Estudio" : "Rambla";
+  const destinatarioDefault = hayParteEstudio ? "Estudio" : "Rental";
 
   // Presets: Seña 50% / Saldo total / Otro
   type Preset = "sena" | "saldo" | "otro";
@@ -66,8 +66,8 @@ export function RegistrarPagoModal({
   const [preset, setPreset] = useState<Preset>("saldo");
   const [montoInput, setMontoInput] = useState<string>(String(saldo));
   const [concepto, setConcepto] = useState("Saldo final");
-  // A quién se cobró y cómo. Default del dueño: Rambla + transferencia (Estudio
-  // si el pedido es del Estudio — esa plata no es de Rambla ni de los socios).
+  // A quién se cobró y cómo. Default del dueño: Rental + transferencia (Estudio
+  // si el pedido es del Estudio — esa plata no es de Rental ni de los socios).
   const [destinatario, setDestinatario] = useState<string>(destinatarioDefault);
   const [metodo, setMetodo] = useState<string>("transferencia");
   const [fecha, setFecha] = useState<string>(() => new Date().toISOString().slice(0, 10));
@@ -284,6 +284,11 @@ export function RegistrarPagoModal({
             />
           </div>
         </div>
+
+        <p className="text-xs text-muted-foreground">
+          Transferencia → a la cuenta real (Rental o Estudio). Efectivo → lo tiene la persona
+          (Tincho o Pablo) en mano hasta que lo deposite o lo rinda.
+        </p>
 
         {/* Aviso simétrico: cualquier cruce entre la plata del Estudio y la
             del rental necesita rendición — para el lado que la cobra, no solo

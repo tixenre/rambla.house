@@ -122,13 +122,13 @@ def setup(monkeypatch):
         )
         conn.execute(
             "INSERT INTO equipos (id, nombre, cantidad, precio_jornada, visible_catalogo, dueno) "
-            "VALUES (%s,'Componente promo admin test',5,1000,1,'Rambla')",
+            "VALUES (%s,'Componente promo admin test',5,1000,1,'Rental')",
             (EQ_PROMO_COMP,),
         )
         conn.execute(
             "INSERT INTO equipos (id, nombre, cantidad, tipo, dueno, visible_catalogo) "
             "VALUES (%s,%s,1,%s,%s,%s)",
-            (PROMO_COMBO_ID, "Promo admin test", "combo", "Rambla", 0),
+            (PROMO_COMBO_ID, "Promo admin test", "combo", "Rental", 0),
         )
         conn.execute(
             "INSERT INTO kit_componentes (equipo_id, componente_id, cantidad, descuento_pct) "

@@ -566,7 +566,7 @@ export type EquipoPendienteCompat = {
 
 // Pagos: destinatario (a quién se cobró) y método. Espeja las constantes del
 // backend (`contabilidad/constants.py::COBRADORES`); los defaults se aplican en el modal.
-export const DESTINATARIOS_PAGO = ["Rambla", "Tincho", "Pablo", "Estudio"] as const;
+export const DESTINATARIOS_PAGO = ["Rental", "Tincho", "Pablo", "Estudio"] as const;
 export const METODOS_PAGO = ["transferencia", "efectivo"] as const;
 
 export interface PagoLogRow {
@@ -776,7 +776,7 @@ export interface ReporteMensual {
   devengado: { total: number; pedidos: number; por_socio: Record<string, number> };
   cobrado: { por_socio: Record<string, number>; total: number };
   gastos: { total: number; por_categoria: { categoria: string; monto: number }[] };
-  /** Lo facturado que NO es de Rambla (parte de los dueños): un costo, no ganancia. */
+  /** Lo facturado que NO es de Rental (parte de los dueños): un costo, no ganancia. */
   comisiones_duenos: number;
   /** Lo facturado que es del Estudio (otra unidad de negocio, no una comisión). */
   parte_estudio: number;

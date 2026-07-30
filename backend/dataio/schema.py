@@ -136,7 +136,7 @@ class Equipo(_Base):
     fecha_compra: str | None = None
     serie: str | None = None
     bh_url: str | None = None
-    dueno: str | None = "Rambla"
+    dueno: str | None = "Rental"
     visible_catalogo: int = 1
     estado: str = "operativo"
     ficha_completa: bool = False

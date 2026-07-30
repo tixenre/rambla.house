@@ -12,10 +12,10 @@ import { adminApi } from "@/lib/admin/api";
  *  cuadrada (con 0 explícitos) para que se vean todas las columnas editables,
  *  igual que hace el propio backend con el modelo real. */
 const DEFAULT_COMISIONES: Record<string, Record<string, number>> = {
-  Rambla: { Rambla: 100, Pablo: 0, Tincho: 0, Estudio: 0 },
-  Pablo: { Pablo: 50, Rambla: 45, Tincho: 5, Estudio: 0 },
-  Tincho: { Tincho: 50, Rambla: 45, Pablo: 5, Estudio: 0 },
-  Estudio: { Estudio: 100, Rambla: 0, Pablo: 0, Tincho: 0 },
+  Rental: { Rental: 100, Pablo: 0, Tincho: 0, Estudio: 0 },
+  Pablo: { Pablo: 50, Rental: 45, Tincho: 5, Estudio: 0 },
+  Tincho: { Tincho: 50, Rental: 45, Pablo: 5, Estudio: 0 },
+  Estudio: { Estudio: 100, Rental: 0, Pablo: 0, Tincho: 0 },
 };
 
 /** Todos los dueños/beneficiarios que aparecen en el modelo (unión de claves de

@@ -131,11 +131,11 @@ def test_el_cobro_no_toca_la_caja_del_otro_socio(conn):
     assert _saldo(conn, "Caja Pablo") == base_pablo  # Pablo no se mueve
 
 
-def test_cobro_de_rambla_alimenta_el_fondo_rambla(conn):
-    # Rambla también cobra (default): su plata cae en la caja Fondo Rambla.
-    base = _saldo(conn, "Fondo Rambla")
-    _pedido_y_pago(conn, 80000, "Rambla")
-    assert _saldo(conn, "Fondo Rambla") - base == 80000
+def test_cobro_de_rental_alimenta_el_fondo_rental(conn):
+    # Rental también cobra (default): su plata cae en la caja Fondo Rental.
+    base = _saldo(conn, "Fondo Rental")
+    _pedido_y_pago(conn, 80000, "Rental")
+    assert _saldo(conn, "Fondo Rental") - base == 80000
 
 
 def test_ingresos_derivados_agrupan_por_destinatario(conn):
@@ -188,11 +188,11 @@ def test_gasto_baja_el_saldo_de_la_caja_de_origen(conn):
 
 def test_transferencia_mueve_plata_entre_cuentas(conn):
     base_pablo = _saldo(conn, "Caja Pablo")
-    base_fondo = _saldo(conn, "Fondo Rambla")
+    base_fondo = _saldo(conn, "Fondo Rental")
     _mov(conn, "transferencia", 60000,
-         origen=_cuenta_id(conn, "Caja Pablo"), destino=_cuenta_id(conn, "Fondo Rambla"))
+         origen=_cuenta_id(conn, "Caja Pablo"), destino=_cuenta_id(conn, "Fondo Rental"))
     assert _saldo(conn, "Caja Pablo") - base_pablo == -60000
-    assert _saldo(conn, "Fondo Rambla") - base_fondo == 60000
+    assert _saldo(conn, "Fondo Rental") - base_fondo == 60000
 
 
 def test_saldo_iguala_la_derivacion(conn):
@@ -242,7 +242,7 @@ def test_crear_gasto_baja_caja_y_anular_lo_restaura(conn):
 
 
 def test_reporte_mensual_cargo_a_socio_no_toca_ganancia(conn):
-    # Núcleo del reporte: un CARGO a un socio (Rambla le compró algo) es una
+    # Núcleo del reporte: un CARGO a un socio (Rental le compró algo) es una
     # transferencia, NO un gasto → aparece en socios_mes pero NO baja la ganancia.
     from contabilidad.commands.movimientos import crear_movimiento
     from contabilidad.queries.reporte_mensual import reporte_mensual
@@ -279,9 +279,9 @@ def test_reporte_mensual_gasto_si_baja_ganancia(conn):
 
 def test_reporte_ganancia_descuenta_comision_de_duenos(conn):
     # Núcleo del fix de plata: un pedido saldado de $100k con equipo de Pablo. Del
-    # reparto, a Rambla le tocan $45k (45%); Pablo+Tincho se llevan $55k. La
-    # ganancia parte de los $45k de Rambla, NO de los $100k facturados — la comisión
-    # de los dueños es un COSTO, no ganancia de Rambla.
+    # reparto, a Rental le tocan $45k (45%); Pablo+Tincho se llevan $55k. La
+    # ganancia parte de los $45k de Rental, NO de los $100k facturados — la comisión
+    # de los dueños es un COSTO, no ganancia de Rental.
     from contabilidad.queries.reporte_mensual import reporte_mensual
 
     EQ, PEDX = 9_400_700, 9_400_701
@@ -303,14 +303,14 @@ def test_reporte_ganancia_descuenta_comision_de_duenos(conn):
     conn.execute(
         """INSERT INTO alquiler_pagos (pedido_id, monto, concepto, destinatario, metodo, fecha)
            VALUES (%s,%s,%s,%s,%s,%s)""",
-        (PEDX, 100000, "pago", "Rambla", "transferencia", "2026-06-15T10:00:00"),
+        (PEDX, 100000, "pago", "Rental", "transferencia", "2026-06-15T10:00:00"),
     )
 
     rep = reporte_mensual(conn, "2026-06")
     assert rep["devengado"]["total"] == 100000  # se facturó el total
-    assert rep["devengado"]["por_socio"]["Rambla"] == 45000  # a Rambla le toca el 45%
+    assert rep["devengado"]["por_socio"]["Rental"] == 45000  # a Rental le toca el 45%
     assert rep["comisiones_duenos"] == 55000  # Pablo 50k + Tincho 5k
-    assert rep["ganancia_neta"] == 45000  # parte de Rambla − 0 gastos (NO los 100k)
+    assert rep["ganancia_neta"] == 45000  # parte de Rental − 0 gastos (NO los 100k)
     # Invariante del modelo: ganancia = facturado − comisiones − gastos.
     assert rep["ganancia_neta"] == (
         rep["devengado"]["total"] - rep["comisiones_duenos"] - rep["gastos"]["total"]
@@ -376,7 +376,7 @@ def test_rendicion_cierra_en_cero_y_saldar(conn):
     assert r["cuadra"] is True
     by = {p["persona"]: p for p in r["personas"]}
     assert by["Pablo"]["le_corresponde"] == 50000  # equipo de Pablo → 50/45/5
-    assert by["Rambla"]["le_corresponde"] == 45000
+    assert by["Rental"]["le_corresponde"] == 45000
     assert by["Tincho"]["le_corresponde"] == 5000
     assert by["Tincho"]["cobro"] == 100000  # todo lo cobró Tincho
     assert sum(p["pendiente"] for p in r["personas"]) == 0  # cierra en cero
@@ -775,11 +775,11 @@ def test_retiro_aporte_bloqueados_contra_cuenta_socio(conn):
 
 
 def test_gasto_contra_cuenta_socio_cuenta_en_pyl_y_baja_deuda(conn):
-    # Permitido a propósito: "el socio pagó un gasto de Rambla con su propia
+    # Permitido a propósito: "el socio pagó un gasto de Rental con su propia
     # plata". Un solo movimiento hace las dos cosas — cuenta en el P&L
     # categorizado (gastos_por_categoria no filtra por tipo de cuenta origen,
     # solo por moneda) Y baja la deuda del socio (egresos resta en la fórmula de
-    # cuenta corriente) — Rambla ahora le debe eso.
+    # cuenta corriente) — Rental ahora le debe eso.
     from contabilidad.commands.movimientos import crear_movimiento
     from contabilidad.queries.reporte_mensual import reporte_mensual
     from contabilidad.queries.saldos import saldos

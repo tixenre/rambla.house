@@ -102,7 +102,7 @@ class EquipoCreate(BaseModel):
     fecha_compra:     Optional[str]   = None
     serie:            Optional[str]   = None
     bh_url:           Optional[str]   = None
-    dueno:            Optional[str]   = "Rambla"
+    dueno:            Optional[str]   = "Rental"
     visible_catalogo: Optional[int]   = 1
     estado:           Optional[str]   = "operativo"   # operativo / en_mantenimiento / fuera_servicio
     ficha_completa:   Optional[bool]  = False

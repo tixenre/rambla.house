@@ -18,8 +18,12 @@ type Item = { t: string; d: React.ReactNode };
 
 const TERMINOS: Item[] = [
   {
+    t: "Rental y Estudio",
+    d: "Las dos economías separadas del negocio, cada una con su cuenta real de Mercado Pago: Rental es la cuenta de Tincho, Estudio la de Pablo. Un cobro por transferencia entra directo a esa cuenta; un cobro en efectivo lo tiene la persona (Tincho o Pablo) en mano hasta que lo deposite o lo rinda — por eso «Cobró» tiene 4 opciones (Rental/Tincho/Pablo/Estudio) y no solo 2.",
+  },
+  {
     t: "Caja",
-    d: "Plata real del negocio y dónde está: Efectivo, Banco, Mercado Pago, Dólares, Fondo Rambla. Sube y baja con movimientos. Su saldo es plata que existe de verdad.",
+    d: "Plata real del negocio y dónde está: Efectivo, Banco, Mercado Pago, Dólares, Fondo Rental. Sube y baja con movimientos. Su saldo es plata que existe de verdad.",
   },
   {
     t: "Total disponible",
@@ -27,20 +31,20 @@ const TERMINOS: Item[] = [
   },
   {
     t: "Cuenta corriente de un socio",
-    d: "No es una caja: es el saldo de quién le debe a quién entre el socio (Pablo/Tincho) y Rambla. Se lee siempre en palabras: «le debe a Rambla» o «Rambla le debe».",
+    d: "No es una caja: es el saldo de quién le debe a quién entre el socio (Pablo/Tincho) y Rental. Se lee siempre en palabras: «le debe a Rental» o «Rental le debe».",
   },
   {
     t: "Deudor",
-    d: "El socio le debe plata a Rambla (tiene plata del negocio en mano). Se muestra en rojo.",
+    d: "El socio le debe plata a Rental (tiene plata del negocio en mano). Se muestra en rojo.",
   },
   {
     t: "Acreedor",
-    d: "Rambla le debe plata al socio (le falta cobrar su parte). Se muestra en verde. Un acreedor NO es un error.",
+    d: "Rental le debe plata al socio (le falta cobrar su parte). Se muestra en verde. Un acreedor NO es un error.",
   },
-  { t: "Saldado", d: "El socio está a mano con Rambla: no debe ni le deben." },
+  { t: "Saldado", d: "El socio está a mano con Rental: no debe ni le deben." },
   {
     t: "Arranque",
-    d: "Lo que un socio ya tenía/debía ANTES de arrancar el sistema (ej. plata que cobró de Rambla). Es el punto de partida de su cuenta corriente.",
+    d: "Lo que un socio ya tenía/debía ANTES de arrancar el sistema (ej. plata que cobró de Rental). Es el punto de partida de su cuenta corriente.",
   },
   {
     t: "Cobró",
@@ -59,6 +63,10 @@ const TERMINOS: Item[] = [
     d: "El reporte de cuánto generó cada equipo/dueño y cuánto le toca a cada socio, por mes, con los pedidos detrás. Es el «devengado».",
   },
   {
+    t: "Rendición",
+    d: "Distinto de Liquidación: acá no importa quién generó la plata, sino quién la cobró de verdad (Pablo, Tincho, Rental o Estudio) contra quién le correspondía — y qué transferencia falta para que las 4 partes queden en cero. Tiene su propia pantalla (Finanzas → Rendición) con un botón para marcar cada transferencia como hecha.",
+  },
+  {
     t: "Ganancia neta del mes",
     d: "Lo devengado del mes menos los gastos del mes. El resultado del negocio (distinto del saldo de caja).",
   },
@@ -75,7 +83,7 @@ const TERMINOS: Item[] = [
 const ACCIONES: Item[] = [
   {
     t: "Registrar un cobro",
-    d: "Se hace desde el pedido (Cobros de pedidos). Entra a la caja de quien cobró (Rambla → Fondo Rambla) o le sube la deuda al socio que cobró.",
+    d: "Se hace desde el pedido (Cobros de pedidos). Entra a la caja de quien cobró (Rental → Fondo Rental) o le sube la deuda al socio que cobró.",
   },
   {
     t: "Cargar un gasto",
@@ -91,7 +99,7 @@ const ACCIONES: Item[] = [
   },
   {
     t: "Cargar a la cuenta de un socio",
-    d: "Rambla puso plata por el socio (ej. le compró un equipo): sale de una caja y le SUBE la deuda al socio. Desde la tarjeta del socio, opción «le cargué».",
+    d: "Rental puso plata por el socio (ej. le compró un equipo): sale de una caja y le SUBE la deuda al socio. Desde la tarjeta del socio, opción «le cargué».",
   },
   {
     t: "Anular un movimiento",

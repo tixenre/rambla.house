@@ -1,7 +1,7 @@
 """Promo combo del Estudio (#1283 Fase 5) contra Postgres REAL.
 
 La promo reemplaza al pack curado: un equipo real `tipo='combo'` (dueno=
-'Rambla', oculto del catálogo), creado desde `POST /admin/estudio/promo/
+'Rental', oculto del catálogo), creado desde `POST /admin/estudio/promo/
 crear-desde-pack` a partir de `estudio_pack_equipos`, con su precio clavado
 vía un descuento % uniforme (`resolver_descuento_uniforme`). Reservar CON
 promo agrega una línea del combo a precio fijo (ítems veraces) — BEST-EFFORT
@@ -176,7 +176,7 @@ def test_crear_promo_desde_pack_reemplaza_pack(client_con_db, setup):
             "FROM equipos WHERE id=%s", (combo_id,),
         ).fetchone()
         assert combo["tipo"] == "combo"
-        assert combo["dueno"] == "Rambla"
+        assert combo["dueno"] == "Rental"
         assert combo["visible_catalogo"] == 0
         assert combo["eliminado_at"] is None
 
@@ -251,7 +251,7 @@ def _reservar(client, *, fecha, start, horas, con_promo):
     )
 
 
-def test_reserva_con_promo_items_veraces_y_atribucion_rambla(client_con_db, setup):
+def test_reserva_con_promo_items_veraces_y_atribucion_rental(client_con_db, setup):
     assert _crear_promo(client_con_db, precio_objetivo=1200).status_code == 201
 
     r = _reservar(client_con_db, fecha="2030-04-02", start="14:00", horas=3, con_promo=True)
@@ -278,7 +278,7 @@ def test_reserva_con_promo_items_veraces_y_atribucion_rambla(client_con_db, setu
     assert sum(it["subtotal"] for it in items) == pedido["monto_total"]
     promo_item = next(it for it in items if it["subtotal"] == 1200)
     assert promo_item["cobro_modo"] == "fijo"
-    assert promo_item["dueno"] == "Rambla"  # NO los dueños tradicionales de EQ_A/EQ_B
+    assert promo_item["dueno"] == "Rental"  # NO los dueños tradicionales de EQ_A/EQ_B
 
 
 def test_reserva_con_promo_sin_stock_es_best_effort_no_bloquea(client_con_db, setup):

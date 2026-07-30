@@ -174,7 +174,7 @@ def reconciliar(conn) -> dict:
     modelo = cargar_modelo(conn)
     canonicos = set(modelo.keys())
     duenos = conn.execute(
-        "SELECT DISTINCT COALESCE(dueno, 'Rambla') AS dueno FROM equipos"
+        "SELECT DISTINCT COALESCE(dueno, 'Rental') AS dueno FROM equipos"
     ).fetchall()
     no_canonicos = sorted(
         row_to_dict(d)["dueno"] for d in duenos if row_to_dict(d)["dueno"] not in canonicos

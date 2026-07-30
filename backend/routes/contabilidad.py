@@ -467,7 +467,7 @@ def get_pyl(request: Request, mes: str):
 
 @router.get("/admin/contabilidad/reporte/{mes}")
 def get_reporte_mensual(request: Request, mes: str):
-    """Reporte mensual completo de Rambla: devengado + percibido + gastos +
+    """Reporte mensual completo de Rental: devengado + percibido + gastos +
     ganancia + cargos de socios + cuenta corriente, derivado del motor."""
     require_admin(request)
     from contabilidad.queries.reporte_mensual import reporte_mensual

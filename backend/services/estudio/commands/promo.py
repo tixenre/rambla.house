@@ -13,8 +13,8 @@ _COMBO_STOCK_SENTINEL = 9999
 
 def crear_promo(conn, estudio, nombre: str | None, precio_objetivo: int | None) -> int:
     """Crea la promo (combo) del Estudio a partir del pack curado actual
-    (`estudio_pack_equipos`): un equipo real `tipo='combo'`, `dueno='Rambla'`
-    (no los dueños tradicionales — es plata de Rambla, no de terceros),
+    (`estudio_pack_equipos`): un equipo real `tipo='combo'`, `dueno='Rental'`
+    (no los dueños tradicionales — es plata de Rental, no de terceros),
     `visible_catalogo=0` (oculto del catálogo público, solo se ofrece desde el
     Estudio/back-office). El precio objetivo (default = `pack_precio` actual)
     se clava vía un descuento % uniforme en sus componentes
@@ -44,7 +44,7 @@ def crear_promo(conn, estudio, nombre: str | None, precio_objetivo: int | None) 
         """
         INSERT INTO equipos (nombre, tipo, cantidad, dueno, visible_catalogo,
                              es_recurso_interno, estado)
-        VALUES (%s,'combo',%s,'Rambla',0,FALSE,'operativo')
+        VALUES (%s,'combo',%s,'Rental',0,FALSE,'operativo')
         """,
         (nombre_final, _COMBO_STOCK_SENTINEL),
     )
