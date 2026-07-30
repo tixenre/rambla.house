@@ -2412,7 +2412,7 @@ def admin_ofrecer_cupo(taller_id: int, ins_id: int, request: Request):
         "taller_nombre": edicion_row["taller_nombre"],
         "nombre_pila": ins["nombre"].split()[0],
         "precio_sena_str": _fmt_pesos(edicion_row["precio_sena"]),
-        "link_sena": f"{SITE_URL}/escuela/sena/{token}",
+        "link_sena": f"{SITE_URL}/escuelas/sena/{token}",
     })
     return {"ok": True}
 
@@ -2503,6 +2503,6 @@ def admin_notificar_interesado(taller_id: int, interesado_id: int, request: Requ
     send_email("taller_interesado_nueva_edicion", row["email"], {
         "taller_nombre": row["taller_nombre"],
         "nombre_pila": row["nombre"].split()[0],
-        "taller_url": f"{SITE_URL}/escuela/{row['slug_base']}",
+        "taller_url": f"{SITE_URL}/escuelas/{row['slug_base']}",
     })
     return {"ok": True}

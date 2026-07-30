@@ -997,8 +997,9 @@ def estudio_page():
         return _serve_frontend("index.html")
 
 
-@app.get("/escuela/{slug}", include_in_schema=False)
-@app.get("/workshops/{slug}", include_in_schema=False)  # alias viejo: el front lo redirige a /escuela, acá sirve OG para scrapers
+@app.get("/escuelas/{slug}", include_in_schema=False)
+@app.get("/escuela/{slug}", include_in_schema=False)  # alias viejo (singular): el front lo redirige a /escuelas, acá sirve OG para scrapers
+@app.get("/workshops/{slug}", include_in_schema=False)  # alias más viejo: el front lo redirige a /escuelas, acá sirve OG para scrapers
 def workshop_page(slug: str):
     """Sirve el SPA del taller con OG tags dinámicos (foto del instructor).
     Ante cualquier error sirve el index.html plano — nunca rompe la página.
@@ -1055,7 +1056,7 @@ def workshop_page(slug: str):
         title = f"{nombre} con {instructor} — Rambla" if instructor else f"{nombre} — Rambla"
         if not og_img.startswith("http"):
             og_img = f"{SITE_URL}/icon-512.png"
-        taller_url = f"{SITE_URL}/escuela/{slug}"
+        taller_url = f"{SITE_URL}/escuelas/{slug}"
         html_text = _inject_og_meta(
             index_file.read_text(encoding="utf-8"),
             title=title, description=desc_raw, image=og_img, url=taller_url,

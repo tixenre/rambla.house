@@ -44,7 +44,7 @@ export const AREAS = {
     label: "escuelas.",
     desc: "Talleres y workshops",
     eyebrow: "Formación",
-    href: "/escuela",
+    href: "/escuelas",
     bg: "bg-rosa",
     fg: "text-ink",
     accent: "text-rosa",

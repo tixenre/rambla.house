@@ -22,7 +22,7 @@ import { apiGetTaller, type EdicionLite, type Taller } from "@/lib/api";
 import { ordinalEdicion, resumenFechas, resumenHorario } from "@/lib/talleres/formato";
 import { descargarIcsTaller } from "@/lib/talleres/ical";
 
-export const Route = createLazyFileRoute("/escuela/$slug")({
+export const Route = createLazyFileRoute("/escuelas/$slug")({
   component: TallerLandingPage,
 });
 
@@ -68,7 +68,7 @@ function SoldOutModal({
           {fechaA} y {fechaB}.
         </p>
         <Link
-          to="/escuela/$slug"
+          to="/escuelas/$slug"
           params={{ slug: proxima.slug }}
           className="flex items-center justify-center w-full rounded-full bg-rosa text-ink font-bold py-3 hover:brightness-110 active:scale-[0.97] transition-all"
           onClick={onDismiss}

@@ -137,7 +137,7 @@ function LandingHub() {
 
           {/* Escuelas */}
           <Link
-            to="/escuela"
+            to="/escuelas"
             className="group relative flex flex-1 flex-col justify-center md:justify-start px-6 py-5 sm:p-10 text-ink md:flex-none transition-[filter] hover:brightness-105 active:brightness-95"
             style={{ backgroundColor: "var(--color-rosa)" }}
           >

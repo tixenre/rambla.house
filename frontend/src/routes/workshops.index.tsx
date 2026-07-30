@@ -1,9 +1,10 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 
-/** /workshops → /escuela (área renombrada; redirect para links viejos de prod). */
+/** /workshops → /escuelas (área renombrada; redirect para links viejos de prod
+ *  — apunta directo al canónico actual, sin pasar por el alias /escuela). */
 export const Route = createFileRoute("/workshops/")({
   beforeLoad: () => {
-    throw redirect({ to: "/escuela", replace: true });
+    throw redirect({ to: "/escuelas", replace: true });
   },
   component: () => null,
 });
