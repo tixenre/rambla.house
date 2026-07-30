@@ -18,6 +18,10 @@ type Item = { t: string; d: React.ReactNode };
 
 const TERMINOS: Item[] = [
   {
+    t: "Rental y Estudio",
+    d: "Las dos economías separadas del negocio, cada una con su cuenta real de Mercado Pago: Rental es la cuenta de Tincho, Estudio la de Pablo. Un cobro por transferencia entra directo a esa cuenta; un cobro en efectivo lo tiene la persona (Tincho o Pablo) en mano hasta que lo deposite o lo rinda — por eso «Cobró» tiene 4 opciones (Rental/Tincho/Pablo/Estudio) y no solo 2.",
+  },
+  {
     t: "Caja",
     d: "Plata real del negocio y dónde está: Efectivo, Banco, Mercado Pago, Dólares, Fondo Rental. Sube y baja con movimientos. Su saldo es plata que existe de verdad.",
   },
@@ -57,6 +61,10 @@ const TERMINOS: Item[] = [
   {
     t: "Liquidación",
     d: "El reporte de cuánto generó cada equipo/dueño y cuánto le toca a cada socio, por mes, con los pedidos detrás. Es el «devengado».",
+  },
+  {
+    t: "Rendición",
+    d: "Distinto de Liquidación: acá no importa quién generó la plata, sino quién la cobró de verdad (Pablo, Tincho, Rental o Estudio) contra quién le correspondía — y qué transferencia falta para que las 4 partes queden en cero. Tiene su propia pantalla (Finanzas → Rendición) con un botón para marcar cada transferencia como hecha.",
   },
   {
     t: "Ganancia neta del mes",

@@ -162,7 +162,7 @@ function CajaEstudioPage() {
     <AdminPage
       title="Caja Estudio"
       maxW="detail"
-      description="La economía del Estudio, separada de Rambla rental — hoy no se reparte ganancia, así que esto es lo único que hace falta ver: qué entra y qué sale de su propia caja."
+      description="La economía del Estudio, separada del Rental — hoy no se reparte ganancia, así que esto es lo único que hace falta ver: qué entra y qué sale de su propia caja."
       backTo={{ to: "/admin/contabilidad", label: "Tablero" }}
       actions={
         <Button variant="outline" size="sm" asChild>
@@ -193,10 +193,10 @@ function CajaEstudioPage() {
             <b>{formatARS(parte.pendiente)}</b> (alguien más cobró plata que era del Estudio). Vas a
             ver a quién pedírselo en{" "}
             <Link
-              to="/admin/contabilidad/liquidacion"
+              to="/admin/contabilidad/rendicion"
               className="underline decoration-amber/60 underline-offset-2"
             >
-              Liquidación
+              Rendición
             </Link>
             .
           </div>

@@ -285,6 +285,11 @@ export function RegistrarPagoModal({
           </div>
         </div>
 
+        <p className="text-xs text-muted-foreground">
+          Transferencia → a la cuenta real (Rental o Estudio). Efectivo → lo tiene la persona
+          (Tincho o Pablo) en mano hasta que lo deposite o lo rinda.
+        </p>
+
         {/* Aviso simétrico: cualquier cruce entre la plata del Estudio y la
             del rental necesita rendición — para el lado que la cobra, no solo
             cuando el Estudio "pierde" plata que cobró otro. */}
