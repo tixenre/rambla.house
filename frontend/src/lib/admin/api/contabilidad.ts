@@ -109,7 +109,14 @@ export const contabilidadMethods = {
     authedJson<RendicionData>(`/api/admin/contabilidad/rendicion/${mes}`),
   saldarRendicion: (
     mes: string,
-    body: { de: string; a: string; monto: number; metodo?: string | null; nota?: string | null },
+    body: {
+      de: string;
+      a: string;
+      monto: number;
+      metodo?: string | null;
+      fecha?: string | null;
+      nota?: string | null;
+    },
   ) => authedPostJson<Movimiento>(`/api/admin/contabilidad/rendicion/${mes}/saldar`, body),
   getPyl: (mes: string) =>
     authedJson<{
