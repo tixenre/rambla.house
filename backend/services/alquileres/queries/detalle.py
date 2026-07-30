@@ -97,6 +97,7 @@ def _get_alquiler_detail(conn, id: int) -> dict:
         pedido["items"],
         any(t["estado"] != "cancelado" for t in pedido["turnos_estudio_vinculados"]),
     )
+    pedido["saldo_pendiente"] = _tiene_saldo_pendiente(pedido["monto_total"], pedido["monto_pagado"])
     _enriquecer_pedido_con_cliente(conn, pedido)
     _enriquecer_pedido_con_total(conn, pedido)
     return pedido
@@ -138,6 +139,20 @@ def _pedido_tiene_contenido(items: list, turnos_vinculados_activos: int | bool) 
     la respuesta) para que el front deje de adivinarlo mirando solo
     `items.length` (hallazgo de auditoría, #1313/#1314)."""
     return bool(items) or bool(turnos_vinculados_activos)
+
+
+def _tiene_saldo_pendiente(monto_total: int | None, monto_pagado: int | None) -> bool:
+    """¿Este pedido todavía tiene plata por cobrar? Pura (sin DB) — mismo
+    criterio que `_maybe_finalizar` (commands/pedido.py): un pedido
+    `monto_total=0` (comp/cortesía) nunca tiene saldo pendiente, sea cual sea
+    `monto_pagado`. Fuente ÚNICA de "¿está pago?", consumida tanto por el
+    gate de `cambiar_estado` (bloquea `finalizado` manual con saldo) como
+    expuesta al front (`saldo_pendiente`) para que el botón "Finalizar" deje
+    de ofrecerse como si fuera gratis (hallazgo del dueño, 2026-07-30: un
+    pedido con $120.000 sin cobrar ofrecía "Cobrar saldo y finalizar" sin que
+    nada impidiera finalizarlo sin cobrar)."""
+    total = monto_total or 0
+    return total > 0 and (monto_pagado or 0) < total
 
 
 def _turnos_vinculados(conn, pedido_id: int) -> list[dict]:

@@ -94,6 +94,13 @@ export type PedidoTransicionable = {
    *  bloqueaba para siempre un pedido "2 horas de estudio y nada más"
    *  (hallazgo real, #1313/#1314-adjacent). */
   tiene_contenido: boolean;
+  /** ¿Todavía tiene plata por cobrar? SIEMPRE lo calcula el backend
+   *  (`_tiene_saldo_pendiente`, services/alquileres/queries/detalle.py) sobre
+   *  la fila individual — el front no resta monto_pagado de monto_total para
+   *  decidir esto, solo lee el resultado. Antes nada lo chequeaba: el botón
+   *  "Cobrar saldo y finalizar" dejaba marcar Finalizado un pedido real sin
+   *  haber cobrado un peso (hallazgo del dueño, 2026-07-30). */
+  saldo_pendiente: boolean;
   /** Para el gate de salida de borrador: alcanza con la ficha vinculada O un
    *  nombre cargado a mano ("alguien que llamó"). */
   cliente_id?: number | null;
@@ -116,6 +123,10 @@ export function blockReason(p: PedidoTransicionable, target: EstadoPedido): stri
     if (!p.fecha_desde || !p.fecha_hasta) return "faltan fechas";
     if (!p.tiene_contenido) return "sin equipos";
   }
+  // Finalizar es "estilo Magento": normalmente se prende solo (devuelto +
+  // pagado completo). El botón manual es un escape hatch para un pedido sin
+  // nada por cobrar (monto_total=0) — no una forma de saltear el cobro.
+  if (target === "finalizado" && p.saldo_pendiente) return "saldo pendiente";
   return null;
 }
 

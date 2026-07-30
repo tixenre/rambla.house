@@ -20,13 +20,18 @@ a corregir un pedido — pasa seguido), con dos excepciones:
 1. `finalizado` es "estilo Magento": normalmente se prende SOLO (devuelto +
    pagado completo, vía `_maybe_finalizar` en `detalle.py` — se sigue
    llamando acá al final de cada `cambiar_estado`) y se apaga solo si se
-   anula el pago que lo completaba (`pagos.py`). Pero SÍ sigue siendo un
-   destino manual válido, un solo paso desde/hacia `devuelto` — es el
-   escape hatch real que ya existe (botón "Finalizar" del admin) para un
-   pedido con `monto_total=0` (comp/cortesía), que nunca cumple la condición
-   de `_maybe_finalizar` y quedaría trabado en `devuelto` para siempre sin
-   esto. Esto deja los 7 consumidores de `estado='finalizado'` en
-   reportes/liquidación (MEMORIA 2026-07-03) totalmente intactos — la
+   anula el pago que lo completaba (`pagos.py`). SÍ sigue siendo un destino
+   manual válido, un solo paso desde/hacia `devuelto` — es el escape hatch
+   real que ya existe (botón "Finalizar" del admin) para un pedido con
+   `monto_total=0` (comp/cortesía), que nunca cumple la condición de
+   `_maybe_finalizar` y quedaría trabado en `devuelto` para siempre sin
+   esto. El escape hatch está GATEADO (`_tiene_saldo_pendiente`, ver más
+   abajo): solo puede saltear `_maybe_finalizar` cuando de verdad no hay
+   nada por cobrar (`monto_total=0`, o `monto_pagado >= monto_total`) — no
+   es una forma de marcar "Finalizado" un pedido real sin cobrarlo (hallazgo
+   del dueño, 2026-07-30: el botón "Cobrar saldo y finalizar" lo permitía con
+   $120.000 sin cobrar). Esto deja los 7 consumidores de `estado='finalizado'`
+   en reportes/liquidación (MEMORIA 2026-07-03) totalmente intactos — la
    columna sigue significando exactamente lo mismo, cero migración de
    queries.
 2. Volver a `borrador` está bloqueado si el pedido ya tiene plata cobrada
@@ -44,7 +49,7 @@ from database import to_datetime
 from reservas import validar_stock as _check_stock
 from tipos_pedido import es_pedido_estudio, es_pedido_taller
 from services.alquileres.commands.items import _lock_equipos_por_id
-from services.alquileres.queries.detalle import _tiene_turno_vinculado_activo
+from services.alquileres.queries.detalle import _tiene_turno_vinculado_activo, _tiene_saldo_pendiente
 
 # Estados que reservan stock activamente — entrar a uno de estos desde uno que
 # NO reserva exige re-validar stock (ver `_requiere_revalidar_stock`).
@@ -306,6 +311,16 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
         ).fetchone()
         if not tiene_items and not _tiene_turno_vinculado_activo(conn, pedido_id):
             errores.append("El pedido no tiene equipos cargados ni un turno del Estudio.")
+        # El escape hatch manual de `finalizado` (punto 1 del docstring) es
+        # SOLO para un pedido sin nada por cobrar — `_maybe_finalizar` ya
+        # cubre el caso normal (devuelto + pagado). Sin este chequeo, el botón
+        # "Finalizar" del admin marcaba como cerrado-y-cobrado un pedido real
+        # sin haber cobrado un peso (hallazgo del dueño, 2026-07-30).
+        if (
+            estado_nuevo == "finalizado" and estado_actual != "finalizado"
+            and _tiene_saldo_pendiente(p["monto_total"], p["monto_pagado"])
+        ):
+            errores.append("Falta cobrar el saldo antes de poder finalizar el pedido.")
         if p["fecha_desde"] and p["fecha_hasta"] and not errores:
             errores.extend(_revalidar_stock(conn, p))
         if errores:

@@ -26,7 +26,7 @@ from services.pedidos_enriquecimiento import (
     _batch_count_turnos_vinculados,
     _batch_plata_turnos_vinculados,
 )
-from services.alquileres.queries.detalle import _pedido_tiene_contenido
+from services.alquileres.queries.detalle import _pedido_tiene_contenido, _tiene_saldo_pendiente
 from reservas import validar_stock as _check_stock
 from routes.alquileres.core import (
     router,
@@ -206,6 +206,11 @@ def list_pedidos(
             # Mismo campo que expone el detalle (`_get_alquiler_detail`) — sin
             # query extra, reusa `items`/`turnos_count_map` ya batcheados.
             p["tiene_contenido"] = _pedido_tiene_contenido(p["items"], p["turnos_vinculados_count"])
+            # Con los montos DE LA FILA (antes de combinar con el turno abajo)
+            # — mismos que ve `cambiar_estado` (SELECT * FOR UPDATE de la fila
+            # individual, sin combinar), así que el botón "Finalizar" del
+            # front bloquea EXACTAMENTE lo mismo que el backend rechazaría.
+            p["saldo_pendiente"] = _tiene_saldo_pendiente(p["monto_total"], p["monto_pagado"])
             # La plata del turno se SUMA a la del pedido (#1308: una sola venta).
             # `monto_total`/`monto_pagado` de la fila quedan pisados con el
             # combinado — es lo que la lista tiene que leer para no contradecir

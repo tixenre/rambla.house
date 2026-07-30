@@ -39,7 +39,7 @@ pytestmark = [
 EQ_ID = 9_700_001
 CLIENTE_ID = 9_700_201
 FD, FH = "2026-09-01T08:00:00", "2026-09-02T20:00:00"
-_PEDIDO_IDS = list(range(9_700_101, 9_700_117))
+_PEDIDO_IDS = list(range(9_700_101, 9_700_122))
 
 
 def _limpiar(conn):
@@ -390,5 +390,109 @@ def test_borrador_con_turno_cancelado_no_cuenta_como_contenido(db_setup):
         assert exc.value.status_code == 400
         p = conn.execute("SELECT estado FROM alquileres WHERE id=%s", (principal_id,)).fetchone()
         assert p["estado"] == "borrador"
+    finally:
+        conn.close()
+
+
+# ── Finalizar manual sin cobrar (hallazgo del dueño, 2026-07-30) ────────────
+#
+# El botón "Cobrar saldo y finalizar" del admin llamaba a `cambiar_estado`
+# directo, sin ningún chequeo de plata — un pedido devuelto con saldo real
+# pendiente (no el caso comp/cortesía monto_total=0 que es el escape hatch
+# de siempre) se podía marcar 'finalizado' sin cobrar un peso.
+
+def test_finalizar_manual_rechazado_si_no_esta_pago(db_setup):
+    """El escenario reportado: $120.000 de total, $0 cobrado — el botón NO
+    puede finalizar esto. Antes del fix, esto pasaba sin ningún error."""
+    from database import get_db
+    from routes.alquileres.transiciones import cambiar_estado
+
+    conn = get_db()
+    try:
+        _crear_pedido(conn, _PEDIDO_IDS[16], "devuelto", monto_total=120_000, monto_pagado=0)
+        with pytest.raises(HTTPException) as exc:
+            cambiar_estado(conn, _PEDIDO_IDS[16], "finalizado", es_admin=True, actor="system")
+        conn.rollback()
+        assert exc.value.status_code == 422
+        assert "saldo" in str(exc.value.detail).lower()
+        p = conn.execute("SELECT estado FROM alquileres WHERE id=%s", (_PEDIDO_IDS[16],)).fetchone()
+        assert p["estado"] == "devuelto"
+    finally:
+        conn.close()
+
+
+def test_finalizar_manual_rechazado_con_pago_parcial(db_setup):
+    """Pagó la seña pero no el resto — sigue bloqueado, no solo el caso
+    'nada cobrado'."""
+    from database import get_db
+    from routes.alquileres.transiciones import cambiar_estado
+
+    conn = get_db()
+    try:
+        _crear_pedido(conn, _PEDIDO_IDS[17], "devuelto", monto_total=120_000, monto_pagado=50_000)
+        with pytest.raises(HTTPException) as exc:
+            cambiar_estado(conn, _PEDIDO_IDS[17], "finalizado", es_admin=True, actor="system")
+        conn.rollback()
+        assert exc.value.status_code == 422
+        p = conn.execute("SELECT estado FROM alquileres WHERE id=%s", (_PEDIDO_IDS[17],)).fetchone()
+        assert p["estado"] == "devuelto"
+    finally:
+        conn.close()
+
+
+def test_finalizar_manual_permitido_si_esta_pago_completo(db_setup):
+    """Con monto_total>0 pero YA pago completo, el botón manual sigue
+    andando — el gate solo bloquea cuando falta cobrar, no el escape hatch
+    en sí (ej. `_maybe_finalizar` no disparó todavía por algún motivo y el
+    admin lo fuerza a mano)."""
+    from database import get_db
+    from routes.alquileres.transiciones import cambiar_estado
+
+    conn = get_db()
+    try:
+        _crear_pedido(conn, _PEDIDO_IDS[18], "devuelto", monto_total=120_000, monto_pagado=120_000)
+        resultado = cambiar_estado(conn, _PEDIDO_IDS[18], "finalizado", es_admin=True, actor="system")
+        conn.commit()
+        assert resultado["estado_nuevo"] == "finalizado"
+        p = conn.execute("SELECT estado FROM alquileres WHERE id=%s", (_PEDIDO_IDS[18],)).fetchone()
+        assert p["estado"] == "finalizado"
+    finally:
+        conn.close()
+
+
+def test_cascada_no_finaliza_turno_vinculado_con_saldo_pendiente(db_setup):
+    """El principal está pago completo y finaliza — pero su turno vinculado
+    TODAVÍA debe plata en su propia fila: la cascada no lo fuerza a
+    'finalizado', lo reporta como advertencia y el principal igual avanza
+    (mismo criterio que cualquier otro fallo puntual de un turno en la
+    cascada — nunca revierte al principal)."""
+    from database import get_db
+    from routes.alquileres.transiciones import cambiar_estado
+
+    principal_id, turno_id = _PEDIDO_IDS[19], _PEDIDO_IDS[20]
+    conn = get_db()
+    try:
+        _crear_pedido(conn, principal_id, "devuelto", monto_total=100_000, monto_pagado=100_000)
+        conn.execute(
+            "INSERT INTO alquileres (id, cliente_id, cliente_nombre, estado, "
+            "pedido_principal_id, monto_total, monto_pagado) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (turno_id, CLIENTE_ID, "Cliente test", "devuelto", principal_id, 30_000, 0),
+        )
+        conn.commit()
+
+        resultado = cambiar_estado(conn, principal_id, "finalizado", es_admin=True, actor="system")
+        conn.commit()
+
+        assert resultado["estado_nuevo"] == "finalizado"
+        assert len(resultado["turnos_vinculados_sin_avanzar"]) == 1
+        assert resultado["turnos_vinculados_sin_avanzar"][0]["turno_id"] == turno_id
+
+        principal = conn.execute(
+            "SELECT estado FROM alquileres WHERE id=%s", (principal_id,)
+        ).fetchone()
+        assert principal["estado"] == "finalizado"
+        turno = conn.execute("SELECT estado FROM alquileres WHERE id=%s", (turno_id,)).fetchone()
+        assert turno["estado"] == "devuelto"
     finally:
         conn.close()

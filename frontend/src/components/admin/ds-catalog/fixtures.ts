@@ -382,6 +382,7 @@ export const adminPedidoPresupuesto: AdminPedido = {
   estado: "solicitado",
   monto_total: 222000,
   monto_pagado: 0,
+  saldo_pendiente: true,
   items: [
     {
       id: 91041,
@@ -410,6 +411,7 @@ export const adminPedidoSolicitado: AdminPedido = {
   estado: "solicitado",
   monto_total: 390000,
   monto_pagado: 0,
+  saldo_pendiente: true,
   items: itemsAdminPedido(9101),
   pagos: [],
   tiene_solicitud_pendiente: true,
@@ -428,6 +430,7 @@ export const adminPedidoConfirmado: AdminPedido = {
   estado: "confirmado",
   monto_total: 390000,
   monto_pagado: 150000,
+  saldo_pendiente: true,
   items: itemsAdminPedido(9102),
   pagos: [
     {
@@ -453,6 +456,7 @@ export const adminPedidoFinalizado: AdminPedido = {
   estado: "finalizado",
   monto_total: 390000,
   monto_pagado: 390000,
+  saldo_pendiente: false,
   items: itemsAdminPedido(9103),
   pagos: [
     {

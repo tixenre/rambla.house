@@ -108,9 +108,13 @@ def test_apply_items_preserva_descuento_jornadas(monkeypatch):
     puntos = [(1, 0.0), (7, 10.0)]
     conn = FakeConn(pedido, puntos)
 
-    # Evitamos resolver _get_alquiler_detail (depende de muchos JOINs).
+    # Evitamos resolver _get_alquiler_detail (depende de muchos JOINs). Patch
+    # sobre `commands.items` (donde `_apply_pedido_items` lo resuelve de
+    # verdad tras el split CQRS-lite) — `routes.alquileres` es un re-export,
+    # parchearlo ahí no interceptaba la llamada real (gap latente: ninguna
+    # de las dos assertions de este test lee el valor de retorno).
     monkeypatch.setattr(
-        "routes.alquileres._get_alquiler_detail",
+        "services.alquileres.commands.items._get_alquiler_detail",
         lambda conn, id: {"id": id, "monto_total": conn.updates_alquileres[-1][1][0]},
     )
 
@@ -168,7 +172,7 @@ def test_apply_items_preserva_cobro_modo_fijo_en_item_de_catalogo(monkeypatch):
     }
     conn = FakeConn(pedido, descuento_jornadas_puntos=[])
     monkeypatch.setattr(
-        "routes.alquileres._get_alquiler_detail",
+        "services.alquileres.commands.items._get_alquiler_detail",
         lambda conn, id: {"id": id},
     )
 

@@ -1227,6 +1227,14 @@ export type Pedido = {
    *  que bloqueaba para siempre un pedido "2 horas de estudio y nada más"
    *  (hallazgo real, #1313/#1314-adjacent). */
   tiene_contenido: boolean;
+  /** ¿Todavía tiene plata por cobrar? Lo calcula el backend
+   *  (`_tiene_saldo_pendiente`, services/alquileres/queries/detalle.py) sobre
+   *  monto_total/monto_pagado de la FILA individual — el front lo usa tal
+   *  cual (`blockReason`) para bloquear "Cobrar saldo y finalizar" en vez de
+   *  restar los montos por su cuenta; el gate real vive en el backend
+   *  (`cambiar_estado`). Antes nada lo chequeaba: el botón dejaba marcar
+   *  Finalizado un pedido real sin cobrar (hallazgo del dueño, 2026-07-30). */
+  saldo_pendiente: boolean;
   /** Solo presente en la respuesta de `PATCH /alquileres/{id}` cuando `id` es
    *  un pedido PRINCIPAL con turnos vinculados (#1308, cascada de estado
    *  "avanzan juntos"): qué turno no pudo seguir el mismo paso (bloqueado por
