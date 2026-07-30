@@ -10,7 +10,7 @@ import { apiGetTalleres, type Taller } from "@/lib/api";
 import { formatARS } from "@/lib/format";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
 
-export const Route = createLazyFileRoute("/escuela/")({
+export const Route = createLazyFileRoute("/escuelas/")({
   component: TalleresPage,
 });
 
@@ -32,7 +32,7 @@ function WorkshopCard({ taller }: { taller: Taller }) {
 
   return (
     <Link
-      to="/escuela/$slug"
+      to="/escuelas/$slug"
       params={{ slug: taller.slug }}
       className={`group flex flex-col sm:flex-row rounded-2xl border overflow-hidden transition-all duration-200 ${
         soldOut

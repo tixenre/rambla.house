@@ -10,7 +10,13 @@ import { Spinner } from "@/design-system/ui/spinner";
 import { Switch } from "@/design-system/ui/switch";
 import { useConfirm } from "@/components/admin/useConfirm";
 import { CuposPill } from "./CuposPill";
-import { ClasesSection, ModalidadesSection, PagosSection, PreciosSection } from "./EdicionTabs";
+import {
+  ClasesSection,
+  ModalidadesSection,
+  PagosSection,
+  PedidosGeneradosSection,
+  PreciosSection,
+} from "./EdicionTabs";
 import { InscripcionesSection } from "./InscripcionesSection";
 import { updateEdicionInCache } from "./cache";
 
@@ -147,7 +153,7 @@ export function EdicionSubRow({
             aria-label={edicion.activo ? "Pasar a borrador" : "Publicar edición"}
           />
           <a
-            href={`/escuela/${edicion.slug}`}
+            href={`/escuelas/${edicion.slug}`}
             target="_blank"
             rel="noopener noreferrer"
             className="p-1 rounded text-muted-foreground hover:text-ink transition"
@@ -222,6 +228,12 @@ export function EdicionSubRow({
                     Modalidades de pago
                   </p>
                   <ModalidadesSection edicion={edicion} />
+                </div>
+                <div className="border-t border-border/40 mt-6 pt-6">
+                  <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3">
+                    Pedidos generados
+                  </p>
+                  <PedidosGeneradosSection edicion={edicion} />
                 </div>
               </div>
             )}

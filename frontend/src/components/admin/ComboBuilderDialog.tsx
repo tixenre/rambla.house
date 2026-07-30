@@ -66,7 +66,7 @@ export function ComboBuilderDialog({
 
   const [step, setStep] = useState<"form" | "componentes">("form");
   const [nombre, setNombre] = useState("");
-  const [dueno, setDueno] = useState<string>("Rambla");
+  const [dueno, setDueno] = useState<string>("Rental");
   const [visibleCatalogo, setVisibleCatalogo] = useState(true);
   const [saving, setSaving] = useState(false);
   const [equipo, setEquipo] = useState<Equipo | null>(null);
@@ -87,7 +87,7 @@ export function ComboBuilderDialog({
       // Reset para la próxima apertura
       setStep("form");
       setNombre("");
-      setDueno("Rambla");
+      setDueno("Rental");
       setVisibleCatalogo(true);
       setSaving(false);
       setEquipo(null);

@@ -7,9 +7,9 @@ ledger `alquiler_pagos`, por destinatario). Está atada al MISMO universo de
 pedidos saldados del mes que el reporte → los dos lados suman el mismo total y la
 rendición cierra en cero.
 
-Las partes son **Pablo**, **Tincho**, **Rambla** y **Estudio** (constante `PARTES`)
-— todas pueden cobrar (Rambla es el cobrador por defecto y su plata cae en la
-caja Fondo Rambla; Estudio, en Caja Estudio). El netting calcula quién le debe a
+Las partes son **Pablo**, **Tincho**, **Rental** y **Estudio** (constante `PARTES`)
+— todas pueden cobrar (Rental es el cobrador por defecto y su plata cae en la
+caja Fondo Rental; Estudio, en Caja Estudio). El netting calcula quién le debe a
 quién para que cada parte termine con lo que le corresponde; ninguna parte se
 reparte entre las demás — es una transferencia 1:1 sugerida.
 
@@ -92,11 +92,11 @@ def cobrado_por_socio(conn, desde: str, hasta: str) -> dict:
 
 
 def _parte_de_cuenta(socio, tipo, nombre) -> str | None:
-    """Mapea una cuenta a su parte de rendición (Pablo/Tincho/Rambla) o None."""
+    """Mapea una cuenta a su parte de rendición (Pablo/Tincho/Rental) o None."""
     if socio in PARTES:
         return socio
-    if tipo == "fondo" or (nombre or "").strip().lower() == "fondo rambla":
-        return "Rambla"
+    if tipo == "fondo" or (nombre or "").strip().lower() == "fondo rental":
+        return "Rental"
     return None
 
 
@@ -143,7 +143,7 @@ def _movimientos_rendicion(conn, mes: str) -> list[dict]:
 
 def cuenta_de_parte(conn, parte: str) -> int | None:
     """La caja que representa a una parte (vínculo por la columna `socio`):
-    Caja Pablo/Tincho, o Fondo Rambla."""
+    Caja Pablo/Tincho, o Fondo Rental."""
     if parte not in PARTES:
         return None
     row = conn.execute(
@@ -151,10 +151,10 @@ def cuenta_de_parte(conn, parte: str) -> int | None:
     ).fetchone()
     if row:
         return row[0]
-    if parte == "Rambla":  # fallback si el Fondo no quedó vinculado al cobrador
+    if parte == "Rental":  # fallback si el Fondo no quedó vinculado al cobrador
         row = conn.execute(
             """SELECT id FROM cuentas
-               WHERE activa = TRUE AND (tipo = 'fondo' OR nombre = 'Fondo Rambla')
+               WHERE activa = TRUE AND (tipo = 'fondo' OR nombre = 'Fondo Rental')
                ORDER BY id LIMIT 1"""
         ).fetchone()
     return row[0] if row else None

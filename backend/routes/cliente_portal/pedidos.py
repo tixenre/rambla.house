@@ -3,8 +3,9 @@
 Crear / cancelar pedido + listar / ver detalle de los pedidos del cliente logueado.
 Registra sus rutas en el router compartido del paquete `routes.cliente_portal`. Los
 helpers compartidos (`require_cliente`, `_proyectar`, `_documentos_disponibles`) viven
-en `core`; cancelar el pedido delega en `routes.alquileres.transiciones.cambiar_estado`
-(única puerta de transición de estado, admin y cliente).
+en `core`; cancelar el pedido delega en
+`services.alquileres.commands.transiciones.cambiar_estado` (única puerta de
+transición de estado, admin y cliente).
 """
 from typing import Optional
 
@@ -12,6 +13,7 @@ from fastapi import Request, HTTPException, BackgroundTasks
 from pydantic import BaseModel, field_validator
 
 from database import get_db, row_to_dict, to_datetime
+from pedidos_vinculados import SIN_PRINCIPAL_SQL
 from rate_limit import limiter, CLIENTE_WRITE_LIMIT
 from routes.cliente_portal.core import (
     router,
@@ -22,6 +24,7 @@ from routes.cliente_portal.core import (
     _ITEM_CAMPOS_PORTAL,
 )
 from services.checkout import faltan_firma_tyc, FIRMA_CHECKOUT_OBLIGATORIA
+from services.finanzas_flujo.pedido import combinar_turnos_vinculados
 from services.fechas import validar_rango_fechas, antelacion_insuficiente, validar_fecha_iso
 from auth.stepup import has_recent_stepup
 
@@ -200,18 +203,22 @@ def cliente_crear_pedido(
 def cliente_cancelar_pedido(id: int, request: Request):
     """La legalidad de la transición (qué estados puede cancelar un cliente)
     y el auto-cancelado de solicitudes pendientes viven en
-    `routes.alquileres.transiciones.cambiar_estado` — única puerta, la
-    comparte con la transición de estado del admin."""
+    `services.alquileres.commands.transiciones.cambiar_estado` — única puerta,
+    la comparte con la transición de estado del admin."""
     session = require_cliente(request)
     cliente_id = session["cliente_id"]
     with get_db() as conn:
+        # `SIN_PRINCIPAL_SQL`: un turno del Estudio vinculado no existe como
+        # pedido para el cliente (#1308) — tampoco por API. Era el único write
+        # que el cliente podía hacerle.
         p = conn.execute(
-            "SELECT id FROM alquileres WHERE id = %s AND cliente_id = %s",
+            f"SELECT id FROM alquileres "
+            f"WHERE id = %s AND cliente_id = %s AND {SIN_PRINCIPAL_SQL}",
             (id, cliente_id),
         ).fetchone()
         if not p:
             raise HTTPException(404, "Pedido no encontrado")
-        from routes.alquileres.transiciones import cambiar_estado
+        from services.alquileres.commands.transiciones import cambiar_estado
         cambiar_estado(
             conn, id, "cancelado", es_admin=False,
             actor=session.get("email") or "cliente",
@@ -227,12 +234,19 @@ def cliente_pedidos(request: Request):
     session = require_cliente(request)
     cliente_id = session["cliente_id"]
     with get_db() as conn:
-        pedidos = conn.execute("""
+        # `SIN_PRINCIPAL_SQL`: los turnos del Estudio vinculados a un pedido de
+        # alquiler NO son pedidos del cliente (#1308) — son la misma venta que su
+        # principal, que más abajo absorbe su plata vía `combinar_turnos_vinculados`.
+        # Sin esto el cliente veía dos cards, con dos números y dos totales.
+        # `estado != 'borrador'`: un borrador es un escenario hipotético del admin
+        # (puede tener un cliente real asignado mientras se prueba algo) — el
+        # cliente no debe verlo nunca, ni por accidente, hasta que salga de ahí.
+        pedidos = conn.execute(f"""
             SELECT id, numero_pedido, estado, fecha_desde, fecha_hasta,
                    monto_total, monto_pagado, descuento_pct, descuento_jornadas_pct,
                    notas, created_at, perfil_fiscal_id, productora_id
             FROM alquileres
-            WHERE cliente_id = %s
+            WHERE cliente_id = %s AND estado != 'borrador' AND {SIN_PRINCIPAL_SQL}
             ORDER BY created_at DESC NULLS LAST, numero_pedido DESC
         """, (cliente_id,)).fetchall()
 
@@ -320,6 +334,11 @@ def cliente_pedidos(request: Request):
             # no lo traía y podía mostrar 0%/$0 de descuento cuando ganaba el
             # de jornadas (asimetría encontrada en la Fase B de #1219).
             _enriquecer_pedido_con_total(conn, d)
+            # ...y después la plata de los turnos del Estudio vinculados: el
+            # cliente ve UN pedido con UN total (#1308). Sin esto, ocultar la
+            # fila del turno le escondería su plata (el total del portal
+            # quedaría por debajo de lo que realmente debe).
+            combinar_turnos_vinculados(conn, d)
 
             result.append(d)
         return result
@@ -330,13 +349,18 @@ def cliente_pedido_detalle(id: int, request: Request):
     session = require_cliente(request)
     cliente_id = session["cliente_id"]
     with get_db() as conn:
-        pedido = conn.execute("""
+        # `SIN_PRINCIPAL_SQL` → 404 para un turno del Estudio vinculado (#1308):
+        # deja de tener página, documentos y pagos propios de cara al cliente.
+        # `estado != 'borrador'` → mismo 404 para un borrador (ver `cliente_pedidos`
+        # más arriba): el cliente no debe poder ver un escenario hipotético del
+        # admin, ni siquiera si adivina/guarda el `id`.
+        pedido = conn.execute(f"""
             SELECT id, numero_pedido, estado, fecha_desde, fecha_hasta,
                    monto_total, monto_pagado, descuento_pct,
                    descuento_jornadas_pct, cliente_id, notas, created_at,
                    perfil_fiscal_id, productora_id
             FROM alquileres
-            WHERE id = %s AND cliente_id = %s
+            WHERE id = %s AND cliente_id = %s AND estado != 'borrador' AND {SIN_PRINCIPAL_SQL}
         """, (id, cliente_id)).fetchone()
         if not pedido:
             raise HTTPException(404, "Pedido no encontrado")
@@ -374,6 +398,9 @@ def cliente_pedido_detalle(id: int, request: Request):
         # superficies (#496). El frontend del portal lo lee directo.
         from routes.alquileres import _enriquecer_pedido_con_total
         _enriquecer_pedido_con_total(conn, d)
+        # Un pedido, un total: absorbe la plata de sus turnos del Estudio (#1308),
+        # igual que la lista y que la factura.
+        combinar_turnos_vinculados(conn, d)
 
         return d
 

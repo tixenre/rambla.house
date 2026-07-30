@@ -1,5 +1,5 @@
 /**
- * ReservasSection — alta/gestión de turnos del Estudio desde el back-office
+ * ReservasSection — gestión de turnos del Estudio desde el back-office
  * (#1283 Fase 6). Vive en su propia ruta (`/admin/estudio/reservas`, no
  * dentro de la página de configuración) porque es uso DIARIO/operativo, a
  * diferencia del resto de `/admin/estudio` (config, se toca rara vez).
@@ -9,11 +9,18 @@
  * promo/sueltos pasa por `ReservaDialog`; pagos/documentos/estado del
  * pedido siguen en `/admin/pedidos/$id` (el editor genérico bloquea items/
  * fechas para tipo estudio, Fase 1 — no se reimplementa acá).
+ *
+ * SIN alta acá a propósito (decisión del dueño, 2026-07-30): el turno se
+ * carga desde un pedido de alquiler (`TurnosEstudioSection`, dentro de
+ * `pedidos.$id`) — una sola forma de crear un turno. Un turno "solo estudio"
+ * arranca de un pedido vacío (sin equipos, ahora soportado — #1313/#1314) al
+ * que se le agrega el turno ahí mismo. `ReservaDialog` de acá abajo queda
+ * SOLO para editar un turno ya existente (`reserva` nunca es `null`).
  */
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { CalendarDays, ExternalLink, Plus, Rows3 } from "lucide-react";
+import { CalendarDays, ExternalLink, Rows3 } from "lucide-react";
 
 import { Button } from "@/design-system/ui/button";
 import { Spinner } from "@/design-system/ui/spinner";
@@ -47,10 +54,6 @@ export function ReservasSection({ estudio }: { estudio: EstudioConfig }) {
   });
   const reservas = useMemo(() => reservasQ.data?.reservas ?? [], [reservasQ.data]);
 
-  const abrirNuevo = () => {
-    setReservaEditando(null);
-    setDialogAbierto(true);
-  };
   const abrirEdicion = (r: EstudioReservaListItem) => {
     setReservaEditando(r);
     setDialogAbierto(true);
@@ -107,7 +110,7 @@ export function ReservasSection({ estudio }: { estudio: EstudioConfig }) {
 
   return (
     <div>
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+      <div className="mb-4 flex flex-wrap items-center gap-2">
         <div className="inline-flex rounded-lg border hairline p-0.5">
           <button
             type="button"
@@ -132,9 +135,6 @@ export function ReservasSection({ estudio }: { estudio: EstudioConfig }) {
             <Rows3 className="h-4 w-4" /> Lista
           </button>
         </div>
-        <Button onClick={abrirNuevo}>
-          <Plus className="mr-1.5 h-4 w-4" /> Nuevo turno
-        </Button>
       </div>
 
       {vista === "agenda" ? (
@@ -151,7 +151,7 @@ export function ReservasSection({ estudio }: { estudio: EstudioConfig }) {
         <EmptyState
           icon={<CalendarDays className="h-6 w-6" />}
           title="Sin turnos todavía"
-          sub="Creá el primero con el botón de arriba."
+          sub="Se cargan desde un pedido — abrí uno y agregá el turno en 'Turnos del Estudio'."
         />
       ) : (
         <AdminTable columns={columns} rows={reservas} getRowKey={(r) => r.id} />

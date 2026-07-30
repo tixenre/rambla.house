@@ -41,9 +41,9 @@ pytestmark = [
     ),
 ]
 
-E_PABLO, E_RAMBLA = 9_400_001, 9_400_002
+E_PABLO, E_RENTAL = 9_400_001, 9_400_002
 P_JUNIO, P_EDIT = 9_400_101, 9_400_102
-ALL_EQ = (E_PABLO, E_RAMBLA)
+ALL_EQ = (E_PABLO, E_RENTAL)
 ALL_PED = (P_JUNIO, P_EDIT)
 MES = "2026-06"
 
@@ -79,7 +79,7 @@ def setup():
         )
         conn.execute(
             "INSERT INTO equipos (id, nombre, cantidad, dueno) VALUES (%s,%s,%s,%s)",
-            (E_RAMBLA, "Equipo Rambla", 5, "Rambla"),
+            (E_RENTAL, "Equipo Rental", 5, "Rental"),
         )
         # P_JUNIO: 100k de Pablo, alquiler y saldo en junio → cuenta para junio
         # (fecha_desde dentro del clean start, ver liquidacion.LIQUIDACION_INICIO).
@@ -97,7 +97,7 @@ def setup():
             (P_JUNIO, 100000, "pago", "2026-06-15T10:00:00"),
         )
         # Modelo default conocido.
-        _modelo(conn, {"Pablo": {"Pablo": 50, "Rambla": 45, "Tincho": 5}, "Rambla": {"Rambla": 100}})
+        _modelo(conn, {"Pablo": {"Pablo": 50, "Rental": 45, "Tincho": 5}, "Rental": {"Rental": 100}})
         conn.commit()
     finally:
         conn.close()
@@ -136,7 +136,7 @@ def test_cerrar_congela_frente_a_cambio_de_modelo(setup):
         assert snap["resumen"]["por_beneficiario"]["Pablo"] == 50000
 
         # Cambiamos el modelo: ahora Pablo se lleva todo.
-        _modelo(conn, {"Pablo": {"Pablo": 100}, "Rambla": {"Rambla": 100}})
+        _modelo(conn, {"Pablo": {"Pablo": 100}, "Rental": {"Rental": 100}})
         conn.commit()
 
         # El mes ABIERTO recalcularía (Pablo 100k); el CERRADO sigue 50k.
@@ -289,7 +289,7 @@ def test_liquidar_rango_multimes_respeta_mes_cerrado(setup):
         conn.commit()
 
         # Cambiamos el modelo DESPUÉS de cerrar junio: ahora Pablo se lo lleva todo.
-        _modelo(conn, {"Pablo": {"Pablo": 100}, "Rambla": {"Rambla": 100}})
+        _modelo(conn, {"Pablo": {"Pablo": 100}, "Rental": {"Rental": 100}})
         conn.commit()
 
         anio_rango = liquidar_rango(conn, "2026-01-01", "2026-12-31")

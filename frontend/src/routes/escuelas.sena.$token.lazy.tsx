@@ -16,7 +16,7 @@ import {
   type OfertaCupo,
 } from "@/lib/api";
 
-export const Route = createLazyFileRoute("/escuela/sena/$token")({
+export const Route = createLazyFileRoute("/escuelas/sena/$token")({
   component: SenaPage,
 });
 
@@ -222,7 +222,7 @@ function SenaPage() {
               }
             >
               <Link
-                to="/escuela"
+                to="/escuelas"
                 className="text-sm font-semibold text-ink hover:text-rosa transition"
               >
                 Ver talleres

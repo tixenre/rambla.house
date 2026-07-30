@@ -84,7 +84,7 @@ def _get_pedido(conn, pedido_id: int) -> dict:
         _enriquecer_pedido_con_cliente,
         _batch_get_alquiler_items,
     )
-    from services.finanzas_flujo.pedido import desglose_de_pedido
+    from services.finanzas_flujo.pedido import combinar_turnos_vinculados, desglose_de_pedido
 
     row = conn.execute(
         "SELECT * FROM alquileres WHERE id = %s",
@@ -102,9 +102,35 @@ def _get_pedido(conn, pedido_id: int) -> dict:
     # por módulos de services/, nunca por routes.alquileres — un service no debería depender de un
     # route (auditoría cruzada de plata, 2026-07-02).
     desglose_de_pedido(conn, pedido)
+    # Un pedido de alquiler y sus turnos del Estudio vinculados son UNA sola venta
+    # → UNA sola factura (#1308, "facturar en el mismo pedido"). Va acá, en el punto
+    # único de carga, para que los 4 consumidores de `_get_pedido` (chequeos previos,
+    # preview HTML, emisión, y re-render/mail de una factura ya emitida) vean SIEMPRE
+    # el mismo número — si viviera solo en `emitir_factura`, el preview y la
+    # reimpresión mostrarían un total distinto al del CAE.
+    combinar_turnos_vinculados(conn, pedido, expandir_periodo=True)
     _enriquecer_pedido_con_cliente_fiscal(conn, pedido)
     _enriquecer_pedido_con_cliente(conn, pedido)
     return pedido
+
+
+def _rechazar_si_es_turno_vinculado(pedido: dict) -> None:
+    """Un turno del Estudio vinculado NO se factura por su cuenta: su plata ya
+    entra en la factura de su pedido principal (`combinar_turnos_vinculados`).
+    Sin este gate se podía emitir dos veces la misma plata — el endpoint de
+    facturar nunca miró `pedido_principal_id`.
+
+    Va en los dos puntos de ENTRADA de facturación (preview y emisión), NO
+    dentro de `_get_pedido`: la nota de crédito y el re-render/mail de una
+    factura de turno **preexistente** (emitida antes de que existiera este
+    gate) también pasan por `_get_pedido`, y tienen que seguir funcionando —
+    la NC es justamente la vía para deshacer una de esas."""
+    principal_id = pedido.get("pedido_principal_id")
+    if principal_id:
+        raise ValueError(
+            f"Este turno del Estudio se factura desde su pedido principal "
+            f"(#{principal_id}), que ya incluye su importe."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -286,6 +312,7 @@ def previsualizar_factura(
     el admin elige facturar este pedido puntual con un emisor distinto al
     que resolvería automáticamente el perfil del receptor."""
     pedido = _get_pedido(conn, pedido_id)
+    _rechazar_si_es_turno_vinculado(pedido)
 
     estado = (pedido.get("estado") or "").lower()
     if estado not in ("confirmado", "retirado", "devuelto", "finalizado"):
@@ -635,6 +662,7 @@ def emitir_factura(
     """
     with get_db() as conn:
         pedido = _get_pedido(conn, pedido_id)
+        _rechazar_si_es_turno_vinculado(pedido)
 
         estado = (pedido.get("estado") or "").lower()
         if estado not in ("confirmado", "retirado", "devuelto", "finalizado"):

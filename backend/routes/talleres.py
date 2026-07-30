@@ -28,7 +28,7 @@ from rate_limit import limiter
 from dataio.slug import slugify, slug_unico
 from routes.alquileres import _next_numero_pedido
 from services.email import send_email
-from services.fechas import fmt_hhmm as _fmt_hhmm, fmt_fecha_es as _fmt_fecha_es
+from services.fechas import fmt_fecha_es as _fmt_fecha_es
 from services.email.service import get_admin_to
 from services.media.models import DeriveSpec
 from services.media.errors import MediaError
@@ -41,7 +41,12 @@ from services import telefono as telefono_svc
 # esa porción — perfil/lectura/serialización, instructores/instituciones/
 # trabajos/portada e inscripción/seña (Fase 2, diferida) siguen acá. Ver
 # services/talleres/CLAUDE.md.
-from services.talleres.queries.clases import _row_get, _validar_clases, _validar_modalidades
+from services.talleres.queries.clases import (
+    _row_get,
+    _validar_clases,
+    _validar_modalidades,
+    clases_de_edicion as _get_clases,
+)
 from services.talleres.commands.clases import _upsert_clases, _upsert_modalidades
 from services.talleres.commands.ediciones import _gate_conflicto_estudio, crear_edicion
 from services.talleres.commands.economia import _regenerar_pedidos_taller
@@ -105,25 +110,6 @@ def _get_edicion_row(conn, slug: str, incluir_borrador: bool = False):
     if row is None:
         raise HTTPException(status_code=404, detail="Taller no encontrado")
     return row
-
-
-def _clase_dict(c) -> dict:
-    """Serialización única de una clase (row de DB o dict normalizado de
-    _validar_clases): minutos crudos + strings \"HH:MM\" resueltos acá +
-    el contenido rico (F2: titulo/descripcion/nota/portada)."""
-    return {
-        "id": _row_get(c, "id"),
-        "fecha": str(c["fecha"]),
-        "hora_inicio_min": c["hora_inicio_min"],
-        "hora_fin_min": c["hora_fin_min"],
-        "hora_inicio_str": _fmt_hhmm(c["hora_inicio_min"]),
-        "hora_fin_str": _fmt_hhmm(c["hora_fin_min"]),
-        "titulo": _row_get(c, "titulo", ""),
-        "descripcion": _row_get(c, "descripcion", ""),
-        "nota": _row_get(c, "nota", ""),
-        "portada_media_id": _row_get(c, "portada_media_id"),
-        "portada_url": _row_get(c, "portada_url", ""),
-    }
 
 
 def _instructor_dict(row) -> dict:
@@ -196,18 +182,6 @@ def _get_trabajos_taller(conn, taller_id: int) -> list[dict]:
         (taller_id,),
     ).fetchall()
     return [_trabajo_dict(r) for r in rows]
-
-
-def _get_clases(conn, edicion_id: int) -> list:
-    # `orden` (manual, independiente de fecha) — no `fecha, hora_inicio_min`:
-    # el admin puede reordenar clases sin que la fecha las re-ordene sola.
-    rows = conn.execute(
-        "SELECT id, fecha, hora_inicio_min, hora_fin_min, titulo, descripcion, "
-        "nota, portada_media_id, portada_url FROM clases_taller "
-        "WHERE edicion_id = %s ORDER BY orden, id",
-        (edicion_id,),
-    ).fetchall()
-    return [_clase_dict(r) for r in rows]
 
 
 def _modalidad_dict(row) -> dict:
@@ -2196,6 +2170,39 @@ def admin_edicion_kpis(edicion_id: int, request: Request):
     }
 
 
+@router.get("/admin/ediciones/{edicion_id}/pedidos")
+def admin_list_pedidos_edicion(edicion_id: int, request: Request):
+    """Pedidos mensuales que `_regenerar_pedidos_taller` generó para esta
+    edición (`taller_edicion_id`) — el puente Talleres → Pedidos (Fase 1,
+    #1308): antes había que buscarlos a mano en /admin/pedidos, sin ver de un
+    vistazo qué meses ya están pagados. Ordenados por mes; el front linkea
+    cada uno a `/admin/pedidos/{id}`."""
+    require_admin(request)
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, numero_pedido, estado, fecha_desde, fecha_hasta,
+                   monto_total, monto_pagado
+            FROM alquileres
+            WHERE taller_edicion_id = %s
+            ORDER BY fecha_desde
+            """,
+            (edicion_id,),
+        ).fetchall()
+    return [
+        {
+            "id": r["id"],
+            "numero_pedido": r["numero_pedido"],
+            "estado": r["estado"],
+            "fecha_desde": r["fecha_desde"].isoformat() if r["fecha_desde"] else None,
+            "fecha_hasta": r["fecha_hasta"].isoformat() if r["fecha_hasta"] else None,
+            "monto_total": r["monto_total"],
+            "monto_pagado": r["monto_pagado"],
+        }
+        for r in rows
+    ]
+
+
 @router.get("/admin/talleres/{taller_id}/inscripciones/export-csv")
 def admin_export_inscripciones_csv(taller_id: int, request: Request):
     """Descarga CSV de inscriptos de un concepto de taller."""
@@ -2405,7 +2412,7 @@ def admin_ofrecer_cupo(taller_id: int, ins_id: int, request: Request):
         "taller_nombre": edicion_row["taller_nombre"],
         "nombre_pila": ins["nombre"].split()[0],
         "precio_sena_str": _fmt_pesos(edicion_row["precio_sena"]),
-        "link_sena": f"{SITE_URL}/escuela/sena/{token}",
+        "link_sena": f"{SITE_URL}/escuelas/sena/{token}",
     })
     return {"ok": True}
 
@@ -2496,6 +2503,6 @@ def admin_notificar_interesado(taller_id: int, interesado_id: int, request: Requ
     send_email("taller_interesado_nueva_edicion", row["email"], {
         "taller_nombre": row["taller_nombre"],
         "nombre_pila": row["nombre"].split()[0],
-        "taller_url": f"{SITE_URL}/escuela/{row['slug_base']}",
+        "taller_url": f"{SITE_URL}/escuelas/{row['slug_base']}",
     })
     return {"ok": True}

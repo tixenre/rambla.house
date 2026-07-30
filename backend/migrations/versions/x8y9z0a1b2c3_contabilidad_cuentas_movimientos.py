@@ -58,13 +58,16 @@ def upgrade() -> None:
         "ON cuentas(socio) WHERE socio IS NOT NULL"
     ))
     # Seed: las cajas de arranque. Las dos de socio reciben los cobros derivados.
+    # `Fondo Rental` (ex `Fondo Rambla`, 2026-07-29): mantiene paridad con el
+    # seed de `init_db()` — mismo nombre, para que `ON CONFLICT (nombre)` siga
+    # atrapando el choque en vez de crear una fila fantasma con el nombre viejo.
     bind.execute(sa.text("""
         INSERT INTO cuentas (nombre, tipo, socio, orden) VALUES
             ('Caja Tincho', 'socio', 'Tincho', 1),
             ('Caja Pablo',  'socio', 'Pablo',  2),
             ('Efectivo',    'caja',  NULL,      3),
             ('Banco',       'banco', NULL,      4),
-            ('Fondo Rambla','fondo', NULL,      5)
+            ('Fondo Rental','fondo', 'Rental',  5)
         ON CONFLICT (nombre) WHERE activa DO NOTHING
     """))
 

@@ -122,13 +122,13 @@ def setup(monkeypatch):
         )
         conn.execute(
             "INSERT INTO equipos (id, nombre, cantidad, precio_jornada, visible_catalogo, dueno) "
-            "VALUES (%s,'Componente promo admin test',5,1000,1,'Rambla')",
+            "VALUES (%s,'Componente promo admin test',5,1000,1,'Rental')",
             (EQ_PROMO_COMP,),
         )
         conn.execute(
             "INSERT INTO equipos (id, nombre, cantidad, tipo, dueno, visible_catalogo) "
             "VALUES (%s,%s,1,%s,%s,%s)",
-            (PROMO_COMBO_ID, "Promo admin test", "combo", "Rambla", 0),
+            (PROMO_COMBO_ID, "Promo admin test", "combo", "Rental", 0),
         )
         conn.execute(
             "INSERT INTO kit_componentes (equipo_id, componente_id, cantidad, descuento_pct) "
@@ -463,6 +463,23 @@ def test_cotizar_no_muta_nada(client_con_db, setup):
     ]
     assert data["monto_total"] == 35000
     assert data["espacio_disponible"] is True
+
+    # `espacio_monto` = la tarifa NEGOCIADA que el admin tipea en la fila
+    # "Espacio". Sin esto la cotización devolvía el precio de LISTA aunque el
+    # guardado persistiera la negociada → la pantalla mostraba un número
+    # distinto al que se iba a cobrar.
+    negociada = client_con_db.get(
+        "/api/admin/estudio/reservas/cotizar",
+        params={
+            "fecha": "2030-05-09", "start": "10:00", "horas": 3,
+            "con_promo": "true",
+            "sueltos_json": f'[{{"equipo_id":{EQ_SUELTO},"cantidad":2}}]',
+            "espacio_monto": 99000,
+        },
+    )
+    assert negociada.status_code == 200, negociada.text
+    assert negociada.json()["espacio"] == 99000, "la tarifa negociada gana sobre la de lista"
+    assert negociada.json()["monto_total"] == 99000 + 1000 + 4000
 
     conn = get_db()
     try:

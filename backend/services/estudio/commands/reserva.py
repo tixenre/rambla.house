@@ -18,7 +18,12 @@ from pydantic import BaseModel, Field
 
 from database import to_datetime
 from reservas import validar_stock_hipotetico
-from services.precios import precio_jornada_efectivo
+from services.precios import (
+    calcular_total,
+    jornadas_periodo,
+    precio_jornada_efectivo,
+    tipos_equipo_batch,
+)
 
 from services.estudio.queries.estudio import _get_estudio_row
 from services.estudio.queries.disponibilidad import (
@@ -56,23 +61,96 @@ class SueltoItem(BaseModel):
 
 def _precio_promo_y_sueltos(
     conn, estudio, con_promo: bool, sueltos: list,
-) -> tuple[int, int, dict[int, int]]:
+) -> tuple[int, dict[int, int]]:
     """Resuelve el precio de la promo + de cada suelto vía la fuente única
     `precio_jornada_efectivo` (MEMORIA 2026-06-29 — el front no calcula
-    plata; esto tampoco calcula nada propio, solo suma lo que esa fuente
+    plata; esto tampoco calcula nada propio, solo lee lo que esa fuente
     devuelve). Puro cálculo de lectura, sin validar stock ni insertar nada —
-    compartido por `_crear_pedido_estudio` (necesita el total ANTES de
+    compartido por `_crear_pedido_estudio` (necesita los precios ANTES de
     insertar el pedido), `editar_reserva` y `cotizar_reserva_estudio`
-    (`routes/estudio.py`, preview sin pedido_id). Devuelve `(promo_precio,
-    monto_extra, precios_sueltos)`: `monto_extra` ya suma promo + sueltos×cantidad."""
+    (`routes/estudio.py`, preview sin pedido_id).
+
+    Devuelve `(promo_precio, precios_sueltos)`. Devolvía además un
+    `monto_extra` (promo + sueltos×cantidad) que quedó muerto al pasar el
+    total del turno por `total_turno_estudio` — el único que suma es ese, y
+    suma TODAS las líneas (incluido el espacio) vía `calcular_total`."""
     promo_precio = precio_jornada_efectivo(conn, estudio["promo_combo_id"]) or 0 if con_promo else 0
-    monto_extra = promo_precio
     precios_sueltos: dict[int, int] = {}
     for s in sueltos:
-        precio = precio_jornada_efectivo(conn, s.equipo_id) or 0
-        precios_sueltos[s.equipo_id] = precio
-        monto_extra += precio * s.cantidad
-    return promo_precio, monto_extra, precios_sueltos
+        precios_sueltos[s.equipo_id] = precio_jornada_efectivo(conn, s.equipo_id) or 0
+    return promo_precio, precios_sueltos
+
+
+def total_turno_estudio(
+    conn, *, estudio, fecha_desde, fecha_hasta,
+    espacio_monto: int, con_promo: bool, promo_precio: int,
+    sueltos: list, precios_sueltos: dict[int, int],
+    pintura_reciente: bool, pintura_precio: int,
+    descuento_pct: float = 0, descuento_manual_tipo: str = "pct",
+    descuento_manual_monto: float = 0,
+) -> dict:
+    """Desglose de plata de un turno del Estudio — **la única forma** de
+    resolver cuánto sale (alta, edición y preview usan esta).
+
+    Delega en `services.precios.calcular_total` sobre las MISMAS líneas que se
+    van a persistir en `alquiler_items` (espacio + promo + sueltos + pintura,
+    todas `cobro_modo='fijo'`), en vez de sumarlas a mano. No es cosmético: así
+    `monto_total` coincide **por construcción** con lo que
+    `finanzas_flujo.pedido.desglose_de_pedido` recalcula desde los ítems — que
+    es exactamente lo que compara el chequeo `desglose_divergente`
+    (`reportes/reconciliacion.py`, que SÍ cubre los pedidos del Estudio). Sumar
+    a mano y descontar aparte hubiera hecho sonar ese chequeo (mail diario al
+    dueño) en cuanto el turno tuviera descuento.
+
+    **El descuento del turno reusa las columnas de descuento manual que la fila
+    de `alquileres` YA tiene** (`descuento_pct` / `descuento_manual_tipo` /
+    `descuento_manual_monto`) — un turno ES un pedido, no hace falta una
+    columna paralela. Como el Estudio nunca setea `descuento_cliente_pct` ni
+    `descuento_jornadas_pct` (quedan en 0), el override manual gana outright y
+    el número es idéntico al que reconstruye el desglose genérico. De ahí sale
+    gratis que la factura y los reportes lo respeten: todos leen `monto_total`.
+
+    `es_combo` sale de `equipos.tipo` en vivo (`tipos_equipo_batch`), igual que
+    `desglose_de_pedido` — una línea de combo (la promo) no acumula el
+    descuento global, ya trae el suyo horneado (Fase C-3, #1219).
+
+    Devuelve el dict de `calcular_total`; `neto` es lo que va a
+    `alquileres.monto_total` (NETO, sin IVA — el IVA lo resuelve el consumidor
+    con el perfil fiscal del pedido principal, no el turno).
+    """
+    ids = [estudio["equipo_id"], *(s.equipo_id for s in sueltos)]
+    if con_promo and estudio["promo_combo_id"]:
+        ids.append(estudio["promo_combo_id"])
+    tipos = tipos_equipo_batch(conn, [i for i in ids if i is not None])
+
+    def _linea(equipo_id, cantidad, precio):
+        return {
+            "equipo_id": equipo_id,
+            "cantidad": cantidad,
+            "precio_jornada": precio,
+            # Un turno se mide en horas, no en jornadas: TODA su plata es fija.
+            "cobro_modo": "fijo",
+            "es_combo": tipos.get(equipo_id) == "combo",
+        }
+
+    items = [_linea(estudio["equipo_id"], 1, espacio_monto)]
+    if con_promo:
+        items.append(_linea(estudio["promo_combo_id"], 1, promo_precio))
+    items += [_linea(s.equipo_id, s.cantidad, precios_sueltos[s.equipo_id]) for s in sueltos]
+    if pintura_reciente:
+        # Línea libre (`equipo_id=NULL`), igual que la que inserta
+        # `_insertar_item_pintura` — nunca es un combo.
+        items.append(_linea(None, 1, pintura_precio))
+    return calcular_total(
+        items=items,
+        jornadas=jornadas_periodo(fecha_desde, fecha_hasta),
+        descuento_cliente_pct=0,
+        descuento_jornadas_pct=0,
+        descuento_manual_pct=descuento_pct,
+        descuento_manual_tipo=descuento_manual_tipo or "pct",
+        descuento_manual_monto=descuento_manual_monto,
+        perfil_impuestos=None,
+    )
 
 
 def _validar_e_insertar_promo_sueltos(
@@ -163,6 +241,7 @@ def _crear_pedido_estudio(
     cliente_id, cliente_nombre, cliente_email, cliente_telefono,
     con_promo: bool, sueltos: list | None, pintura_reciente: bool = False,
     espacio_monto: int | None, estado: str, numero_pedido: int,
+    pedido_principal_id: int | None = None,
 ) -> tuple[int, Optional[str]]:
     """Núcleo de creación de un pedido del Estudio (#1283 Fase 6 — extraído de
     `crear_reserva_estudio`, que ahora es un wrapper: sesión+Didit+anticipación
@@ -181,6 +260,13 @@ def _crear_pedido_estudio(
     `espacio_monto`: si es `None`, se calcula `precio_hora × horas` como
     siempre; si viene, es un override manual del admin (ej. tarifa
     negociada) — el pedido lo persiste tal cual, sin recalcularlo.
+
+    `pedido_principal_id`: si viene, vincula este turno a un pedido de
+    alquiler normal (#1308, "Reserva del Estudio" desde la página del
+    pedido) — el CALLER es responsable de resolver `cliente_id`/
+    `cliente_nombre`/etc. DEL PEDIDO PRINCIPAL antes de llamar (no de lo que
+    mande el request), así el turno y su pedido nunca muestran clientes
+    distintos.
     """
     slot_cliente = _slot_bloqueante(conn, fecha_desde, fecha_hasta)
     if slot_cliente:
@@ -203,23 +289,34 @@ def _crear_pedido_estudio(
     espacio_monto_final = (
         espacio_monto if espacio_monto is not None else (estudio["precio_hora"] or 0) * horas
     )
-    promo_precio, monto_extra, precios_sueltos = _precio_promo_y_sueltos(
+    promo_precio, precios_sueltos = _precio_promo_y_sueltos(
         conn, estudio, con_promo, sueltos,
     )
     pintura_precio = (estudio["precio_pintura_reciente"] or 0) if pintura_reciente else 0
-    monto_total = espacio_monto_final + monto_extra + pintura_precio
+    # Un turno nace SIN descuento (0): el alta no lo ofrece — se edita después,
+    # desde su sección en la página del pedido. Con 0 este total es idéntico al
+    # `espacio + promo + sueltos + pintura` que se sumaba a mano acá antes; la
+    # única forma de resolverlo es `total_turno_estudio` (ver su docstring).
+    monto_total = total_turno_estudio(
+        conn, estudio=estudio, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
+        espacio_monto=espacio_monto_final, con_promo=con_promo,
+        promo_precio=promo_precio, sueltos=sueltos, precios_sueltos=precios_sueltos,
+        pintura_reciente=pintura_reciente, pintura_precio=pintura_precio,
+    )["neto"]
 
     pedido_id = conn.insert_returning(
         """
         INSERT INTO alquileres (cliente_id, cliente_nombre, cliente_email, cliente_telefono,
                                 fecha_desde, fecha_hasta, monto_total, estado,
-                                fuente, tipo, estudio_con_pack, numero_pedido)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                                fuente, tipo, estudio_con_pack, numero_pedido,
+                                pedido_principal_id)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
         """,
         (
             cliente_id, cliente_nombre, cliente_email, cliente_telefono,
             fecha_desde, fecha_hasta, monto_total, estado,
             "estudio", "estudio", False, numero_pedido,
+            pedido_principal_id,
         ),
     )
 
@@ -274,6 +371,9 @@ def editar_reserva(
     con_promo: bool | None = None, sueltos: list | None = None,
     pintura_reciente: bool | None = None,
     espacio_monto: int | None = None,
+    descuento_pct: float | None = None,
+    descuento_manual_tipo: str | None = None,
+    descuento_manual_monto: int | None = None,
 ) -> Optional[str]:
     """Reprograma/edita una reserva del estudio YA EXISTENTE (extraído de
     `PATCH /admin/estudio/reservas/{id}`, #1283 Fase 6). Reemplaza TODOS los
@@ -286,7 +386,18 @@ def editar_reserva(
     Toma `FOR UPDATE` sobre el pedido (lock de fila, mismo mecanismo que
     `_crear_pedido_estudio` usa sobre el centinela). No commitea — eso es
     responsabilidad del caller (route). Devuelve `promo_advertencia` (o
-    `None`)."""
+    `None`).
+
+    **Descuento propio del turno** (`descuento_pct`/`descuento_manual_tipo`/
+    `descuento_manual_monto`): son las columnas de descuento manual que la fila
+    de `alquileres` ya tiene — ver `total_turno_estudio`. **Ojo con el
+    contrato de `None`, que acá es el OPUESTO al de `espacio_monto`:** en el
+    descuento `None` significa "no lo toques, dejá lo persistido" (semántica
+    PATCH normal), mientras que en `espacio_monto` significa "volvé a precio de
+    lista". Son distintos a propósito — `espacio_monto` ya tenía ese contrato y
+    cambiarlo rompería a sus callers (gotcha del pedido #445), pero un
+    descuento que se borrara solo cada vez que se toca otro campo del turno
+    sería plata perdida en silencio."""
     pedido = conn.execute(
         "SELECT * FROM alquileres WHERE id = %s FOR UPDATE", (pedido_id,)
     ).fetchone()
@@ -366,6 +477,13 @@ def editar_reserva(
             for it in items_actuales
             if it["equipo_id"] is not None and it["equipo_id"] not in ids_conocidos
         ]
+    # Contrato de `espacio_monto` (gotcha real, pedido #445, 2026-07-28): acá
+    # `None` SIEMPRE recalcula a precio de lista — no "conserva lo que había".
+    # Cualquier caller que quiera preservar una tarifa negociada tiene que
+    # RESOLVER y reenviar el monto actual él mismo (así lo hace `ReservaDialog`
+    # vía `espacioOverrideInicial`, `frontend/src/lib/estudio-slots.ts`); este
+    # módulo no tiene forma de distinguir "el admin no tocó el campo" de "el
+    # admin quiere volver a lista" — esa decisión es del caller, no de acá.
     espacio_monto_final = (
         espacio_monto if espacio_monto is not None
         else (estudio["precio_hora"] or 0)
@@ -386,11 +504,31 @@ def editar_reserva(
     # mismos dos helpers que `_crear_pedido_estudio` — ver
     # `_validar_e_insertar_promo_sueltos` para el porqué del orden
     # validar-antes-de-insertar.
-    promo_precio, monto_extra, precios_sueltos = _precio_promo_y_sueltos(
+    promo_precio, precios_sueltos = _precio_promo_y_sueltos(
         conn, estudio, con_promo, sueltos_finales,
     )
     pintura_precio = (estudio["precio_pintura_reciente"] or 0) if pintura_reciente else 0
-    monto_total = espacio_monto_final + monto_extra + pintura_precio
+    # `None` acá = "no lo toques" (ver docstring): el descuento sobrevive a
+    # cualquier otra edición del turno.
+    dto_pct = pedido["descuento_pct"] if descuento_pct is None else descuento_pct
+    dto_tipo = (
+        pedido["descuento_manual_tipo"] if descuento_manual_tipo is None
+        else descuento_manual_tipo
+    )
+    dto_monto = (
+        pedido["descuento_manual_monto"] if descuento_manual_monto is None
+        else descuento_manual_monto
+    )
+    monto_total = total_turno_estudio(
+        conn, estudio=estudio, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
+        espacio_monto=espacio_monto_final, con_promo=con_promo,
+        promo_precio=promo_precio, sueltos=sueltos_finales,
+        precios_sueltos=precios_sueltos,
+        pintura_reciente=bool(pintura_reciente), pintura_precio=pintura_precio,
+        descuento_pct=dto_pct or 0,
+        descuento_manual_tipo=dto_tipo or "pct",
+        descuento_manual_monto=dto_monto or 0,
+    )["neto"]
     promo_advertencia = _validar_e_insertar_promo_sueltos(
         conn, pedido_id, fecha_desde, fecha_hasta,
         estudio=estudio, con_promo=con_promo, sueltos=sueltos_finales,
@@ -406,8 +544,13 @@ def editar_reserva(
     )
     conn.execute(
         "UPDATE alquileres SET fecha_desde = %s, fecha_hasta = %s, monto_total = %s, "
+        "descuento_pct = %s, descuento_manual_tipo = %s, descuento_manual_monto = %s, "
         "estudio_con_pack = FALSE, updated_at = CURRENT_TIMESTAMP WHERE id = %s",
-        (fecha_desde, fecha_hasta, monto_total, pedido_id),
+        (
+            fecha_desde, fecha_hasta, monto_total,
+            dto_pct or 0, dto_tipo or "pct", int(dto_monto or 0),
+            pedido_id,
+        ),
     )
 
     return promo_advertencia

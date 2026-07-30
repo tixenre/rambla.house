@@ -108,7 +108,7 @@ export function EquipoFormDialog({
       serie: initial ? (initial.serie ?? "") : "N/A",
       bh_url: initial?.bh_url ?? "",
       foto_url: initial?.foto_url ?? "",
-      dueno: initial?.dueno ?? "Rambla",
+      dueno: initial?.dueno ?? "Rental",
       estado: (initial?.estado as FormValues["estado"]) ?? "operativo",
       visible_catalogo: initial ? Boolean(initial.visible_catalogo) : true,
       ficha_completa: initial ? Boolean(initial.ficha_completa) : false,

@@ -18,6 +18,7 @@ import type {
   LiquidacionData,
   ReconciliacionData,
   GrupoDuplicado,
+  RepartoPagoLinea,
 } from "./types";
 
 export const pedidosMethods = {
@@ -100,6 +101,23 @@ export const pedidosMethods = {
       destinatario,
       metodo,
     }),
+  /** Igual que `addPago`, pero reparte el monto entre `id` (el pedido
+   *  principal) y sus turnos del Estudio vinculados (#1308, "un pago,
+   *  reparte solo") — cada parte queda como una fila real de
+   *  `alquiler_pagos` con su `pedido_id` propio. Sin turnos vinculados se
+   *  comporta idéntico a `addPago`. */
+  addPagoCombinado: (
+    id: number,
+    monto: number,
+    concepto?: string,
+    fecha?: string,
+    destinatario?: string,
+    metodo?: string,
+  ) =>
+    authedPostJson<Pedido & { reparto: RepartoPagoLinea[] }>(
+      `/api/alquileres/${id}/pagos-combinado`,
+      { monto, concepto, fecha, destinatario, metodo },
+    ),
   /** Ledger global de pagos — vista de logs del back-office. */
   listPagosLog: (params?: {
     destinatario?: string;

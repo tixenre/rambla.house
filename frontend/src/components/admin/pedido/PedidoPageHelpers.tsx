@@ -54,7 +54,7 @@ import { FacturaBadge } from "@/design-system/ui/FacturaBadge";
 import { Spinner } from "@/design-system/ui/spinner";
 import { cn } from "@/lib/utils";
 import { ESTADO_DOT } from "@/design-system/ui/estado-color";
-import { adminApi, ESTADO_LABEL, type PedidoEstado } from "@/lib/admin/api";
+import { adminApi, ESTADO_LABEL, type PedidoEstado, type PedidoPago } from "@/lib/admin/api";
 import { formatARS, formatFechaCorta, fmtArs } from "@/lib/format";
 import {
   useFacturacionArca,
@@ -67,23 +67,39 @@ import { EquipoThumb } from "@/components/admin/pedido/EquipoThumb";
 export function PagoRow({
   pago,
   pedidoId,
+  invalidatePedidoId,
+  origenLabel,
 }: {
-  pago: {
-    id: number;
-    monto: number;
-    concepto: string | null;
-    fecha: string;
-    anulado?: boolean;
-    anulado_motivo?: string | null;
-  };
+  // El tipo canónico, no una copia local recortada: la copia venía sin
+  // `destinatario`/`metodo` (que el backend SÍ devuelve) y por eso no había
+  // forma de mostrarlos sin que TypeScript los rechazara.
+  pago: PedidoPago;
+  /** El pedido REAL dueño de esta fila de `alquiler_pagos` — el pago
+   *  combinado (#1308) reparte contra el principal Y sus turnos vinculados,
+   *  cada fila con SU PROPIO `pedido_id`. Es lo que usa la anulación. */
   pedidoId: number;
+  /** Qué pedido invalidar en caché al anular — default `pedidoId`. Un pago de
+   *  un TURNO vinculado se anula contra el turno (`pedidoId=turno.id`, la
+   *  fila real), pero lo único que esta página tiene fetcheado es el
+   *  PRINCIPAL — sin esto, anular el pago de un turno no refrescaba nada en
+   *  pantalla hasta recargar. */
+  invalidatePedidoId?: number;
+  /** "Estudio"/"Estudio N" cuando este pago es de un turno vinculado, no del
+   *  pedido principal — sin esto, con más de un turno cobrado, todos los
+   *  pagos se leen igual y no hay forma de saber cuál pagó qué. */
+  origenLabel?: string;
 }) {
   const qc = useQueryClient();
+  const invalidateId = invalidatePedidoId ?? pedidoId;
+  const [askAnular, setAskAnular] = useState(false);
+  const [motivo, setMotivo] = useState("");
   const delMut = useMutation({
     mutationFn: (motivo: string) => adminApi.anularPago(pedidoId, pago.id, motivo),
     onSuccess: () => {
       toast.success("Pago anulado");
-      qc.invalidateQueries({ queryKey: ["admin", "pedido", pedidoId] });
+      setAskAnular(false);
+      setMotivo("");
+      qc.invalidateQueries({ queryKey: ["admin", "pedido", invalidateId] });
       qc.invalidateQueries({ queryKey: ["admin", "pedidos"] });
     },
     onError: (e: Error) => toast.error(e.message),
@@ -96,6 +112,12 @@ export function PagoRow({
       <span className="text-muted-foreground">
         <span className={cn(pago.anulado && "line-through")}>
           {pago.concepto || "Pago"} · {formatFechaCorta(pago.fecha)}
+          {origenLabel ? ` · ${origenLabel}` : ""}
+          {/* Quién cobró y cómo: el modal OBLIGA a elegirlos y el backend los
+              guarda, pero acá no se veían — para saber quién tiene la plata
+              había que salir a Finanzas. */}
+          {pago.destinatario ? ` · ${pago.destinatario}` : ""}
+          {pago.metodo ? ` (${pago.metodo})` : ""}
         </span>
         {pago.anulado && pago.anulado_motivo && (
           <span className="text-destructive"> · Anulado: {pago.anulado_motivo}</span>
@@ -109,10 +131,7 @@ export function PagoRow({
           <IconButton
             aria-label="Anular pago"
             size="xs"
-            onClick={() => {
-              const motivo = window.prompt("Motivo de la anulación del pago:");
-              if (motivo && motivo.trim()) delMut.mutate(motivo.trim());
-            }}
+            onClick={() => setAskAnular(true)}
             disabled={delMut.isPending}
             className="text-muted-foreground hover:text-destructive hover:bg-destructive/10"
           >
@@ -120,6 +139,43 @@ export function PagoRow({
           </IconButton>
         )}
       </div>
+      {/* AlertDialog, no window.prompt: es la única confirmación de esta
+          página que todavía usaba el prompt nativo del browser — el resto
+          (cancelar/eliminar pedido, cliente sin verificar) ya usa este mismo
+          componente. */}
+      <AlertDialog
+        open={askAnular}
+        onOpenChange={(open) => {
+          setAskAnular(open);
+          if (!open) setMotivo("");
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Anular pago de {formatARS(pago.monto)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              Queda tachado en el ledger con el motivo — la plata no se borra, se marca anulada.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            autoFocus
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            placeholder="Motivo de la anulación…"
+            aria-label="Motivo de la anulación"
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={!motivo.trim()}
+              onClick={() => delMut.mutate(motivo.trim())}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              Anular pago
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -134,6 +190,7 @@ export function ItemRow({
   jornadas,
   updateItem,
   removeItem,
+  disabled = false,
 }: {
   it: DraftItem;
   /** Libres del equipo tras TODO el draft (backend, expansión de kits incluida).
@@ -142,9 +199,19 @@ export function ItemRow({
   jornadas: number;
   updateItem: (uid: string, patch: Partial<DraftItem>) => void;
   removeItem: (uid: string) => void;
+  /** Solo-lectura real (no solo `updateItem`/`removeItem` no-op): un pedido
+   *  `estudio_fijo` muestra esta lista pero su verdad es el slot recurrente
+   *  — sin esto, el stepper/precio/quitar se veían perfectamente interactivos
+   *  y no hacían nada al tocarlos, sin ningún indicio visual de por qué. */
+  disabled?: boolean;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: it.uid,
+    // `estudio_fijo`: el `onDragEnd` del `DndContext` padre ya es no-op acá,
+    // pero sin esto el grip seguía arrastrando la fila LOCALMENTE (el drag
+    // visual de dnd-kit no depende de `onDragEnd`) para volver a su lugar
+    // apenas se soltaba — interactivo en apariencia, sin ningún efecto real.
+    disabled,
   });
   const esLibre = it.equipo_id == null;
   // El backend ya descontó el draft completo (incluida esta línea y los kits
@@ -167,7 +234,11 @@ export function ItemRow({
         <IconButton
           aria-label="Reordenar línea"
           size="lg"
-          className="-ml-2 w-9 shrink-0 text-muted-foreground/60 hover:text-ink cursor-grab touch-none active:cursor-grabbing"
+          disabled={disabled}
+          className={cn(
+            "-ml-2 w-9 shrink-0 text-muted-foreground/60 touch-none",
+            disabled ? "cursor-not-allowed" : "cursor-grab hover:text-ink active:cursor-grabbing",
+          )}
           {...attributes}
           {...listeners}
         >
@@ -189,8 +260,9 @@ export function ItemRow({
             <Input
               value={it.nombre_libre ?? ""}
               placeholder="Descripción (ej. Flete, Operador…)"
+              disabled={disabled}
               onChange={(e) => updateItem(it.uid, { nombre_libre: e.target.value })}
-              className="h-8 text-sm"
+              className="h-11 text-base md:h-8 md:text-sm"
             />
           ) : (
             <>
@@ -223,6 +295,8 @@ export function ItemRow({
           onChange={(v) => updateItem(it.uid, { cantidad: v })}
           min={1}
           error={overstock}
+          disabled={disabled}
+          ariaLabel={`Cantidad de ${it.nombre_publico || it.nombre || it.nombre_libre || "esta línea"}`}
         />
 
         {/* Precio editable por jornada */}
@@ -231,21 +305,30 @@ export function ItemRow({
             min={0}
             value={it.precio_jornada}
             ariaLabel="Precio por jornada"
+            disabled={disabled}
             onCommit={(v) => updateItem(it.uid, { precio_jornada: v })}
-            className="h-9 w-24 text-sm"
+            className="h-11 w-24 text-base md:h-9 md:text-sm"
           />
           {esLibre ? (
             <select
               value={it.cobro_modo ?? "jornada"}
+              disabled={disabled}
               onChange={(e) =>
                 updateItem(it.uid, { cobro_modo: e.target.value as "jornada" | "fijo" })
               }
-              className="h-9 rounded-md border hairline bg-surface-elevated px-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+              className="h-9 rounded-md border hairline bg-surface-elevated px-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
               aria-label="Modo de cobro"
             >
               <option value="jornada">/jornada</option>
               <option value="fijo">fijo</option>
             </select>
+          ) : it.cobro_modo === "fijo" ? (
+            // Ítem de catálogo con cobro_modo='fijo' (ej. el centinela del
+            // Estudio en un pedido de taller): no se multiplica por jornadas,
+            // "/día" mentiría. No editable acá (a diferencia de una línea
+            // libre) — el cobro_modo de un ítem de catálogo lo decide su
+            // motor dueño (Estudio/Talleres), no el editor genérico.
+            <span className="text-xs text-muted-foreground whitespace-nowrap">fijo</span>
           ) : (
             <span className="text-xs text-muted-foreground whitespace-nowrap">/día</span>
           )}
@@ -260,6 +343,7 @@ export function ItemRow({
         <IconButton
           aria-label="Quitar línea"
           onClick={() => removeItem(it.uid)}
+          disabled={disabled}
           className="shrink-0 text-muted-foreground hover:text-destructive hover:bg-destructive/10"
         >
           <X className="h-4 w-4" />
@@ -274,14 +358,37 @@ export function BackLink({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-ink shrink-0"
+      aria-label="Volver a Pedidos"
+      className="inline-flex h-11 shrink-0 items-center gap-1 text-sm text-muted-foreground hover:text-ink md:h-auto"
     >
-      <ChevronLeft className="h-4 w-4" /> Pedidos
+      <ChevronLeft className="h-4 w-4" />
+      {/* Oculto bajo `sm`: en el topbar del pedido, "Pedidos" + el nombre del
+          cliente + el #N + el badge de estado + el indicador de guardado +
+          el botón de WhatsApp no entraban en 375px sin recortarse — este
+          texto es el candidato más seguro para no mostrar (el ícono solo ya
+          comunica "volver", y `aria-label` lo mantiene accesible). */}
+      <span className="hidden sm:inline">Pedidos</span>
     </button>
   );
 }
 
-export function SaveIndicator({ status }: { status: string }) {
+export function SaveIndicator({
+  status,
+  /** Calla TODO salvo un error — para un indicador LOCAL (ej. el total de un
+   *  turno del Estudio) cuando la pantalla ya tiene un indicador GENERAL
+   *  propio (el de arriba a la derecha, que cubre el autosave del pedido).
+   *  Un primer intento solo callaba "Guardado" pero dejaba "Sin guardar"/
+   *  "Guardando…" — el dueño lo notó igual ("¿por qué aparecen estos textos
+   *  aún?"): son transiciones de menos de un segundo (debounce 700ms + un
+   *  PATCH rápido), no hace falta narrarlas — la señal real y accionable es
+   *  solo el ERROR (el general no puede darla: son autosaves de recursos
+   *  distintos, este PATCHea el turno, no el pedido). Default `false`: no
+   *  cambia nada para el indicador general de la página. */
+  onlyError = false,
+}: {
+  status: string;
+  onlyError?: boolean;
+}) {
   const map: Record<string, { tx: string; cls: string }> = {
     saving: { tx: "Guardando…", cls: "text-muted-foreground" },
     saved: { tx: "Guardado", cls: "text-verde-ink" },
@@ -291,6 +398,7 @@ export function SaveIndicator({ status }: { status: string }) {
   };
   const s = map[status] ?? map.idle;
   if (!s.tx) return null;
+  if (onlyError && status !== "error") return null;
   return (
     <span className={cn("inline-flex items-center gap-1 font-mono text-xs", s.cls)}>
       {status === "saved" && <Check className="h-3 w-3" />}
@@ -366,9 +474,23 @@ export function FacturacionTargetSection({
   );
 }
 
-export function RailSection({ label, children }: { label: string; children: React.ReactNode }) {
+export function RailSection({
+  label,
+  /** `true` = sin la línea/padding de arriba: para una sub-parte DENTRO de otra
+   *  `RailSection` (ej. Cobranza y Factura, que viven bajo "Plata del pedido"
+   *  — pedido del dueño: "¿podemos unir visualmente estas dos cosas? Que esté
+   *  el desglose, registrar pago y facturar como un bloque más coherente entre
+   *  sí"). El separador entre sub-partes lo pone el contenedor, más suave que
+   *  el corte de primer nivel. */
+  anidada = false,
+  children,
+}: {
+  label: string;
+  anidada?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="border-t hairline pt-4 first:border-t-0 first:pt-0">
+    <div className={cn(!anidada && "border-t hairline pt-4 first:border-t-0 first:pt-0")}>
       <div className="t-eyebrow mb-2">{label}</div>
       <div className="space-y-2">{children}</div>
     </div>
@@ -505,12 +627,12 @@ const CONDICION_IVA_CORTA: Record<string, string> = {
 export function FacturaPreviewDialog({ f }: { f: FacturacionArca }) {
   return (
     <AlertDialog open={f.showPreview} onOpenChange={f.setShowPreview}>
-      <AlertDialogContent className="flex h-[94vh] w-fit max-w-[95vw] flex-row overflow-hidden p-0">
+      <AlertDialogContent className="flex h-[94dvh] w-full max-w-[95vw] flex-col overflow-hidden p-0 md:h-[94vh] md:w-fit md:flex-row">
         {/* Columna izquierda: info + chequeos + acciones. Columna derecha: la factura a pantalla
             completa de alto, dimensionada a la proporción REAL del layout elegido (LAYOUT_ASPECT)
             — así no queda el sobrante gris que el propio HTML de arca_fe deja alrededor cuando
             el viewport no matchea el aspecto (ese HTML centra y escala manteniendo proporción). */}
-        <div className="flex w-[360px] shrink-0 flex-col overflow-y-auto border-r hairline">
+        <div className="flex w-full shrink-0 flex-col overflow-y-auto border-b hairline md:w-[360px] md:border-b-0 md:border-r">
           <AlertDialogHeader className="px-5 py-4 text-left">
             <AlertDialogTitle>Confirmar factura</AlertDialogTitle>
             <AlertDialogDescription>
@@ -578,7 +700,7 @@ export function FacturaPreviewDialog({ f }: { f: FacturacionArca }) {
         </div>
 
         <div
-          className="relative h-full shrink-0 overflow-hidden bg-muted"
+          className="relative min-h-[45dvh] w-full shrink-0 overflow-hidden bg-muted md:h-full md:min-h-0 md:w-auto"
           style={{ aspectRatio: LAYOUT_ASPECT[f.layout] ?? LAYOUT_ASPECT.simplificada }}
         >
           {!f.facturaHtmlError && (!f.facturaBlobUrl || !f.facturaIframeReady) && (
@@ -619,6 +741,8 @@ export function FacturarButton({
   f,
   className,
   hideWhenUnavailable,
+  disabledExtra,
+  tituloExtra,
 }: {
   f: FacturacionArca;
   className?: string;
@@ -631,7 +755,21 @@ export function FacturarButton({
    * usuario decide qué falta para poder facturar.
    */
   hideWhenUnavailable?: boolean;
+  /** Bloqueo del CALLER (ej. cotización/stock del pedido en falla) — no viene
+   *  de `f` porque el hook no sabe nada del estado de la página que lo aloja.
+   *  Facturar con un total que no se pudo confirmar generaría un comprobante
+   *  legal con la plata equivocada. */
+  disabledExtra?: boolean;
+  tituloExtra?: string;
 }) {
+  // `f.q.isError` incluido acá (no solo `isLoading`): sin esto, un fetch de
+  // `GET /admin/facturas/{pedidoId}` que fallara dejaba `f.principal`
+  // undefined (mismo shape que "nunca se facturó") y el botón mostraba
+  // "Facturar" como si el pedido estuviera limpio — indistinguible de la
+  // verdad real ("no sabemos si ya tiene factura"). Mejor no mostrar nada acá
+  // (el error visible vive en `FacturacionRailSection`, que sí tiene lugar
+  // para explicarlo + un Reintentar) que invitar a facturar a ciegas.
+  if (f.q.isError) return null;
   if (!((!f.principal || f.principal.estado === "error") && !f.q.isLoading)) return null;
   if (hideWhenUnavailable && !f.puedeFacturar) return null;
   return (
@@ -639,8 +777,8 @@ export function FacturarButton({
       variant="outline"
       size="sm"
       className={className}
-      disabled={!f.puedeFacturar || f.preview.isPending}
-      title={!f.puedeFacturar ? "No se puede facturar en este estado" : undefined}
+      disabled={!f.puedeFacturar || f.preview.isPending || !!disabledExtra}
+      title={!f.puedeFacturar ? "No se puede facturar en este estado" : tituloExtra}
       onClick={() => {
         f.setShowPreview(true);
         f.preview.mutate(undefined);
@@ -659,15 +797,44 @@ export function FacturarButton({
 export function FacturacionRailSection({
   pedidoId,
   estadoPedido,
+  plataConfiable = true,
 }: {
   pedidoId: number;
   estadoPedido: PedidoEstado;
+  /** `false` cuando la cotización o el stock en vivo del pedido fallaron —
+   *  facturar o anular con un total que no se pudo confirmar es un riesgo
+   *  real (la factura es un documento legal e inmutable, a diferencia de
+   *  "Registrar pago" no hay forma de deshacerla sin una Nota de Crédito).
+   *  No bloquea ver/descargar/enviar una factura YA EMITIDA — esa plata ya
+   *  quedó fija, no depende de la cotización en vivo. */
+  plataConfiable?: boolean;
 }) {
   const f = useFacturacionArca(pedidoId, estadoPedido);
+  const motivoBloqueo = !plataConfiable
+    ? "No se pudo confirmar la plata del pedido — recargá la página antes de facturar."
+    : undefined;
 
   return (
-    <RailSection label="Factura ARCA">
+    <RailSection label="Factura ARCA" anidada>
       {f.q.isLoading && <div className="text-xs text-muted-foreground">Cargando…</div>}
+
+      {/* Sin esto, un fetch caído se veía IDÉNTICO a "este pedido nunca se
+          facturó" — ni rastro de que el chequeo falló, con "Facturar"
+          disponible como si no hubiera nada que perder de vista. */}
+      {f.q.isError && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive">
+          <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+          <span>No se pudo consultar si este pedido ya tiene factura.</span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            onClick={() => void f.q.refetch()}
+          >
+            Reintentar
+          </Button>
+        </div>
+      )}
 
       {f.principal && (
         <div className="space-y-1.5">
@@ -771,7 +938,8 @@ export function FacturacionRailSection({
               variant="outline"
               size="sm"
               className="w-full border-destructive/30 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              disabled={f.notaCredito.isPending}
+              disabled={f.notaCredito.isPending || !plataConfiable}
+              title={motivoBloqueo}
               onClick={() => f.notaCredito.mutate(f.principal!.id)}
             >
               <X className="h-3.5 w-3.5 mr-1" />
@@ -781,7 +949,12 @@ export function FacturacionRailSection({
         </div>
       )}
 
-      <FacturarButton f={f} className="w-full" />
+      <FacturarButton
+        f={f}
+        className="w-full"
+        disabledExtra={!plataConfiable}
+        tituloExtra={motivoBloqueo}
+      />
       <FacturaPreviewDialog f={f} />
     </RailSection>
   );

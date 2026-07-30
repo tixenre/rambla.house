@@ -65,6 +65,7 @@ import { adminApi, ESTADO_LABEL, type Cliente, type ClienteInput } from "@/lib/a
 import { usePadronLookup } from "@/lib/admin/usePadronLookup";
 import { AuthedHttpError } from "@/lib/authedFetch";
 import { fmtArs, formatFechaDisplay } from "@/lib/format";
+import { etiquetaPedido } from "@/lib/pedido-estados";
 import { PERFIL_IMPUESTOS_LABEL, type PerfilImpuestos } from "@/lib/iva";
 
 type Props = {
@@ -167,7 +168,10 @@ export function ClienteDetalleDialog({ open, onOpenChange, cliente, onSaved }: P
     enabled: !!cliente?.id && open,
   });
   const pedidos = pedidosQ.data ?? [];
-  const totalGastado = pedidos.reduce((acc, p) => acc + (p.monto_total ?? 0), 0);
+  // Los borradores se listan (el admin quiere verlos) pero NO cuentan como
+  // pedidos ni como plata gastada: son presupuestos rápidos, no ventas.
+  const pedidosReales = pedidos.filter((p) => p.estado !== "borrador");
+  const totalGastado = pedidosReales.reduce((acc, p) => acc + (p.monto_total ?? 0), 0);
 
   const perfilesFiscalesQ = useQuery({
     queryKey: ["admin", "cliente-perfiles-fiscales", cliente?.id],
@@ -499,7 +503,11 @@ export function ClienteDetalleDialog({ open, onOpenChange, cliente, onSaved }: P
             <div className="flex items-baseline justify-between mb-2">
               <h3 className="font-display text-lg text-ink">Historial de pedidos</h3>
               <div className="font-mono text-xs text-muted-foreground">
-                {pedidos.length} pedidos · {fmtArs(totalGastado)}
+                {pedidosReales.length} pedidos · {fmtArs(totalGastado)}
+                {pedidos.length > pedidosReales.length &&
+                  ` · ${pedidos.length - pedidosReales.length} borrador${
+                    pedidos.length - pedidosReales.length === 1 ? "" : "es"
+                  }`}
               </div>
             </div>
 
@@ -520,7 +528,7 @@ export function ClienteDetalleDialog({ open, onOpenChange, cliente, onSaved }: P
                 >
                   <div className="flex items-center justify-between gap-2">
                     <div className="font-mono text-xs text-muted-foreground">
-                      #{p.numero_pedido ?? p.id}
+                      {etiquetaPedido(p)}
                     </div>
                     <EstadoBadge estado={p.estado} label={estadoLabel(p.estado)} />
                   </div>

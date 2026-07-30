@@ -72,7 +72,7 @@ def sitemap():
         {"loc": f"{SITE_URL}/", "lastmod": today, "changefreq": "daily", "priority": "1.0"},
         {"loc": f"{SITE_URL}/rental", "lastmod": today, "changefreq": "daily", "priority": "0.9"},
         {"loc": f"{SITE_URL}/estudio", "lastmod": today, "changefreq": "monthly", "priority": "0.8"},
-        {"loc": f"{SITE_URL}/escuela", "lastmod": today, "changefreq": "weekly", "priority": "0.8"},
+        {"loc": f"{SITE_URL}/escuelas", "lastmod": today, "changefreq": "weekly", "priority": "0.8"},
         {"loc": f"{SITE_URL}/preguntas-frecuentes", "lastmod": today, "changefreq": "monthly", "priority": "0.6"},
     ]
 
@@ -138,7 +138,7 @@ def sitemap():
             taller_slug = (r["slug"] or "").strip()
             if taller_slug:
                 urls.append({
-                    "loc": f"{SITE_URL}/escuela/{taller_slug}",
+                    "loc": f"{SITE_URL}/escuelas/{taller_slug}",
                     "lastmod": today,
                     "changefreq": "monthly",
                     "priority": "0.7",

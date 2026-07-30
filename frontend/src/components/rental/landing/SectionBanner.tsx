@@ -9,7 +9,7 @@ import { AREAS, type AreaKey } from "@/data/areas";
 const HEADLINE: Record<AreaKey, string> = {
   rental: "alquilá lo que necesitás.",
   estudio: "un lugar donde pasan cosas.",
-  escuela: "aprender haciendo.",
+  escuela: "talleres y workshops.",
 };
 
 const BODY: Record<AreaKey, string> = {

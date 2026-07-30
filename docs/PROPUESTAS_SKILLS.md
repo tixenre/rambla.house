@@ -169,3 +169,23 @@ sigue recomendando instalar ruff manualmente como si no estuviera ya en el pipel
 paso 1 del Frente A.
 ✅ aplicada — cierre de gobernanza 2026-07-26 (nota corregida en `mantenimiento/SKILL.md` Frente A ·
 paso 1: `ruff` ya corre en CI con ruleset conservador, este barrido usa un ruleset más amplio)
+
+2026-07-29 · pulido-frontend · Tensión no cubierta: "el bug de plata se reporta, no se arregla en la
+pasada de pulido" **deja de aplicar cuando el propio pulido hace VISIBLE un número que antes estaba
+oculto**. Caso testigo: al unificar las filas de "qué incluye este turno" con las de "Equipos", la fila
+"Espacio" pasó a mostrar su subtotal — y ahí se vio que `GET /admin/estudio/reservas/cotizar` calculaba
+SIEMPRE el precio de lista (`precio_hora * horas`) aunque el guardado persistiera la tarifa negociada
+que el admin tipea. Diferirlo habría significado shippear una línea que muestra un número distinto al
+que se cobra (peor que antes, cuando esa fila no mostraba nada). Proponer: agregar al paso 2 (RUTEAR)
+que si un cambio de presentación EXPONE un número de plata que antes no se veía, el fix del número deja
+de ser diferible — o se arregla en la misma pasada (con test), o no se muestra el número. · Por qué: la
+regla actual, leída literal, empuja a shippear un dato incorrecto a la vista.
+
+2026-07-29 · pulido-frontend · Gotcha de verificación: al medir alineación por JS (`getBoundingClientRect`,
+como ya recomienda el paso 4), **scopear el selector a la sección bajo prueba**. Un selector global
+(`document.querySelectorAll("li")` + clase del subtotal) barrió filas de TRES secciones distintas de la
+página —cada una en un contenedor de ancho distinto— y devolvió "no alinean" cuando las filas que
+importaban sí alineaban: un falso negativo que costó una vuelta de diagnóstico. Proponer: sumar al paso 4
+"medí dentro del contenedor de la sección (`section.querySelectorAll(...)`), no en `document`". · Por qué:
+el paso 4 ya empuja a medir por JS en vez de screenshot, pero no advierte que el alcance del selector es
+justo donde se cuela el falso negativo.

@@ -356,6 +356,10 @@ const itemsAdminPedido = (pedidoId: number): AdminPedidoItem[] => [
 
 /** Campos de contacto/fechas comunes a los pedidos admin demo. */
 const ADMIN_PEDIDO_BASE = {
+  // Los 4 fixtures de abajo tienen ítems reales — mismo campo que calcula el
+  // backend (`_pedido_tiene_contenido`), acá fijo en `true` porque ninguna
+  // demo modela el caso "solo turno del Estudio, sin equipos".
+  tiene_contenido: true,
   numero_remito: null,
   cliente_perfil_impuestos: null,
   fecha_desde: "2026-07-10T10:00:00",
@@ -378,6 +382,7 @@ export const adminPedidoPresupuesto: AdminPedido = {
   estado: "solicitado",
   monto_total: 222000,
   monto_pagado: 0,
+  saldo_pendiente: true,
   items: [
     {
       id: 91041,
@@ -406,6 +411,7 @@ export const adminPedidoSolicitado: AdminPedido = {
   estado: "solicitado",
   monto_total: 390000,
   monto_pagado: 0,
+  saldo_pendiente: true,
   items: itemsAdminPedido(9101),
   pagos: [],
   tiene_solicitud_pendiente: true,
@@ -424,6 +430,7 @@ export const adminPedidoConfirmado: AdminPedido = {
   estado: "confirmado",
   monto_total: 390000,
   monto_pagado: 150000,
+  saldo_pendiente: true,
   items: itemsAdminPedido(9102),
   pagos: [
     {
@@ -449,6 +456,7 @@ export const adminPedidoFinalizado: AdminPedido = {
   estado: "finalizado",
   monto_total: 390000,
   monto_pagado: 390000,
+  saldo_pendiente: false,
   items: itemsAdminPedido(9103),
   pagos: [
     {

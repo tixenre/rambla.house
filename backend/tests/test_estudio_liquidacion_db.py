@@ -1,9 +1,9 @@
 """Fase 4 (#1283) contra Postgres REAL — atribución "Estudio" en liquidación/P&L.
 
 El centinela del Estudio pasa a `dueno='Estudio'` (antes 'Rambla'): sus horas se
-atribuyen al Estudio en la liquidación, NO a Rambla rental — economía separada.
+atribuyen al Estudio en la liquidación, NO al rental — economía separada.
 Verifica el pipeline completo con un pedido "mixto" (espacio + promo + suelto,
-cada uno a su dueño real) y la rendición cuando Rambla cobra plata que
+cada uno a su dueño real) y la rendición cuando Rental cobra plata que
 "corresponde" al Estudio (mismo netting genérico de las otras 3 partes).
 
 OPT-IN y SEGURO POR DEFECTO (mismo gating que los demás `*_db.py`).
@@ -70,10 +70,10 @@ def _equipo(conn, eid, nombre, dueno):
 
 def _setup_pedido_mixto(conn):
     """Un pedido de Estudio con las 3 economías: espacio (Estudio), promo
-    (Rambla) y un equipo suelto (su dueño real, Pablo) — ítems veraces:
+    (Rental) y un equipo suelto (su dueño real, Pablo) — ítems veraces:
     Σ subtotal = monto_total."""
     _equipo(conn, EQ_ESPACIO, "Estudio (espacio) test", "Estudio")
-    _equipo(conn, EQ_PROMO, "Promo equipos test", "Rambla")
+    _equipo(conn, EQ_PROMO, "Promo equipos test", "Rental")
     _equipo(conn, EQ_SUELTO, "Equipo suelto test", "Pablo")
 
     total = ESPACIO_MONTO + PROMO_MONTO + SUELTO_MONTO
@@ -97,7 +97,7 @@ def _setup_pedido_mixto(conn):
     conn.execute(
         """INSERT INTO alquiler_pagos (pedido_id, monto, concepto, destinatario, metodo, fecha)
            VALUES (%s,%s,%s,%s,%s,%s)""",
-        (PED_MIXTO, total, "pago", "Rambla", "transferencia", "2026-06-05T09:00:00"),
+        (PED_MIXTO, total, "pago", "Rental", "transferencia", "2026-06-05T09:00:00"),
     )
     return total
 
@@ -114,7 +114,7 @@ def test_liquidacion_estudio_beneficiario_db(conn):
     # Atribución por dueño (pre-reparto): cada línea va a su dueño real.
     por_dueno = {d["dueno"]: d["monto_generado"] for d in data["por_dueno"]}
     assert por_dueno["Estudio"] == ESPACIO_MONTO
-    assert por_dueno["Rambla"] == PROMO_MONTO
+    assert por_dueno["Rental"] == PROMO_MONTO
     assert por_dueno["Pablo"] == SUELTO_MONTO
 
     # El Estudio es 100% autónomo (su modelo no reparte con nadie más) → su
@@ -127,9 +127,9 @@ def test_liquidacion_estudio_beneficiario_db(conn):
 
 
 def test_rendicion_estudio_db(conn):
-    # Rambla cobró un pedido íntegramente de espacio (dueno=Estudio) — le
-    # corresponde al Estudio, no a Rambla. El netting (ya genérico a 4 partes,
-    # Fase 3) sugiere la transferencia Rambla→Estudio.
+    # Rental cobró un pedido íntegramente de espacio (dueno=Estudio) — le
+    # corresponde al Estudio, no a Rental. El netting (ya genérico a 4 partes,
+    # Fase 3) sugiere la transferencia Rental→Estudio.
     from contabilidad.queries.rendicion import rendicion
 
     conn.execute(
@@ -151,15 +151,15 @@ def test_rendicion_estudio_db(conn):
     conn.execute(
         """INSERT INTO alquiler_pagos (pedido_id, monto, concepto, destinatario, metodo, fecha)
            VALUES (%s,%s,%s,%s,%s,%s)""",
-        (PED_SOLO_ESPACIO, ESPACIO_MONTO, "pago", "Rambla", "transferencia", "2026-06-10T09:00:00"),
+        (PED_SOLO_ESPACIO, ESPACIO_MONTO, "pago", "Rental", "transferencia", "2026-06-10T09:00:00"),
     )
 
     r = rendicion(conn, MES)
     assert r["cuadra"] is True  # todo lo cobrado está contabilizado, solo mal atribuido
     assert r["corresponde"]["Estudio"] == ESPACIO_MONTO
-    assert r["cobrado"]["Rambla"] == ESPACIO_MONTO
+    assert r["cobrado"]["Rental"] == ESPACIO_MONTO
     assert r["cobrado"]["Estudio"] == 0
-    assert {"de": "Rambla", "a": "Estudio", "monto": ESPACIO_MONTO} in r["sugeridos"]
+    assert {"de": "Rental", "a": "Estudio", "monto": ESPACIO_MONTO} in r["sugeridos"]
 
 
 def test_pyl_parte_estudio(conn):
@@ -168,14 +168,14 @@ def test_pyl_parte_estudio(conn):
     total = _setup_pedido_mixto(conn)
     gan = ganancia_neta(conn, MES)
 
-    # Reparto DEFAULT_MODELO: Rambla 100% self + Pablo reparte 50/45/5 (Pablo/
-    # Rambla/Tincho) sobre su ítem suelto → Rambla acumula promo + su tajada.
-    parte_rambla_esperada = PROMO_MONTO + int(round(SUELTO_MONTO * 0.45))
+    # Reparto DEFAULT_MODELO: Rental 100% self + Pablo reparte 50/45/5 (Pablo/
+    # Rental/Tincho) sobre su ítem suelto → Rental acumula promo + su tajada.
+    parte_rental_esperada = PROMO_MONTO + int(round(SUELTO_MONTO * 0.45))
     parte_pablo_esperada = int(round(SUELTO_MONTO * 0.50))
     parte_tincho_esperada = int(round(SUELTO_MONTO * 0.05))
 
     assert gan["facturado"] == total
     assert gan["parte_estudio"] == ESPACIO_MONTO
-    # comisiones_duenos excluye TANTO Rambla como Estudio — solo Pablo/Tincho.
+    # comisiones_duenos excluye TANTO Rental como Estudio — solo Pablo/Tincho.
     assert gan["comisiones_duenos"] == parte_pablo_esperada + parte_tincho_esperada
-    assert gan["ganancia_neta"] == parte_rambla_esperada - gan["gastos"]
+    assert gan["ganancia_neta"] == parte_rental_esperada - gan["gastos"]

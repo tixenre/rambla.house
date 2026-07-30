@@ -9,7 +9,7 @@ from datetime import date, datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 from auth.guards import require_admin
 from database import get_db, now_ar, row_to_dict, to_datetime
@@ -59,6 +59,15 @@ from services.estudio.commands.reserva import (
     _ESTADOS_ADMIN_CREACION,
     _precio_promo_y_sueltos,
     editar_reserva as _editar_reserva_estudio,
+    total_turno_estudio,
+)
+# Validadores de descuento: fuente única compartida con `PedidoDatos`
+# (routes/alquileres/modelos.py) y `CotizarRequest` — el descuento propio del
+# turno del Estudio (#1308) no puede aceptar rangos que el de un pedido rechaza.
+from routes.alquileres.modelos import (
+    _validar_descuento_manual_monto,
+    _validar_descuento_manual_tipo,
+    _validar_descuento_pct,
 )
 from services.estudio.commands.promo import crear_promo as _crear_promo
 
@@ -1106,8 +1115,8 @@ class PromoCrearBody(BaseModel):
 @limiter.limit(ADMIN_WRITE_LIMIT)
 def crear_promo_desde_pack(body: PromoCrearBody, request: Request):
     """Crea la promo (combo) del Estudio a partir del pack curado actual
-    (`estudio_pack_equipos`): un equipo real `tipo='combo'`, `dueno='Rambla'`
-    (no los dueños tradicionales — es plata de Rambla, no de terceros),
+    (`estudio_pack_equipos`): un equipo real `tipo='combo'`, `dueno='Rental'`
+    (no los dueños tradicionales — es plata de Rental, no de terceros),
     `visible_catalogo=0` (oculto del catálogo público, solo se ofrece desde el
     Estudio/back-office). El precio objetivo (default = `pack_precio` actual)
     se clava vía un descuento % uniforme en sus componentes
@@ -1555,13 +1564,25 @@ def cotizar_reserva_estudio(
     pintura_reciente: bool = False,
     sueltos_json: str = Query("[]"),
     pedido_id: Optional[int] = None,
+    espacio_monto: Optional[int] = None,
+    descuento_pct: float = 0,
+    descuento_manual_tipo: str = "pct",
+    descuento_manual_monto: int = 0,
 ):
     """Desglose de plata de una reserva ANTES de crearla — no muta nada (el
     front no calcula plata, MEMORIA 2026-06-29). `sueltos_json` es
     `[{"equipo_id":N,"cantidad":N}]` codificado. `pedido_id`: al cotizar la
     EDICIÓN de un turno ya existente, se excluye a sí mismo del chequeo de
     disponibilidad — si no, un turno siempre se vería "ocupado" por su propia
-    franja (bug real encontrado al verificar el editor: #1283 Fase 6)."""
+    franja (bug real encontrado al verificar el editor: #1283 Fase 6).
+
+    `espacio_monto`: tarifa NEGOCIADA del espacio, la que el admin tipea en la
+    fila "Espacio". Sin esto, la cotización siempre devolvía el precio de LISTA
+    (`precio_hora * horas`) aunque el guardado persistiera la negociada — o sea,
+    la pantalla mostraba un número distinto al que se iba a cobrar (la misma
+    clase de desfasaje del pedido #445). Es un override explícito del admin, no
+    un cálculo del front: se usa tal cual, igual que lo hace `editar_reserva` al
+    persistirlo. `None` → precio de lista, como siempre."""
     require_admin(request)
     try:
         sueltos_raw = json.loads(sueltos_json)
@@ -1576,14 +1597,30 @@ def cotizar_reserva_estudio(
         fecha_desde, fecha_hasta = _franja_estudio(estudio, fecha, start, horas)
 
         con_promo = bool(con_promo) and bool(estudio["promo_combo_id"])
-        espacio_monto = (estudio["precio_hora"] or 0) * horas
+        espacio_monto = (
+            espacio_monto
+            if espacio_monto is not None and espacio_monto >= 0
+            else (estudio["precio_hora"] or 0) * horas
+        )
         # Mismo resolutor de precios que `_crear_pedido_estudio`/`editar_reserva`
         # (services.estudio.commands.reserva) — acá sin validar stock ni insertar
         # nada (preview puro, sin pedido_id todavía).
-        promo_precio, monto_extra, precios_sueltos = _precio_promo_y_sueltos(
+        promo_precio, precios_sueltos = _precio_promo_y_sueltos(
             conn, estudio, con_promo, sueltos,
         )
         pintura_precio = (estudio["precio_pintura_reciente"] or 0) if pintura_reciente else 0
+        # Mismo resolutor del total que el alta y la edición
+        # (`total_turno_estudio`): el preview no puede mostrar un número que el
+        # guardado no vaya a persistir.
+        total = total_turno_estudio(
+            conn, estudio=estudio, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
+            espacio_monto=espacio_monto, con_promo=con_promo, promo_precio=promo_precio,
+            sueltos=sueltos, precios_sueltos=precios_sueltos,
+            pintura_reciente=pintura_reciente, pintura_precio=pintura_precio,
+            descuento_pct=descuento_pct,
+            descuento_manual_tipo=descuento_manual_tipo,
+            descuento_manual_monto=descuento_manual_monto,
+        )
         desglose = {
             "espacio": espacio_monto,
             "promo": promo_precio,
@@ -1596,7 +1633,14 @@ def cotizar_reserva_estudio(
                 for s in sueltos
             ],
             "pintura_reciente": pintura_precio,
-            "monto_total": espacio_monto + monto_extra + pintura_precio,
+            # `monto_total` sigue siendo el NETO (lo que se persiste), como
+            # siempre; `bruto`/`descuento_monto`/`descuento_pct` son el detalle
+            # nuevo para que la sección MUESTRE el descuento sin calcularlo.
+            "bruto": total["bruto"],
+            "bruto_descontable": total["bruto_descontable"],
+            "descuento_pct": total["descuento_pct"],
+            "descuento_monto": total["descuento_monto"],
+            "monto_total": total["neto"],
         }
 
         libre, motivo = _estudio_disponible(
@@ -1618,6 +1662,29 @@ class EstudioReservaAdminCreate(BaseModel):
     sueltos: list[SueltoItem] = []
     espacio_monto: Optional[int] = None
     estado: str = "confirmado"
+    # Vincula el turno a un pedido de alquiler normal (#1308, "Reserva del
+    # Estudio" desde la página del pedido) — cuando viene, el cliente del
+    # turno se hereda del pedido principal (`cliente_id`/`cliente_nombre` de
+    # este body se ignoran) para que nunca puedan desincronizarse.
+    pedido_principal_id: Optional[int] = None
+
+
+def _resolver_pedido_principal(conn, pedido_principal_id: int):
+    """Valida el pedido a vincular y devuelve su contacto — el turno hereda
+    SIEMPRE de acá, nunca de lo que mande el request (ver docstring de
+    `_crear_pedido_estudio`)."""
+    p = conn.execute(
+        "SELECT tipo, cliente_id, cliente_nombre, cliente_email, cliente_telefono "
+        "FROM alquileres WHERE id = %s",
+        (pedido_principal_id,),
+    ).fetchone()
+    if not p:
+        raise HTTPException(404, "El pedido a vincular no existe")
+    if p["tipo"] != "diaria":
+        raise HTTPException(
+            400, "Solo se puede vincular un turno a un pedido de alquiler normal"
+        )
+    return p["cliente_id"], p["cliente_nombre"], p["cliente_email"], p["cliente_telefono"]
 
 
 @router.post("/admin/estudio/reservas", status_code=201)
@@ -1640,9 +1707,14 @@ def crear_reserva_estudio_admin(body: EstudioReservaAdminCreate, request: Reques
             if not estudio["equipo_id"]:
                 raise HTTPException(409, "El estudio todavía no tiene un recurso asociado")
 
-            cliente_id, cliente_nombre, cliente_email, cliente_telefono = _resolver_cliente_admin(
-                conn, body.cliente_id, body.cliente_nombre
-            )
+            if body.pedido_principal_id is not None:
+                cliente_id, cliente_nombre, cliente_email, cliente_telefono = (
+                    _resolver_pedido_principal(conn, body.pedido_principal_id)
+                )
+            else:
+                cliente_id, cliente_nombre, cliente_email, cliente_telefono = (
+                    _resolver_cliente_admin(conn, body.cliente_id, body.cliente_nombre)
+                )
             fecha_desde, fecha_hasta = _franja_estudio(estudio, body.fecha, body.start, body.horas)
 
             pedido_id, promo_advertencia = _crear_pedido_estudio(
@@ -1653,6 +1725,7 @@ def crear_reserva_estudio_admin(body: EstudioReservaAdminCreate, request: Reques
                 pintura_reciente=body.pintura_reciente,
                 espacio_monto=body.espacio_monto, estado=body.estado,
                 numero_pedido=_next_numero_pedido(conn),
+                pedido_principal_id=body.pedido_principal_id,
             )
             conn.commit()
             resp = _reserva_estudio_admin_dict(conn, pedido_id)
@@ -1671,6 +1744,30 @@ class EstudioReservaAdminUpdate(BaseModel):
     pintura_reciente: Optional[bool] = None
     sueltos: Optional[list[SueltoItem]] = None
     espacio_monto: Optional[int] = None
+    # Descuento PROPIO del turno (#1308): reusa las columnas de descuento manual
+    # que la fila de `alquileres` ya tiene — un turno ES un pedido. `None` = no
+    # tocar lo persistido (≠ `espacio_monto`, donde `None` vuelve a lista); ver
+    # `services.estudio.commands.reserva.editar_reserva`. Los validadores son
+    # los MISMOS que los de `PedidoDatos`/`CotizarRequest`, no una copia: el
+    # descuento de un turno no puede aceptar rangos que el de un pedido rechaza.
+    descuento_pct: Optional[float] = None
+    descuento_manual_tipo: Optional[str] = None
+    descuento_manual_monto: Optional[int] = None
+
+    @field_validator("descuento_pct")
+    @classmethod
+    def _v_descuento_pct(cls, v):
+        return _validar_descuento_pct(v)
+
+    @field_validator("descuento_manual_tipo")
+    @classmethod
+    def _v_descuento_manual_tipo(cls, v):
+        return _validar_descuento_manual_tipo(v)
+
+    @field_validator("descuento_manual_monto")
+    @classmethod
+    def _v_descuento_manual_monto(cls, v):
+        return _validar_descuento_manual_monto(v)
 
 
 @router.patch("/admin/estudio/reservas/{pedido_id}")
@@ -1692,6 +1789,9 @@ def editar_reserva_estudio_admin(pedido_id: int, body: EstudioReservaAdminUpdate
                 con_promo=body.con_promo, sueltos=body.sueltos,
                 pintura_reciente=body.pintura_reciente,
                 espacio_monto=body.espacio_monto,
+                descuento_pct=body.descuento_pct,
+                descuento_manual_tipo=body.descuento_manual_tipo,
+                descuento_manual_monto=body.descuento_manual_monto,
             )
             conn.commit()
             resp = _reserva_estudio_admin_dict(conn, pedido_id)
@@ -1707,13 +1807,17 @@ def editar_reserva_estudio_admin(pedido_id: int, body: EstudioReservaAdminUpdate
 # `GET /admin/calendario` (routes/dashboard.py) lista pedidos — una reserva de
 # estudio confirmada/solicitada YA aparece ahí (es un alquiler normal sobre el
 # centinela). Lo que ese endpoint NO puede ver son los bloqueos que no son
-# pedidos: los slots fijos (el pedido mensual que genera `_regenerar_pedidos_slot`
-# es solo un marcador de facturación, sin `alquiler_items` — el INNER JOIN de
-# `get_calendario` lo excluye a propósito, y aunque no lo excluyera solo mostraría
-# UN día representativo por mes, no cada ocurrencia semanal real) y las clases de
-# taller publicadas. Mismas reglas que `_slot_bloqueante`/`_taller_bloqueante`
-# (una sola forma de decidir "¿está ocupado?"), en forma de lista para un rango
-# en vez de un chequeo puntual.
+# pedidos reales: los slots fijos y los talleres. Ambos SÍ generan un pedido
+# (`_regenerar_pedidos_slot`/`_regenerar_pedidos_taller`, con su ítem centinela
+# real desde Fase 2 — "sin alquiler_items" dejó de ser cierto ahí), pero ese
+# pedido es un resumen CONTABLE (un solo día representativo por mes, o el mes
+# calendario completo), no la ocupación real — por eso `get_calendario`
+# (2026-07-28) filtra explícito `p.tipo NOT IN ('taller','estudio_fijo')`, no
+# depende de que el INNER JOIN "no tenga ítems" para excluirlos. Esta función
+# es la que sí muestra la ocupación REAL (slots fijos + clases de taller
+# publicadas), leyendo `estudio_slots_fijos`/`clases_taller` directo. Mismas
+# reglas que `_slot_bloqueante`/`_taller_bloqueante` (una sola forma de decidir
+# "¿está ocupado?"), en forma de lista para un rango en vez de un chequeo puntual.
 
 def _ocupacion_estudio_rango(conn, desde: date, hasta: date) -> list[dict]:
     """Slots fijos + clases de taller que ocupan el estudio en [desde, hasta].

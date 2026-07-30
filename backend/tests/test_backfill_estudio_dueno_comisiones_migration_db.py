@@ -123,10 +123,12 @@ def test_backfill_dueno_estudio_y_comisiones_respeta_modelo_custom(clean_db):
         modelo = json.loads(row["value"])
         # Se agregó Estudio...
         assert modelo["Estudio"] == {"Estudio": 100}
-        # ...sin tocar las reglas custom del dueño para Pablo/Tincho/Rambla.
-        assert modelo["Pablo"] == {"Pablo": 60, "Rambla": 40}
-        assert modelo["Tincho"] == {"Tincho": 50, "Rambla": 45, "Pablo": 5}
-        assert modelo["Rambla"] == {"Rambla": 100}
+        # ...sin tocar las reglas custom del dueño para Pablo/Tincho/Rental — la
+        # cadena completa a "head" también incluye la migración de rename
+        # (23aa6949d4df), que renombra la clave "Rambla" legacy a "Rental" acá.
+        assert modelo["Pablo"] == {"Pablo": 60, "Rental": 40}
+        assert modelo["Tincho"] == {"Tincho": 50, "Rental": 45, "Pablo": 5}
+        assert modelo["Rental"] == {"Rental": 100}
     finally:
         conn.close()
 

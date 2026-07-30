@@ -417,6 +417,59 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export RESERVAS_DB_TEST=1
           python -m pytest tests/test_estudio_transiciones_stock_db.py -v --tb=short -m integration
+      - name: services/estudio — el centinela ignora pedidos derivados (taller/estudio_fijo) contra Postgres real
+        run: |
+          cd backend
+          # Bug real (pedido #445, dueño): un pedido de taller con rango mensual ancho
+          # bloqueaba el espacio los días corridos del mes — su bloqueo real ya lo hace
+          # _taller_bloqueante (clases_taller). _centinela_libre ahora excluye
+          # tipo IN ('taller','estudio_fijo'); un turno real sigue bloqueando (regresión).
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_estudio_centinela_ignora_derivados_db.py -v --tb=short -m integration
+      - name: Dashboard — no lista pedidos derivados (taller/estudio_fijo) ni el centinela contra Postgres real
+        run: |
+          cd backend
+          # Bug real (pedido #445, dueño): salen_hoy/devuelven_hoy/devuelven_manana/
+          # calendario mostraban el pedido mensual de un taller como si "saliera"/
+          # "volviera" un día puntual; equipos_afuera listaba "Estudio (espacio)"
+          # como si fuera un equipo físico prestado.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_dashboard_excluye_derivados_db.py -v --tb=short -m integration
+      - name: Blindaje del pedido de taller (fechas/ítems/descuento/transición) contra Postgres real
+        run: |
+          cd backend
+          # Fase 1 (#1308): el editor genérico no debe poder pisar fechas/plata
+          # de un taller, PERO sí agregar matrícula (a diferencia del bloqueo en
+          # bloque de estudio). 2 bugs latentes reales encontrados y cerrados acá:
+          # _apply_pedido_items/_recalcular_total_pedido podían aplicarle un %
+          # de descuento a un taller sin cliente/jornadas reales (0 por
+          # coincidencia, no por regla); _revalidar_stock caía al motor
+          # genérico, que contaba el centinela contra el mes ENTERO del taller
+          # y podía rechazar una transición legítima por un turno real
+          # cualquiera ese mes.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_taller_pedidos_blindaje_db.py -v --tb=short -m integration
+      - name: Detalle del pedido de taller trae las clases reales de la edición contra Postgres real
+        run: |
+          cd backend
+          # Fase 1 (#1308): GET /alquileres/{id} de un taller ahora suma
+          # clases_taller (fecha + franja horaria reales, vía taller_edicion_id)
+          # — la pieza de datos que le permite al front mostrar la verdad en
+          # vez del rango contable ("7 jornadas", bug real #445).
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_pedido_taller_clases_enriquecido_db.py -v --tb=short -m integration
       - name: Escuela v2 — instructores como entidad contra Postgres real (F3, #1278)
         run: |
           cd backend
@@ -508,6 +561,29 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export RESERVAS_DB_TEST=1
           python -m pytest tests/test_talleres_f4c_db.py -v --tb=short -m integration
+      - name: Puente Talleres → Pedidos — lista los pedidos generados de una edición contra Postgres real
+        run: |
+          cd backend
+          # Fase 1 (#1308): GET /admin/ediciones/{id}/pedidos lista los pedidos
+          # mensuales de _regenerar_pedidos_taller (mes, estado, monto_total/
+          # monto_pagado), ordenados y filtrados por edición.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_talleres_pedidos_generados_db.py -v --tb=short -m integration
+      - name: Turno del Estudio vinculado a un pedido de alquiler normal contra Postgres real
+        run: |
+          cd backend
+          # pedido_principal_id (#1308): el turno hereda SIEMPRE el cliente del
+          # pedido principal (ignora lo que mande el request); solo se puede
+          # vincular a un pedido tipo='diaria'; borrar el principal se lleva el
+          # turno (no lo deja huérfano volviendo a la lista como pedido propio).
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_pedido_estudio_vinculado_db.py -v --tb=short -m integration
       - name: Merge de identidad + índice único de CUIL contra Postgres real
         run: |
           cd backend
@@ -533,6 +609,148 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export RESERVAS_DB_TEST=1
           python -m pytest tests/test_talleres_liquidacion_db.py -v --tb=short -m integration
+      - name: _anular_pago revierte monto_pagado y finalizado→devuelto contra Postgres real
+        run: |
+          cd backend
+          # Hallazgo de la auditoría post-split CQRS-lite (#1313/#1314): el
+          # soft-delete del ledger de pagos no tenía ningún test. Cubre: resta
+          # monto_pagado, un pago ya anulado da 404, un pago de OTRO pedido da
+          # 404 (scoping real), y anular el pago que completaba un 'finalizado'
+          # lo revierte a 'devuelto'.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_anular_pago_db.py -v --tb=short -m integration
+      - name: Un borrador nace sin número y no cuenta en los totales contra Postgres real
+        run: |
+          cd backend
+          # El borrador es un presupuesto rápido, no una venta (decisión del
+          # dueño): nace SIN numero_pedido, lo recibe recién al salir de
+          # borrador, se cuenta aparte del "N pedidos" de la lista, y se borra
+          # de verdad (hard delete).
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_borrador_fantasma_db.py -v --tb=short -m integration
+      - name: Un pedido sin cliente sigue pudiendo guardar cambios contra Postgres real
+        run: |
+          cd backend
+          # Bug real: el autosave del editor mandaba cliente_nombre=null para un
+          # pedido sin cliente asignado → NotNullViolation tumbaba el guardado
+          # ENTERO (aunque solo se tocara la fecha). Fix en _apply_pedido_datos,
+          # la puerta compartida por admin y portal.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_pedido_sin_cliente_guarda_db.py -v --tb=short -m integration
+      - name: Sacar el último equipo de un pedido se guarda contra Postgres real
+        run: |
+          cd backend
+          # Bug real ("cuando saco un equipo, no se guarda"): el front ni
+          # intentaba guardar una lista vacía y el backend la rechazaba sin
+          # excepción. Un borrador y un pedido con turno del Estudio (#1308,
+          # "2 horas de estudio y nada más") SÍ pueden quedar sin ítems; un
+          # pedido de primera clase ya solicitado sin turnos, no.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_pedido_sin_equipos_guarda_db.py -v --tb=short -m integration
+      - name: Cascada de estado del pedido principal a sus turnos vinculados contra Postgres real
+        run: |
+          cd backend
+          # #1308, "avanzan juntos": mover el estado del principal empuja cada
+          # turno vinculado al MISMO paso de FLOW (solo hacia adelante; un
+          # turno más avanzado no retrocede). Un turno que no puede avanzar
+          # queda como advertencia, nunca revierte al principal. Un turno
+          # tampoco puede superar por su cuenta el paso de su principal.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_pedido_vinculado_cascada_estado_db.py -v --tb=short -m integration
+      - name: Turno vinculado no lista como pedido aparte + cuentas por cobrar contra Postgres real
+        run: |
+          cd backend
+          # El turno del Estudio vinculado deja de listarse como fila propia en
+          # /admin/pedidos y en "Cuentas por cobrar" (dashboard de Equipos) —
+          # pero SIGUE viéndose donde la "duplicación" es información real (el
+          # historial de pedidos del cliente).
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_pedido_vinculado_list_pedidos_db.py -v --tb=short -m integration
+      - name: Pago combinado reparte entre el principal y sus turnos vinculados contra Postgres real
+        run: |
+          cd backend
+          # #1308, "un pago, reparte solo": un solo "Registrar pago" en el
+          # principal satura primero su resta, después cada turno vinculado por
+          # fecha_desde ascendente; un turno cancelado queda excluido; el
+          # sobrante se acredita siempre en el principal. Cada parte es una fila
+          # REAL de alquiler_pagos, nunca un concepto de "pago compartido".
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_pedido_vinculado_pago_combinado_db.py -v --tb=short -m integration
+      - name: Pedido + turnos vinculados son una sola venta (factura/mail/portal/liquidación) contra Postgres real
+        run: |
+          cd backend
+          # #1308, "no quiero dobles pedidos fantasmas": la factura combinada +
+          # el gate de facturar el turno solo, el mail del recordatorio de
+          # retiro, el portal del cliente, la ficha admin y la liquidación —
+          # todas las superficies de cara al dueño/cliente ven UNA sola venta.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_pedido_vinculado_un_solo_pedido_db.py -v --tb=short -m integration
+      - name: Descuento propio de un turno del Estudio contra Postgres real
+        run: |
+          cd backend
+          # #1308: el turno gana su propio descuento (%, o $ fijo), aparte del
+          # de los equipos — reusa descuento_pct/descuento_manual_* (sin
+          # columna nueva), sobrevive a editar la franja, y la promo (combo) no
+          # lo acumula. Invariante: monto_total == desglose_de_pedido(...)
+          # ["monto_neto"] — lo mismo que compara el chequeo desglose_divergente.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_turno_estudio_descuento_db.py -v --tb=short -m integration
+      - name: dataio export/import preserva tipo + pedido_principal_id contra Postgres real
+        run: |
+          cd backend
+          # Bug latente (misma clase que alquiler_pagos.anulado, 2026-07-03):
+          # export_alquileres no incluía tipo/pedido_principal_id → un ciclo
+          # export→import (backup/restore o clonado) devolvía todo como
+          # tipo='diaria' y desvinculado — un turno del Estudio revivía como
+          # alquiler suelto. El vínculo viaja por NÚMERO de pedido, no por id.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_dataio_pedido_vinculado_roundtrip_db.py -v --tb=short -m integration
+      - name: Migración Rambla→Rental mergea la cuenta legacy en vez de chocar contra Postgres real
+        run: |
+          cd backend
+          # #1314, bug encontrado en staging: init_db() (ya nombra "Rental")
+          # siembra 'Fondo Rental' ANTES que Alembic corra en una BD que
+          # todavía tenía 'Fondo Rambla' con plata real → el rename ciego
+          # chocaba (UniqueViolation) y la migración entera hacía rollback
+          # (incluido equipos.dueno, mismo upgrade()). El fix mergea la cuenta
+          # vieja en la nueva (reasigna movimientos + suma saldo_inicial +
+          # borra) y es idempotente corrida dos veces. Env var propia
+          # (ALEMBIC_DB_TEST), mismo gating que test_alembic_upgrade_db.py.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export ALEMBIC_DB_TEST=1
+          python -m pytest tests/test_rambla_a_rental_cuentas_merge_migration_db.py -v --tb=short -m integration
 
   e2e-admin:
     name: E2E admin (Playwright + backend real)

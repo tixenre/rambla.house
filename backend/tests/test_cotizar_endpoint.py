@@ -11,9 +11,10 @@ Estilo unitario (sin TestClient): se llama a la función con un FakeConn y
 """
 
 import pytest
+from pydantic import ValidationError
 from starlette.requests import Request as StarletteRequest
 
-import routes.alquileres.cotizacion as alq
+import services.alquileres.queries.cotizacion as alq
 from routes.alquileres import cotizar, CotizarRequest, CotizarItem
 
 # slowapi valida con isinstance(request, StarletteRequest) → necesita una instancia real.
@@ -40,13 +41,16 @@ class FakeConn:
     por jornadas, resueltos según el SQL que llega."""
 
     def __init__(self, precios, perfil=None, descuento=0, descuentos_jornada=None,
-                 perfiles_por_id=None):
+                 perfiles_por_id=None, ocultos=None):
         self.precios = precios                       # {equipo_id: precio_jornada}
         self.perfil = perfil
         self.descuento = descuento
         self.descuentos_jornada = descuentos_jornada or []
         # {cliente_id: (perfil, descuento)} — para verificar QUÉ cliente se usó.
         self.perfiles_por_id = perfiles_por_id
+        # equipo_ids en `precios` que existen pero NO son visible_catalogo (el
+        # centinela del Estudio, un componente de promo) — #1313/#1314.
+        self.ocultos = ocultos or set()
         self._sql = ""
         self._params = ()
         self.closed = 0  # cuántas veces se devolvió la conexión al pool
@@ -82,12 +86,24 @@ class FakeConn:
     def fetchall(self):
         if "FROM descuentos_jornada" in self._sql:
             return [{"jornadas": j, "pct": p} for j, p in self.descuentos_jornada]
-        # Batch query para equipos: SELECT id, precio_jornada, tipo FROM equipos WHERE id IN (...)
-        if "FROM equipos" in self._sql and "IN" in self._sql:
+        # Gate de catálogo (`_equipos_visibles_catalogo`, services/carrito/
+        # readiness.py, #1313/#1314): todo lo que está en `self.precios` es
+        # visible, SALVO lo listado en `self.ocultos` — a diferencia del batch
+        # de tipos de abajo, que no filtra por visibilidad (un equipo oculto
+        # sigue teniendo tipo).
+        if "FROM equipos" in self._sql and "visible_catalogo" in self._sql:
+            ids = self._params[0]
+            return [
+                {"id": eid} for eid in self.precios
+                if eid in ids and eid not in self.ocultos
+            ]
+        # Batch query para equipos (tipos_equipo_batch / consolidación vieja):
+        # SELECT ... FROM equipos WHERE id = ANY(%s) / IN (...)
+        if "FROM equipos" in self._sql and ("IN" in self._sql or "ANY" in self._sql):
             return [
                 {"id": eid, "precio_jornada": precio, "tipo": "simple"}
                 for eid, precio in self.precios.items()
-                if eid in self._params
+                if eid in self._params[0]
             ]
         return []
 
@@ -397,6 +413,53 @@ class TestPreciosDesdeBackend:
 
         assert out["bruto"] == 0
         assert out["total_final"] == 0
+
+
+class TestGateCatalogoVisible:
+    """`/api/cotizar` es público: un equipo que existe pero no es
+    `visible_catalogo` (el centinela del Estudio, un componente de promo) no
+    puede cotizarse desde acá para un caller no-admin — mismo gate que
+    `precios_catalogo_para_reserva` (creación real). #1313/#1314."""
+
+    def test_no_admin_ignora_equipo_oculto(self, patch_db):
+        # equipo 7 visible, equipo 9 existe pero está oculto → se excluye,
+        # igual que un equipo inexistente (best-effort, no 404).
+        patch_db(FakeConn(precios={7: 10000, 9: 5000}, ocultos={9}), session=None)
+        out = cotizar(_req([(7, 1), (9, 1)]), FakeReq())
+
+        assert out["bruto"] == 10000  # solo el 7, el 9 oculto se ignora
+
+    def test_admin_si_puede_cotizar_un_equipo_oculto(self, patch_db, monkeypatch):
+        # El admin cotiza pedidos derivados (Estudio/taller) que SÍ llevan
+        # equipos no-catálogo — el gate no debe bloquearlo.
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        patch_db(
+            FakeConn(precios={9: 5000}, ocultos={9}),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(_req([(9, 1)]), FakeReq())
+
+        assert out["bruto"] == 5000
+
+
+class TestFechaMalformada:
+    """`/api/cotizar` es público — una fecha rota tiene que rechazarse en el
+    borde (422 vía Pydantic), no llegar cruda a `to_datetime()` y explotar
+    como 500 más adentro. Mismo validador que `PedidoCreate`/`PedidoDatos`
+    (routes/alquileres/modelos.py). #1313/#1314."""
+
+    def test_fecha_desde_malformada_rechaza_antes_de_llegar_al_endpoint(self):
+        with pytest.raises(ValidationError):
+            CotizarRequest(items=[], fecha_desde="ayer")
+
+    def test_fecha_hasta_malformada_rechaza_antes_de_llegar_al_endpoint(self):
+        with pytest.raises(ValidationError):
+            CotizarRequest(items=[], fecha_hasta="32/05/2026")
+
+    def test_fecha_iso_valida_sigue_pasando(self):
+        # No regresivo: una fecha bien formada no debe empezar a rechazarse.
+        data = CotizarRequest(items=[], fecha_desde="2026-06-01", fecha_hasta="2026-06-08")
+        assert data.fecha_desde == "2026-06-01"
 
 
 class TestDescuentoJornadas:
@@ -887,3 +950,75 @@ class TestPedidoConFacturaCVigente:
         out = cotizar(self._data(), FakeReq())
         assert out["con_iva"] is True
         assert out["total_final"] == 12100
+
+
+class TestRespetarPrecioItemCobroModo:
+    """Bug real encontrado en vivo (Fase 1, #1308) mientras se probaba el
+    Desglose de un pedido de taller: con `respetar_precio_item` (el editor
+    admin de un pedido existente), un ítem de CATÁLOGO siempre se etiquetaba
+    `cobro_modo="jornada"` para `calcular_total`, sin importar el cobro_modo
+    REAL persistido en la línea. Un ítem `cobro_modo='fijo'` (ej. el
+    centinela del Estudio en un pedido de taller, cuyo rango es el mes
+    contable completo) se multiplicaba igual por las jornadas del rango —
+    para 31 jornadas, un pedido de $1.200.000 mostraba $37.200.000 en el
+    Desglose/Cobranza del editor, mintiendo sobre cuánto falta cobrar. El
+    front YA mandaba el `cobro_modo` real (`lib/cotizacion.ts`); el bug era
+    puramente que el backend lo ignoraba para ítems de catálogo."""
+
+    def _data(self, cobro_modo=None):
+        item = CotizarItem(
+            equipo_id=7, cantidad=1, precio_jornada=1_200_000, cobro_modo=cobro_modo,
+        )
+        return CotizarRequest(
+            items=[item],
+            fecha_desde="2026-08-01T00:00:00",
+            fecha_hasta="2026-08-31T23:59:59",  # 31 jornadas
+            cliente_id=99,
+            pedido_id=5,
+            respetar_precio_item=True,
+        )
+
+    def test_item_fijo_no_se_multiplica_por_jornadas(self, patch_db, monkeypatch):
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        patch_db(
+            FakeConnConPedido(
+                precios={7: 10000}, descuento=0,
+                pedido={"estado": "confirmado", "cliente_id": 99,
+                        "descuento_jornadas_pct": 0, "descuento_cliente_pct": 0},
+            ),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(self._data(cobro_modo="fijo"), FakeReq())
+        assert out["neto"] == 1_200_000, (
+            f"cobro_modo='fijo' no debe multiplicarse por jornadas (31); dio {out['neto']}"
+        )
+
+    def test_item_jornada_si_se_multiplica_por_jornadas(self, patch_db, monkeypatch):
+        # Control: el caso normal (catálogo, cobro por jornada) tiene que
+        # seguir multiplicando — el fix no debe apagar esto por accidente.
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        patch_db(
+            FakeConnConPedido(
+                precios={7: 10000}, descuento=0,
+                pedido={"estado": "confirmado", "cliente_id": 99,
+                        "descuento_jornadas_pct": 0, "descuento_cliente_pct": 0},
+            ),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(self._data(cobro_modo="jornada"), FakeReq())
+        assert out["neto"] == 1_200_000 * 31
+
+    def test_sin_cobro_modo_explicito_default_jornada(self, patch_db, monkeypatch):
+        # Si el front no manda cobro_modo (ej. un caller viejo), el default
+        # sigue siendo "jornada" — mismo comportamiento que antes del fix.
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        patch_db(
+            FakeConnConPedido(
+                precios={7: 10000}, descuento=0,
+                pedido={"estado": "confirmado", "cliente_id": 99,
+                        "descuento_jornadas_pct": 0, "descuento_cliente_pct": 0},
+            ),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(self._data(cobro_modo=None), FakeReq())
+        assert out["neto"] == 1_200_000 * 31

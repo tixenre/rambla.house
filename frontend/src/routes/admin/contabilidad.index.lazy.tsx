@@ -171,9 +171,9 @@ function SocioCard({ socio }: { socio: CuentaSaldo }) {
   const abs = Math.abs(socio.saldo);
   const frase =
     socio.estado === "deudor"
-      ? `${socio.nombre} le debe a Rambla`
+      ? `${socio.nombre} le debe a Rental`
       : socio.estado === "acreedor"
-        ? `Rambla le debe a ${socio.nombre}`
+        ? `Rental le debe a ${socio.nombre}`
         : "A mano";
   const color =
     socio.estado === "deudor"

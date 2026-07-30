@@ -87,16 +87,46 @@ export type PedidoTransicionable = {
   estado: EstadoPedido;
   fecha_desde?: string | null;
   fecha_hasta?: string | null;
-  items?: { length: number } | null;
+  /** ¿Tiene contenido real (ítems O un turno del Estudio vinculado activo)?
+   *  SIEMPRE lo calcula el backend (`_pedido_tiene_contenido`,
+   *  services/alquileres/queries/detalle.py) — el front solo lo muestra, no
+   *  lo recalcula. Antes este archivo miraba `items.length` a secas y
+   *  bloqueaba para siempre un pedido "2 horas de estudio y nada más"
+   *  (hallazgo real, #1313/#1314-adjacent). */
+  tiene_contenido: boolean;
+  /** ¿Todavía tiene plata por cobrar? SIEMPRE lo calcula el backend
+   *  (`_tiene_saldo_pendiente`, services/alquileres/queries/detalle.py) sobre
+   *  la fila individual — el front no resta monto_pagado de monto_total para
+   *  decidir esto, solo lee el resultado. Antes nada lo chequeaba: el botón
+   *  "Cobrar saldo y finalizar" dejaba marcar Finalizado un pedido real sin
+   *  haber cobrado un peso (hallazgo del dueño, 2026-07-30). */
+  saldo_pendiente: boolean;
+  /** Para el gate de salida de borrador: alcanza con la ficha vinculada O un
+   *  nombre cargado a mano ("alguien que llamó"). */
+  cliente_id?: number | null;
+  cliente_nombre?: string | null;
 };
 
 /** Motivo por el que un destino está bloqueado (faltan fechas / sin equipos) — espeja la validación del backend. */
 export function blockReason(p: PedidoTransicionable, target: EstadoPedido): string | null {
+  // Salir de BORRADOR: el presupuesto rápido se vuelve un pedido real (saca
+  // número, entra en Solicitados, se puede cobrar y facturar) → necesita tener
+  // algo y alguien. Criterio del dueño (2026-07-29); el freno de verdad está en
+  // el backend (`transiciones.cambiar_estado`), esto es para que el botón lo
+  // diga ANTES de apretarlo en vez de fallar después.
+  if (p.estado === "borrador" && target !== "borrador" && target !== "cancelado") {
+    if (!p.cliente_id && !(p.cliente_nombre ?? "").trim()) return "sin cliente";
+    if (!p.tiene_contenido) return "sin equipos";
+  }
   const needs: EstadoPedido[] = ["confirmado", "retirado", "devuelto", "finalizado"];
   if (needs.includes(target)) {
     if (!p.fecha_desde || !p.fecha_hasta) return "faltan fechas";
-    if (!p.items?.length) return "sin equipos";
+    if (!p.tiene_contenido) return "sin equipos";
   }
+  // Finalizar es "estilo Magento": normalmente se prende solo (devuelto +
+  // pagado completo). El botón manual es un escape hatch para un pedido sin
+  // nada por cobrar (monto_total=0) — no una forma de saltear el cobro.
+  if (target === "finalizado" && p.saldo_pendiente) return "saldo pendiente";
   return null;
 }
 
@@ -124,4 +154,23 @@ export function otrosDestinos(p: PedidoTransicionable): EstadoPedido[] {
   const siguiente = SIGUIENTE_PASO[p.estado];
   const candidatos = transiciones(p.estado).filter((e) => e !== "cancelado" && e !== siguiente);
   return [...candidatos].sort((a, b) => FLOW.indexOf(a) - FLOW.indexOf(b));
+}
+
+/**
+ * Cómo se identifica un pedido en pantalla. Un BORRADOR no tiene
+ * `numero_pedido`: es un presupuesto rápido, no una venta (decisión del dueño)
+ * — mostrar su id interno como "#425" lo hacía pasar por un pedido real, que es
+ * justamente la confusión que se quiso sacar.
+ *
+ * Los registros históricos/manuales sin número (que NO son borradores)
+ * conservan el fallback de siempre al id — ahí el "#" sigue siendo la mejor
+ * referencia disponible.
+ */
+export function etiquetaPedido(p: {
+  id: number;
+  numero_pedido?: number | null;
+  estado?: string;
+}): string {
+  if (p.numero_pedido) return `#${p.numero_pedido}`;
+  return p.estado === "borrador" ? "Borrador" : `#${p.id}`;
 }

@@ -11,6 +11,7 @@ import {
   Trash2,
   ShieldAlert,
   X,
+  Clapperboard,
 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -29,8 +30,10 @@ import {
 } from "@/design-system/ui/alert-dialog";
 import { SearchInput } from "@/design-system/ui/search-input";
 import { Skeleton } from "@/design-system/ui/skeleton";
+import { CountBadge } from "@/design-system/ui/count-badge";
 import { adminApi, ESTADO_LABEL, type Pedido } from "@/lib/admin/api";
-import { nextStep, type EstadoPedido } from "@/lib/pedido-estados";
+import { etiquetaPedido, nextStep, type EstadoPedido } from "@/lib/pedido-estados";
+import { combinarTotales, etiquetaTurno } from "@/lib/pedido-combinado";
 import { esPedidoEstudio } from "@/lib/tipos-pedido";
 import { EquipoThumb } from "@/components/admin/pedido/EquipoThumb";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
@@ -81,6 +84,22 @@ function creadoHace(iso?: string): string | null {
   return `hace ${d} d`;
 }
 
+/** Cuántos turnos del Estudio tiene vinculados este pedido (#1308) — el
+ *  turno en sí ya no aparece como fila propia en esta lista, esta señal
+ *  es para no perderlo de vista. */
+function TurnosVinculadosTag({ count }: { count: number }) {
+  if (count <= 0) return null;
+  return (
+    <span
+      className="inline-flex items-center gap-0.5"
+      title={`${count} turno(s) del Estudio vinculado(s)`}
+    >
+      <Clapperboard className="h-3 w-3 text-muted-foreground" />
+      <CountBadge count={count} size="sm" />
+    </span>
+  );
+}
+
 const saldoDe = (p: Pedido) => Math.max(0, (p.monto_total ?? 0) - (p.monto_pagado ?? 0));
 // Pagado completo: mismo criterio que el "Pagado" de PagoBadge (pagado ≥ total > 0).
 const estaPagado = (p: Pedido) => (p.monto_total ?? 0) > 0 && saldoDe(p) === 0;
@@ -99,11 +118,15 @@ function fuenteLabel(fuente: string | null): string | null {
   return map[fuente] ?? fuente;
 }
 
-type EstadoFilter = "activos" | "solicitado" | "confirmado" | "cerrados" | "todos";
+type EstadoFilter = "activos" | "solicitado" | "confirmado" | "borrador" | "cerrados" | "todos";
 const ESTADO_FILTERS: { id: EstadoFilter; label: string }[] = [
   { id: "activos", label: "Activos" },
   { id: "solicitado", label: "Solicitados" },
   { id: "confirmado", label: "Confirmados" },
+  // Los presupuestos rápidos tienen su propia pestaña: no son ventas (no entran
+  // en "Activos" ni suman al "N pedidos"), pero son lo que uno está armando —
+  // pedido del dueño: "un filtro para que solo haya borradores".
+  { id: "borrador", label: "Borradores" },
   { id: "cerrados", label: "Cerrados" },
   { id: "todos", label: "Todos" },
 ];
@@ -158,8 +181,14 @@ function PedidosPage() {
   const raw = useMemo(() => pedidosQ.data?.items ?? [], [pedidosQ.data]);
 
   // Conteo de activos para el chip de estado.
+  // El badge de "Activos" cuenta PEDIDOS reales: un borrador es un presupuesto
+  // rápido, no una venta activa (sigue listándose dentro de la pestaña, pero no
+  // infla el número que el admin lee de un vistazo).
   const activosCount = useMemo(
-    () => raw.filter((p) => p.estado !== "finalizado" && p.estado !== "cancelado").length,
+    () =>
+      raw.filter(
+        (p) => p.estado !== "finalizado" && p.estado !== "cancelado" && p.estado !== "borrador",
+      ).length,
     [raw],
   );
 
@@ -172,6 +201,7 @@ function PedidosPage() {
       return raw.filter((p) => p.estado === "finalizado" || p.estado === "cancelado");
     if (estadoF === "solicitado") return raw.filter((p) => p.estado === "solicitado");
     if (estadoF === "confirmado") return raw.filter((p) => p.estado === "confirmado");
+    if (estadoF === "borrador") return raw.filter((p) => p.estado === "borrador");
     return raw;
   }, [raw, dayFilter, estadoF]);
 
@@ -181,6 +211,17 @@ function PedidosPage() {
       ? selectedId
       : (items[0]?.id ?? null);
   const total = pedidosQ.data?.total ?? 0;
+  // Los borradores se listan igual, pero NO son ventas: son presupuestos
+  // rápidos. El "N pedidos" del header cuenta solo lo real y los nombra aparte,
+  // para que un par de borradores sueltos no inflen el número del negocio.
+  const borradores = pedidosQ.data?.borradores ?? 0;
+  const totalReales = Math.max(0, total - borradores);
+  const resumenConteo = borradores
+    ? `${totalReales} en total · ${borradores} borrador${borradores === 1 ? "" : "es"}.`
+    : `${totalReales} en total.`;
+  // Los que se ven AHORA (después del filtro de pestaña/día) — el contador de
+  // la barra del listado cuenta filas visibles, no el universo del filtro.
+  const borradoresVisibles = items.filter((p) => p.estado === "borrador").length;
 
   const openEditor = (id: number) =>
     navigate({ to: "/admin/pedidos/$id", params: { id: String(id) } });
@@ -205,7 +246,7 @@ function PedidosPage() {
       description={
         <>
           Reservas activas y solicitudes de cambio de tus clientes.{" "}
-          {pedidosQ.isLoading ? "Cargando…" : `${total} en total.`}
+          {pedidosQ.isLoading ? "Cargando…" : resumenConteo}
         </>
       }
       actions={
@@ -268,6 +309,9 @@ function PedidosPage() {
                   {f.id === "activos" && (
                     <span className="font-mono text-2xs tabular-nums">{activosCount}</span>
                   )}
+                  {f.id === "borrador" && borradores > 0 && (
+                    <span className="font-mono text-2xs tabular-nums">{borradores}</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -286,7 +330,12 @@ function PedidosPage() {
           {/* Barra del listado: contador + acciones (eliminar el seleccionado · ancho del panel) */}
           <div className="flex items-center gap-1 px-3 py-2 border-b hairline bg-surface-elevated shrink-0">
             <span className="t-eyebrow">
-              {items.length} pedido{items.length !== 1 ? "s" : ""}
+              {/* Mismo criterio que el header: los borradores se listan pero se
+                  nombran aparte — no son "pedidos". */}
+              {items.length - borradoresVisibles} pedido
+              {items.length - borradoresVisibles !== 1 ? "s" : ""}
+              {borradoresVisibles > 0 &&
+                ` · ${borradoresVisibles} borrador${borradoresVisibles === 1 ? "" : "es"}`}
             </span>
             <div className="flex-1" />
             <button
@@ -331,7 +380,7 @@ function PedidosPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              Eliminar pedido #{selPedido?.numero_pedido ?? selId}
+              Eliminar {selPedido ? etiquetaPedido(selPedido) : "pedido"}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {selPedido?.cliente_nombre ? `${selPedido.cliente_nombre} · ` : ""}Se borran también
@@ -377,7 +426,13 @@ function PedidosPage() {
           <AdminCard key={p.id} onClick={() => openEditor(p.id)}>
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
-                <div className="mb-0.5 t-eyebrow">#{p.numero_pedido ?? p.id}</div>
+                <div className="mb-0.5 flex items-center gap-1.5 t-eyebrow">
+                  {/* Un borrador no tiene número: su etiqueta sería "Borrador",
+                      lo mismo que ya dice el badge de la derecha. Se omite en
+                      vez de escribirlo dos veces en la misma fila. */}
+                  {p.estado !== "borrador" && <span>{etiquetaPedido(p)}</span>}
+                  <TurnosVinculadosTag count={p.turnos_vinculados_count ?? 0} />
+                </div>
                 <div className="truncate font-medium text-ink">
                   {p.cliente_nombre || "Sin cliente"}
                 </div>
@@ -488,13 +543,21 @@ function MasterList({
                   />
                 </div>
                 <div className="mt-0.5 flex items-center gap-1.5 font-mono text-xs text-muted-foreground">
-                  <span>#{p.numero_pedido ?? p.id}</span>
-                  <span>·</span>
+                  {/* Un borrador no tiene número: su etiqueta diría "Borrador",
+                      lo mismo que el badge de arriba. Se omite (con su "·") en
+                      vez de repetirlo en la misma fila. */}
+                  {p.estado !== "borrador" && (
+                    <>
+                      <span>{etiquetaPedido(p)}</span>
+                      <span>·</span>
+                    </>
+                  )}
                   {hoyTag(p) ?? (
                     <span className="truncate tabular-nums">
                       {fechaDia(p.fecha_desde)} → {fechaDia(p.fecha_hasta)}
                     </span>
                   )}
+                  <TurnosVinculadosTag count={p.turnos_vinculados_count ?? 0} />
                 </div>
                 <div className="mt-1.5 flex items-center gap-2">
                   {!estaPagado(p) && (
@@ -571,9 +634,16 @@ function PreviewPane({ id, onOpen }: { id: number | null; onOpen: (id: number) =
     );
   }
 
-  const pagado = p.monto_pagado ?? 0;
-  const total = p.monto_total ?? 0;
-  const saldo = Math.max(0, total - pagado);
+  // Plata COMBINADA: el pedido + sus turnos del Estudio (#1308). Sin esto el
+  // panel mostraba solo la fila del principal — un pedido de "2 horas de
+  // estudio y nada más" se veía como $0 con "Sin equipos cargados", sin rastro
+  // de las horas ni de su plata (el dueño lo reportó: "en esta view no se ven
+  // los turnos"). Misma fuente única que usa el rail del editor.
+  const turnosVinculados = p.turnos_estudio_vinculados ?? [];
+  const combinado = combinarTotales(p.monto_total ?? 0, p.monto_pagado ?? 0, turnosVinculados);
+  const pagado = combinado.pagadoCombinado;
+  const total = combinado.totalCombinado;
+  const saldo = combinado.restaCombinado;
   const jornadas = p.cantidad_jornadas ?? 1;
   const nItems = p.items?.length ?? 0;
   const fuente = fuenteLabel(p.fuente);
@@ -605,10 +675,12 @@ function PreviewPane({ id, onOpen }: { id: number | null; onOpen: (id: number) =
               <EstadoBadge estado={p.estado} label={ESTADO_LABEL[p.estado]} />
             </div>
             <div className="mt-1 font-mono text-xs text-muted-foreground flex items-center gap-1.5 flex-wrap">
-              <span>Pedido #{p.numero_pedido ?? p.id}</span>
+              {/* "Pedido Borrador" no dice nada que el badge de arriba no diga:
+                  para un borrador esta línea arranca directo en cuándo se creó. */}
+              {p.estado !== "borrador" && <span>Pedido {etiquetaPedido(p)}</span>}
               {creadoHace(p.created_at) && (
                 <>
-                  <span>·</span>
+                  {p.estado !== "borrador" && <span>·</span>}
                   <span>creado {creadoHace(p.created_at)}</span>
                 </>
               )}
@@ -703,38 +775,66 @@ function PreviewPane({ id, onOpen }: { id: number | null; onOpen: (id: number) =
           </div>
         </div>
 
-        {/* Equipos */}
-        <div className="card-elevated">
-          <div className="flex items-center justify-between px-4 py-2.5 border-b hairline">
-            <span className="t-eyebrow">Equipos · {nItems}</span>
-            {nItems > 0 && <span className="t-eyebrow">precio / jornada</span>}
+        {/* Equipos — el bloque NO se muestra vacío (pedido del dueño: "si no
+            hay equipos, o no hay turnos, que no se muestren"). Este panel es
+            de lectura rápida: una caja que solo dice "Sin equipos cargados" no
+            informa nada que el "Equipos · 0" del encabezado no dijera, y hace
+            scrollear de gratis. Cargar equipos se hace en el editor, no acá. */}
+        {nItems > 0 && (
+          <div className="card-elevated">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b hairline">
+              <span className="t-eyebrow">Equipos · {nItems}</span>
+              <span className="t-eyebrow">precio / jornada</span>
+            </div>
+            <ul className="divide-y hairline">
+              {(p.items ?? []).map((it) => (
+                <li key={it.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <EquipoThumb
+                    src={it.foto_url}
+                    alt={it.nombre_publico || it.nombre}
+                    className="h-9 w-9 shrink-0"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm text-ink truncate">
+                      {it.nombre_publico || it.nombre}
+                    </div>
+                    {it.marca && (
+                      <div className="font-mono text-xs text-muted-foreground">{it.marca}</div>
+                    )}
+                  </div>
+                  <div className="font-mono text-sm tabular-nums text-ink shrink-0">
+                    {it.cantidad}× {fmtArs(it.precio_jornada)}
+                  </div>
+                </li>
+              ))}
+            </ul>
           </div>
-          <ul className="divide-y hairline">
-            {(p.items ?? []).map((it) => (
-              <li key={it.id} className="flex items-center gap-3 px-4 py-2.5">
-                <EquipoThumb
-                  src={it.foto_url}
-                  alt={it.nombre_publico || it.nombre}
-                  className="h-9 w-9 shrink-0"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="text-sm text-ink truncate">{it.nombre_publico || it.nombre}</div>
-                  {it.marca && (
-                    <div className="font-mono text-xs text-muted-foreground">{it.marca}</div>
-                  )}
-                </div>
-                <div className="font-mono text-sm tabular-nums text-ink shrink-0">
-                  {it.cantidad}× {fmtArs(it.precio_jornada)}
-                </div>
-              </li>
-            ))}
-            {nItems === 0 && (
-              <li className="px-4 py-6 text-center text-sm text-muted-foreground">
-                Sin equipos cargados.
-              </li>
-            )}
-          </ul>
-        </div>
+        )}
+
+        {/* Turnos del Estudio — solo lectura: el turno se administra en la
+            página del pedido, acá se ve QUÉ hay y CUÁNTO suma (si no, la plata
+            del panel no cierra con lo que muestra). Se nombran por su franja,
+            nunca por un "#N": son parte del pedido, no ventas aparte. */}
+        {turnosVinculados.length > 0 && (
+          <div className="card-elevated">
+            <div className="flex items-center justify-between px-4 py-2.5 border-b hairline">
+              <span className="t-eyebrow">Turnos del Estudio · {turnosVinculados.length}</span>
+            </div>
+            <ul className="divide-y hairline">
+              {combinado.turnos.map((t) => (
+                <li key={t.id} className="flex items-center gap-3 px-4 py-2.5">
+                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-dashed hairline text-muted-foreground/60">
+                    <Clapperboard className="h-4 w-4" />
+                  </div>
+                  <div className="min-w-0 flex-1 truncate text-sm text-ink">{etiquetaTurno(t)}</div>
+                  <div className="shrink-0 font-mono text-sm tabular-nums text-ink">
+                    {fmtArs(t.monto_total ?? 0)}
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       {/* Modales (quick-actions inline) */}

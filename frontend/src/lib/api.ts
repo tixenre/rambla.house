@@ -578,7 +578,7 @@ export function apiCrearInscripcion(slug: string, body: InscripcionBody) {
   return post<InscripcionResult>(`/api/talleres/${slug}/inscripcion`, body);
 }
 
-// ── F5: página pública "completá tu seña" (/escuela/sena/$token) ───────────
+// ── F5: página pública "completá tu seña" (/escuelas/sena/$token) ──────────
 
 export type OfertaCupo = {
   taller_nombre: string;

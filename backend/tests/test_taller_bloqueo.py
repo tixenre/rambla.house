@@ -165,6 +165,25 @@ def test_slot_bloqueante_exclude_slot_id():
     assert 5 in params
 
 
+# ── _centinela_libre ──────────────────────────────────────────────────────────
+
+
+def test_centinela_libre_ignora_pedidos_derivados_taller_y_estudio_fijo():
+    """Candado del fix del bug real reportado por el dueño (pedido #445): el
+    WHERE de `_centinela_libre` tiene que excluir `p.tipo IN ('taller',
+    'estudio_fijo')` — esos dos son pedidos DERIVADOS/contables cuyas fechas
+    NO representan la franja real ocupada (taller guarda el mes calendario
+    completo; estudio_fijo, solo la primera ocurrencia semanal). Su bloqueo
+    real ya lo hacen `_taller_bloqueante`/`_slot_bloqueante`, ANTES en
+    `_estudio_disponible`. Si alguien remueve el filtro, este test lo caza
+    por el SQL — mismo patrón que `test_taller_bloqueante_filtra_edicion_activa`."""
+    from services.estudio.queries.disponibilidad import _centinela_libre
+    conn = FakeConn([FakeRow(cnt=0)])
+    _centinela_libre(conn, 99, _desde(2026, 8, 15, 10), _hasta(2026, 8, 15, 12), buffer_horas=0)
+    sql, _params = conn._calls[0]
+    assert "p.tipo NOT IN ('taller', 'estudio_fijo')" in sql
+
+
 # ── _estudio_disponible ───────────────────────────────────────────────────────
 
 

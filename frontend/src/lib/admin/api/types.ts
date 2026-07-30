@@ -566,7 +566,7 @@ export type EquipoPendienteCompat = {
 
 // Pagos: destinatario (a quién se cobró) y método. Espeja las constantes del
 // backend (`contabilidad/constants.py::COBRADORES`); los defaults se aplican en el modal.
-export const DESTINATARIOS_PAGO = ["Rambla", "Tincho", "Pablo", "Estudio"] as const;
+export const DESTINATARIOS_PAGO = ["Rental", "Tincho", "Pablo", "Estudio"] as const;
 export const METODOS_PAGO = ["transferencia", "efectivo"] as const;
 
 export interface PagoLogRow {
@@ -776,7 +776,7 @@ export interface ReporteMensual {
   devengado: { total: number; pedidos: number; por_socio: Record<string, number> };
   cobrado: { por_socio: Record<string, number>; total: number };
   gastos: { total: number; por_categoria: { categoria: string; monto: number }[] };
-  /** Lo facturado que NO es de Rambla (parte de los dueños): un costo, no ganancia. */
+  /** Lo facturado que NO es de Rental (parte de los dueños): un costo, no ganancia. */
   comisiones_duenos: number;
   /** Lo facturado que es del Estudio (otra unidad de negocio, no una comisión). */
   parte_estudio: number;
@@ -1123,12 +1123,35 @@ export type PedidoPago = {
   monto: number;
   concepto: string | null;
   fecha: string;
+  /** A quién entró la plata y cómo. El backend los devuelve desde siempre
+   *  (`SELECT * FROM alquiler_pagos`) y el modal de cobro OBLIGA a elegirlos,
+   *  pero el tipo no los declaraba y la ficha del pedido no los mostraba: se
+   *  elegía "Cobró: Tincho / efectivo" y quedaba invisible acá, había que
+   *  irse a Finanzas para saber quién tiene esa plata. */
+  destinatario?: string | null;
+  metodo?: string | null;
   created_at?: string;
   created_by?: string | null;
   anulado?: boolean;
   anulado_por?: string | null;
   anulado_at?: string | null;
   anulado_motivo?: string | null;
+};
+
+/** Una clase real de una edición de taller — mismo shape que
+ *  `services.talleres.queries.clases._clase_dict` (backend). */
+export type ClaseTallerPedido = {
+  id: number;
+  fecha: string;
+  hora_inicio_min: number;
+  hora_fin_min: number;
+  hora_inicio_str: string;
+  hora_fin_str: string;
+  titulo: string;
+  descripcion: string;
+  nota: string;
+  portada_media_id: number | null;
+  portada_url: string;
 };
 
 export type Pedido = {
@@ -1169,8 +1192,65 @@ export type Pedido = {
    *  slot mensual del Estudio, #1283) | "taller" (resumen mensual de una
    *  edición, ver `_regenerar_pedidos_taller`) — ver `lib/tipos-pedido.ts`.
    *  Ítems/fechas de un pedido del Estudio se editan desde Estudio → Reservas;
-   *  un pedido de taller queda editable normal. */
+   *  un pedido de taller (Fase 1, #1308) también las tiene blindadas —
+   *  fecha/ítem-auto rechazan el editor genérico, aunque sí permite agregar
+   *  una línea nueva (matrícula). */
   tipo?: "diaria" | "estudio" | "estudio_fijo" | "taller";
+  /** Presente solo si `tipo === "taller"`: la edición que lo generó. */
+  taller_edicion_id?: number | null;
+  /** Presente solo en un turno del Estudio creado desde la página de un
+   *  pedido de alquiler normal (#1308, sección "Reserva del Estudio" en el
+   *  pedido principal) — el pedido del que "cuelga". `cliente_id`/nombre del
+   *  turno se heredan SIEMPRE de este pedido (lo fuerza el backend, nunca
+   *  desincroniza). `null`/ausente = turno sin vincular (el caso normal). */
+  pedido_principal_id?: number | null;
+  /** Breadcrumb liviano de vuelta al pedido principal — solo en el detalle
+   *  (`getPedido`) de un turno vinculado. */
+  pedido_principal?: {
+    id: number;
+    numero_pedido: number | null;
+    cliente_nombre: string | null;
+  } | null;
+  /** Solo presente en el detalle de un pedido de alquiler normal: los turnos
+   *  del Estudio vinculados (#1308) — mismo shape que `PedidoGeneradoEdicion`
+   *  (Talleres → Pedidos). Vacío/ausente = sin turnos vinculados. */
+  turnos_estudio_vinculados?: PedidoGeneradoEdicion[];
+  /** Solo presente en `GET /alquileres` (la lista): cuántos turnos del
+   *  Estudio (no cancelados) tiene vinculados este pedido — el turno en sí
+   *  ya no aparece como fila propia ahí, esto es la señal de que existen. */
+  turnos_vinculados_count?: number;
+  /** ¿Tiene contenido real — al menos un ítem de alquiler O un turno del
+   *  Estudio vinculado activo? Lo calcula el backend
+   *  (`_pedido_tiene_contenido`, services/alquileres/queries/detalle.py) en
+   *  tanto el detalle como la lista — el front lo usa tal cual (`blockReason`,
+   *  `lib/pedido-estados.ts`) en vez de mirar `items.length` por su cuenta,
+   *  que bloqueaba para siempre un pedido "2 horas de estudio y nada más"
+   *  (hallazgo real, #1313/#1314-adjacent). */
+  tiene_contenido: boolean;
+  /** ¿Todavía tiene plata por cobrar? Lo calcula el backend
+   *  (`_tiene_saldo_pendiente`, services/alquileres/queries/detalle.py) sobre
+   *  monto_total/monto_pagado de la FILA individual — el front lo usa tal
+   *  cual (`blockReason`) para bloquear "Cobrar saldo y finalizar" en vez de
+   *  restar los montos por su cuenta; el gate real vive en el backend
+   *  (`cambiar_estado`). Antes nada lo chequeaba: el botón dejaba marcar
+   *  Finalizado un pedido real sin cobrar (hallazgo del dueño, 2026-07-30). */
+  saldo_pendiente: boolean;
+  /** Solo presente en la respuesta de `PATCH /alquileres/{id}` cuando `id` es
+   *  un pedido PRINCIPAL con turnos vinculados (#1308, cascada de estado
+   *  "avanzan juntos"): qué turno no pudo seguir el mismo paso (bloqueado por
+   *  una validación de negocio propia, ej. sin ítems) — el pedido principal
+   *  SIGUE avanzando igual, esto es solo una advertencia a mostrar. Vacío =
+   *  todos los turnos avanzaron sin problema (o no hay turnos vinculados). */
+  turnos_vinculados_sin_avanzar?: {
+    turno_id: number;
+    numero_pedido: number | null;
+    error: string;
+  }[];
+  /** Solo presente en el detalle (`getPedido`) de un pedido de taller: las
+   *  clases REALES (fecha + franja horaria) de la edición — la verdad
+   *  temporal que `fecha_desde`/`fecha_hasta` no representan (esas son el mes
+   *  contable completo). Vacío para cualquier otro tipo. Bug real #445. */
+  clases_taller?: ClaseTallerPedido[];
   /** Presente solo en la respuesta de crear/editar un turno del Estudio: si
    *  la promo (combo) se reservó con algún componente sin stock — best-effort,
    *  nunca bloquea la reserva, pero el admin/cliente debe saberlo. `null`/
@@ -1220,7 +1300,11 @@ export type PedidoHistorialItem = {
 };
 
 export type PedidosListResp = {
+  /** Filas totales del filtro — la verdad de la PAGINACIÓN, incluye borradores. */
   total: number;
+  /** Cuántas de esas filas son borradores. Un borrador es un presupuesto rápido,
+   *  no una venta: se lista igual, pero no suma al "N pedidos" del header. */
+  borradores?: number;
   page: number;
   per_page: number;
   items: Pedido[];
@@ -1445,7 +1529,16 @@ export type EstudioCotizacion = {
   promo: number;
   sueltos: Array<{ equipo_id: number; cantidad: number; precio_jornada: number; subtotal: number }>;
   pintura_reciente: number;
+  /** NETO: lo que se persiste en `alquileres.monto_total` (ya con el descuento
+   *  del turno aplicado, sin IVA — el IVA lo resuelve el pedido principal). */
   monto_total: number;
+  /** Antes del descuento del turno (#1308). */
+  bruto: number;
+  /** Bruto SIN las líneas de combo (la promo ya trae su propio descuento) — el
+   *  tope real de un descuento en $. */
+  bruto_descontable: number;
+  descuento_pct: number;
+  descuento_monto: number;
   espacio_disponible: boolean;
   espacio_motivo: string | null;
 };
@@ -1461,6 +1554,10 @@ export type EstudioReservaCreateInput = {
   sueltos?: EstudioSueltoInput[];
   espacio_monto?: number | null;
   estado?: "solicitado" | "confirmado" | "retirado";
+  /** Vincula el turno a un pedido de alquiler normal (#1308) — cuando viene,
+   *  el backend ignora `cliente_id`/`cliente_nombre` de este mismo body y
+   *  hereda el contacto del pedido principal. */
+  pedido_principal_id?: number;
 };
 
 export type EstudioReservaUpdateInput = {
@@ -1471,6 +1568,12 @@ export type EstudioReservaUpdateInput = {
   pintura_reciente?: boolean;
   sueltos?: EstudioSueltoInput[];
   espacio_monto?: number | null;
+  /** Descuento propio del turno (#1308) — reusa las columnas de descuento
+   *  manual que la fila de `alquileres` ya tiene. `undefined` = no tocar lo
+   *  persistido (≠ `espacio_monto`, donde `null` vuelve a precio de lista). */
+  descuento_pct?: number;
+  descuento_manual_tipo?: "pct" | "monto";
+  descuento_manual_monto?: number;
 };
 
 // ── Descuentos por jornadas ──────────────────────────────────────────────────
@@ -1557,6 +1660,28 @@ export type EdicionKpis = {
   plata_recibida_str: string;
   plata_esperada_str: string;
 };
+
+/** Un pedido mensual que `_regenerar_pedidos_taller` generó para una edición
+ *  (Fase 1, #1308) — puente Talleres → Pedidos, `GET /admin/ediciones/{id}/pedidos`. */
+export type PedidoGeneradoEdicion = {
+  id: number;
+  numero_pedido: number | null;
+  estado: string;
+  fecha_desde: string | null;
+  fecha_hasta: string | null;
+  monto_total: number;
+  monto_pagado: number;
+  /** Solo presente en `turnos_estudio_vinculados` (#1308) — el pago combinado
+   *  reparte filas reales de `alquiler_pagos` con el `pedido_id` del turno;
+   *  Talleres → Pedidos no lo necesita y no lo manda. */
+  pagos?: PedidoPago[];
+};
+
+/** Una línea del reparto de un pago combinado (#1308) — a qué pedido real
+ *  (principal o un turno vinculado) se le aplicó qué parte del monto
+ *  cobrado. `excedente` marca la línea del sobrante (siempre sobre el
+ *  pedido principal, nunca sobre un turno). */
+export type RepartoPagoLinea = { pedido_id: number; monto: number; excedente?: boolean };
 
 // F4c: FAQ del concepto — ninguna pregunta es obligatoria.
 export type FaqItem = { pregunta: string; respuesta: string };

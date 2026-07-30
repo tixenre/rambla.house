@@ -101,7 +101,7 @@ def clean_db():
     _reset_schema()
 
 
-def _equipo(conn, eid, nombre, tipo="simple", dueno="Rambla", precio_jornada=10_000):
+def _equipo(conn, eid, nombre, tipo="simple", dueno="Rental", precio_jornada=10_000):
     conn.execute(
         "INSERT INTO equipos (id, nombre, tipo, cantidad, dueno, precio_jornada, visible_catalogo) "
         "VALUES (%s,%s,%s,1,%s,%s,1)",
@@ -196,7 +196,10 @@ def test_unificar_legacy_happy_path(clean_db):
         ).fetchone()
         assert combo["nombre"] == "Promo legacy test"
         assert combo["tipo"] == "combo"
-        assert combo["dueno"] == "Rambla"
+        # La migración histórica crea el combo con dueno='Rambla' (su valor de
+        # ese momento) pero "head" también incluye el rename 23aa6949d4df, que
+        # lo reescribe a 'Rental' antes de que este assert corra.
+        assert combo["dueno"] == "Rental"
         assert combo["visible_catalogo"] == 0
         assert combo["es_recurso_interno"] is False
 
@@ -275,7 +278,7 @@ def test_unificar_legacy_respeta_componente_vivo_de_otro_combo(clean_db):
         _setup_comun(conn)
         # Otro combo real que usa 266 como uno de sus componentes.
         conn.execute(
-            "INSERT INTO equipos (id, nombre, tipo, cantidad, dueno) VALUES (%s,'Combo ajeno','combo',1,'Rambla')",
+            "INSERT INTO equipos (id, nombre, tipo, cantidad, dueno) VALUES (%s,'Combo ajeno','combo',1,'Rental')",
             (EQ_COMPONENTE_AJENO,),
         )
         conn.execute(

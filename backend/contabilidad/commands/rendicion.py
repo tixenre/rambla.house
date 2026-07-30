@@ -17,7 +17,7 @@ def saldar(conn, mes: str, *, de: str, a: str, monto: int,
     partes, marcada `es_rendicion`. Reusa el libro de movimientos (no duplica)."""
     validar_mes(mes)
     if de not in PARTES or a not in PARTES:
-        raise ValueError("Las partes de la rendición son Pablo, Tincho o Rambla.")
+        raise ValueError(f"Las partes de la rendición son {', '.join(PARTES)}.")
     if de == a:
         raise ValueError("El que paga y el que recibe no pueden ser la misma parte.")
     monto = int(monto or 0)
@@ -27,7 +27,7 @@ def saldar(conn, mes: str, *, de: str, a: str, monto: int,
     origen = cuenta_de_parte(conn, de)
     destino = cuenta_de_parte(conn, a)
     if not origen or not destino:
-        raise ValueError("Falta la caja de alguna de las partes (Caja del socio o Fondo Rambla).")
+        raise ValueError("Falta la caja de alguna de las partes (Caja del socio o Fondo Rental).")
 
     from contabilidad.commands.movimientos import crear_movimiento
 
