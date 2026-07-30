@@ -1,17 +1,18 @@
 /**
- * ReservaDialog — alta/edición de un turno del Estudio desde el back-office
+ * ReservaDialog — edición de un turno del Estudio desde el back-office
  * (#1283 Fase 6). Sin sesión de cliente ni Didit ni anticipación mínima (eso
  * es del flujo público) — acá el admin carga a mano: cliente real o texto
  * libre, promo, equipos sueltos, override del precio del espacio.
  *
- * El modo EDICIÓN delega en `ReservaEstudioSection` (Fase 2, #1308) y el
- * modo ALTA en `NuevoTurnoEstudioForm` (#1308, ask del dueño de sacar el
- * modal de la página del pedido) — ambos, la misma pieza que usan otras
- * superficies; este diálogo es solo el Dialog-chrome + el detalle a editar.
- * Sigue siendo el punto de entrada de la agenda del Estudio
- * (`ReservasSection`), donde SÍ tiene sentido un popup (alta/edición desde
- * un calendario) — la página del pedido (`TurnosEstudioSection`) monta
- * `NuevoTurnoEstudioForm` directo, sin este Dialog.
+ * El modo EDICIÓN delega en `ReservaEstudioSection` (Fase 2, #1308). El modo
+ * ALTA (`reserva == null`) sigue soportado acá abajo por si vuelve a hacer
+ * falta, pero HOY no tiene ningún caller real: `ReservasSection` (único
+ * consumidor de este Dialog) solo lo abre para editar, y la agenda del
+ * Estudio ya NO tiene un botón "Nuevo turno" — el turno se carga desde un
+ * pedido de alquiler (`TurnosEstudioSection`, que monta `NuevoTurnoEstudioForm`
+ * directo, sin este Dialog) — decisión del dueño, 2026-07-30, una sola forma
+ * de crear un turno. Un turno "solo estudio" arranca de un pedido vacío
+ * (sin equipos, soportado desde #1313/#1314).
  */
 import { useQuery } from "@tanstack/react-query";
 
