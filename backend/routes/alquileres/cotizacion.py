@@ -8,24 +8,25 @@ sobre el router compartido del paquete `routes.alquileres`.
 from typing import Optional
 
 from fastapi import Request
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 from rate_limit import limiter
 from routes.alquileres.core import router
 from services.alquileres.queries.cotizacion import cotizar_carrito
-# Validadores de descuento: fuente única compartida con `PedidoDatos`
+# Validadores: fuente única compartida con `PedidoCreate`/`PedidoDatos`
 # (routes/alquileres/modelos.py) — antes estaban duplicados byte a byte acá.
 from routes.alquileres.modelos import (
     _validar_descuento_manual_monto,
     _validar_descuento_manual_tipo,
     _validar_descuento_pct,
+    _validar_fecha_iso,
 )
 
 
 class CotizarItem(BaseModel):
     # equipo_id None = línea personalizada (#805): su precio y modo de cobro
     # vienen del front (el admin la edita libre); no se busca en `equipos`.
-    equipo_id: Optional[int] = None
+    equipo_id: Optional[int] = Field(default=None, gt=0, lt=2_147_483_647)
     cantidad: int
     precio_jornada: Optional[int] = None
     cobro_modo: Optional[str] = None
@@ -40,7 +41,7 @@ class CotizarRequest(BaseModel):
     #  - cliente_id: de qué cliente tomar el perfil tributario.
     #  - descuento_pct: override del descuento del cliente (el admin lo edita
     #    en vivo en el builder; gana sobre el `clientes.descuento` guardado).
-    cliente_id: Optional[int] = None
+    cliente_id: Optional[int] = Field(default=None, gt=0, lt=2_147_483_647)
     descuento_pct: Optional[float] = None
     # Override manual en % o en $ fijo (Fase C-2, #1219): mismo par que
     # `PedidoDatos` (routes/alquileres/core.py) — el builder los edita en vivo
@@ -62,13 +63,22 @@ class CotizarRequest(BaseModel):
     # editor coincide con `monto_total` (y con la lista de pedidos). El editor
     # solo lo manda para pedidos no-presupuesto; en presupuesto el descuento
     # sigue al cliente en vivo. Ver MEMORIA 2026-06-06 "plata congelada".
-    pedido_id: Optional[int] = None
+    pedido_id: Optional[int] = Field(default=None, gt=0, lt=2_147_483_647)
     # #1240: a nombre de quién se está cotizando (perfil personal alternativo o
     # productora) — solo lo honra una sesión cliente (mismo criterio que el resto
     # de este bloque: el admin cotiza para el cliente del pedido, no para sí
     # mismo). Mutuamente excluyentes; NULL/NULL = perfil default de la cuenta.
-    perfil_fiscal_id: Optional[int] = None
-    productora_id: Optional[int] = None
+    perfil_fiscal_id: Optional[int] = Field(default=None, gt=0, lt=2_147_483_647)
+    productora_id: Optional[int] = Field(default=None, gt=0, lt=2_147_483_647)
+
+    # `/api/cotizar` es público (sin sesión) — sin este validador, una fecha
+    # malformada llegaba cruda a `to_datetime()` y explotaba como 500 en vez
+    # de un 400 limpio (a diferencia de `PedidoCreate`/`PedidoDatos`, que sí
+    # lo tienen). Hallazgo de auditoría, #1313/#1314.
+    @field_validator("fecha_desde", "fecha_hasta")
+    @classmethod
+    def validate_fechas(cls, v):
+        return _validar_fecha_iso(v)
 
     # Mismo validador que `PedidoDatos.descuento_pct` (routes/alquileres/modelos.py)
     # — este override vivía sin cota de rango (hallazgo de la Fase A del split

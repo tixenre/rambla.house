@@ -65,6 +65,12 @@ class FakeConn:
                 {"jornadas": j, "pct": p}
                 for j, p in self._descuento_jornadas_puntos
             ]
+        if "FROM equipos" in sql:
+            # tipos_equipo_batch (#1313/#1314, reemplazó la query por-ítem):
+            # SELECT id, tipo FROM equipos WHERE id = ANY(%s) — mismo criterio
+            # que `fetchone()` arriba, todo equipo "existe" y es simple.
+            ids = self._last_params[0] if self._last_params else []
+            return [{"id": eid, "tipo": "simple"} for eid in ids]
         return []
 
     def commit(self):

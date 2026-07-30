@@ -11,6 +11,7 @@ Estilo unitario (sin TestClient): se llama a la función con un FakeConn y
 """
 
 import pytest
+from pydantic import ValidationError
 from starlette.requests import Request as StarletteRequest
 
 import services.alquileres.queries.cotizacion as alq
@@ -40,13 +41,16 @@ class FakeConn:
     por jornadas, resueltos según el SQL que llega."""
 
     def __init__(self, precios, perfil=None, descuento=0, descuentos_jornada=None,
-                 perfiles_por_id=None):
+                 perfiles_por_id=None, ocultos=None):
         self.precios = precios                       # {equipo_id: precio_jornada}
         self.perfil = perfil
         self.descuento = descuento
         self.descuentos_jornada = descuentos_jornada or []
         # {cliente_id: (perfil, descuento)} — para verificar QUÉ cliente se usó.
         self.perfiles_por_id = perfiles_por_id
+        # equipo_ids en `precios` que existen pero NO son visible_catalogo (el
+        # centinela del Estudio, un componente de promo) — #1313/#1314.
+        self.ocultos = ocultos or set()
         self._sql = ""
         self._params = ()
         self.closed = 0  # cuántas veces se devolvió la conexión al pool
@@ -82,12 +86,24 @@ class FakeConn:
     def fetchall(self):
         if "FROM descuentos_jornada" in self._sql:
             return [{"jornadas": j, "pct": p} for j, p in self.descuentos_jornada]
-        # Batch query para equipos: SELECT id, precio_jornada, tipo FROM equipos WHERE id IN (...)
-        if "FROM equipos" in self._sql and "IN" in self._sql:
+        # Gate de catálogo (`_equipos_visibles_catalogo`, services/carrito/
+        # readiness.py, #1313/#1314): todo lo que está en `self.precios` es
+        # visible, SALVO lo listado en `self.ocultos` — a diferencia del batch
+        # de tipos de abajo, que no filtra por visibilidad (un equipo oculto
+        # sigue teniendo tipo).
+        if "FROM equipos" in self._sql and "visible_catalogo" in self._sql:
+            ids = self._params[0]
+            return [
+                {"id": eid} for eid in self.precios
+                if eid in ids and eid not in self.ocultos
+            ]
+        # Batch query para equipos (tipos_equipo_batch / consolidación vieja):
+        # SELECT ... FROM equipos WHERE id = ANY(%s) / IN (...)
+        if "FROM equipos" in self._sql and ("IN" in self._sql or "ANY" in self._sql):
             return [
                 {"id": eid, "precio_jornada": precio, "tipo": "simple"}
                 for eid, precio in self.precios.items()
-                if eid in self._params
+                if eid in self._params[0]
             ]
         return []
 
@@ -397,6 +413,53 @@ class TestPreciosDesdeBackend:
 
         assert out["bruto"] == 0
         assert out["total_final"] == 0
+
+
+class TestGateCatalogoVisible:
+    """`/api/cotizar` es público: un equipo que existe pero no es
+    `visible_catalogo` (el centinela del Estudio, un componente de promo) no
+    puede cotizarse desde acá para un caller no-admin — mismo gate que
+    `precios_catalogo_para_reserva` (creación real). #1313/#1314."""
+
+    def test_no_admin_ignora_equipo_oculto(self, patch_db):
+        # equipo 7 visible, equipo 9 existe pero está oculto → se excluye,
+        # igual que un equipo inexistente (best-effort, no 404).
+        patch_db(FakeConn(precios={7: 10000, 9: 5000}, ocultos={9}), session=None)
+        out = cotizar(_req([(7, 1), (9, 1)]), FakeReq())
+
+        assert out["bruto"] == 10000  # solo el 7, el 9 oculto se ignora
+
+    def test_admin_si_puede_cotizar_un_equipo_oculto(self, patch_db, monkeypatch):
+        # El admin cotiza pedidos derivados (Estudio/taller) que SÍ llevan
+        # equipos no-catálogo — el gate no debe bloquearlo.
+        monkeypatch.setattr(alq, "is_admin_email", lambda email: True)
+        patch_db(
+            FakeConn(precios={9: 5000}, ocultos={9}),
+            session={"email": "admin@test.com"},
+        )
+        out = cotizar(_req([(9, 1)]), FakeReq())
+
+        assert out["bruto"] == 5000
+
+
+class TestFechaMalformada:
+    """`/api/cotizar` es público — una fecha rota tiene que rechazarse en el
+    borde (422 vía Pydantic), no llegar cruda a `to_datetime()` y explotar
+    como 500 más adentro. Mismo validador que `PedidoCreate`/`PedidoDatos`
+    (routes/alquileres/modelos.py). #1313/#1314."""
+
+    def test_fecha_desde_malformada_rechaza_antes_de_llegar_al_endpoint(self):
+        with pytest.raises(ValidationError):
+            CotizarRequest(items=[], fecha_desde="ayer")
+
+    def test_fecha_hasta_malformada_rechaza_antes_de_llegar_al_endpoint(self):
+        with pytest.raises(ValidationError):
+            CotizarRequest(items=[], fecha_hasta="32/05/2026")
+
+    def test_fecha_iso_valida_sigue_pasando(self):
+        # No regresivo: una fecha bien formada no debe empezar a rechazarse.
+        data = CotizarRequest(items=[], fecha_desde="2026-06-01", fecha_hasta="2026-06-08")
+        assert data.fecha_desde == "2026-06-01"
 
 
 class TestDescuentoJornadas:

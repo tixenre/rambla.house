@@ -20,6 +20,10 @@ from clientes.queries.identidad import nombre_completo_cliente
 from services.fechas import validar_rango_fechas
 from services.alquileres.commands.items import _apply_pedido_items
 from services.alquileres.commands.pedido import _next_numero_pedido
+from services.alquileres.queries.cotizacion import (
+    _cliente_es_dueno_de_perfil_fiscal,
+    _cliente_es_miembro_de_productora,
+)
 from services.alquileres.queries.detalle import _get_alquiler_detail
 from services.pedidos_notificaciones import _dispatch_pedido_creado_emails
 from reservas import validar_stock as _check_stock
@@ -59,18 +63,10 @@ def create_pedido(data: "PedidoCreate", background: Optional[BackgroundTasks] = 
     if data.perfil_fiscal_id or data.productora_id:
         with get_db() as _conn:
             if data.perfil_fiscal_id:
-                propio = _conn.execute(
-                    "SELECT 1 FROM cliente_perfiles_fiscales WHERE id = %s AND cliente_id = %s",
-                    (data.perfil_fiscal_id, data.cliente_id),
-                ).fetchone()
-                if not propio:
+                if not _cliente_es_dueno_de_perfil_fiscal(_conn, data.cliente_id, data.perfil_fiscal_id):
                     raise HTTPException(404, "Perfil fiscal no encontrado para este cliente.")
             if data.productora_id:
-                vinculado = _conn.execute(
-                    "SELECT 1 FROM productora_miembros WHERE productora_id = %s AND cliente_id = %s",
-                    (data.productora_id, data.cliente_id),
-                ).fetchone()
-                if not vinculado:
+                if not _cliente_es_miembro_de_productora(_conn, data.cliente_id, data.productora_id):
                     raise HTTPException(404, "Productora no encontrada para este cliente.")
 
     cliente_nombre   = data.cliente_nombre
@@ -155,8 +151,15 @@ def create_pedido(data: "PedidoCreate", background: Optional[BackgroundTasks] = 
             # consolida las de catálogo y respeta cobro_modo='fijo' (no × jornadas).
             # El armado inline anterior asumía equipo_id válido → 404 al crear con una
             # línea libre, y descartaba nombre_libre/cobro_modo. Borradores: sin ítems.
-            if data.items:
-                _apply_pedido_items(conn, pedido_id, data.items)
+            #
+            # `_apply_pedido_items` YA arma (y devuelve) el detalle completo del
+            # pedido — se reusa acá en vez de descartarlo y recalcularlo después
+            # del commit (hallazgo de auditoría #1313/#1314: nada muta el pedido
+            # entre este punto y el commit salvo el chequeo de stock, que no
+            # escribe nada, así que el detalle no puede quedar stale). Ahorra una
+            # segunda armada completa (~6-8 queries) en la creación más común, y
+            # de paso achica el tiempo sosteniendo el advisory lock de arriba.
+            pedido = _apply_pedido_items(conn, pedido_id, data.items) if data.items else None
 
             if estado_inicial == "solicitado" and data.fecha_desde and data.fecha_hasta:
                 problemas = _check_stock(conn, pedido_id, data.fecha_desde, data.fecha_hasta)
@@ -164,7 +167,8 @@ def create_pedido(data: "PedidoCreate", background: Optional[BackgroundTasks] = 
                     raise HTTPException(409, "Sin stock: " + "; ".join(problemas))
 
             conn.commit()
-            pedido = _get_alquiler_detail(conn, pedido_id)
+            if pedido is None:
+                pedido = _get_alquiler_detail(conn, pedido_id)
         except psycopg.errors.DeadlockDetected:
             # Deadlock transitorio por upgrade de lock bajo concurrencia (FK
             # KEY-SHARE del insert de ítems + FOR UPDATE del gate sobre la misma

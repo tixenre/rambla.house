@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from database import get_db
 from auth.guards import require_admin
+from rate_limit import limiter, ADMIN_WRITE_LIMIT
 from descuentos.commands.jornadas import crear_descuento_jornada, eliminar_descuento_jornada
 from descuentos.queries.jornadas import interpolar_descuento_jornadas, listar_descuentos_jornada
 from routes.alquileres.core import router
@@ -62,6 +63,7 @@ def get_descuentos_jornada_interpolados(request: Request, jornadas: list[int] = 
 
 
 @router.post("/admin/descuentos-jornada", status_code=201)
+@limiter.limit(ADMIN_WRITE_LIMIT)
 def create_descuento_jornada(data: DescuentoJornadaIn, request: Request):
     require_admin(request)
     with get_db() as conn:
@@ -72,6 +74,7 @@ def create_descuento_jornada(data: DescuentoJornadaIn, request: Request):
 
 
 @router.delete("/admin/descuentos-jornada/{id}", status_code=204)
+@limiter.limit(ADMIN_WRITE_LIMIT)
 def delete_descuento_jornada(id: int, request: Request):
     require_admin(request)
     with get_db() as conn:

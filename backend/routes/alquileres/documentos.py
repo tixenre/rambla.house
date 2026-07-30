@@ -16,6 +16,7 @@ from database import get_db, row_to_dict
 from services.email import send_email, send_raw_email, render_template, wrap_preview, Attachment
 from pdf import _render_pdf
 from auth.guards import require_admin
+from rate_limit import limiter, ADMIN_WRITE_LIMIT
 from routes.alquileres.core import router
 from services.alquileres.queries.documentos import (
     DOCUMENTOS,
@@ -37,12 +38,13 @@ from services.alquileres.queries.documentos import (
 _DOC_NO_CACHE = {"Cache-Control": "no-store, max-age=0"}
 
 
-@router.get("/alquileres/{id}/remito")
-async def pedido_remito(id: int, request: Request, format: str = "pdf"):
-    """`format=html` devuelve el preview HTML sin pasar por el renderer."""
+async def _pedido_doc_response(id: int, request: Request, format: str, kind: str):
+    """PDF (o preview HTML con `format=html`) de un documento del pedido —
+    fuente ÚNICA de los 4 endpoints de abajo, que antes repetían el mismo
+    esqueleto de ~15 líneas 4 veces (hallazgo de auditoría, #1313/#1314)."""
     require_admin(request)
     with get_db() as conn:
-        html, filename = _doc_html(conn, id, "remito")
+        html, filename = _doc_html(conn, id, kind)
     if format == "html":
         from fastapi.responses import HTMLResponse
         return HTMLResponse(content=html, headers=_DOC_NO_CACHE)
@@ -52,57 +54,30 @@ async def pedido_remito(id: int, request: Request, format: str = "pdf"):
         media_type = "application/pdf",
         headers    = {"Content-Disposition": f'attachment; filename="{filename}"', **_DOC_NO_CACHE},
     )
+
+
+@router.get("/alquileres/{id}/remito")
+async def pedido_remito(id: int, request: Request, format: str = "pdf"):
+    """`format=html` devuelve el preview HTML sin pasar por el renderer."""
+    return await _pedido_doc_response(id, request, format, "remito")
 
 
 @router.get("/alquileres/{id}/detalle-seguro")
 async def pedido_detalle_seguro(id: int, request: Request, format: str = "pdf"):
     """`format=html` devuelve el preview HTML sin pasar por el renderer."""
-    require_admin(request)
-    with get_db() as conn:
-        html, filename = _doc_html(conn, id, "detalle-seguro")
-    if format == "html":
-        from fastapi.responses import HTMLResponse
-        return HTMLResponse(content=html, headers=_DOC_NO_CACHE)
-    pdf_bytes = await _render_pdf(html)
-    return Response(
-        content    = pdf_bytes,
-        media_type = "application/pdf",
-        headers    = {"Content-Disposition": f'attachment; filename="{filename}"', **_DOC_NO_CACHE},
-    )
+    return await _pedido_doc_response(id, request, format, "detalle-seguro")
 
 
 @router.get("/alquileres/{id}/checklist-retiro")
 async def pedido_checklist_retiro(id: int, request: Request, format: str = "pdf"):
     """`format=html` devuelve el preview HTML sin pasar por el renderer."""
-    require_admin(request)
-    with get_db() as conn:
-        html_content, filename = _doc_html(conn, id, "checklist-retiro")
-    if format == "html":
-        from fastapi.responses import HTMLResponse
-        return HTMLResponse(content=html_content, headers=_DOC_NO_CACHE)
-    pdf_bytes = await _render_pdf(html_content)
-    return Response(
-        content=pdf_bytes,
-        media_type="application/pdf",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"', **_DOC_NO_CACHE},
-    )
+    return await _pedido_doc_response(id, request, format, "checklist-retiro")
 
 
 @router.get("/alquileres/{id}/contrato")
 async def pedido_contrato(id: int, request: Request, format: str = "pdf"):
     """Genera el PDF del contrato de alquiler."""
-    require_admin(request)
-    with get_db() as conn:
-        html, filename = _doc_html(conn, id, "contrato")
-    if format == "html":
-        from fastapi.responses import HTMLResponse
-        return HTMLResponse(content=html, headers=_DOC_NO_CACHE)
-    pdf_bytes = await _render_pdf(html)
-    return Response(
-        content    = pdf_bytes,
-        media_type = "application/pdf",
-        headers    = {"Content-Disposition": f'attachment; filename="{filename}"', **_DOC_NO_CACHE},
-    )
+    return await _pedido_doc_response(id, request, format, "contrato")
 
 
 # ── Enviar documentos por mail (#725) ─────────────────────────────────────────
@@ -131,6 +106,7 @@ class MailPreviewRequest(BaseModel):
 
 
 @router.post("/alquileres/{id}/enviar-documentos")
+@limiter.limit(ADMIN_WRITE_LIMIT)
 async def enviar_documentos(id: int, data: EnviarDocsRequest, request: Request):
     """Manda al cliente los documentos elegidos (cotización/remito/contrato/
     packing-list) adjuntos en PDF.
@@ -222,6 +198,7 @@ async def enviar_documentos(id: int, data: EnviarDocsRequest, request: Request):
 
 
 @router.post("/alquileres/{id}/mail-preview")
+@limiter.limit(ADMIN_WRITE_LIMIT)
 def mail_preview(id: int, data: MailPreviewRequest, request: Request):
     """Renderiza el mail que mandaría el modal (plantilla + nota + adjuntos
     elegidos) con los datos REALES de este pedido, **sin enviar**. Devuelve

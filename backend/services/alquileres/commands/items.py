@@ -29,7 +29,11 @@ from services.precios import bruto_linea, calcular_total, jornadas_periodo, tipo
 from services.fechas import validar_rango_fechas
 from tipos_pedido import es_pedido_estudio, es_pedido_derivado, es_pedido_taller
 from services.alquileres.queries.detalle import _es_historico, _get_alquiler_detail
-from services.alquileres.queries.cotizacion import _resolver_descuentos_snapshot_o_vivo
+from services.alquileres.queries.cotizacion import (
+    _cliente_es_dueno_de_perfil_fiscal,
+    _cliente_es_miembro_de_productora,
+    _resolver_descuentos_snapshot_o_vivo,
+)
 
 # Los modelos Pydantic (contrato HTTP) se quedan en routes/alquileres/modelos.py
 # (no se mueven en ninguna fase) — acá solo hacen falta como forward-ref para
@@ -37,6 +41,30 @@ from services.alquileres.queries.cotizacion import _resolver_descuentos_snapshot
 # TYPE_CHECKING (no crea un import real de este paquete hacia `routes.*`).
 if TYPE_CHECKING:
     from routes.alquileres.modelos import PedidoDatos, PedidoItem
+
+# Mismo namespace que `creacion.py::_ADVISORY_NS_PEDIDO` (5390412) — DEBEN
+# coincidir, es la misma serialización por equipo. Duplicado acá (no
+# importado desde `creacion.py`) para no crear un ciclo de import
+# (`creacion.py` ya importa `_apply_pedido_items` de este módulo).
+_ADVISORY_NS_PEDIDO = 5390412
+
+
+def _lock_equipos_por_id(conn, equipo_ids) -> None:
+    """Serializa (`pg_advisory_xact_lock`, orden de id) cualquier escritura que
+    vaya a tocar estos equipos vía `alquiler_items`/el gate de stock — mismo
+    mecanismo que `create_pedido` (2026-06-22, #969): el INSERT de
+    `alquiler_items` toma un FK KEY-SHARE sobre la fila de `equipos`; el gate
+    de stock pide después `FOR UPDATE` (exclusivo) sobre la misma fila — sin
+    serializar, dos escritores concurrentes del mismo equipo pueden
+    deadlockear en el upgrade de lock. `create_pedido` ya lo hace por su
+    cuenta (byte-idéntico, no se toca); este helper es la puerta para los
+    otros dos escritores que tocan el MISMO equipo sin pasar por
+    `create_pedido` — `_apply_pedido_items` (abajo) y
+    `transiciones._revalidar_stock` — que hasta ahora no participaban de la
+    misma serialización (hallazgo de auditoría, #1313/#1314).
+    """
+    for eid in sorted(set(equipo_ids)):
+        conn.execute("SELECT pg_advisory_xact_lock(%s, %s)", (_ADVISORY_NS_PEDIDO, eid))
 
 
 def _recalcular_total_pedido(conn, id: int) -> None:
@@ -283,18 +311,10 @@ def _apply_pedido_datos(conn, id: int, data: "PedidoDatos", es_admin: bool = Fal
         if payload.get("productora_id") and not cliente_efectivo:
             raise HTTPException(400, "El pedido necesita un cliente antes de elegir una productora.")
         if payload.get("perfil_fiscal_id"):
-            propio = conn.execute(
-                "SELECT 1 FROM cliente_perfiles_fiscales WHERE id = %s AND cliente_id = %s",
-                (payload["perfil_fiscal_id"], cliente_efectivo),
-            ).fetchone()
-            if not propio:
+            if not _cliente_es_dueno_de_perfil_fiscal(conn, cliente_efectivo, payload["perfil_fiscal_id"]):
                 raise HTTPException(404, "Perfil fiscal no encontrado para este cliente.")
         if payload.get("productora_id"):
-            vinculado = conn.execute(
-                "SELECT 1 FROM productora_miembros WHERE productora_id = %s AND cliente_id = %s",
-                (payload["productora_id"], cliente_efectivo),
-            ).fetchone()
-            if not vinculado:
+            if not _cliente_es_miembro_de_productora(conn, cliente_efectivo, payload["productora_id"]):
                 raise HTTPException(404, "Productora no encontrada para este cliente.")
 
     if "fecha_desde" in payload or "fecha_hasta" in payload:
@@ -445,6 +465,13 @@ def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
     if not items and not _puede_quedar_sin_items(conn, p):
         raise HTTPException(400, "Debe tener al menos un ítem")
 
+    # Serializar por equipo ANTES de reemplazar los ítems (mismo criterio que
+    # `create_pedido`, #969) — sin esto, este reemplazo (llamado por
+    # `PUT /alquileres/{id}/items`) no participaba de la misma serialización
+    # y podía deadlockear contra un `create_pedido` concurrente del mismo
+    # equipo (hallazgo de auditoría, #1313/#1314).
+    _lock_equipos_por_id(conn, (it.equipo_id for it in items if it.equipo_id is not None))
+
     d0 = to_datetime(p["fecha_desde"]) if p["fecha_desde"] else None
     d1 = to_datetime(p["fecha_hasta"]) if p["fecha_hasta"] else None
     jornadas = jornadas_periodo(d0, d1)
@@ -488,17 +515,21 @@ def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
             })
 
     # `orden` por posición; subtotal por línea vía `bruto_linea` (respeta cobro_modo).
+    # Tipo por equipo EN BATCH (mismo helper que ya usa `_recalcular_total_pedido`
+    # más arriba en este archivo) — antes era una query por línea (N+1 real,
+    # hallazgo de auditoría #1313/#1314), sostenida además dentro del advisory
+    # lock de `create_pedido` cuando esta función corre desde ahí.
+    tipos_lineas = tipos_equipo_batch(
+        conn, [ln["equipo_id"] for ln in lineas if ln["equipo_id"] is not None]
+    )
     rows = []
     for orden, ln in enumerate(lineas):
         if ln["equipo_id"] is not None:
-            eq = conn.execute(
-                "SELECT id, tipo FROM equipos WHERE id=%s", (ln["equipo_id"],)
-            ).fetchone()
-            if not eq:
+            if ln["equipo_id"] not in tipos_lineas:
                 raise HTTPException(404, f"Equipo {ln['equipo_id']} no encontrado")
             # `es_combo` (Fase C-3, #1219): no acumula el descuento global — ya
             # trae el suyo propio horneado en `precio_jornada`.
-            ln["es_combo"] = eq["tipo"] == "combo"
+            ln["es_combo"] = tipos_lineas[ln["equipo_id"]] == "combo"
         subtotal = bruto_linea(ln, jornadas)
         rows.append((
             id, ln["equipo_id"], ln["cantidad"], ln["precio_jornada"],

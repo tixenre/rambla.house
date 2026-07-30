@@ -43,6 +43,7 @@ from fastapi import HTTPException
 from database import to_datetime
 from reservas import validar_stock as _check_stock
 from tipos_pedido import es_pedido_estudio, es_pedido_taller
+from services.alquileres.commands.items import _lock_equipos_por_id
 
 # Estados que reservan stock activamente — entrar a uno de estos desde uno que
 # NO reserva exige re-validar stock (ver `_requiere_revalidar_stock`).
@@ -190,6 +191,19 @@ def _revalidar_stock(conn, p) -> list[str]:
         return revalidar_disponibilidad_estudio(conn, p)
     if es_pedido_taller(p):
         return []
+    # Mismo advisory lock por equipo que `create_pedido`/`_apply_pedido_items`
+    # (namespace 5390412, `_lock_equipos_por_id`) — sin esto, este `FOR UPDATE`
+    # genérico contra `equipos` no participaba de la misma serialización y
+    # podía deadlockear contra un `create_pedido` concurrente del mismo equipo
+    # (hallazgo de auditoría, #1313/#1314).
+    equipo_ids = [
+        r["equipo_id"] for r in conn.execute(
+            "SELECT DISTINCT equipo_id FROM alquiler_items "
+            "WHERE pedido_id = %s AND equipo_id IS NOT NULL",
+            (p["id"],),
+        ).fetchall()
+    ]
+    _lock_equipos_por_id(conn, equipo_ids)
     return [
         f"Sin stock suficiente: {s}"
         for s in _check_stock(conn, p["id"], p["fecha_desde"], p["fecha_hasta"])
