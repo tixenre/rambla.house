@@ -10,16 +10,36 @@ Un pedido pasa por estos estados (columna `estado` de la tabla `alquileres`):
 
 | Estado | Qué significa | Para el cliente |
 |---|---|---|
-| `borrador` | Pedido a medio cargar (lo usa el admin). | No lo ve. |
-| `presupuesto` | **Solicitud enviada, a confirmar.** Es donde caen todos los pedidos del cliente al crearse. | "Solicitado" |
-| `confirmado` | Confirmamos disponibilidad y precio. Acá se habilitan los documentos (remito/contrato). | "Confirmado" |
+| `borrador` | Pedido a medio cargar (lo usa el admin) — sandbox sin compromiso de ningún tipo, ni con plata, ni con stock, ni con un cliente, ni con un mensaje. | No lo ve — ni siquiera si ya tiene un cliente real asignado mientras se prueba algo. |
+| `solicitado` (ex-`presupuesto`) | **Solicitud enviada, a confirmar.** Es donde caen todos los pedidos del cliente al crearse — ya hay compromiso con un cliente, un monto, fechas y comunicación. | "Solicitado" |
+| `confirmado` | El compromiso en sí: confirmamos disponibilidad y precio. Acá se habilitan los documentos (remito/contrato). | "Confirmado" |
 | `retirado` | El cliente pasó por el local y se llevó el equipo. | "Retirado" |
 | `devuelto` | Recibimos el equipo de vuelta y lo revisamos. | "Devuelto" |
 | `finalizado` | Pedido cerrado (normalmente automático — ver abajo). | "Finalizado" |
 | `cancelado` | El pedido se dio de baja (estado terminal, sin salida). | "Cancelado" |
 
-Los estados que **reservan stock** (cuentan contra la disponibilidad) son `presupuesto`,
-`confirmado` y `retirado`.
+Los estados que **reservan stock** (cuentan contra la disponibilidad) son `solicitado`,
+`confirmado` y `retirado` — `borrador` queda afuera a propósito.
+
+### Qué le corresponde a cada estado
+
+Tabla de referencia — qué acciones/efectos están habilitados en cada estado, para no tener que
+reconstruir el criterio cada vez que se agrega una acción nueva a la página del pedido:
+
+| Estado | Reserva stock | Pago | Mail / WhatsApp | Portal cliente | Facturar | Eliminar pedido |
+|---|---|---|---|---|---|---|
+| `borrador` | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ (descartable, sin riesgo) |
+| `solicitado` | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ |
+| `confirmado` | ✅ | ✅ | ✅ | ✅ | ✅ | ❓ hoy sin gate — pendiente de decidir |
+| `retirado` | ✅ | ✅ | ✅ | ✅ | ✅ | ❓ hoy sin gate — pendiente de decidir |
+| `devuelto` | — | ✅ | ✅ | ✅ | ✅ | ❓ hoy sin gate — pendiente de decidir |
+| `finalizado` | — | ✅ | ✅ | ✅ | ✅ | ❓ hoy sin gate — pendiente de decidir |
+| `cancelado` | ❌ | ❌ | ❓ sin decidir | ✅ | ❌ | ✅ (terminal, sin riesgo) |
+
+"Eliminar pedido" no tiene gate por estado ni por plata para un pedido normal — el único guard
+existente (`monto_pagado > 0` bloquea el borrado) es explícitamente solo para turnos del Estudio
+vinculados (`routes/alquileres/pedidos.py::_delete_pedido`). Queda documentado como pendiente de
+decisión a propósito — no es una decisión chica (borrar algo con plata/stock real comprometido).
 
 **Motor único de transición** (`backend/routes/alquileres/transiciones.py::cambiar_estado`,
 sesión 2026-07-06): antes esta lógica estaba desparramada (el PATCH admin, el cancelar del
@@ -44,7 +64,7 @@ transición a `cancelado` — cualquier otro destino es rechazado.
 
 Cuando el cliente solicita un **rental** (carrito) o reserva el **estudio**:
 
-1. Se crea el pedido en estado `presupuesto`.
+1. Se crea el pedido en estado `solicitado`.
 2. Se **vacía el carrito** / se cierra el form, y aparece un **toast** con el número de pedido
    ("Pedido #1023 enviado").
 3. Se **redirige al portal del cliente** (`/cliente/portal?nuevo=<id>`), donde la card del pedido
@@ -80,7 +100,7 @@ destinatarios para el equipo).
 
 ### Regla de documentos
 
-El **remito** y el **contrato** **no existen mientras el pedido está en `presupuesto`** — recién se
+El **remito** y el **contrato** **no existen mientras el pedido está en `solicitado`** — recién se
 habilitan desde `confirmado` en adelante. Por eso el mail de creación **no promete descargas**
 ("vas a poder descargarlos cuando confirmemos"), y es el mail de confirmación el que dice "ya están
 listos". La lógica de qué documentos están disponibles vive en
