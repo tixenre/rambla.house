@@ -135,7 +135,7 @@ function LandingHub() {
             </div>
           </Link>
 
-          {/* Escuela */}
+          {/* Escuelas */}
           <Link
             to="/escuela"
             className="group relative flex flex-1 flex-col justify-center md:justify-start px-6 py-5 sm:p-10 text-ink md:flex-none transition-[filter] hover:brightness-105 active:brightness-95"
@@ -148,12 +148,12 @@ function LandingHub() {
               className="font-display font-black lowercase leading-[0.9] tracking-[-0.02em] text-ink mb-3 sm:mb-4"
               style={{ fontSize: "clamp(1.75rem, 3.5vw, 2.5rem)" }}
             >
-              escuela.
+              escuelas.
               <br />
               <span className="opacity-60">
-                aprender
+                talleres y
                 <br />
-                haciendo.
+                workshops.
               </span>
             </h2>
             <p className="hidden md:block text-ink/65 text-sm mb-7 leading-relaxed max-w-xs md:min-h-[2lh]">
