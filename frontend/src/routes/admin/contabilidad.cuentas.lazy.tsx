@@ -3,9 +3,9 @@
  *
  * Dos secciones, porque son dos cosas distintas:
  *  - **Socios · Cuenta corriente** (Pablo/Tincho): NO son cajas de plata, son el
- *    saldo de la rendición acumulada — DEUDOR (le debe a Rambla) / ACREEDOR (Rambla
+ *    saldo de la rendición acumulada — DEUDOR (le debe a Rental) / ACREEDOR (Rental
  *    le debe). Sale de: arranque + cobró − su parte ± rendiciones.
- *  - **Cajas · Plata del negocio** (Efectivo/Banco/Fondo Rambla/Dólares…): plata
+ *  - **Cajas · Plata del negocio** (Efectivo/Banco/Fondo Rental/Dólares…): plata
  *    real; suben/bajan con movimientos. Se pueden crear, editar y dar de baja.
  */
 import { createLazyFileRoute } from "@tanstack/react-router";
@@ -70,7 +70,7 @@ function CuentasPage() {
             <p className="text-xs text-muted-foreground">
               El <strong>arranque</strong> es lo que cobró antes del sistema. Se va saldando con{" "}
               <strong>su parte</strong> de lo que se alquila: cuando llega a cero están a mano, y si
-              se da vuelta, Rambla le debe a él.
+              se da vuelta, Rental le debe a él.
             </p>
           </section>
         )}
@@ -155,7 +155,7 @@ function SocioCard({
       const monto = Number(montoMov) || 0;
       const caja = Number(cajaId);
       // pago/rindió: el socio entrega → sale de su cuenta, entra a la caja (baja deuda).
-      // cargo: Rambla puso por él → sale de la caja, entra a su cuenta (sube deuda).
+      // cargo: Rental puso por él → sale de la caja, entra a su cuenta (sube deuda).
       const origen = dir === "pago" ? socio.id : caja;
       const destino = dir === "pago" ? caja : socio.id;
       return adminApi.createMovimiento({
@@ -187,9 +187,9 @@ function SocioCard({
   const abs = Math.abs(socio.saldo);
   const frase =
     socio.estado === "deudor"
-      ? `${socio.nombre} le debe a Rambla`
+      ? `${socio.nombre} le debe a Rental`
       : socio.estado === "acreedor"
-        ? `Rambla le debe a ${socio.nombre}`
+        ? `Rental le debe a ${socio.nombre}`
         : "A mano";
   const color =
     socio.estado === "deudor"
@@ -291,7 +291,7 @@ function SocioCard({
           <p className="text-xs text-muted-foreground">
             {dir === "pago"
               ? `${socio.nombre} entrega plata → baja su deuda y entra a la caja.`
-              : `Rambla puso plata por ${socio.nombre} (ej. le compró algo) → sube su deuda y sale de la caja.`}
+              : `Rental puso plata por ${socio.nombre} (ej. le compró algo) → sube su deuda y sale de la caja.`}
           </p>
           <div className="flex flex-wrap items-center gap-2">
             <Input
@@ -374,7 +374,7 @@ function CajaRow({ cuenta, onChanged }: { cuenta: CuentaSaldo; onChanged: () => 
     onError: (e) => toast.error("No se pudo dar de baja", { description: (e as Error).message }),
   });
 
-  // El Fondo Rambla representa al cobrador Rambla: recibe cobros, no se da de baja.
+  // El Fondo Rental representa al cobrador Rental: recibe cobros, no se da de baja.
   const esCobrador = Boolean(cuenta.socio);
 
   return (
@@ -454,7 +454,7 @@ function CajaRow({ cuenta, onChanged }: { cuenta: CuentaSaldo; onChanged: () => 
                   ? "text-muted-foreground/40 cursor-not-allowed no-underline"
                   : "text-muted-foreground hover:text-destructive",
               )}
-              title={esCobrador ? "El Fondo Rambla no se da de baja" : "Dar de baja"}
+              title={esCobrador ? "El Fondo Rental no se da de baja" : "Dar de baja"}
             >
               Baja
             </button>
