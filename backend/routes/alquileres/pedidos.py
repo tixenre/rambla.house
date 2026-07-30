@@ -26,6 +26,7 @@ from services.pedidos_enriquecimiento import (
     _batch_count_turnos_vinculados,
     _batch_plata_turnos_vinculados,
 )
+from services.alquileres.queries.detalle import _pedido_tiene_contenido
 from reservas import validar_stock as _check_stock
 from routes.alquileres.core import (
     router,
@@ -202,6 +203,9 @@ def list_pedidos(
             p["tiene_solicitud_pendiente"] = p["id"] in pendientes
             p["facturado"] = p["id"] in facturados
             p["turnos_vinculados_count"] = turnos_count_map.get(p["id"], 0)
+            # Mismo campo que expone el detalle (`_get_alquiler_detail`) — sin
+            # query extra, reusa `items`/`turnos_count_map` ya batcheados.
+            p["tiene_contenido"] = _pedido_tiene_contenido(p["items"], p["turnos_vinculados_count"])
             # La plata del turno se SUMA a la del pedido (#1308: una sola venta).
             # `monto_total`/`monto_pagado` de la fila quedan pisados con el
             # combinado — es lo que la lista tiene que leer para no contradecir

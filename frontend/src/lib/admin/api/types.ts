@@ -1219,6 +1219,14 @@ export type Pedido = {
    *  Estudio (no cancelados) tiene vinculados este pedido — el turno en sí
    *  ya no aparece como fila propia ahí, esto es la señal de que existen. */
   turnos_vinculados_count?: number;
+  /** ¿Tiene contenido real — al menos un ítem de alquiler O un turno del
+   *  Estudio vinculado activo? Lo calcula el backend
+   *  (`_pedido_tiene_contenido`, services/alquileres/queries/detalle.py) en
+   *  tanto el detalle como la lista — el front lo usa tal cual (`blockReason`,
+   *  `lib/pedido-estados.ts`) en vez de mirar `items.length` por su cuenta,
+   *  que bloqueaba para siempre un pedido "2 horas de estudio y nada más"
+   *  (hallazgo real, #1313/#1314-adjacent). */
+  tiene_contenido: boolean;
   /** Solo presente en la respuesta de `PATCH /alquileres/{id}` cuando `id` es
    *  un pedido PRINCIPAL con turnos vinculados (#1308, cascada de estado
    *  "avanzan juntos"): qué turno no pudo seguir el mismo paso (bloqueado por

@@ -356,6 +356,10 @@ const itemsAdminPedido = (pedidoId: number): AdminPedidoItem[] => [
 
 /** Campos de contacto/fechas comunes a los pedidos admin demo. */
 const ADMIN_PEDIDO_BASE = {
+  // Los 4 fixtures de abajo tienen ítems reales — mismo campo que calcula el
+  // backend (`_pedido_tiene_contenido`), acá fijo en `true` porque ninguna
+  // demo modela el caso "solo turno del Estudio, sin equipos".
+  tiene_contenido: true,
   numero_remito: null,
   cliente_perfil_impuestos: null,
   fecha_desde: "2026-07-10T10:00:00",

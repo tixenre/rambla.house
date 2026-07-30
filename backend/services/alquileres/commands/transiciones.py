@@ -44,6 +44,7 @@ from database import to_datetime
 from reservas import validar_stock as _check_stock
 from tipos_pedido import es_pedido_estudio, es_pedido_taller
 from services.alquileres.commands.items import _lock_equipos_por_id
+from services.alquileres.queries.detalle import _tiene_turno_vinculado_activo
 
 # Estados que reservan stock activamente — entrar a uno de estos desde uno que
 # NO reserva exige re-validar stock (ver `_requiere_revalidar_stock`).
@@ -253,17 +254,8 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
     # facturar. Para eso hace falta tener algo y alguien (criterio del dueño,
     # 2026-07-29 — vio un pedido pasado a solicitud sin ninguna de las dos:
     # "no sé si debería poderse"). Sin cliente no hay a quién llamar ni a quién
-    # facturarle; sin equipos no hay nada que entregar.
-    #
-    # SOLO en esta transición, a propósito: los pedidos que nacen ya reales
-    # (Estudio, taller, importados históricos) nunca pasan por acá, así que
-    # este gate no puede romperlos.
-    # Salir de BORRADOR = el presupuesto rápido se vuelve un pedido real: saca
-    # número, entra en la cola de Solicitados, se puede confirmar/cobrar/
-    # facturar. Para eso hace falta tener algo y alguien (criterio del dueño,
-    # 2026-07-29 — vio un pedido pasado a solicitud sin ninguna de las dos:
-    # "no sé si debería poderse"). Sin cliente no hay a quién llamar ni a quién
-    # facturarle; sin equipos no hay nada que entregar.
+    # facturarle; sin contenido (equipos O un turno del Estudio vinculado) no
+    # hay nada que entregar.
     #
     # SOLO en esta transición, a propósito: los pedidos que nacen ya reales
     # (Estudio, taller, importados históricos) nunca pasan por acá, así que
@@ -278,10 +270,15 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
         tiene_items = conn.execute(
             "SELECT 1 FROM alquiler_items WHERE pedido_id = %s LIMIT 1", (pedido_id,)
         ).fetchone()
-        if not tiene_items:
+        # Un turno del Estudio vinculado (#1308) también es contenido válido
+        # ("2 horas de estudio y nada más") — antes esta gate solo miraba
+        # `alquiler_items` y bloqueaba para siempre un pedido sin equipos
+        # propios, sin importar el turno (hallazgo de auditoría, #1313/#1314;
+        # mismo criterio que `_puede_quedar_sin_items`, commands/items.py).
+        if not tiene_items and not _tiene_turno_vinculado_activo(conn, pedido_id):
             raise HTTPException(
                 400,
-                "Agregá al menos un equipo antes de sacarlo de borrador.",
+                "Agregá al menos un equipo (o un turno del Estudio) antes de sacarlo de borrador.",
             )
 
     fuente_es_historica = bool(p["fuente"]) and p["fuente"].endswith("historico")
@@ -302,8 +299,13 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
             except ValueError:
                 errores.append("Las fechas tienen formato inválido")
 
-        if not conn.execute("SELECT 1 FROM alquiler_items WHERE pedido_id=%s", (pedido_id,)).fetchone():
-            errores.append("El pedido no tiene equipos cargados.")
+        # Mismo criterio que la gate de salida de borrador, arriba: un turno
+        # del Estudio vinculado también cuenta como contenido (#1313/#1314).
+        tiene_items = conn.execute(
+            "SELECT 1 FROM alquiler_items WHERE pedido_id=%s", (pedido_id,)
+        ).fetchone()
+        if not tiene_items and not _tiene_turno_vinculado_activo(conn, pedido_id):
+            errores.append("El pedido no tiene equipos cargados ni un turno del Estudio.")
         if p["fecha_desde"] and p["fecha_hasta"] and not errores:
             errores.extend(_revalidar_stock(conn, p))
         if errores:

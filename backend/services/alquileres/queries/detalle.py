@@ -89,6 +89,14 @@ def _get_alquiler_detail(conn, id: int) -> dict:
         if pedido.get("pedido_principal_id") else None
     )
     pedido["turnos_estudio_vinculados"] = _turnos_vinculados(conn, id)
+    # ¿Tiene contenido real (ítems O un turno vinculado activo)? Fuente única
+    # (`_pedido_tiene_contenido`) que el front consume en vez de mirar solo
+    # `items.length` — un pedido "2 horas de estudio y nada más" SÍ tiene
+    # contenido (#1313/#1314-adjacent).
+    pedido["tiene_contenido"] = _pedido_tiene_contenido(
+        pedido["items"],
+        any(t["estado"] != "cancelado" for t in pedido["turnos_estudio_vinculados"]),
+    )
     _enriquecer_pedido_con_cliente(conn, pedido)
     _enriquecer_pedido_con_total(conn, pedido)
     return pedido
@@ -103,6 +111,33 @@ def _pedido_principal_liviano(conn, pedido_principal_id: int) -> dict | None:
         (pedido_principal_id,),
     ).fetchone()
     return row_to_dict(row) if row else None
+
+
+def _tiene_turno_vinculado_activo(conn, pedido_id: int) -> bool:
+    """¿`pedido_id` tiene al menos un turno del Estudio vinculado (#1308) que
+    no esté cancelado? Fuente ÚNICA de esta pregunta — antes se respondía con
+    la MISMA query inline en 3 lugares (`_puede_quedar_sin_items` en
+    `commands/items.py`, y las dos gates de `cambiar_estado` en
+    `commands/transiciones.py`, que directamente no la respondían y solo
+    miraban `alquiler_items` — el hallazgo real: un pedido "2 horas de
+    estudio y nada más" no podía salir de `borrador` porque esas dos gates
+    nunca contemplaban el turno vinculado, #1313/#1314-adjacent)."""
+    return bool(conn.execute(
+        "SELECT 1 FROM alquileres WHERE pedido_principal_id = %s AND estado <> 'cancelado' LIMIT 1",
+        (pedido_id,),
+    ).fetchone())
+
+
+def _pedido_tiene_contenido(items: list, turnos_vinculados_activos: int | bool) -> bool:
+    """¿Este pedido tiene contenido real — al menos un ítem de alquiler O un
+    turno del Estudio vinculado activo? Pura (sin DB): el caller ya trae
+    ambos datos (batch en la lista, ya cargados en el detalle) — evita una
+    query extra. Fuente ÚNICA de "qué cuenta como contenido de un pedido",
+    consumida tanto por el backend (gates de `cambiar_estado`,
+    `_puede_quedar_sin_items`) como expuesta al front (`tiene_contenido` en
+    la respuesta) para que el front deje de adivinarlo mirando solo
+    `items.length` (hallazgo de auditoría, #1313/#1314)."""
+    return bool(items) or bool(turnos_vinculados_activos)
 
 
 def _turnos_vinculados(conn, pedido_id: int) -> list[dict]:

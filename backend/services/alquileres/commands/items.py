@@ -28,7 +28,11 @@ from clientes.queries.identidad import nombre_completo_cliente
 from services.precios import bruto_linea, calcular_total, jornadas_periodo, tipos_equipo_batch
 from services.fechas import validar_rango_fechas
 from tipos_pedido import es_pedido_estudio, es_pedido_derivado, es_pedido_taller
-from services.alquileres.queries.detalle import _es_historico, _get_alquiler_detail
+from services.alquileres.queries.detalle import (
+    _es_historico,
+    _get_alquiler_detail,
+    _tiene_turno_vinculado_activo,
+)
 from services.alquileres.queries.cotizacion import (
     _cliente_es_dueno_de_perfil_fiscal,
     _cliente_es_miembro_de_productora,
@@ -429,11 +433,7 @@ def _puede_quedar_sin_items(conn, p) -> bool:
         return True
     # Mismo filtro que usan el pago combinado (`pagos.py`) y la factura
     # combinada (`finanzas_flujo.pedido`): un turno cancelado ya no es contenido.
-    row = conn.execute(
-        "SELECT 1 FROM alquileres WHERE pedido_principal_id = %s AND estado <> 'cancelado' LIMIT 1",
-        (p["id"],),
-    ).fetchone()
-    return row is not None
+    return _tiene_turno_vinculado_activo(conn, p["id"])
 
 
 def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:

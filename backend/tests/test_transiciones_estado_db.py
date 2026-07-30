@@ -39,7 +39,7 @@ pytestmark = [
 EQ_ID = 9_700_001
 CLIENTE_ID = 9_700_201
 FD, FH = "2026-09-01T08:00:00", "2026-09-02T20:00:00"
-_PEDIDO_IDS = list(range(9_700_101, 9_700_112))
+_PEDIDO_IDS = list(range(9_700_101, 9_700_117))
 
 
 def _limpiar(conn):
@@ -106,7 +106,7 @@ def test_transicion_hacia_adelante_ok(db_setup):
         resultado = cambiar_estado(conn, _PEDIDO_IDS[0], "solicitado", es_admin=True, actor="system")
         conn.commit()
         assert resultado == {
-            "estado_anterior": "borrador", "estado_nuevo": "solicitado", "numero_pedido_asignado": False,
+            "estado_anterior": "borrador", "estado_nuevo": "solicitado", "numero_pedido_asignado": True,
             "turnos_vinculados_sin_avanzar": [],
         }
         p = conn.execute("SELECT estado FROM alquileres WHERE id=%s", (_PEDIDO_IDS[0],)).fetchone()
@@ -304,5 +304,91 @@ def test_revertir_finalizado_a_devuelto_si_no_esta_realmente_pago(db_setup):
         assert resultado["estado_nuevo"] == "devuelto"
         p = conn.execute("SELECT estado FROM alquileres WHERE id=%s", (_PEDIDO_IDS[10],)).fetchone()
         assert p["estado"] == "devuelto"
+    finally:
+        conn.close()
+
+
+# ── Gate de contenido al salir de borrador (#1313/#1314-adjacent) ───────────
+#
+# Bug real reportado por el dueño: un pedido "2 horas de estudio y nada más"
+# (borrador, 0 alquiler_items, 1 turno del Estudio vinculado activo) no podía
+# salir de borrador — esta gate solo miraba `alquiler_items`, sin considerar
+# que el turno vinculado YA es contenido válido (mismo criterio que
+# `_puede_quedar_sin_items`, services/alquileres/commands/items.py).
+
+def test_borrador_sin_contenido_sigue_rechazado(db_setup):
+    """Sin ítems y sin turno vinculado: sigue siendo un pedido sin nada —
+    no-regresión del comportamiento de siempre."""
+    from database import get_db
+    from routes.alquileres.transiciones import cambiar_estado
+
+    conn = get_db()
+    try:
+        _crear_pedido(conn, _PEDIDO_IDS[11], "borrador", con_items=False)
+        with pytest.raises(HTTPException) as exc:
+            cambiar_estado(conn, _PEDIDO_IDS[11], "solicitado", es_admin=True, actor="system")
+        conn.rollback()
+        assert exc.value.status_code == 400
+        assert "equipo" in exc.value.detail.lower()
+        p = conn.execute("SELECT estado FROM alquileres WHERE id=%s", (_PEDIDO_IDS[11],)).fetchone()
+        assert p["estado"] == "borrador"
+    finally:
+        conn.close()
+
+
+def test_borrador_sin_items_pero_con_turno_vinculado_activo_puede_avanzar(db_setup):
+    """El bug real: un borrador sin equipos propios, pero con un turno del
+    Estudio vinculado (no cancelado), SÍ tiene contenido — debe poder salir
+    de borrador."""
+    from database import get_db
+    from routes.alquileres.transiciones import cambiar_estado
+
+    principal_id, turno_id = _PEDIDO_IDS[12], _PEDIDO_IDS[13]
+    conn = get_db()
+    try:
+        _crear_pedido(conn, principal_id, "borrador", con_items=False)
+        conn.execute(
+            "INSERT INTO alquileres (id, cliente_id, cliente_nombre, estado, "
+            "pedido_principal_id, monto_total, monto_pagado) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (turno_id, CLIENTE_ID, "Cliente test", "confirmado", principal_id, 5000, 0),
+        )
+        conn.commit()
+
+        resultado = cambiar_estado(conn, principal_id, "solicitado", es_admin=True, actor="system")
+        conn.commit()
+
+        assert resultado["estado_nuevo"] == "solicitado"
+        p = conn.execute("SELECT estado FROM alquileres WHERE id=%s", (principal_id,)).fetchone()
+        assert p["estado"] == "solicitado"
+    finally:
+        conn.close()
+
+
+def test_borrador_con_turno_cancelado_no_cuenta_como_contenido(db_setup):
+    """Un turno CANCELADO ya no es contenido (mismo filtro que el pago
+    combinado y la factura combinada) — un borrador cuyo único turno está
+    cancelado sigue sin poder salir de borrador."""
+    from database import get_db
+    from routes.alquileres.transiciones import cambiar_estado
+
+    principal_id, turno_id = _PEDIDO_IDS[14], _PEDIDO_IDS[15]
+    conn = get_db()
+    try:
+        _crear_pedido(conn, principal_id, "borrador", con_items=False)
+        conn.execute(
+            "INSERT INTO alquileres (id, cliente_id, cliente_nombre, estado, "
+            "pedido_principal_id, monto_total, monto_pagado) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (turno_id, CLIENTE_ID, "Cliente test", "cancelado", principal_id, 5000, 0),
+        )
+        conn.commit()
+
+        with pytest.raises(HTTPException) as exc:
+            cambiar_estado(conn, principal_id, "solicitado", es_admin=True, actor="system")
+        conn.rollback()
+        assert exc.value.status_code == 400
+        p = conn.execute("SELECT estado FROM alquileres WHERE id=%s", (principal_id,)).fetchone()
+        assert p["estado"] == "borrador"
     finally:
         conn.close()

@@ -87,7 +87,13 @@ export type PedidoTransicionable = {
   estado: EstadoPedido;
   fecha_desde?: string | null;
   fecha_hasta?: string | null;
-  items?: { length: number } | null;
+  /** ¿Tiene contenido real (ítems O un turno del Estudio vinculado activo)?
+   *  SIEMPRE lo calcula el backend (`_pedido_tiene_contenido`,
+   *  services/alquileres/queries/detalle.py) — el front solo lo muestra, no
+   *  lo recalcula. Antes este archivo miraba `items.length` a secas y
+   *  bloqueaba para siempre un pedido "2 horas de estudio y nada más"
+   *  (hallazgo real, #1313/#1314-adjacent). */
+  tiene_contenido: boolean;
   /** Para el gate de salida de borrador: alcanza con la ficha vinculada O un
    *  nombre cargado a mano ("alguien que llamó"). */
   cliente_id?: number | null;
@@ -103,12 +109,12 @@ export function blockReason(p: PedidoTransicionable, target: EstadoPedido): stri
   // diga ANTES de apretarlo en vez de fallar después.
   if (p.estado === "borrador" && target !== "borrador" && target !== "cancelado") {
     if (!p.cliente_id && !(p.cliente_nombre ?? "").trim()) return "sin cliente";
-    if (!p.items?.length) return "sin equipos";
+    if (!p.tiene_contenido) return "sin equipos";
   }
   const needs: EstadoPedido[] = ["confirmado", "retirado", "devuelto", "finalizado"];
   if (needs.includes(target)) {
     if (!p.fecha_desde || !p.fecha_hasta) return "faltan fechas";
-    if (!p.items?.length) return "sin equipos";
+    if (!p.tiene_contenido) return "sin equipos";
   }
   return null;
 }
