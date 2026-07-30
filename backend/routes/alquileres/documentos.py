@@ -37,12 +37,12 @@ from services.alquileres.queries.documentos import (
 _DOC_NO_CACHE = {"Cache-Control": "no-store, max-age=0"}
 
 
-@router.get("/alquileres/{id}/pdf")
-async def pedido_pdf(id: int, request: Request, format: str = "pdf"):
+@router.get("/alquileres/{id}/remito")
+async def pedido_remito(id: int, request: Request, format: str = "pdf"):
     """`format=html` devuelve el preview HTML sin pasar por el renderer."""
     require_admin(request)
     with get_db() as conn:
-        html, filename = _doc_html(conn, id, "pdf")
+        html, filename = _doc_html(conn, id, "remito")
     if format == "html":
         from fastapi.responses import HTMLResponse
         return HTMLResponse(content=html, headers=_DOC_NO_CACHE)
@@ -54,12 +54,12 @@ async def pedido_pdf(id: int, request: Request, format: str = "pdf"):
     )
 
 
-@router.get("/alquileres/{id}/albaran")
-async def pedido_albaran(id: int, request: Request, format: str = "pdf"):
+@router.get("/alquileres/{id}/detalle-seguro")
+async def pedido_detalle_seguro(id: int, request: Request, format: str = "pdf"):
     """`format=html` devuelve el preview HTML sin pasar por el renderer."""
     require_admin(request)
     with get_db() as conn:
-        html, filename = _doc_html(conn, id, "albaran")
+        html, filename = _doc_html(conn, id, "detalle-seguro")
     if format == "html":
         from fastapi.responses import HTMLResponse
         return HTMLResponse(content=html, headers=_DOC_NO_CACHE)
@@ -71,12 +71,12 @@ async def pedido_albaran(id: int, request: Request, format: str = "pdf"):
     )
 
 
-@router.get("/alquileres/{id}/packing-list")
-async def pedido_packing_list(id: int, request: Request, format: str = "pdf"):
+@router.get("/alquileres/{id}/checklist-retiro")
+async def pedido_checklist_retiro(id: int, request: Request, format: str = "pdf"):
     """`format=html` devuelve el preview HTML sin pasar por el renderer."""
     require_admin(request)
     with get_db() as conn:
-        html_content, filename = _doc_html(conn, id, "packing-list")
+        html_content, filename = _doc_html(conn, id, "checklist-retiro")
     if format == "html":
         from fastapi.responses import HTMLResponse
         return HTMLResponse(content=html_content, headers=_DOC_NO_CACHE)

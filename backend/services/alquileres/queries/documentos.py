@@ -29,11 +29,13 @@ from services.alquileres.queries.detalle import (
 )
 
 # Documentos del pedido y su etiqueta legible (para la UI de envío por mail).
+# Las keys espejan la etiqueta (#1313) — antes eran una traducción sin relación
+# ("pdf"→Remito, "albaran"→Detalle de seguro, "packing-list"→Checklist de retiro).
 DOCUMENTOS = {
-    "pdf": "Remito",
-    "albaran": "Detalle de seguro",
+    "remito": "Remito",
+    "detalle-seguro": "Detalle de seguro",
     "contrato": "Contrato",
-    "packing-list": "Checklist de retiro",
+    "checklist-retiro": "Checklist de retiro",
 }
 
 
@@ -134,7 +136,7 @@ def _agrupar_items_por_categoria(conn, items: list[dict]) -> list[dict]:
 def _doc_html(conn, id: int, kind: str) -> tuple[str, str]:
     """Construye el HTML + filename de un documento del pedido. Fuente ÚNICA
     usada por los GET de descarga y por el envío por mail."""
-    if kind == "pdf":
+    if kind == "remito":
         row = conn.execute("SELECT * FROM alquileres WHERE id=%s", (id,)).fetchone()
         if not row:
             raise HTTPException(404, "Pedido no encontrado")
@@ -145,7 +147,7 @@ def _doc_html(conn, id: int, kind: str) -> tuple[str, str]:
         _enriquecer_pedido_con_total(conn, pedido)
         return _pedido_html(pedido), _pedido_filename(pedido)
 
-    if kind == "albaran":
+    if kind == "detalle-seguro":
         row = conn.execute("SELECT * FROM alquileres WHERE id=%s", (id,)).fetchone()
         if not row:
             raise HTTPException(404, "Pedido no encontrado")
@@ -172,7 +174,7 @@ def _doc_html(conn, id: int, kind: str) -> tuple[str, str]:
         pedido["grupos"] = _agrupar_items_por_categoria(conn, pedido["items"])
         return _albaran_html(pedido), _pedido_filename(pedido, doc="albaran")
 
-    if kind == "packing-list":
+    if kind == "checklist-retiro":
         row = conn.execute("SELECT * FROM alquileres WHERE id=%s", (id,)).fetchone()
         if not row:
             raise HTTPException(404, "Pedido no encontrado")
