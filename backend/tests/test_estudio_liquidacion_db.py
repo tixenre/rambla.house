@@ -1,6 +1,6 @@
 """Fase 4 (#1283) contra Postgres REAL — atribución "Estudio" en liquidación/P&L.
 
-El centinela del Estudio pasa a `dueno='Estudio'` (antes 'Rental'): sus horas se
+El centinela del Estudio pasa a `dueno='Estudio'` (antes 'Rambla'): sus horas se
 atribuyen al Estudio en la liquidación, NO al rental — economía separada.
 Verifica el pipeline completo con un pedido "mixto" (espacio + promo + suelto,
 cada uno a su dueño real) y la rendición cuando Rental cobra plata que
