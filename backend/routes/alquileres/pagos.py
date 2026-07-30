@@ -128,8 +128,8 @@ def _agregar_pago(conn, id: int, data: PagoCreate, admin_email: str) -> dict:
     p = conn.execute("SELECT estado FROM alquileres WHERE id=%s FOR UPDATE", (id,)).fetchone()
     if not p:
         raise HTTPException(404, "Pedido no encontrado")
-    if p["estado"] in ("cancelado",):
-        raise HTTPException(400, "No se pueden agregar pagos a un pedido cancelado")
+    if p["estado"] in ("cancelado", "borrador"):
+        raise HTTPException(400, "No se pueden agregar pagos a un pedido cancelado o en borrador")
 
     fecha = data.fecha or now_ar().date().isoformat()
     conn.execute("""
@@ -194,8 +194,8 @@ def _agregar_pago_combinado(conn, id: int, data: PagoCombinadoCreate, admin_emai
     ).fetchone()
     if not p:
         raise HTTPException(404, "Pedido no encontrado")
-    if p["estado"] == "cancelado":
-        raise HTTPException(400, "No se pueden agregar pagos a un pedido cancelado")
+    if p["estado"] in ("cancelado", "borrador"):
+        raise HTTPException(400, "No se pueden agregar pagos a un pedido cancelado o en borrador")
 
     turnos = conn.execute(
         "SELECT id, monto_total, monto_pagado FROM alquileres "

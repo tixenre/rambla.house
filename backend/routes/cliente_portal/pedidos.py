@@ -237,12 +237,15 @@ def cliente_pedidos(request: Request):
         # alquiler NO son pedidos del cliente (#1308) — son la misma venta que su
         # principal, que más abajo absorbe su plata vía `combinar_turnos_vinculados`.
         # Sin esto el cliente veía dos cards, con dos números y dos totales.
+        # `estado != 'borrador'`: un borrador es un escenario hipotético del admin
+        # (puede tener un cliente real asignado mientras se prueba algo) — el
+        # cliente no debe verlo nunca, ni por accidente, hasta que salga de ahí.
         pedidos = conn.execute(f"""
             SELECT id, numero_pedido, estado, fecha_desde, fecha_hasta,
                    monto_total, monto_pagado, descuento_pct, descuento_jornadas_pct,
                    notas, created_at, perfil_fiscal_id, productora_id
             FROM alquileres
-            WHERE cliente_id = %s AND {SIN_PRINCIPAL_SQL}
+            WHERE cliente_id = %s AND estado != 'borrador' AND {SIN_PRINCIPAL_SQL}
             ORDER BY created_at DESC NULLS LAST, numero_pedido DESC
         """, (cliente_id,)).fetchall()
 
@@ -347,13 +350,16 @@ def cliente_pedido_detalle(id: int, request: Request):
     with get_db() as conn:
         # `SIN_PRINCIPAL_SQL` → 404 para un turno del Estudio vinculado (#1308):
         # deja de tener página, documentos y pagos propios de cara al cliente.
+        # `estado != 'borrador'` → mismo 404 para un borrador (ver `cliente_pedidos`
+        # más arriba): el cliente no debe poder ver un escenario hipotético del
+        # admin, ni siquiera si adivina/guarda el `id`.
         pedido = conn.execute(f"""
             SELECT id, numero_pedido, estado, fecha_desde, fecha_hasta,
                    monto_total, monto_pagado, descuento_pct,
                    descuento_jornadas_pct, cliente_id, notas, created_at,
                    perfil_fiscal_id, productora_id
             FROM alquileres
-            WHERE id = %s AND cliente_id = %s AND {SIN_PRINCIPAL_SQL}
+            WHERE id = %s AND cliente_id = %s AND estado != 'borrador' AND {SIN_PRINCIPAL_SQL}
         """, (id, cliente_id)).fetchone()
         if not pedido:
             raise HTTPException(404, "Pedido no encontrado")

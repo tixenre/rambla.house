@@ -377,6 +377,8 @@ async def enviar_documentos(id: int, data: EnviarDocsRequest, request: Request):
         if not row:
             raise HTTPException(404, "Pedido no encontrado")
         ped = row_to_dict(row)
+        if ped["estado"] == "borrador":
+            raise HTTPException(400, "No se puede enviar mail de un pedido en borrador")
         destinatario = (data.to or ped.get("cliente_email") or "").strip()
         if not destinatario and ped.get("cliente_id"):
             c = conn.execute(
