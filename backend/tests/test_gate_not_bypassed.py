@@ -34,6 +34,13 @@ SERVICES_ESTUDIO_DIR = os.path.join(
 SERVICES_TALLERES_DIR = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "services", "talleres"
 )
+# Mismo motivo: el núcleo de ítems/total de un pedido (_apply_pedido_items,
+# el INSERT real contra el motor) se extrajo de `routes/alquileres/core.py` a
+# `services/alquileres/commands/items.py` (CQRS-lite, #1312 Fase 3) — sin
+# sumar este árbol, ese INSERT quedaría fuera del scan.
+SERVICES_ALQUILERES_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(__file__)), "services", "alquileres"
+)
 
 GATE_SYMBOLS = {
     "_check_stock", "_check_stock_hipotetico", "_centinela_libre",
@@ -50,8 +57,9 @@ GATE_SYMBOLS = {
 
 # Helpers que insertan items PERO delegan la validación de stock en su caller.
 # Cada uno está documentado en el código fuente como "el caller valida".
-#   - _apply_pedido_items (alquileres): docstring "No valida stock — el caller
-#     debe llamar a _check_stock si corresponde".
+#   - _apply_pedido_items (services/alquileres/commands/items.py — extraído de
+#     routes/alquileres/core.py en el split CQRS-lite, #1312 Fase 3): docstring
+#     "No valida stock — el caller debe llamar a _check_stock si corresponde".
 #   - _regenerar_pedidos_slot (estudio, Fase 2 — ítems veraces): el ítem
 #     centinela que inserta es para que la plata del slot se atribuya/vea en
 #     la liquidación, NO el mecanismo de bloqueo — ese sigue siendo
@@ -82,7 +90,7 @@ GATE_SYMBOLS = {
 # services/estudio|talleres/ con su prefijo (ver `fuentes` abajo), así
 # desambigua entre los varios core.py de los paquetes split (#501) y entre árboles.
 ALLOWLIST_DELEGADORES = {
-    ("alquileres/core.py", "_apply_pedido_items"),
+    ("services/alquileres/commands/items.py", "_apply_pedido_items"),
     ("estudio.py", "_regenerar_pedidos_slot"),
     ("services/talleres/commands/economia.py", "_regenerar_pedidos_taller"),
     ("services/estudio/commands/reserva.py", "_insertar_item_pintura"),
@@ -111,8 +119,9 @@ def _archivos_py(root):
 def _funciones_que_insertan_reservas():
     """Devuelve [(archivo, funcname, referencia_gate?)] por cada sitio que
     inserta en alquiler_items, en `routes/` y en `services/estudio/` +
-    `services/talleres/` (los motores de disponibilidad/reservas del Estudio
-    y la economía de talleres, ambos extraídos a CQRS-lite)."""
+    `services/talleres/` + `services/alquileres/` (los motores de
+    disponibilidad/reservas del Estudio, la economía de talleres y el núcleo
+    de ítems de un pedido, los tres extraídos a CQRS-lite)."""
     hallazgos = []
     # (raíz, prefijo del identificador) — el prefijo distingue cada árbol de
     # services/ sin tocar el formato ya usado para routes/ (así las keys
@@ -121,6 +130,7 @@ def _funciones_que_insertan_reservas():
         (ROUTES_DIR, ""),
         (SERVICES_ESTUDIO_DIR, "services/estudio/"),
         (SERVICES_TALLERES_DIR, "services/talleres/"),
+        (SERVICES_ALQUILERES_DIR, "services/alquileres/"),
     ]
     for root, prefijo in fuentes:
         for path in sorted(_archivos_py(root)):

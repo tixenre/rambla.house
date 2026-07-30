@@ -5,6 +5,13 @@ Move-verbatim desde `routes/alquileres/cotizacion.py::cotizar` (el CUERPO —
 lectura/cómputo puro, cero escritura a DB). `routes/alquileres/cotizacion.py`
 mantiene el contrato HTTP (`CotizarItem`/`CotizarRequest`, el `@router.post` +
 rate limit) y delega acá.
+
+`_resolver_descuentos_snapshot_o_vivo` vive acá (Fase 3, #1312) — pese a que su
+otro consumidor (`_recalcular_total_pedido`/`_apply_pedido_items`) es un
+`command`: es lectura pura (nunca muta), y el invariante duro del paquete es
+`commands/` puede importar `queries/`, nunca al revés — así que el lugar que
+respeta esa dirección en ambos sentidos es acá, con `services.alquileres.
+commands.items` importándola de vuelta.
 """
 from fastapi import Request
 
@@ -20,7 +27,24 @@ from services.precios import (
 )
 from descuentos.queries.decision import resolver_origen_pedido_monto
 from descuentos.queries.jornadas import obtener_descuento_jornadas
+from descuentos.queries.cliente import obtener_descuento_cliente
 from services.facturacion.repo import factura_c_vigente
+
+
+def _resolver_descuentos_snapshot_o_vivo(conn, p, jornadas: int) -> tuple[float, float]:
+    """Descuento de jornadas + de cliente: en vivo mientras el pedido sigue en
+    `presupuesto`, snapshot ya persistido en la fila una vez que avanzó.
+
+    Fuente ÚNICA de este guard — antes vivía duplicado, idéntico, en
+    `_recalcular_total_pedido` y `_apply_pedido_items` (mismo invariante de
+    "plata congelada" escrito dos veces, con el riesgo de que una copia se
+    actualizara y la otra no). `p` es la fila de `alquileres` ya leída por el
+    caller (`estado`, `descuento_jornadas_pct`, `descuento_cliente_pct`,
+    `cliente_id`).
+    """
+    if p["estado"] == "solicitado":
+        return obtener_descuento_jornadas(conn, jornadas), obtener_descuento_cliente(conn, p["cliente_id"])
+    return p["descuento_jornadas_pct"] or 0, p["descuento_cliente_pct"] or 0
 
 
 def cotizar_carrito(data, request: Request) -> dict:
@@ -43,12 +67,6 @@ def cotizar_carrito(data, request: Request) -> dict:
     números tal cual. Reemplaza el cálculo duplicado del front
     (`src/lib/cart-total.ts`). Ver #617.
     """
-    # `_resolver_descuentos_snapshot_o_vivo` todavía vive en `routes.alquileres.core`
-    # (va a `services/alquileres/commands/` recién en la Fase 3) — import diferido
-    # a propósito, para no crear un import a nivel de módulo de este paquete hacia
-    # `routes.*` mientras la migración está a mitad de camino.
-    from routes.alquileres.core import _resolver_descuentos_snapshot_o_vivo
-
     with get_db() as conn:
         # Jornadas: misma fórmula única (ceil/24h). Sin fechas → 1.
         d0 = to_datetime(data.fecha_desde) if data.fecha_desde else None
