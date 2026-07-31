@@ -55,6 +55,21 @@ REGISTRO: dict[str, PlantillaWA] = {
         ),
         campos_ctx=("cliente_nombre", "numero_pedido"),
     ),
+    # Aviso INTERNO al equipo (Pablo, Tincho) — no lo ve el cliente. Va a cada
+    # número por separado: la API de grupos de Meta exige ser Official Business
+    # Account, que todavía no somos.
+    "pedido_creado_admin": PlantillaWA(
+        key="pedido_creado_admin",
+        meta_name="pedido_creado_admin",
+        lang=LANG,
+        idempotente_por_pedido=True,
+        descripcion="Aviso al equipo cuando entra una solicitud de reserva.",
+        copy_ejemplo=(
+            "Entró la solicitud Nº {{1}} de {{2}} para el {{3}}. "
+            "Revisala en el back-office de Rambla."
+        ),
+        campos_ctx=("numero_pedido", "cliente_nombre", "fecha_desde"),
+    ),
     "pedido_confirmado": PlantillaWA(
         key="pedido_confirmado",
         meta_name="pedido_confirmado",

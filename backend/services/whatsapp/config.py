@@ -82,3 +82,30 @@ def destinatario_permitido(to_e164: str) -> bool:
         x.strip() for x in (settings.WHATSAPP_TEST_RECIPIENTS or "").split(",") if x.strip()
     }
     return to_e164 in permitidos
+
+
+def destinatarios_admin(conn) -> list[str]:
+    """Números del EQUIPO (Pablo, Tincho…) que reciben los avisos internos, en E.164.
+
+    Env `WHATSAPP_ADMIN_NUMEROS` (override de ops) > app_settings
+    `whatsapp_admin_numeros` (editable desde el back-office), coma-separados. Mismo
+    criterio env>settings>default que el resto del canal.
+
+    Se manda un mensaje INDIVIDUAL a cada uno: la API de grupos existe pero exige ser
+    Official Business Account, que Rambla todavía no es. Cuando lo sea, esto pasa a
+    ser un único destinatario (el id del grupo) sin tocar a los llamadores.
+
+    Cada número pasa por el embudo único `services/telefono` — uno inválido se
+    descarta acá y no llega a Meta.
+    """
+    from services.telefono import normalizar_e164
+
+    crudo = (os.getenv("WHATSAPP_ADMIN_NUMEROS") or "").strip()
+    if not crudo:
+        crudo = _setting(conn, "whatsapp_admin_numeros")
+    out: list[str] = []
+    for parte in crudo.split(","):
+        num = normalizar_e164(parte.strip())
+        if num and num not in out:  # sin duplicados: no le mandamos dos veces al mismo
+            out.append(num)
+    return out

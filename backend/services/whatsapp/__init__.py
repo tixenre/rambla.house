@@ -16,13 +16,14 @@ from services.whatsapp.config import (
     destinatario_permitido,
     resolver_creds,
 )
-from services.whatsapp.envio import enviar_evento_pedido
+from services.whatsapp.envio import enviar_evento_admin, enviar_evento_pedido
 from services.whatsapp.estado import diagnosticar
 from services.whatsapp.plantillas import REGISTRO, PlantillaWA
 from services.whatsapp.sincronizacion import estado_plantillas, sincronizar
 
 __all__ = [
     "enviar_evento_pedido",
+    "enviar_evento_admin",
     "diagnosticar",
     "estado_plantillas",
     "sincronizar",

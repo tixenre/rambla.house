@@ -91,6 +91,10 @@ class EventoComunicacion:
     estrategia: str = FALLBACK
     mail: Optional[CanalMail] = None
     whatsapp: Optional[str] = None
+    # Aviso INTERNO al equipo por WhatsApp (Pablo, Tincho). Independiente de la
+    # estrategia del cliente, igual que `CanalMail.template_admin`: el equipo se
+    # entera del pedido pase lo que pase con el canal del cliente.
+    whatsapp_admin: Optional[str] = None
 
 
 REGISTRO: dict[str, EventoComunicacion] = {
@@ -100,6 +104,7 @@ REGISTRO: dict[str, EventoComunicacion] = {
         estrategia=FALLBACK,
         mail=CanalMail(template_cliente="pedido_creado_cliente", template_admin="pedido_creado_admin"),
         whatsapp="pedido_creado",
+        whatsapp_admin="pedido_creado_admin",
     ),
     "pedido_confirmado": EventoComunicacion(
         key="pedido_confirmado",

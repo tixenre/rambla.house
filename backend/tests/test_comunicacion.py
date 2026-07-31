@@ -171,7 +171,7 @@ def test_background_encola_una_sola_tarea(monkeypatch):
     res = d.notificar_pedido(
         "pedido_creado", {"id": 1, "cliente_id": 2, "cliente_email": "c@x.com"}, {"x": 1}, background=bg
     )
-    assert res == {"mail": [], "whatsapp": None}  # encolado; nada síncrono
+    assert res == {"mail": [], "whatsapp": None, "whatsapp_admin": None}  # encolado
     assert len(bg.tasks) == 1  # UNA sola tarea (no dos ciegas)
     fn, a, k = bg.tasks[0]
     fn()  # correrla ejecuta el plan A/B completo
@@ -190,4 +190,8 @@ def test_ctx_none_se_arma_solo_con_pedido_email_context(monkeypatch):
 
 
 def test_evento_desconocido_no_rompe():
-    assert d.notificar_pedido("no_existe", {"id": 1}, {}) == {"mail": [], "whatsapp": None}
+    assert d.notificar_pedido("no_existe", {"id": 1}, {}) == {
+        "mail": [],
+        "whatsapp": None,
+        "whatsapp_admin": None,
+    }

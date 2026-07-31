@@ -213,6 +213,14 @@ def _mail_admin(canal: Optional[CanalMail], pedido: dict, ctx: dict):
     return send_email(canal.template_admin, to, ctx, pedido.get("id"))
 
 
+def _whatsapp_admin(template_key: str, pedido: dict, ctx: dict):
+    """Aviso interno al equipo por WhatsApp. Fuera del plan A/B del cliente, igual
+    que el mail al admin: son avisos al negocio, no al cliente."""
+    from services.whatsapp import enviar_evento_admin
+
+    return enviar_evento_admin(template_key, pedido, ctx)
+
+
 def _whatsapp(template_key: str, pedido: dict, ctx: dict):
     # Import perezoso: no acopla el despacho al canal WhatsApp al importar.
     from services.whatsapp import enviar_evento_pedido
@@ -282,7 +290,7 @@ def notificar_pedido(
     evento = REGISTRO.get(evento_key)
     if evento is None:
         logger.warning("comunicacion: evento desconocido %r", evento_key)
-        return {"mail": [], "whatsapp": None}
+        return {"mail": [], "whatsapp": None, "whatsapp_admin": None}
 
     if ctx is None:
         ctx = pedido_email_context(pedido)
@@ -291,9 +299,13 @@ def notificar_pedido(
         cliente = _despachar_cliente(evento, pedido, ctx)
         admin = _mail_admin(evento.mail, pedido, ctx) if evento.mail else None
         mails = [m for m in (cliente["mail"], admin) if m is not None]
-        return {"whatsapp": cliente["whatsapp"], "mail": mails}
+        wa_admin = (
+            _whatsapp_admin(evento.whatsapp_admin, pedido, ctx) if evento.whatsapp_admin else None
+        )
+        return {"whatsapp": cliente["whatsapp"], "mail": mails, "whatsapp_admin": wa_admin}
 
     if background is not None:
         background.add_task(_run)
-        return {"mail": [], "whatsapp": None}  # encolado; resultados no disponibles aún
+        # encolado; resultados no disponibles aún
+        return {"mail": [], "whatsapp": None, "whatsapp_admin": None}
     return _run()

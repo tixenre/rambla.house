@@ -63,12 +63,14 @@ def enviar_evento_pedido(plantilla_key: str, pedido: dict, ctx: dict, *, force: 
         if not destinatario_permitido(to):
             return {"ok": True, "skipped": True, "reason": "destinatario_no_permitido"}
 
-        # Idempotencia por pedido: primera línea (el índice único es la red final).
+        # Idempotencia por pedido Y DESTINATARIO: primera línea (el índice único es
+        # la red final). Incluye `to_phone` porque un mismo aviso puede tener varios
+        # destinatarios (el equipo) — sin eso, el segundo se descartaría como duplicado.
         if not force and plantilla.idempotente_por_pedido and alquiler_id:
             existing = conn.execute(
                 "SELECT id FROM whatsapp_log WHERE alquiler_id = %s AND template_key = %s "
-                "AND status = 'sent' LIMIT 1",
-                (alquiler_id, plantilla.key),
+                "AND to_phone = %s AND status = 'sent' LIMIT 1",
+                (alquiler_id, plantilla.key, to),
             ).fetchone()
             if existing:
                 return {"ok": True, "skipped": True, "reason": "duplicado", "log_id": existing["id"]}
@@ -165,3 +167,101 @@ def _insert_log(conn, *, to, template_key, alquiler_id, status, wamid, error):
         "VALUES (%s, %s, %s, %s, %s, %s)",
         (to, template_key, alquiler_id, status, wamid, error),
     )
+
+
+def enviar_evento_admin(plantilla_key: str, pedido: dict, ctx: dict) -> dict:
+    """Manda el aviso INTERNO del evento a cada número del equipo (Pablo, Tincho…).
+
+    Diferencias con el aviso al cliente:
+      - **sin opt-in**: el equipo configuró sus propios números, ese es el consentimiento;
+      - el teléfono sale de la config (`destinatarios_admin`), no del pedido;
+      - se manda uno por número (la API de grupos exige Official Business Account).
+
+    Mismo contrato que el resto del canal: NUNCA propaga, loguea cada envío en
+    `whatsapp_log` e idempotente por (pedido, plantilla, número). Devuelve
+    `{ok, enviados, resultados:[...]}`."""
+    plantilla = REGISTRO.get(plantilla_key)
+    if plantilla is None:
+        logger.warning("whatsapp admin: plantilla desconocida %r", plantilla_key)
+        return {"ok": False, "skipped": True, "reason": "plantilla_desconocida", "enviados": 0}
+
+    creds = resolver_creds()
+    if creds is None:
+        return {"ok": True, "skipped": True, "reason": "sin_credenciales", "enviados": 0}
+
+    alquiler_id = pedido.get("id")
+    conn = get_db()
+    try:
+        if not canal_habilitado(conn):
+            return {"ok": True, "skipped": True, "reason": "canal_apagado", "enviados": 0}
+
+        from services.whatsapp.config import destinatarios_admin
+
+        numeros = destinatarios_admin(conn)
+        if not numeros:
+            return {"ok": True, "skipped": True, "reason": "sin_destinatarios", "enviados": 0}
+
+        from whatsapp_cloud import WhatsAppClient, WhatsAppError
+
+        client = WhatsAppClient(
+            phone_number_id=creds.phone_number_id,
+            access_token=creds.access_token,
+            base_url=creds.base_url,
+        )
+        resultados: list[dict] = []
+        enviados = 0
+        for to in numeros:
+            if not destinatario_permitido(to):
+                resultados.append({"to": to, "ok": True, "skipped": True, "reason": "destinatario_no_permitido"})
+                continue
+            # Idempotencia por (pedido, plantilla, número): que uno ya lo haya
+            # recibido no puede dejar sin mensaje al otro.
+            if plantilla.idempotente_por_pedido and alquiler_id:
+                ya = conn.execute(
+                    "SELECT id FROM whatsapp_log WHERE alquiler_id = %s AND template_key = %s "
+                    "AND to_phone = %s AND status = 'sent' LIMIT 1",
+                    (alquiler_id, plantilla.key, to),
+                ).fetchone()
+                if ya:
+                    resultados.append({"to": to, "ok": True, "skipped": True, "reason": "duplicado"})
+                    continue
+            try:
+                res = client.enviar_template(
+                    to=to,
+                    template_name=plantilla.meta_name,
+                    lang_code=plantilla.lang,
+                    body_params=plantilla.params(ctx),
+                )
+            except WhatsAppError as e:
+                _insert_log(
+                    conn, to=to, template_key=plantilla.key, alquiler_id=alquiler_id,
+                    status="failed", wamid=None, error=str(e),
+                )
+                conn.commit()
+                logger.warning("whatsapp admin falló tpl=%s pedido=%s to=%s: %s",
+                               plantilla.key, alquiler_id, to, e)
+                resultados.append({"to": to, "ok": False, "error": str(e)})
+                continue
+            try:
+                _insert_log(
+                    conn, to=to, template_key=plantilla.key, alquiler_id=alquiler_id,
+                    status="sent", wamid=res.message_id, error=None,
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                resultados.append({"to": to, "ok": True, "skipped": True, "reason": "duplicado"})
+                continue
+            enviados += 1
+            resultados.append({"to": to, "ok": True, "wamid": res.message_id})
+
+        return {"ok": all(r.get("ok") for r in resultados), "enviados": enviados, "resultados": resultados}
+    except Exception as e:  # red final: jamás propagar
+        logger.exception("whatsapp admin: error inesperado: %s", e)
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        return {"ok": False, "error": f"error interno: {e}", "enviados": 0}
+    finally:
+        conn.close()

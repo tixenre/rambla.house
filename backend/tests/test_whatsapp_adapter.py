@@ -20,6 +20,7 @@ from services.whatsapp import estado as est
 def test_registro_tiene_los_eventos_esperados():
     assert set(plmod.REGISTRO) == {
         "pedido_creado",
+        "pedido_creado_admin",  # aviso interno al equipo (Pablo/Tincho)
         "pedido_confirmado",
         "recordatorio_retiro",
         "recordatorio_devolucion_d1",

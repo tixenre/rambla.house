@@ -201,6 +201,7 @@ ALLOWED_SETTINGS_KEYS = {
     # Toggle del canal desde el back-office (el token/número van en ENV, no acá).
     # Override por env WHATSAPP_ENABLED — ver services/whatsapp/config.py.
     "whatsapp_enabled",           # Encendido del canal WhatsApp. "1"/"0".
+    "whatsapp_admin_numeros",     # Números del equipo (E.164, coma-separados) para avisos internos.
 }
 
 # Subset de ALLOWED_SETTINGS_KEYS que el catálogo ANÓNIMO (sin sesión) puede

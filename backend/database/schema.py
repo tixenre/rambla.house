@@ -1473,7 +1473,7 @@ def _init_db_schema(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_whatsapp_log_alquiler ON whatsapp_log(alquiler_id)")
     conn.execute("""
         CREATE UNIQUE INDEX IF NOT EXISTS idx_whatsapp_log_idempotente
-        ON whatsapp_log(alquiler_id, template_key)
+        ON whatsapp_log(alquiler_id, template_key, to_phone)
         WHERE status = 'sent'
     """)
     # Opt-in de WhatsApp por cliente (Meta exige consentimiento demostrable para
