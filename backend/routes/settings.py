@@ -196,6 +196,7 @@ ALLOWED_SETTINGS_KEYS = {
     "recordatorios_devolucion_d0_enabled",       # D-0 (día de devolución). "1"/"0".
     "recordatorios_devolucion_vencido_enabled",  # D+1 (vencido, sin devolver). "1"/"0".
     "recordatorios_devolucion_hora",             # Hora AR del barrido. Int 0-23.
+    "recordatorios_devolucion_dias_antes",       # Antelación de la víspera. Int 1-14.
     # ── Canal WhatsApp (Meta Cloud API) ──────────────────────────────
     # Toggle del canal desde el back-office (el token/número van en ENV, no acá).
     # Override por env WHATSAPP_ENABLED — ver services/whatsapp/config.py.

@@ -14,6 +14,11 @@ APAGADAS (el canal WhatsApp además está inerte hasta configurar credencial + o
 | D-0     | REMINDERS_DEVOLUCION_D0      | recordatorios_devolucion_d0_enabled     | off     |
 | vencido | REMINDERS_DEVOLUCION_VENCIDO | recordatorios_devolucion_vencido_enabled| off     |
 | hora    | REMINDERS_DEVOLUCION_HOUR    | recordatorios_devolucion_hora           | 9       |
+| antelac.| REMINDERS_DEVOLUCION_DIAS    | recordatorios_devolucion_dias_antes     | 1       |
+
+`dias_antes` es con cuánta anticipación se manda la ventana "víspera": 1 = el día
+anterior a la devolución (lo de siempre), 2 = dos días antes, etc. D-0 y "vencido"
+no se mueven — están atados al día de la devolución y al día siguiente.
 """
 from __future__ import annotations
 
@@ -25,6 +30,8 @@ from database import get_db
 logger = logging.getLogger(__name__)
 
 DEFAULT_HORA = 9
+DEFAULT_DIAS_ANTES = 1
+MAX_DIAS_ANTES = 14
 _TRUTHY = ("1", "true", "yes", "on")
 
 # Clave de ventana → (env var, app_settings key). El orden es el de envío.
@@ -61,7 +68,7 @@ def _clamp_int(raw: str, default: int, lo: int, hi: int) -> int:
 
 
 def resolve(conn=None) -> dict:
-    """Devuelve `{ventanas: set[str], alguna: bool, hora: int(0-23), <clave>: bool}`.
+    """Devuelve `{ventanas, alguna, hora: int(0-23), dias_antes: int(1-14), <clave>: bool}`.
     `ventanas` son las ventanas prendidas (subconjunto de VENTANAS). `conn=None`
     abre y cierra su propia conexión (uso del scheduler)."""
     propia = conn is None
@@ -73,8 +80,19 @@ def resolve(conn=None) -> dict:
             _env("REMINDERS_DEVOLUCION_HOUR") or _setting(conn, "recordatorios_devolucion_hora"),
             DEFAULT_HORA, 0, 23,
         )
+        dias_antes = _clamp_int(
+            _env("REMINDERS_DEVOLUCION_DIAS")
+            or _setting(conn, "recordatorios_devolucion_dias_antes"),
+            DEFAULT_DIAS_ANTES, 1, MAX_DIAS_ANTES,
+        )
         ventanas = {clave for clave, on in estado.items() if on}
-        return {"ventanas": ventanas, "alguna": bool(ventanas), "hora": hora, **estado}
+        return {
+            "ventanas": ventanas,
+            "alguna": bool(ventanas),
+            "hora": hora,
+            "dias_antes": dias_antes,
+            **estado,
+        }
     finally:
         if propia:
             conn.close()

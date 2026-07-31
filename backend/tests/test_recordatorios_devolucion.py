@@ -20,12 +20,18 @@ class _FakeCur:
 
 
 class _FakeConnPedidos:
-    """Devuelve la misma lista de pedidos para cualquier SELECT del barrido."""
+    """Devuelve la lista de pedidos para el SELECT del barrido.
+
+    Las consultas a `app_settings` (la config de ventanas/antelación, que el job
+    resuelve solo si no se le pasa) devuelven vacío → el job cae a los defaults.
+    Antes este fake contestaba pedidos a CUALQUIER query, incluida la de settings."""
 
     def __init__(self, pedidos):
         self.pedidos = pedidos
 
     def execute(self, sql, params=()):
+        if "app_settings" in sql:
+            return _FakeCur([])
         return _FakeCur(self.pedidos)
 
     def close(self):
@@ -123,3 +129,43 @@ def test_job_cuenta_skipped(monkeypatch):
     r = jd.enviar_recordatorios_devolucion(conn=conn, hoy=_hoy(), ventanas={"d0"})
     assert r["ventanas"]["d0"]["saltados"] == 1
     assert r["ventanas"]["d0"]["enviados"] == 0
+
+
+# ── antelación configurable de la víspera (pedido del dueño) ──────────────
+def test_dias_antes_mueve_solo_la_ventana_vispera(monkeypatch):
+    """`dias_antes=3` busca devoluciones de 3 días adelante en la víspera; D-0 y
+    'vencido' NO se mueven (son puntos fijos, no antelación)."""
+    import jobs.recordatorios_devolucion as jd
+
+    vistos: list[tuple[str, int]] = []
+
+    def fake_pedidos(conn, hoy, offset_dias, template_key):
+        vistos.append((template_key, offset_dias))
+        return []
+
+    monkeypatch.setattr(jd, "_pedidos_para_devolucion", fake_pedidos)
+    jd.enviar_recordatorios_devolucion(conn=_FakeConnPedidos([]), hoy=_hoy(), dias_antes=3)
+
+    por_tpl = dict(vistos)
+    assert por_tpl["recordatorio_devolucion_d1"] == 3      # la víspera se corrió
+    assert por_tpl["recordatorio_devolucion_d0"] == 0      # fijo
+    assert por_tpl["recordatorio_devolucion_vencido"] == -1  # fijo
+
+
+def test_dias_antes_sale_de_la_config_si_no_se_pasa(monkeypatch):
+    import jobs.recordatorios_devolucion as jd
+    import jobs.recordatorios_devolucion_config as cfg
+
+    monkeypatch.setattr(cfg, "resolve", lambda conn=None: {"dias_antes": 5})
+    monkeypatch.setattr(jd, "_pedidos_para_devolucion", lambda *a, **k: [])
+    out = jd.enviar_recordatorios_devolucion(conn=_FakeConnPedidos([]), hoy=_hoy())
+    assert out["dias_antes"] == 5
+
+
+def test_config_clampea_la_antelacion():
+    """Fuera de rango o basura → default, sin romper el barrido."""
+    from jobs.recordatorios_devolucion_config import _clamp_int, DEFAULT_DIAS_ANTES
+
+    assert _clamp_int("999", DEFAULT_DIAS_ANTES, 1, 14) == 14
+    assert _clamp_int("0", DEFAULT_DIAS_ANTES, 1, 14) == 1
+    assert _clamp_int("xx", DEFAULT_DIAS_ANTES, 1, 14) == DEFAULT_DIAS_ANTES

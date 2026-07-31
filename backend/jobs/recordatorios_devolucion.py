@@ -29,11 +29,18 @@ logger = logging.getLogger(__name__)
 ESTADO_RECORDABLE = "retirado"
 
 # clave de ventana → (template_key, offset en días de fecha_hasta respecto de hoy).
+# El offset de "d1" (la víspera) es el DEFAULT: la antelación real es configurable
+# desde el back-office (`recordatorios_devolucion_dias_antes`, 1-14) y entra por
+# `dias_antes` en `enviar_recordatorios_devolucion`. D-0 y "vencido" NO se mueven:
+# están atados al día de la devolución y al día siguiente, no son "antelación".
 VENTANAS = {
-    "d1": ("recordatorio_devolucion_d1", 1),        # devuelve mañana
+    "d1": ("recordatorio_devolucion_d1", 1),        # víspera (antelación configurable)
     "d0": ("recordatorio_devolucion_d0", 0),        # devuelve hoy
     "vencido": ("recordatorio_devolucion_vencido", -1),  # venció ayer, sin devolver
 }
+
+# La única ventana cuya antelación se puede elegir (las otras dos son puntos fijos).
+VENTANA_CONFIGURABLE = "d1"
 
 
 def _pedidos_para_devolucion(conn, hoy, offset_dias: int, template_key: str) -> list[dict]:
@@ -66,11 +73,13 @@ def _pedidos_para_devolucion(conn, hoy, offset_dias: int, template_key: str) -> 
 
 
 def enviar_recordatorios_devolucion(
-    conn=None, *, hoy=None, ventanas=None, dry_run: bool = False
+    conn=None, *, hoy=None, ventanas=None, dias_antes: int | None = None, dry_run: bool = False
 ) -> dict:
     """Manda (o simula, si `dry_run`) el recordatorio de devolución por WhatsApp para
     cada ventana activa. `ventanas` es un iterable de claves de `VENTANAS` (default:
-    todas). Devuelve `{fecha, ventanas:{clave:{candidatos,enviados,fallidos,...}}}`.
+    todas). `dias_antes` es la antelación de la ventana "víspera" (default: la
+    configurada en el back-office). Devuelve
+    `{fecha, dias_antes, ventanas:{clave:{candidatos,enviados,fallidos,...}}}`.
 
     `conn=None` abre y cierra su propia conexión. Nunca propaga: `enviar_evento_pedido`
     ya traga y loguea sus errores; acá se contabiliza el resultado."""
@@ -79,12 +88,24 @@ def enviar_recordatorios_devolucion(
         conn = get_db()
     hoy = hoy or now_ar()
     activas = set(ventanas) if ventanas is not None else set(VENTANAS)
+    if dias_antes is None:
+        from jobs.recordatorios_devolucion_config import resolve as _resolve_dev
+
+        dias_antes = _resolve_dev(conn)["dias_antes"]
     try:
-        resumen: dict = {"fecha": hoy.date().isoformat(), "dry_run": dry_run, "ventanas": {}}
+        resumen: dict = {
+            "fecha": hoy.date().isoformat(),
+            "dry_run": dry_run,
+            "dias_antes": dias_antes,
+            "ventanas": {},
+        }
         for clave in VENTANAS:  # orden estable
             if clave not in activas:
                 continue
             template_key, offset = VENTANAS[clave]
+            # La víspera usa la antelación elegida; D-0 y "vencido" son fijos.
+            if clave == VENTANA_CONFIGURABLE:
+                offset = dias_antes
             pedidos = _pedidos_para_devolucion(conn, hoy, offset, template_key)
             v = {"candidatos": len(pedidos), "enviados": 0, "fallidos": 0, "saltados": 0, "pedidos": []}
             for p in pedidos:

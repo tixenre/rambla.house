@@ -51,7 +51,7 @@ REGISTRO: dict[str, PlantillaWA] = {
         descripcion="Acuse al cliente cuando entra una solicitud de reserva.",
         copy_ejemplo=(
             "Hola {{1}} 👋 Recibimos tu solicitud de reserva Nº {{2}} en Rambla. "
-            "Te avisamos apenas la confirmemos. ¡Gracias!"
+            "Te avisamos apenas la confirmemos. El detalle lo tenés en tu portal."
         ),
         campos_ctx=("cliente_nombre", "numero_pedido"),
     ),
@@ -62,8 +62,8 @@ REGISTRO: dict[str, PlantillaWA] = {
         idempotente_por_pedido=True,
         descripcion="Aviso al cliente cuando su reserva pasa a confirmada.",
         copy_ejemplo=(
-            "Hola {{1}} 🎬 Tu reserva Nº {{2}} en Rambla quedó CONFIRMADA. "
-            "Retiro: {{3}}. Cualquier cosa, respondé este mensaje."
+            "Hola {{1}} 🎬 Tu reserva Nº {{2}} en Rambla quedó confirmada. "
+            "Retirás el {{3}}. El detalle y los documentos están en tu portal."
         ),
         campos_ctx=("cliente_nombre", "numero_pedido", "fecha_desde"),
     ),
@@ -74,8 +74,8 @@ REGISTRO: dict[str, PlantillaWA] = {
         idempotente_por_pedido=True,
         descripcion="Recordatorio D-1 del retiro del equipo (reserva confirmada).",
         copy_ejemplo=(
-            "Hola {{1}} 📸 Te recordamos que mañana retirás el equipo de tu reserva "
-            "Nº {{2}} ({{3}}). ¡Te esperamos!"
+            "Hola {{1}} 📸 Te recordamos que tu reserva Nº {{2}} se retira el {{3}}. "
+            "Te esperamos. Cualquier duda, respondé este mensaje."
         ),
         campos_ctx=("cliente_nombre", "numero_pedido", "fecha_desde"),
     ),
@@ -86,7 +86,7 @@ REGISTRO: dict[str, PlantillaWA] = {
         idempotente_por_pedido=True,
         descripcion="Recordatorio la víspera de la devolución (D-1).",
         copy_ejemplo=(
-            "Hola {{1}} ⏰ Te recordamos que tu reserva Nº {{2}} vence mañana ({{3}}): "
+            "Hola {{1}} ⏰ Te recordamos que tu reserva Nº {{2}} vence el {{3}}: "
             "pasá a devolver el equipo. ¡Gracias!"
         ),
         campos_ctx=("cliente_nombre", "numero_pedido", "fecha_hasta"),
