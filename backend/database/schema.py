@@ -543,6 +543,34 @@ def _init_db_schema(conn):
         CREATE INDEX IF NOT EXISTS idx_pedido_items_equipo ON alquiler_items(equipo_id)
     """)
 
+    # Un turno del Estudio embebido en un pedido de alquiler normal (tipo='diaria') es un GRUPO de
+    # alquiler_items (centinela + opcional promo/sueltos/pintura) colgando de la MISMA fila de
+    # alquileres, en vez de una fila `alquileres` aparte vinculada por pedido_principal_id. Aditivo
+    # puro: ninguna fila existente tiene turno_estudio_id poblado (cero cambio de comportamiento).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS alquiler_turnos_estudio (
+            id                      SERIAL PRIMARY KEY,
+            pedido_id               INTEGER NOT NULL REFERENCES alquileres(id) ON DELETE CASCADE,
+            fecha_desde             TIMESTAMP NOT NULL,
+            fecha_hasta             TIMESTAMP NOT NULL,
+            descuento_pct           NUMERIC(7,4) NOT NULL DEFAULT 0,
+            descuento_manual_tipo   VARCHAR(10) NOT NULL DEFAULT 'pct',
+            descuento_manual_monto  INTEGER NOT NULL DEFAULT 0,
+            created_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_turnos_estudio_pedido ON alquiler_turnos_estudio(pedido_id)
+    """)
+    conn.execute(
+        "ALTER TABLE alquiler_items ADD COLUMN IF NOT EXISTS turno_estudio_id "
+        "INTEGER REFERENCES alquiler_turnos_estudio(id) ON DELETE CASCADE"
+    )
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_pedido_items_turno_estudio ON alquiler_items(turno_estudio_id)
+    """)
+
     # NOTA: tabla `usuarios` (auth email+password legacy) removida en #76.
     # Auth ahora es 100% Google OAuth + Supabase. La migración Alembic
     # `322b...drop_tabla_usuarios_legacy_76` hace el DROP en prod.
