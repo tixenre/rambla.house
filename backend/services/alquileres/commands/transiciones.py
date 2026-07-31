@@ -351,16 +351,6 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
     set_clause = ", ".join(f"{k}=%s" for k in updates)
     conn.execute(f"UPDATE alquileres SET {set_clause} WHERE id=%s", (*updates.values(), pedido_id))
 
-    # Import diferido — evita el ciclo alquileres↔cliente_portal (mismo
-    # workaround que ya usaba `update_pedido`).
-    from routes.cliente_portal import ESTADOS_MODIFICABLES, _cancelar_solicitudes_pendientes
-    if estado_nuevo not in ESTADOS_MODIFICABLES:
-        _cancelar_solicitudes_pendientes(
-            conn, pedido_id,
-            motivo=f"El pedido pasó a estado '{estado_nuevo}'.",
-            actor=actor,
-        )
-
     from services.alquileres.commands.pedido import _maybe_finalizar
     _maybe_finalizar(conn, pedido_id)
 

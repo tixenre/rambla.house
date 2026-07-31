@@ -8,20 +8,15 @@
 
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { clienteApi } from "@/lib/cliente/api";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
 import { PagoBadge } from "@/design-system/ui/PagoBadge";
-import { Pill } from "@/design-system/ui/Pill";
 import {
   ArrowRight,
   ChevronDown,
   ShoppingBag,
-  Pencil,
   Clock,
   X as XIcon,
-  CheckCircle2,
   XCircle,
-  Info,
   FileText,
   FileSignature,
   Truck,
@@ -56,7 +51,6 @@ import { EmptyState } from "@/design-system/composites/EmptyState";
 import { useBusinessPhone } from "@/lib/business";
 import { jornadasFromISO as jornadasEntre } from "@/lib/rental-dates";
 import { whatsappLink } from "@/lib/whatsapp";
-import { MODIFICAR_PEDIDOS_HABILITADO } from "@/lib/features";
 import { useCart } from "@/lib/cart-store";
 import { rearmarCarrito } from "@/lib/rearmar-carrito";
 import { GuardarComoListaButton } from "@/components/rental/GuardarComoListaButton";
@@ -64,14 +58,7 @@ import { CompartirComposicionButton } from "@/components/rental/CompartirComposi
 import { cn } from "@/lib/utils";
 import { ESTADO_SOLID, ESTADO_RING } from "@/design-system/ui/estado-color";
 import type { EstadoPedido } from "@/lib/pedido-estados";
-import {
-  fmt,
-  fmtDate,
-  fmtTime,
-  wasDocSeen,
-  markDocSeen,
-  MODIFICABLE_STATES,
-} from "./ClientePortalTypes";
+import { fmt, fmtDate, fmtTime, wasDocSeen, markDocSeen } from "./ClientePortalTypes";
 import { DOC_LABEL, DOC_DESCRIPTION, type Pedido, type DocTipo } from "./ClientePortalTypes";
 
 // ── Constantes de docs (solo usadas aquí) ────────────────────────────────────
@@ -142,60 +129,8 @@ function buildTimelineSteps(pedido: Pedido): TLStep[] {
     state: idx < progress ? "done" : "pending",
   }));
 
-  // Eventos de modificación derivados de solicitudes[]. Solo mostramos al
-  // cliente las que él inició: pendiente/aprobada/rechazada, más las
-  // canceladas-por-sistema (cuando el pedido cambia de estado y se anula
-  // la solicitud). Las que él mismo canceló no las mostramos — ya lo sabe.
-  const mods: TLStep[] = [];
-  for (const sol of pedido.solicitudes ?? []) {
-    mods.push({
-      key: `mod_sol-${sol.id}`,
-      label: "Modificación solicitada",
-      desc: "Pediste un cambio en el pedido.",
-      fecha: sol.created_at,
-      state: sol.estado === "pendiente" ? "current" : "done",
-    });
-    if (sol.estado === "aprobada") {
-      mods.push({
-        key: `mod_ap-${sol.id}`,
-        label: "Modificación aceptada",
-        desc: "Aplicamos el cambio que pediste.",
-        fecha: sol.resolved_at,
-        nota: sol.respuesta,
-        state: "done",
-      });
-    } else if (sol.estado === "rechazada") {
-      mods.push({
-        key: `mod_re-${sol.id}`,
-        label: "Modificación rechazada",
-        desc: "No pudimos aplicar el cambio.",
-        fecha: sol.resolved_at,
-        nota: sol.respuesta,
-        state: "rejected",
-      });
-    } else if (sol.estado === "cancelada" && sol.resolved_by === "system") {
-      mods.push({
-        key: `mod_ca-${sol.id}`,
-        label: "Solicitud anulada",
-        desc: "El pedido cambió de estado y la solicitud quedó sin efecto.",
-        fecha: sol.resolved_at,
-        nota: sol.respuesta,
-        state: "rejected",
-      });
-    }
-  }
-
-  // Mezclar: ítems con fecha en orden cronológico + flow sin fecha
-  // mantienen su posición relativa después.
-  const withDate = [...flow.filter((s) => s.fecha), ...mods.filter((m) => m.fecha)].sort((a, b) =>
-    (a.fecha ?? "").localeCompare(b.fecha ?? ""),
-  );
-  const withoutDate = flow.filter((s) => !s.fecha);
-
-  let merged: TLStep[] = [...withDate, ...withoutDate];
-
   if (cancelado) {
-    merged = merged.filter((it) => it.state !== "pending");
+    const merged = flow.filter((it) => it.state !== "pending");
     merged.push({
       key: "cancelado",
       label: "Cancelado",
@@ -205,18 +140,14 @@ function buildTimelineSteps(pedido: Pedido): TLStep[] {
     return merged;
   }
 
-  // Marcar paso actual: si ya hay un "current" (por solicitud pendiente)
-  // no tocamos; sino, el último "done" pasa a "current".
-  const hasCurrent = merged.some((it) => it.state === "current");
-  if (!hasCurrent) {
-    let lastDone = -1;
-    for (let i = 0; i < merged.length; i++) {
-      if (merged[i].state === "done") lastDone = i;
-    }
-    if (lastDone >= 0) merged[lastDone].state = "current";
+  // Marcar paso actual: el último "done" pasa a "current".
+  let lastDone = -1;
+  for (let i = 0; i < flow.length; i++) {
+    if (flow[i].state === "done") lastDone = i;
   }
+  if (lastDone >= 0) flow[lastDone].state = "current";
 
-  return merged;
+  return flow;
 }
 
 function fmtTimelineDateTime(s?: string | null): string | null {
@@ -299,16 +230,12 @@ export function PedidoCard({
   expanded,
   highlight = false,
   onToggle,
-  ventanaHoras,
-  onChanged,
   perfilImpuestos,
 }: {
   pedido: Pedido;
   expanded: boolean;
   highlight?: boolean;
   onToggle: () => void;
-  ventanaHoras: number;
-  onChanged: () => void;
   perfilImpuestos: string | null;
 }) {
   const navigate = useNavigate();
@@ -338,8 +265,6 @@ export function PedidoCard({
     }
   }
 
-  const [askCancel, setAskCancel] = useState(false);
-
   // Repetir pedido: rearma el carrito con los equipos de catálogo de este pedido
   // y lleva a elegir nuevas fechas. Re-resuelve precio y disponibilidad ACTUALES
   // (no reusa el snapshot del pedido — ver lib/rearmar-carrito.ts). Las líneas
@@ -367,48 +292,6 @@ export function PedidoCard({
       return;
     }
     repetirPedido();
-  }
-
-  const pendiente = (pedido.solicitudes ?? []).find((s) => s.estado === "pendiente");
-  // Última solicitud que el cliente debe ver: aprobada, rechazada, o
-  // cancelada por el sistema (cuando el pedido cambia de estado). Las
-  // canceladas por el propio cliente las ocultamos: él la canceló.
-  const ultimaResuelta = !pendiente
-    ? (pedido.solicitudes ?? [])
-        .filter((s) => {
-          if (s.estado === "aprobada" || s.estado === "rechazada") return true;
-          if (s.estado === "cancelada" && s.resolved_by === "system") return true;
-          return false;
-        })
-        .sort((a, b) =>
-          (b.resolved_at ?? b.created_at).localeCompare(a.resolved_at ?? a.created_at),
-        )[0]
-    : undefined;
-
-  const dentroVentana = (() => {
-    if (!pedido.fecha_desde) return true; // pedido sin fechas: permitir editar
-    const desde = new Date(pedido.fecha_desde.slice(0, 10) + "T00:00:00").getTime();
-    if (Number.isNaN(desde)) return true; // fecha inválida: no bloqueamos
-    const ms = ventanaHoras * 60 * 60 * 1000;
-    return desde - Date.now() >= ms;
-  })();
-
-  // Modificación de pedidos por el cliente: PAUSADA por feature flag (#750).
-  const puedeModificar =
-    MODIFICAR_PEDIDOS_HABILITADO &&
-    MODIFICABLE_STATES.has(pedido.estado) &&
-    !pendiente &&
-    dentroVentana;
-
-  async function cancelarSolicitud() {
-    if (!pendiente) return;
-    try {
-      await clienteApi.cancelarSolicitud(pedido.id, pendiente.id);
-      toast.success("Solicitud cancelada");
-      onChanged();
-    } catch (e) {
-      toast.error((e as Error).message);
-    }
   }
 
   // Desglose canónico desde el backend (services/precios.calcular_total).
@@ -450,11 +333,7 @@ export function PedidoCard({
           <span className="font-mono text-sm font-bold text-ink tracking-[0.04em]">
             #{pedido.numero_pedido}
           </span>
-          {pendiente ? (
-            <Pill tone="warning">Mod. pendiente</Pill>
-          ) : (
-            <EstadoBadge estado={pedido.estado} />
-          )}
+          <EstadoBadge estado={pedido.estado} />
           {pedido.monto_total != null && (
             <PagoBadge pagado={pagado} total={total} estado={pedido.estado} />
           )}
@@ -480,106 +359,26 @@ export function PedidoCard({
             )}
           />
         </button>
-        {!expanded && puedeModificar && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              navigate({
-                to: "/cliente/pedidos/$id/editar",
-                params: { id: String(pedido.id) },
-              });
-            }}
-            className="shrink-0 px-3 sm:px-4 border-l border-[var(--hairline)] text-ink hover:bg-amber-soft transition inline-flex items-center gap-1.5"
-            aria-label="Modificar pedido"
-          >
-            <Pencil className="h-3.5 w-3.5" />
-            <span className="font-sans text-xs font-semibold hidden sm:inline">Modificar</span>
-          </button>
-        )}
       </div>
 
       {expanded && (
         <div className="border-t border-dashed border-[var(--hairline)] px-portal pt-[18px] pb-[22px] grid gap-y-5 gap-x-7 animate-[expand-in_.22s_ease-out] [grid-template-areas:'banner''timeline''docs''main''side'] lg:[grid-template-columns:minmax(0,1fr)_clamp(20rem,26%,25rem)] lg:[grid-template-rows:auto_auto_min-content_min-content_1fr] lg:[grid-template-areas:'banner_banner''timeline_timeline''main_docs''main_side''main_.']">
-          {/* ── Banner: solicitud pendiente / resuelta / bienvenida (full width) ── */}
-          {(pendiente || ultimaResuelta || showWelcome) && (
+          {/* ── Banner: bienvenida al pedido recién solicitado (full width) ── */}
+          {showWelcome && (
             <div className="[grid-area:banner] flex flex-col gap-3">
-              {showWelcome && (
-                <section className="rounded-md border border-amber bg-amber-soft px-3.5 py-3 flex items-start gap-2.5">
-                  <CircleCheckBig className="h-4 w-4 text-amber mt-0.5 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-sans text-base font-semibold text-ink">
-                      ¡Recibimos tu solicitud!
-                    </div>
-                    <div className="font-sans text-xs text-ink/70 mt-0.5">
-                      La estamos revisando. Cuando confirmemos la disponibilidad vas a poder
-                      descargar el remito y el contrato desde acá. Seguí el estado en la línea de
-                      tiempo de abajo.
-                    </div>
+              <section className="rounded-md border border-amber bg-amber-soft px-3.5 py-3 flex items-start gap-2.5">
+                <CircleCheckBig className="h-4 w-4 text-amber mt-0.5 shrink-0" />
+                <div className="flex-1 min-w-0">
+                  <div className="font-sans text-base font-semibold text-ink">
+                    ¡Recibimos tu solicitud!
                   </div>
-                </section>
-              )}
-              {pendiente && (
-                <section className="rounded-md border border-amber bg-amber-soft px-3.5 py-3 flex items-start gap-2.5">
-                  <Clock className="h-4 w-4 text-amber mt-0.5 shrink-0" />
-                  <div className="flex-1 min-w-0">
-                    <div className="font-sans text-base font-semibold text-ink">
-                      Solicitud de modificación pendiente
-                    </div>
-                    <div className="font-sans text-xs text-ink/70 mt-0.5">
-                      Estamos revisando los cambios que pediste. Te avisamos por mail cuando los
-                      resolvamos.
-                    </div>
+                  <div className="font-sans text-xs text-ink/70 mt-0.5">
+                    La estamos revisando. Cuando confirmemos la disponibilidad vas a poder descargar
+                    el remito y el contrato desde acá. Seguí el estado en la línea de tiempo de
+                    abajo.
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setAskCancel(true)}
-                    className="rounded-full px-4 py-2 font-sans text-sm font-semibold text-ink border border-ink/20 hover:border-ink transition shrink-0 inline-flex items-center gap-1.5 min-h-[40px]"
-                  >
-                    <XIcon className="h-3.5 w-3.5" /> Cancelar
-                  </button>
-                </section>
-              )}
-
-              {ultimaResuelta &&
-                (() => {
-                  const isAprobada = ultimaResuelta.estado === "aprobada";
-                  const isRechazada = ultimaResuelta.estado === "rechazada";
-                  const isSystemCancel = ultimaResuelta.estado === "cancelada"; // ya filtramos por resolved_by='system'
-                  const titulo = isAprobada
-                    ? "Tu última solicitud fue aprobada"
-                    : isRechazada
-                      ? "Tu última solicitud fue rechazada"
-                      : "Tu solicitud quedó sin efecto";
-                  return (
-                    <section
-                      className={cn(
-                        "rounded-md border px-3.5 py-3 flex items-start gap-2.5",
-                        isAprobada
-                          ? "border-verde/30 bg-verde/10"
-                          : isRechazada
-                            ? "border-destructive/30 bg-destructive/10"
-                            : "border-azul/30 bg-azul/10",
-                      )}
-                    >
-                      {isAprobada ? (
-                        <CheckCircle2 className="h-4 w-4 text-verde mt-0.5 shrink-0" />
-                      ) : isRechazada ? (
-                        <XCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
-                      ) : (
-                        <Info className="h-4 w-4 text-azul mt-0.5 shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <div className="font-sans text-base font-semibold text-ink">{titulo}</div>
-                        {ultimaResuelta.respuesta && (
-                          <div className="font-sans text-xs text-ink/80 mt-0.5 whitespace-pre-wrap">
-                            {isSystemCancel ? ultimaResuelta.respuesta : ultimaResuelta.respuesta}
-                          </div>
-                        )}
-                      </div>
-                    </section>
-                  );
-                })()}
+                </div>
+              </section>
             </div>
           )}
 
@@ -743,39 +542,6 @@ export function PedidoCard({
               </ul>
             </section>
 
-            {puedeModificar && (
-              <section>
-                <button
-                  type="button"
-                  onClick={() =>
-                    navigate({
-                      to: "/cliente/pedidos/$id/editar",
-                      params: { id: String(pedido.id) },
-                    })
-                  }
-                  className="inline-flex items-center gap-1.5 rounded-full bg-ink px-4 py-2 font-sans text-sm font-bold text-amber hover:bg-amber hover:text-ink transition"
-                >
-                  <Pencil className="h-3.5 w-3.5" /> Modificar pedido
-                </button>
-                {pedido.estado === "confirmado" && (
-                  <p className="mt-2 font-sans text-xs text-muted-foreground">
-                    Los cambios necesitarán nuestra aprobación.
-                  </p>
-                )}
-              </section>
-            )}
-
-            {MODIFICAR_PEDIDOS_HABILITADO &&
-              !puedeModificar &&
-              MODIFICABLE_STATES.has(pedido.estado) &&
-              !pendiente &&
-              !dentroVentana && (
-                <section className="rounded-md border border-dashed border-[var(--hairline)] px-3.5 py-2.5 font-sans text-xs text-muted-foreground">
-                  No es posible modificar este pedido a menos de {ventanaHoras} h del retiro.
-                  Contactanos directamente.
-                </section>
-              )}
-
             {itemsRepetibles.length > 0 && (
               <section>
                 <Button
@@ -818,6 +584,9 @@ export function PedidoCard({
               if (!waHref) return null;
               return (
                 <section>
+                  <p className="mb-2 font-sans text-xs text-muted-foreground">
+                    ¿Necesitás modificar el pedido (fechas, equipos)? Escribinos por WhatsApp.
+                  </p>
                   <a
                     href={waHref}
                     target="_blank"
@@ -945,28 +714,6 @@ export function PedidoCard({
           <AlertDialogFooter>
             <AlertDialogCancel>Volver</AlertDialogCancel>
             <AlertDialogAction onClick={repetirPedido}>Reemplazar y repetir</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={askCancel} onOpenChange={setAskCancel}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Cancelar solicitud de modificación</AlertDialogTitle>
-            <AlertDialogDescription>
-              Vamos a descartar los cambios que pediste. El pedido va a quedar como estaba.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Volver</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={() => {
-                setAskCancel(false);
-                cancelarSolicitud();
-              }}
-            >
-              Cancelar solicitud
-            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

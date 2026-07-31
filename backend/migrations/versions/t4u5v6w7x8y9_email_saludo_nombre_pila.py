@@ -44,8 +44,15 @@ def _q(s: str) -> str:
 
 
 def upgrade() -> None:
+    # `.get(...)` + skip: `modificacion_resuelta_cliente` se retiró después
+    # (`s0l1c1tudb4j`), que también la saca de `DEFAULT_TEMPLATES` — un
+    # bootstrap fresco nunca la tuvo, así que esto no-opea para esa key en vez
+    # de romper `alembic upgrade head` con un KeyError. Prod no se ve afectado
+    # (esta migración ya corrió cuando la key existía).
     for key in _KEYS:
-        tpl = DEFAULT_TEMPLATES[key]
+        tpl = DEFAULT_TEMPLATES.get(key)
+        if tpl is None:
+            continue
         op.execute(
             f"""
             UPDATE email_templates

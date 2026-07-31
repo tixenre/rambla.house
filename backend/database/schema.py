@@ -1110,40 +1110,6 @@ def _init_db_schema(conn):
     conn.execute("ALTER TABLE alquiler_pagos ADD COLUMN IF NOT EXISTS anulado_at TIMESTAMP")
     conn.execute("ALTER TABLE alquiler_pagos ADD COLUMN IF NOT EXISTS anulado_motivo TEXT")
 
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS solicitudes_modificacion (
-            id                SERIAL PRIMARY KEY,
-            pedido_id         INTEGER NOT NULL REFERENCES alquileres(id) ON DELETE CASCADE,
-            cliente_id        INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-            mensaje           TEXT,
-            estado            TEXT NOT NULL DEFAULT 'pendiente',
-            respuesta         TEXT,
-            cambios_json      JSONB,
-            cambios_aplicados JSONB,
-            tipo              TEXT NOT NULL DEFAULT 'aprobacion',
-            resolved_at       TIMESTAMPTZ,
-            resolved_by       TEXT,
-            created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_solicitudes_pedido ON solicitudes_modificacion(pedido_id)
-    """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_solicitudes_estado ON solicitudes_modificacion(estado)
-    """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_solicitudes_cliente ON solicitudes_modificacion(cliente_id)
-    """)
-    # Garantía atómica de "una sola solicitud pendiente por pedido": previene
-    # races multi-tab donde dos requests pasan el check optimista y ambos
-    # insertan.
-    conn.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS uniq_solicitud_pendiente_por_pedido
-        ON solicitudes_modificacion (pedido_id)
-        WHERE estado = 'pendiente'
-    """)
-
     # Configuración global de la app (tipo de cambio, defaults, etc.).
     # Es un key-value simple: clave única + valor (string serializado).
     # Se accede vía /api/settings/:key (público read) y PUT /api/admin/settings/:key.
@@ -1541,8 +1507,7 @@ def _init_db_schema(conn):
     from dataio.slug import backfill_equipos_slug
     backfill_equipos_slug(conn)
 
-    # JSONB agregadas por migraciones (b6f8d3e5a2c1, d7c9e1f3a8b2)
-    conn.execute("ALTER TABLE solicitudes_modificacion ADD COLUMN IF NOT EXISTS cambios_json JSONB")
+    # JSONB agregadas por migraciones (d7c9e1f3a8b2)
     conn.execute("ALTER TABLE spec_definitions ADD COLUMN IF NOT EXISTS tabla_columnas JSONB")
 
     # Canonización de spec_keys (#535): renombres idempotentes en spec_definitions.

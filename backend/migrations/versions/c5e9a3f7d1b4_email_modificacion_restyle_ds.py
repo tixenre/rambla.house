@@ -48,8 +48,14 @@ def _q(s: str) -> str:
 
 
 def upgrade() -> None:
+    # `.get(...)` + skip: la feature se retiró después (`s0l1c1tudb4j`), que
+    # también saca estas 3 keys de `DEFAULT_TEMPLATES` — un bootstrap fresco
+    # nunca las tuvo, así que esto no-opea ahí en vez de romper `alembic
+    # upgrade head` con un KeyError. Prod no se ve afectado (ya corrió).
     for key in _KEYS:
-        tpl = DEFAULT_TEMPLATES[key]
+        tpl = DEFAULT_TEMPLATES.get(key)
+        if tpl is None:
+            continue
         op.execute(
             f"""
             UPDATE email_templates

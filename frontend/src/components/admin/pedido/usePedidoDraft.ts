@@ -1,21 +1,15 @@
 /**
- * usePedidoDraft — estado local del pedido + autoguardado debounced.
+ * usePedidoDraft — estado local del pedido (admin) + autoguardado debounced.
  *
- * Patrón:
- *  - Lee el pedido desde el server (react-query) y hace de "fuente de verdad" inicial.
- *  - Mantiene un draft local mutable; cada cambio dispara un auto-save debounced
- *    (en `submitMode='autosave'`) o queda pendiente hasta que el caller invoque
- *    `submitProposal()` (en `submitMode='propose'`).
- *  - Persiste por separado (admin) o vía endpoint unificado (cliente):
- *     · admin    → PATCH /datos + PUT /items (separados)
- *     · cliente  → POST /api/cliente/pedidos/{id}/modificacion (unificado)
+ * Patrón: lee el pedido desde el server (react-query) como "fuente de verdad"
+ * inicial, mantiene un draft local mutable, y cada cambio dispara un auto-save
+ * debounced vía PATCH /datos + PUT /items (separados).
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { adminApi, type Pedido, type PedidoEstado } from "@/lib/admin/api";
-import { clienteApi } from "@/lib/cliente/api";
 
 export type DraftItem = {
   /** Key estable para render + drag (#806). equipo_id no sirve: las líneas
@@ -72,9 +66,6 @@ export type DraftDatos = {
   perfil_fiscal_id: number | null;
   productora_id: number | null;
 };
-
-export type PedidoMode = "admin" | "cliente";
-export type SubmitMode = "autosave" | "propose";
 
 const DEBOUNCE_MS = 700;
 
@@ -150,32 +141,7 @@ function shallowItemsEq(a: DraftItem[], b: DraftItem[]): boolean {
 
 export type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error";
 
-/** Devuelve un string con la razón por la que el draft no se puede enviar,
- * o null si está OK. Usado para gatear el botón de "Enviar solicitud". */
-function validateForSubmit(d: DraftDatos, its: DraftItem[]): string | null {
-  if (its.length === 0) return "Agregá al menos un equipo";
-  for (const it of its) {
-    if (!Number.isFinite(it.cantidad) || it.cantidad <= 0) {
-      return `La cantidad de "${it.nombre}" debe ser mayor a 0`;
-    }
-  }
-  if (d.fecha_desde && d.fecha_hasta) {
-    if (d.fecha_desde >= d.fecha_hasta) {
-      return "La fecha de devolución debe ser posterior a la de retiro";
-    }
-  }
-  return null;
-}
-
 export type UsePedidoDraftOptions = {
-  /** 'admin' (default) usa endpoints /api/alquileres/...; 'cliente' usa /api/cliente/... */
-  mode?: PedidoMode;
-  /** 'autosave' (default) guarda con debounce; 'propose' acumula hasta submitProposal(). */
-  submitMode?: SubmitMode;
-  /** Mensaje opcional que viaja en submit del cliente (sólo modo cliente). */
-  mensaje?: string;
-  /** Callback cuando una propuesta se envía con éxito. Sólo modo cliente+propose. */
-  onProposalSent?: (tipo: "directo" | "aprobacion") => void;
   /** Conservar la hora en `fecha_desde`/`fecha_hasta` (datetime, no date-only).
    * Para el editor que usa el selector de fechas+horas; el resto deja date-only
    * por compat con `<input type=date>`. Default false. */
@@ -183,13 +149,7 @@ export type UsePedidoDraftOptions = {
 };
 
 export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftOptions = {}) {
-  const {
-    mode = "admin",
-    submitMode = "autosave",
-    mensaje,
-    onProposalSent,
-    keepDateTime = false,
-  } = opts;
+  const { keepDateTime = false } = opts;
   const qc = useQueryClient();
 
   // Snapshot del server (lo que está persistido)
@@ -245,47 +205,6 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
       }
     },
     onError: (e: Error) => toast.error(`Equipos: ${e.message}`),
-  });
-
-  // ── Mutation (cliente) — envía datos+items combinados ──────────────────
-  const clienteMut = useMutation({
-    mutationFn: (payload: { d: DraftDatos; its: DraftItem[] }) =>
-      clienteApi.enviarModificacion(pedido!.id, {
-        fecha_desde: payload.d.fecha_desde || null,
-        fecha_hasta: payload.d.fecha_hasta || null,
-        // El portal del cliente no maneja líneas personalizadas (#805) → solo
-        // ítems de catálogo (con equipo_id).
-        items: payload.its
-          .filter((it) => it.equipo_id != null)
-          .map((it) => ({
-            equipo_id: it.equipo_id as number,
-            cantidad: it.cantidad,
-          })),
-        mensaje: mensaje || null,
-      }),
-    onSuccess: (resp) => {
-      qc.invalidateQueries({ queryKey: ["cliente", "pedido", pedido!.id] });
-      qc.invalidateQueries({ queryKey: ["cliente", "pedidos"] });
-      if (resp.tipo === "directo" && "pedido" in resp && serverRef.current) {
-        serverRef.current.datos = pedidoToDatos(resp.pedido, keepDateTime);
-        serverRef.current.items = pedidoToItems(resp.pedido);
-      }
-      onProposalSent?.(resp.tipo);
-    },
-    onError: (e: Error) => {
-      // Importante: NO invalidamos la query. El refetch + useEffect reset
-      // pisaría los cambios locales del cliente sin que se dé cuenta. En
-      // su lugar dejamos el draft "dirty" y mostramos el error claro.
-      // El SaveIndicator muestra "Error al guardar" hasta que vuelva a
-      // editar y disparar otro autosave.
-      const m = e.message || "";
-      const friendly = m.includes("Sin stock")
-        ? `${m} — ajustá las cantidades o las fechas y volvemos a guardar.`
-        : m.includes("ventana")
-          ? m
-          : `No pudimos guardar: ${m}`;
-      toast.error(friendly);
-    },
   });
 
   const estadoMut = useMutation({
@@ -364,21 +283,14 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
   ]);
 
   // ── Autosave debounced ─────────────────────────────────────────────────
-  // Admin: dos efectos separados (datos / items) que dispatchean a sus mutations.
-  // Cliente + autosave: un solo efecto que dispatchea a clienteMut con todo.
-  const autosaveAdmin = mode === "admin" && submitMode === "autosave";
-  const autosaveCliente = mode === "cliente" && submitMode === "autosave";
+  // Dos efectos separados (datos / items), cada uno dispatchea a su mutation.
 
   // Payload pendiente de enviar. Si se navega antes de que corra el debounce,
   // el efecto de unmount lo flushea — sino el cambio se pierde en silencio.
-  // `pendingFlushRef` es el del cliente (datos+ítems en una sola mutation);
-  // el admin tiene dos mutations separadas, así que lleva un ref por cada una.
-  const pendingFlushRef = useRef<{ d: DraftDatos; its: DraftItem[] } | null>(null);
   const pendingDatosRef = useRef<DraftDatos | null>(null);
   const pendingItemsRef = useRef<DraftItem[] | null>(null);
 
   useEffect(() => {
-    if (!autosaveAdmin) return;
     if (!pedido || !datos || !serverRef.current) return;
     if (shallowDatosEq(datos, serverRef.current.datos)) {
       pendingDatosRef.current = null;
@@ -392,11 +304,10 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
       pendingDatosRef.current = null;
     }, DEBOUNCE_MS);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- autosave con debounce: dispara por datos/pedido/flag; incluir datosMut reiniciaría el timer en cada render
-  }, [datos, pedido?.id, autosaveAdmin]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- autosave con debounce: dispara por datos/pedido; incluir datosMut reiniciaría el timer en cada render
+  }, [datos, pedido?.id]);
 
   useEffect(() => {
-    if (!autosaveAdmin) return;
     if (!pedido || !items || !serverRef.current) return;
     if (shallowItemsEq(items, serverRef.current.items)) return;
     // OJO: acá NO va un `if (items.length === 0) return`. Lo había, y hacía que
@@ -416,43 +327,14 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
       pendingItemsRef.current = null;
     }, DEBOUNCE_MS);
     return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- autosave con debounce: dispara por items/pedido/flag; incluir itemsMut reiniciaría el timer en cada render
-  }, [items, pedido?.id, autosaveAdmin]);
-
-  useEffect(() => {
-    if (!autosaveCliente) return;
-    if (!pedido || !datos || !items || !serverRef.current) return;
-    const dirty =
-      !shallowDatosEq(datos, serverRef.current.datos) ||
-      !shallowItemsEq(items, serverRef.current.items);
-    if (!dirty) {
-      pendingFlushRef.current = null;
-      return;
-    }
-    if (items.length === 0) return;
-    pendingFlushRef.current = { d: datos, its: items };
-    const t = setTimeout(() => {
-      clienteMut.mutate({ d: datos, its: items });
-      pendingFlushRef.current = null;
-    }, DEBOUNCE_MS);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- autosave con debounce: dispara por datos/items/pedido/flag; incluir clienteMut reiniciaría el timer en cada render
-  }, [datos, items, pedido?.id, autosaveCliente]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- autosave con debounce: dispara por items/pedido; incluir itemsMut reiniciaría el timer en cada render
+  }, [items, pedido?.id]);
 
   // Flush en unmount: si quedó un cambio sin enviar (se navegó antes del
   // debounce), lo disparamos best-effort sin debounce. El efecto se monta una
   // vez; el cleanup corre sólo al desmontar.
-  //
-  // Antes solo cubría al CLIENTE: `pendingFlushRef` se escribía únicamente en
-  // el autosave del cliente, así que en admin el ref era siempre null y los
-  // últimos 700ms de cualquier edición se perdían al navegar (volver a la
-  // lista justo después de tipear). Ahora las tres mutations tienen su flush.
   useEffect(() => {
     return () => {
-      if (pendingFlushRef.current) {
-        clienteMut.mutate(pendingFlushRef.current);
-        pendingFlushRef.current = null;
-      }
       if (pendingDatosRef.current) {
         datosMut.mutate(pendingDatosRef.current);
         pendingDatosRef.current = null;
@@ -465,19 +347,8 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
     // eslint-disable-next-line react-hooks/exhaustive-deps -- flush best-effort solo al desmontar (efecto mount-once); deps vacías a propósito
   }, []);
 
-  // ── Submit explícito (propose) ─────────────────────────────────────────
-  async function submitProposal() {
-    if (!pedido || !datos || !items) return;
-    const reason = validateForSubmit(datos, items);
-    if (reason) {
-      toast.error(reason);
-      return;
-    }
-    await clienteMut.mutateAsync({ d: datos, its: items });
-  }
-
-  const isPending = datosMut.isPending || itemsMut.isPending || clienteMut.isPending;
-  const isError = datosMut.isError || itemsMut.isError || clienteMut.isError;
+  const isPending = datosMut.isPending || itemsMut.isPending;
+  const isError = datosMut.isError || itemsMut.isError;
 
   const saveStatus: SaveStatus = useMemo(() => {
     if (isPending) return "saving";
@@ -490,8 +361,6 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
     return "saved";
   }, [datos, items, isPending, isError]);
 
-  const submitBlockedReason = datos && items ? validateForSubmit(datos, items) : "Cargando…";
-
   return {
     datos,
     setDatos,
@@ -499,10 +368,6 @@ export function usePedidoDraft(pedido: Pedido | undefined, opts: UsePedidoDraftO
     setItems,
     saveStatus,
     estadoMut,
-    submitProposal,
-    isSubmitting: clienteMut.isPending,
-    /** null si se puede enviar; string con la razón si no. */
-    submitBlockedReason,
     /** Expuesta para deshabilitar un control puntual (ej. el descuento del
      *  alquiler) mientras SU autosave está en vuelo — evita el doble-submit
      *  donde una edición nueva dispara un segundo PATCH antes de que el

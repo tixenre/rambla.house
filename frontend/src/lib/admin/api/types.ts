@@ -1258,12 +1258,6 @@ export type Pedido = {
   promo_advertencia?: string | null;
   items: PedidoItem[];
   pagos?: PedidoPago[];
-  /** True si hay una `solicitudes_modificacion` con estado='pendiente' para
-   * este pedido. Sólo viene en el listado, no en el detalle. */
-  tiene_solicitud_pendiente?: boolean;
-  /** Solo presente en el detalle (`getPedido`). Timeline de cambios del
-   * cliente desde el portal. */
-  historial_modificaciones?: PedidoHistorialItem[];
   // Desglose canónico del total — viene del backend
   // (services/precios.calcular_total). El frontend lo lee directo sin
   // reimplementar la fórmula (#496).
@@ -1275,28 +1269,6 @@ export type Pedido = {
   total_con_iva?: number;
   con_iva?: boolean;
   cantidad_jornadas?: number;
-};
-
-export type PedidoCambiosSnapshot = {
-  fecha_desde?: string | null;
-  fecha_hasta?: string | null;
-  items?: { equipo_id: number; cantidad: number }[];
-  mensaje?: string | null;
-};
-
-export type PedidoHistorialItem = {
-  id: number;
-  mensaje: string | null;
-  estado: "pendiente" | "aprobada" | "rechazada" | "cancelada";
-  respuesta: string | null;
-  cambios_json: PedidoCambiosSnapshot | null;
-  /** Lo que efectivamente se aplicó al aprobar (≠ cambios_json si admin
-   *  envió contrapropuesta). null si la solicitud no se aprobó. */
-  cambios_aplicados: PedidoCambiosSnapshot | null;
-  tipo: "directo" | "aprobacion";
-  resolved_at: string | null;
-  resolved_by: string | null;
-  created_at: string;
 };
 
 export type PedidosListResp = {
@@ -1778,39 +1750,4 @@ export type Interesado = {
   telefono: string;
   created_at: string | null;
   notificado_at: string | null;
-};
-
-// ── Solicitudes ───────────────────────────────────────────────────────────────
-export type ModificacionItem = { equipo_id: number; cantidad: number };
-export type CambiosJson = {
-  fecha_desde?: string | null;
-  fecha_hasta?: string | null;
-  items: ModificacionItem[];
-  mensaje?: string | null;
-};
-export type Solicitud = {
-  id: number;
-  pedido_id: number;
-  cliente_nombre: string;
-  cliente_apellido?: string | null;
-  cliente_email: string | null;
-  numero_pedido: number | null;
-  mensaje: string | null;
-  estado: "pendiente" | "aprobada" | "rechazada" | "cancelada";
-  respuesta: string | null;
-  cambios_json: CambiosJson | null;
-  tipo: "directo" | "aprobacion";
-  resolved_at: string | null;
-  resolved_by: string | null;
-  created_at: string;
-  pedido_fecha_desde: string | null;
-  pedido_fecha_hasta: string | null;
-  monto_total: number;
-};
-export type PedidoLite = {
-  id: number;
-  numero_pedido: number | null;
-  fecha_desde: string | null;
-  fecha_hasta: string | null;
-  items: { equipo_id: number; cantidad: number; nombre: string; nombre_publico?: string | null }[];
 };

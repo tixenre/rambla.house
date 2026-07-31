@@ -174,7 +174,6 @@ def list_pedidos(
         _enriquecer_pedidos_con_cliente(conn, pedidos)
         items_map  = _batch_get_alquiler_items(conn, [p["id"] for p in pedidos])
 
-        # Pedidos con solicitud de modificación pendiente — para badge en UI.
         pedido_ids = [p["id"] for p in pedidos]
         # Turnos del Estudio vinculados por pedido — para el badge de la
         # lista (el turno en sí ya no aparece como fila propia, ver `where`).
@@ -184,21 +183,11 @@ def list_pedidos(
         # también es una fila 'emitida' → un EXISTS crudo marcaría "facturado" un
         # pedido ya anulado). Batch, sin N+1.
         facturados = pedidos_con_factura_emitida(pedido_ids, conn)
-        pendientes: set[int] = set()
-        if pedido_ids:
-            ph = ",".join(["%s"] * len(pedido_ids))
-            for r in conn.execute(
-                f"""SELECT DISTINCT pedido_id FROM solicitudes_modificacion
-                    WHERE estado = 'pendiente' AND pedido_id IN ({ph})""",
-                pedido_ids,
-            ).fetchall():
-                pendientes.add(r["pedido_id"])
 
         turnos_plata_map = _batch_plata_turnos_vinculados(conn, pedido_ids)
 
         for p in pedidos:
             p["items"] = items_map.get(p["id"], [])
-            p["tiene_solicitud_pendiente"] = p["id"] in pendientes
             p["facturado"] = p["id"] in facturados
             p["turnos_vinculados_count"] = turnos_count_map.get(p["id"], 0)
             # Mismo campo que expone el detalle (`_get_alquiler_detail`) — sin
@@ -254,8 +243,7 @@ def delete_pedido(id: int, request: Request):
 @limiter.limit(ADMIN_WRITE_LIMIT)
 def update_pedido(id: int, data: PedidoEstado, request: Request, background: BackgroundTasks):
     """Transición de estado admin. La legalidad de la transición, las
-    validaciones de fecha/stock, la asignación de `numero_pedido` y el
-    auto-cancelado de solicitudes pendientes viven todas en
+    validaciones de fecha/stock y la asignación de `numero_pedido` viven todas en
     `transiciones.cambiar_estado` — ver ese módulo para el grafo completo.
     Acá solo queda el transporte HTTP + el mail de confirmación."""
     require_admin(request)

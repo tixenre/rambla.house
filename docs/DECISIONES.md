@@ -4054,3 +4054,64 @@ solo_whatsapp, admin siempre, una sola tarea en background); manuales `SISTEMA_C
   `UPDATE` ciego sin chequear si ya existe una fila con el valor destino — el mismo patrón de
   colisión se repite en cualquier columna con UNIQUE + un valor sembrado por `init_db()` antes de que
   Alembic corra.
+
+### 2026-07-31 — Se elimina "solicitudes de modificación" del portal cliente; toda modificación va por WhatsApp
+
+- **Contexto.** Pedido explícito del dueño: "las solicitudes de modificación complejizan los flujos
+  innecesariamente, solo quiero aclararle bien a los clientes que si quieren modificar algo, se
+  comuniquen por WhatsApp." La feature dejaba proponer cambios (fechas/ítems) desde el portal
+  cliente logueado, con un flujo de aprobación/rechazo del admin (`/admin/solicitudes`) — nunca
+  llegó a sentirse simple ni para el cliente ni para el admin.
+- **Decisión: baja completa, no solo apagado.** Dos preguntas resueltas con el dueño vía
+  `AskUserQuestion`: (1) la tabla `solicitudes_modificacion` se **DROPEA** (no se deja sin usar) —
+  nueva migración `s0l1c1tudb4j_solicitudes_modificacion_baja` borra la tabla + sus 3 templates de
+  mail huérfanos + el setting `modificacion_ventana_horas`; (2) el tercer lugar donde comunicar
+  WhatsApp (además del mail y el portal) es la **FAQ pública** — investigado y ya tenía la Q&A
+  correcta ("¿Puedo modificar o cancelar una reserva? Sí... escribinos por WhatsApp...") en
+  `frontend/src/data/faq.ts`, sin necesitar cambio de código (el default hardcodeado; si el dueño
+  alguna vez customizó el setting editable `app_settings.faq_json` desde `/admin/settings`, vale la
+  pena que confirme que esa copia editada también menciona WhatsApp para modificaciones).
+- **Alcance del removido (backend).** Endpoint completo `routes/cliente_portal/solicitudes.py` (767
+  líneas, 6 endpoints); `ESTADOS_MODIFICABLES`/ventana horaria de `cliente_portal/core.py`; el hook
+  de cancelación automática en `services/alquileres/commands/transiciones.py`
+  (`_cancelar_solicitudes_pendientes` al cambiar de estado); `_get_historial_modificaciones` de
+  `services/alquileres/queries/detalle.py`; el batch `tiene_solicitud_pendiente` de `list_pedidos`;
+  la reasignación en `identity/merge.py`; la secuencia operacional en `dataio.py`. El ciclo de
+  import `services.alquileres ↔ routes.cliente_portal` (documentado en el `CLAUDE.md` del paquete)
+  queda **cerrado** — ya no hay vuelta desde `services.alquileres` hacia `routes.cliente_portal`.
+- **Alcance del removido (frontend).** El editor de pedido del cliente
+  (`cliente.pedidos.$id.editar.tsx`), la página admin `/admin/solicitudes`, el botón/badge
+  "Solicitudes" de la lista de pedidos, el banner "Hay una solicitud de cambio pendiente" del
+  detalle admin, el botón "Modificar pedido"/diálogo "Cancelar solicitud" del portal cliente, y el
+  adaptador `ChangeRequest`/`adaptChangeRequests` de `lib/orders.ts` (leía un campo `solicitudes` que
+  el backend ya no manda). Esto **colapsó** la dicotomía admin-vs-cliente de
+  `usePedidoDraft`/`useDisponibilidadDraft` (el parámetro `mode`/`submitMode`) a un solo camino
+  admin-only, confirmado como único caller real tras el removido — no quedó ninguna abstracción
+  sirviendo a un solo lado.
+- **Copy nuevo (dónde se avisa WhatsApp).** Mail de "pedido creado"/"pedido confirmado"
+  (`services/email/default_templates.py`): línea "¿Necesitás modificar el pedido (fechas, equipos)?
+  Escribinos por WhatsApp." Portal cliente (`ClientePortalPedido.tsx`): misma línea arriba del botón
+  de WhatsApp ya existente. Reusa infraestructura YA existente (no una nueva): el link de WhatsApp en
+  el footer de cada mail (`services/email/service.py::_wrap_email_html`, fuente
+  `app_settings.whatsapp_phone`) y el botón de WhatsApp del portal — ninguno de los dos se creó para
+  esto.
+- **Gotcha real: "esquema en dos capas" al borrar una tabla del bootstrap.** Sacar
+  `solicitudes_modificacion` de `init_db()` rompió un bootstrap fresco (`init_db()` + `alembic
+  upgrade head` desde cero) porque 5 migraciones históricas asumían que la tabla ya existía (`ALTER
+  TABLE`/`CREATE UNIQUE INDEX` sin guardas). Se agregaron guardas (`IF EXISTS` / `to_regclass()` /
+  `.get(key)` en vez de `[key]`) a esas 5 migraciones — no-ops en prod (ya corrieron ahí), solo
+  arreglan un ambiente nuevo desde cero. `test_alembic_upgrade_db.py` es el candado que lo detectó.
+- **Verificación.** Backend: ruff + suite completa + `test_alembic_upgrade_db.py` (Postgres real,
+  bootstrap desde cero) en verde; se borró/editó la red de tests que dependía de la feature
+  (`test_cliente_modificar_pedido_gate_db.py` borrado, casos ajustados en
+  `test_gate_not_bypassed.py`/`test_reservas_reservado_helpers.py`/`test_routes_contract.py`/etc.).
+  Frontend: `tsc --noEmit` + `eslint` + `prettier --check` + `npm run build` (regenera
+  `routeTree.gen.ts` sin la ruta borrada) + `npm run check:routes` (80 rutas, todas con `<Outlet/>`)
+  en verde. No se rearmó el stack local completo (DB+backend+frontend+staging-login) para un
+  render-compare en vivo de los 2 flujos autenticados (portal cliente, detalle admin) — el diff es
+  mayormente deletion de bloques condicionales autocontenidos + copy estática, cubierto con solidez
+  por la verificación estructural + lectura manual línea por línea de cada archivo tocado; queda
+  para el pase de prueba del dueño en staging (plan de prueba en el mismo commit).
+- El supervisor marca: cualquier reintroducción de un flujo de propuesta/aprobación de cambios del
+  cliente sobre un pedido ya hecho — la única vía de modificar un pedido confirmado es el contacto
+  humano por WhatsApp, no un mecanismo en la app.

@@ -86,9 +86,6 @@ _ADMIN = [
     ("POST", "/api/alquileres/1/enviar-documentos"),
     ("POST", "/api/alquileres/1/mail-preview"),
     ("POST", "/api/admin/recordatorios/retiro/run"),
-    # cliente_portal.py — solicitudes de modificación (las gestiona el admin)
-    ("GET", "/api/admin/solicitudes"),
-    ("PATCH", "/api/admin/solicitudes/1"),
 ]
 
 # Endpoints CLIENTE: anónimo → 401 (middleware); sesión no-cliente → 401 (guard).
@@ -99,10 +96,6 @@ _CLIENTE = [
     ("GET", "/api/cliente/pedidos"),
     ("GET", "/api/cliente/pedidos/1"),
     ("PATCH", "/api/cliente/pedidos/1/cancelar"),
-    ("POST", "/api/cliente/pedidos/1/modificacion"),
-    ("DELETE", "/api/cliente/pedidos/1/modificacion/1"),
-    ("GET", "/api/cliente/pedidos/1/disponibilidad"),
-    ("GET", "/api/cliente/modificacion-config"),
     ("GET", "/api/cliente/pedidos/1/remito"),
     ("GET", "/api/cliente/pedidos/1/remito.pdf"),
     ("GET", "/api/cliente/pedidos/1/contrato"),
@@ -144,9 +137,6 @@ _VALIDA_ANTES_DEL_GUARD = {
     ("GET", "/api/descuentos-jornada/interpolar"),  # jornadas: list[int] = Query(...) obligatorio
     ("PUT", "/api/alquileres/1/items"),
     ("POST", "/api/alquileres/1/enviar-documentos"),
-    ("PATCH", "/api/admin/solicitudes/1"),
-    ("POST", "/api/cliente/pedidos/1/modificacion"),
-    ("GET", "/api/cliente/pedidos/1/disponibilidad"),
     ("POST", "/api/cliente/favoritos/sync"),
 }
 _ADMIN_GUARD = [e for e in _ADMIN if e not in _VALIDA_ANTES_DEL_GUARD]

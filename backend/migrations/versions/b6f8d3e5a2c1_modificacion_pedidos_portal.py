@@ -78,15 +78,19 @@ Ver pedido: {{ admin_url }}""",
 
 
 def upgrade() -> None:
-    # Columnas nuevas en solicitudes_modificacion (idempotentes vía IF NOT EXISTS).
-    op.execute("ALTER TABLE solicitudes_modificacion ADD COLUMN IF NOT EXISTS cambios_json JSONB")
-    op.execute("ALTER TABLE solicitudes_modificacion ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'aprobacion'")
-    op.execute("ALTER TABLE solicitudes_modificacion ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ")
-    op.execute("ALTER TABLE solicitudes_modificacion ADD COLUMN IF NOT EXISTS resolved_by TEXT")
+    # `IF EXISTS` en la tabla (sumado a `IF NOT EXISTS` en la columna): la
+    # feature se retiró después (`s0l1c1tudb4j`) — un bootstrap fresco ya no
+    # crea `solicitudes_modificacion` en `init_db()`, así que estas 5 líneas
+    # tienen que no-opear ahí en vez de romper `alembic upgrade head`. Prod
+    # (donde la tabla existió y ya corrió esta migración) no se ve afectado.
+    op.execute("ALTER TABLE IF EXISTS solicitudes_modificacion ADD COLUMN IF NOT EXISTS cambios_json JSONB")
+    op.execute("ALTER TABLE IF EXISTS solicitudes_modificacion ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'aprobacion'")
+    op.execute("ALTER TABLE IF EXISTS solicitudes_modificacion ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMPTZ")
+    op.execute("ALTER TABLE IF EXISTS solicitudes_modificacion ADD COLUMN IF NOT EXISTS resolved_by TEXT")
 
     # `mensaje` pasa a ser opcional: la nueva UI estructurada manda cambios_json,
     # el texto libre queda como comentario opcional del cliente.
-    op.execute("ALTER TABLE solicitudes_modificacion ALTER COLUMN mensaje DROP NOT NULL")
+    op.execute("ALTER TABLE IF EXISTS solicitudes_modificacion ALTER COLUMN mensaje DROP NOT NULL")
 
     # Setting: horas de antelación mínima antes del retiro para permitir modificar.
     op.execute("""
@@ -111,10 +115,10 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.execute("DELETE FROM email_templates WHERE key IN ('modificacion_solicitada_admin', 'modificacion_resuelta_cliente', 'modificacion_cancelada_admin')")
     op.execute("DELETE FROM app_settings WHERE key = 'modificacion_ventana_horas'")
-    op.execute("ALTER TABLE solicitudes_modificacion DROP COLUMN IF EXISTS resolved_by")
-    op.execute("ALTER TABLE solicitudes_modificacion DROP COLUMN IF EXISTS resolved_at")
-    op.execute("ALTER TABLE solicitudes_modificacion DROP COLUMN IF EXISTS tipo")
-    op.execute("ALTER TABLE solicitudes_modificacion DROP COLUMN IF EXISTS cambios_json")
+    op.execute("ALTER TABLE IF EXISTS solicitudes_modificacion DROP COLUMN IF EXISTS resolved_by")
+    op.execute("ALTER TABLE IF EXISTS solicitudes_modificacion DROP COLUMN IF EXISTS resolved_at")
+    op.execute("ALTER TABLE IF EXISTS solicitudes_modificacion DROP COLUMN IF EXISTS tipo")
+    op.execute("ALTER TABLE IF EXISTS solicitudes_modificacion DROP COLUMN IF EXISTS cambios_json")
 
 
 def _q(s: str) -> str:

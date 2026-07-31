@@ -75,13 +75,6 @@ export type OrderItem = {
   price_per_day: number;
 };
 
-export type ChangeRequest = {
-  id: string;
-  status: "pendiente" | "aceptado" | "rechazado";
-  message: string;
-  created_at: string;
-};
-
 /* ── Mapeo backend → frontend ─────────────────────────────────────────────── */
 
 const ESTADO_MAP: Record<string, OrderStatus> = {
@@ -128,21 +121,6 @@ function adaptItems(items: Array<Record<string, unknown>>): OrderItem[] {
     brand: String(it.marca ?? ""),
     qty: Number(it.cantidad ?? 0),
     price_per_day: Number(it.precio_jornada ?? 0),
-  }));
-}
-
-const SOLIC_MAP: Record<string, ChangeRequest["status"]> = {
-  pendiente: "pendiente",
-  aprobada: "aceptado",
-  rechazada: "rechazado",
-};
-
-function adaptChangeRequests(arr: Array<Record<string, unknown>>): ChangeRequest[] {
-  return arr.map((s) => ({
-    id: String(s.id),
-    status: SOLIC_MAP[String(s.estado)] ?? "pendiente",
-    message: String(s.mensaje ?? ""),
-    created_at: String(s.created_at ?? new Date().toISOString()),
   }));
 }
 
@@ -247,7 +225,6 @@ export async function getOrder(id: string) {
   return {
     order: adaptOrder(b),
     items: adaptItems((b.items as Array<Record<string, unknown>>) ?? []),
-    changeRequests: adaptChangeRequests((b.solicitudes as Array<Record<string, unknown>>) ?? []),
     documentosDisponibles: {
       remito: !!docs.remito,
       contrato: !!docs.contrato,

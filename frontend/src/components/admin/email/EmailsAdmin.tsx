@@ -57,18 +57,6 @@ const TEMPLATE_META: Record<string, { label: string; description: string }> = {
     label: "Recordatorio de retiro",
     description: "Recordatorio automático al cliente antes del retiro (ver controles abajo).",
   },
-  modificacion_solicitada_admin: {
-    label: "Modificación pedida — admin",
-    description: "Aviso al equipo cuando el cliente pide modificar un pedido.",
-  },
-  modificacion_resuelta_cliente: {
-    label: "Modificación resuelta — cliente",
-    description: "Aviso al cliente cuando se aprueba o rechaza su pedido de cambio.",
-  },
-  modificacion_cancelada_admin: {
-    label: "Modificación cancelada — admin",
-    description: "Aviso al equipo cuando el cliente cancela su solicitud.",
-  },
 };
 
 // Variables comunes de los mails de pedido. Mantener en sincronía con

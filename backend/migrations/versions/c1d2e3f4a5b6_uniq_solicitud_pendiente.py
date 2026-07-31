@@ -12,6 +12,7 @@ Create Date: 2026-05-19
 from typing import Sequence, Union
 
 from alembic import op
+from sqlalchemy import text
 
 revision: str = "c1d2e3f4a5b6"
 down_revision: Union[str, Sequence[str], None] = "b7a1d9e3f4c2"
@@ -20,13 +21,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute(
-        """
-        CREATE UNIQUE INDEX IF NOT EXISTS uniq_solicitud_pendiente_por_pedido
-        ON solicitudes_modificacion (pedido_id)
-        WHERE estado = 'pendiente'
-        """
-    )
+    # `CREATE INDEX` no admite `IF EXISTS` sobre la tabla (a diferencia de
+    # `ALTER TABLE`) — se chequea en Python. La feature se retiró después
+    # (`s0l1c1tudb4j`); un bootstrap fresco ya no crea esta tabla en
+    # `init_db()`, así que esto no-opea ahí en vez de romper `alembic upgrade
+    # head`. Prod no se ve afectado (ya corrió cuando la tabla existía).
+    conn = op.get_bind()
+    existe = conn.execute(text("SELECT to_regclass('solicitudes_modificacion')")).scalar()
+    if existe:
+        op.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS uniq_solicitud_pendiente_por_pedido
+            ON solicitudes_modificacion (pedido_id)
+            WHERE estado = 'pendiente'
+            """
+        )
 
 
 def downgrade() -> None:

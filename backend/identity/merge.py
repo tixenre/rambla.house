@@ -37,7 +37,6 @@ TABLAS_REASIGNADAS = frozenset({
     "kyc_events",               # bitácora de ambas cuentas (se conserva la historia)
     "passkey_credentials",      # credential_id es UNIQUE global → mover sin conflicto
     "alquileres",               # los PEDIDOS (plata/historia) — jamás se pierden
-    "solicitudes_modificacion", # atadas a los pedidos
     "cliente_listas",           # listas guardadas del usuario
     "aceptaciones_tyc",         # UNIQUE(cliente_id, version) → dedup por version (ON CONFLICT DO NOTHING)
     "cliente_perfiles_fiscales",  # #1240 — dedup por cuit; es_default se resuelve aparte (no puede
@@ -167,7 +166,7 @@ def merge_accounts(*, source: int, target: int, conn=None) -> None:
             )
             # Reasignación simple (sin UNIQUE por-cuenta que pueda chocar).
             for tabla in ("kyc_events", "passkey_credentials", "alquileres",
-                          "solicitudes_modificacion", "cliente_listas"):
+                          "cliente_listas"):
                 conn.execute(
                     f"UPDATE {tabla} SET cliente_id=%s WHERE cliente_id=%s",  # noqa: S608 (tabla de allowlist constante)
                     (target, source),

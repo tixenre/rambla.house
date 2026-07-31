@@ -230,9 +230,9 @@ def precio_jornada_efectivo(conn, equipo_id: int) -> Optional[int]:
     COMBO se deriva en vivo de sus componentes (`precio_combo`, C3 #635); un kit/simple
     usa su `precio_jornada` propio. `None` si el equipo no existe (o está soft-deleted).
 
-    Fuente ÚNICA de "qué precio por jornada toma este equipo": la consumen `cotizar`,
-    `cliente_crear_pedido` y `cliente_modificar_pedido` → lo que el carrito COTIZA es lo
-    que se PERSISTE (cierra el drift de combos cotizado≠cobrado). El gate de seguridad
+    Fuente ÚNICA de "qué precio por jornada toma este equipo": la consumen `cotizar` y
+    `cliente_crear_pedido` → lo que el carrito COTIZA es lo que se PERSISTE (cierra el
+    drift de combos cotizado≠cobrado). El gate de seguridad
     "solo equipos de catálogo / el cliente no decide el precio" vive en cada consumidor,
     no acá — esto solo resuelve plata.
     """

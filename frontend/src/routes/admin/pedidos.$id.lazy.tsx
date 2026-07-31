@@ -149,7 +149,7 @@ function PedidoEditorPage() {
   // keepDateTime: el selector de fechas+horas escribe datetime (con hora) en
   // fecha_desde/fecha_hasta; sin esto el draft las recortaría a date-only y se
   // perdería la hora en el round-trip del autosave.
-  const draft = usePedidoDraft(p, { mode: "admin", keepDateTime: true });
+  const draft = usePedidoDraft(p, { keepDateTime: true });
   const [openDateModal, setOpenDateModal] = useState(false);
 
   // Sensores del drag-reorder de líneas (#806). Hook → antes de cualquier
@@ -493,20 +493,6 @@ function PedidoEditorPage() {
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-0 lg:gap-0 min-h-0">
         {/* ── Columna de trabajo ── */}
         <div className="min-w-0 px-4 md:px-6 py-5 space-y-5 lg:border-r hairline pb-28 lg:pb-5">
-          {/* Banner solicitud pendiente (deferido — solo aviso read-only) */}
-          {p.tiene_solicitud_pendiente && (
-            <div className="flex items-start gap-2 rounded-lg border border-amber/40 bg-amber/5 px-3 py-2.5 text-sm">
-              <Info className="h-4 w-4 text-ink shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <span className="font-medium text-ink">Hay una solicitud de cambio pendiente.</span>{" "}
-                <Link to="/admin/solicitudes" className="underline text-muted-foreground">
-                  Revisarla en Solicitudes
-                </Link>
-                .
-              </div>
-            </div>
-          )}
-
           {/* (El breadcrumb "Turno vinculado al pedido #N" se retiró: un turno
               vinculado ya no llega hasta acá — redirige a su principal, arriba.) */}
 

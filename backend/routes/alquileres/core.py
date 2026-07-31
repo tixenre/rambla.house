@@ -65,7 +65,6 @@ from routes.alquileres.detalle import (
     _get_alquiler_detail,  # noqa: F401 — re-export, ver comentario arriba
     _get_alquiler_items,  # noqa: F401 — re-export, ver comentario arriba
     _get_alquiler_pagos,  # noqa: F401 — re-export, ver comentario arriba
-    _get_historial_modificaciones,  # noqa: F401 — re-export, ver comentario arriba
     _maybe_finalizar,  # noqa: F401 — re-export, ver comentario arriba
     _next_numero_pedido,  # noqa: F401 — re-export, ver comentario arriba
     _enriquecer_pedido_con_total,  # noqa: F401 — re-export, ver comentario arriba

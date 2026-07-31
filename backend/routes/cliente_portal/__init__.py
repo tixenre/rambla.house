@@ -13,15 +13,6 @@ from routes.cliente_portal.core import (
     cliente_verificado,
     IDENTIDAD_NO_VERIFICADA_MSG,
     get_session,
-    ESTADOS_MODIFICABLES,
-)
-from routes.cliente_portal.solicitudes import (
-    _cancelar_solicitudes_pendientes,
-    _check_stock_hipotetico,
-    ModificacionItemIn,
-    _items_payload_to_pedido_items,
-    _lineas_libres_actuales,
-    _precios_actuales,
 )
 from routes.cliente_portal.pedidos import cliente_crear_pedido, CartItemIn, PedidoClienteCreate
 from routes.cliente_portal.documentos import _doc_response, _DOC_PREVIEW_HEADERS
@@ -35,16 +26,9 @@ __all__ = [
     "cliente_verificado",
     "IDENTIDAD_NO_VERIFICADA_MSG",
     "get_session",
-    "ESTADOS_MODIFICABLES",
-    "_cancelar_solicitudes_pendientes",
-    "_check_stock_hipotetico",
     "cliente_crear_pedido",
     "CartItemIn",
     "PedidoClienteCreate",
-    "ModificacionItemIn",
-    "_items_payload_to_pedido_items",
-    "_lineas_libres_actuales",
-    "_precios_actuales",
     "_doc_response",
     "_DOC_PREVIEW_HEADERS",
 ]

@@ -89,8 +89,8 @@ def validar_stock_hipotetico(
     re-implementaba la expansión "en seco" importando internos del motor y se
     desincronizaba en silencio si el gate cambiaba; ahora no pueden divergir.
 
-    `items` es un iterable de objetos con `.equipo_id` y `.cantidad` (p. ej.
-    `ModificacionItemIn`). `excl_pedido_id` es el pedido que se está modificando:
+    `items` es un iterable de objetos con `.equipo_id` y `.cantidad` (cualquier
+    objeto con esa forma sirve). `excl_pedido_id` es el pedido que se está modificando:
     sus reservas actuales NO compiten con la propuesta para el mismo rango, así que
     se excluyen del consumo. Es de SOLO LECTURA salvo el `FOR UPDATE` del núcleo
     (que vive y muere en la transacción del caller, igual que el gate real).

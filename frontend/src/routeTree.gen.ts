@@ -45,12 +45,10 @@ import { Route as AdminEstudioRouteImport } from './routes/admin/estudio'
 import { Route as AdminEquiposRouteImport } from './routes/admin/equipos'
 import { Route as EscuelasSenaTokenRouteImport } from './routes/escuelas.sena.$token'
 import { Route as EscuelaSenaTokenRouteImport } from './routes/escuela.sena.$token'
-import { Route as ClientePedidosIdEditarRouteImport } from './routes/cliente.pedidos.$id.editar'
 
 const EscuelasIndexLazyRouteImport = createFileRoute('/escuelas/')()
 const AdminIndexLazyRouteImport = createFileRoute('/admin/')()
 const AdminUnidadesLazyRouteImport = createFileRoute('/admin/unidades')()
-const AdminSolicitudesLazyRouteImport = createFileRoute('/admin/solicitudes')()
 const AdminSettingsLazyRouteImport = createFileRoute('/admin/settings')()
 const AdminProductorasLazyRouteImport = createFileRoute('/admin/productoras')()
 const AdminPagosLazyRouteImport = createFileRoute('/admin/pagos')()
@@ -231,13 +229,6 @@ const AdminUnidadesLazyRoute = AdminUnidadesLazyRouteImport.update({
   getParentRoute: () => AdminRoute,
 } as any).lazy(() =>
   import('./routes/admin/unidades.lazy').then((d) => d.Route),
-)
-const AdminSolicitudesLazyRoute = AdminSolicitudesLazyRouteImport.update({
-  id: '/solicitudes',
-  path: '/solicitudes',
-  getParentRoute: () => AdminRoute,
-} as any).lazy(() =>
-  import('./routes/admin/solicitudes.lazy').then((d) => d.Route),
 )
 const AdminSettingsLazyRoute = AdminSettingsLazyRouteImport.update({
   id: '/settings',
@@ -605,11 +596,6 @@ const AdminEquiposIdEditarLazyRoute =
   } as any).lazy(() =>
     import('./routes/admin/equipos.$id.editar.lazy').then((d) => d.Route),
   )
-const ClientePedidosIdEditarRoute = ClientePedidosIdEditarRouteImport.update({
-  id: '/pedidos/$id/editar',
-  path: '/pedidos/$id/editar',
-  getParentRoute: () => ClienteRoute,
-} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -656,7 +642,6 @@ export interface FileRoutesByFullPath {
   '/admin/pagos': typeof AdminPagosLazyRoute
   '/admin/productoras': typeof AdminProductorasLazyRoute
   '/admin/settings': typeof AdminSettingsLazyRoute
-  '/admin/solicitudes': typeof AdminSolicitudesLazyRoute
   '/admin/unidades': typeof AdminUnidadesLazyRoute
   '/cliente/': typeof ClienteIndexRoute
   '/escuela/': typeof EscuelaIndexRoute
@@ -688,7 +673,6 @@ export interface FileRoutesByFullPath {
   '/admin/pedidos/': typeof AdminPedidosIndexLazyRoute
   '/admin/specs/': typeof AdminSpecsIndexLazyRoute
   '/admin/talleres/': typeof AdminTalleresIndexLazyRoute
-  '/cliente/pedidos/$id/editar': typeof ClientePedidosIdEditarRoute
   '/admin/equipos/$id/editar': typeof AdminEquiposIdEditarLazyRoute
 }
 export interface FileRoutesByTo {
@@ -728,7 +712,6 @@ export interface FileRoutesByTo {
   '/admin/pagos': typeof AdminPagosLazyRoute
   '/admin/productoras': typeof AdminProductorasLazyRoute
   '/admin/settings': typeof AdminSettingsLazyRoute
-  '/admin/solicitudes': typeof AdminSolicitudesLazyRoute
   '/admin/unidades': typeof AdminUnidadesLazyRoute
   '/cliente': typeof ClienteIndexRoute
   '/escuela': typeof EscuelaIndexRoute
@@ -760,7 +743,6 @@ export interface FileRoutesByTo {
   '/admin/pedidos': typeof AdminPedidosIndexLazyRoute
   '/admin/specs': typeof AdminSpecsIndexLazyRoute
   '/admin/talleres': typeof AdminTalleresIndexLazyRoute
-  '/cliente/pedidos/$id/editar': typeof ClientePedidosIdEditarRoute
   '/admin/equipos/$id/editar': typeof AdminEquiposIdEditarLazyRoute
 }
 export interface FileRoutesById {
@@ -809,7 +791,6 @@ export interface FileRoutesById {
   '/admin/pagos': typeof AdminPagosLazyRoute
   '/admin/productoras': typeof AdminProductorasLazyRoute
   '/admin/settings': typeof AdminSettingsLazyRoute
-  '/admin/solicitudes': typeof AdminSolicitudesLazyRoute
   '/admin/unidades': typeof AdminUnidadesLazyRoute
   '/cliente/': typeof ClienteIndexRoute
   '/escuela/': typeof EscuelaIndexRoute
@@ -841,7 +822,6 @@ export interface FileRoutesById {
   '/admin/pedidos/': typeof AdminPedidosIndexLazyRoute
   '/admin/specs/': typeof AdminSpecsIndexLazyRoute
   '/admin/talleres/': typeof AdminTalleresIndexLazyRoute
-  '/cliente/pedidos/$id/editar': typeof ClientePedidosIdEditarRoute
   '/admin/equipos/$id/editar': typeof AdminEquiposIdEditarLazyRoute
 }
 export interface FileRouteTypes {
@@ -891,7 +871,6 @@ export interface FileRouteTypes {
     | '/admin/pagos'
     | '/admin/productoras'
     | '/admin/settings'
-    | '/admin/solicitudes'
     | '/admin/unidades'
     | '/cliente/'
     | '/escuela/'
@@ -923,7 +902,6 @@ export interface FileRouteTypes {
     | '/admin/pedidos/'
     | '/admin/specs/'
     | '/admin/talleres/'
-    | '/cliente/pedidos/$id/editar'
     | '/admin/equipos/$id/editar'
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -963,7 +941,6 @@ export interface FileRouteTypes {
     | '/admin/pagos'
     | '/admin/productoras'
     | '/admin/settings'
-    | '/admin/solicitudes'
     | '/admin/unidades'
     | '/cliente'
     | '/escuela'
@@ -995,7 +972,6 @@ export interface FileRouteTypes {
     | '/admin/pedidos'
     | '/admin/specs'
     | '/admin/talleres'
-    | '/cliente/pedidos/$id/editar'
     | '/admin/equipos/$id/editar'
   id:
     | '__root__'
@@ -1043,7 +1019,6 @@ export interface FileRouteTypes {
     | '/admin/pagos'
     | '/admin/productoras'
     | '/admin/settings'
-    | '/admin/solicitudes'
     | '/admin/unidades'
     | '/cliente/'
     | '/escuela/'
@@ -1075,7 +1050,6 @@ export interface FileRouteTypes {
     | '/admin/pedidos/'
     | '/admin/specs/'
     | '/admin/talleres/'
-    | '/cliente/pedidos/$id/editar'
     | '/admin/equipos/$id/editar'
   fileRoutesById: FileRoutesById
 }
@@ -1231,13 +1205,6 @@ declare module '@tanstack/react-router' {
       path: '/unidades'
       fullPath: '/admin/unidades'
       preLoaderRoute: typeof AdminUnidadesLazyRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/solicitudes': {
-      id: '/admin/solicitudes'
-      path: '/solicitudes'
-      fullPath: '/admin/solicitudes'
-      preLoaderRoute: typeof AdminSolicitudesLazyRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/settings': {
@@ -1639,13 +1606,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminEquiposIdEditarLazyRouteImport
       parentRoute: typeof AdminEquiposRoute
     }
-    '/cliente/pedidos/$id/editar': {
-      id: '/cliente/pedidos/$id/editar'
-      path: '/pedidos/$id/editar'
-      fullPath: '/cliente/pedidos/$id/editar'
-      preLoaderRoute: typeof ClientePedidosIdEditarRouteImport
-      parentRoute: typeof ClienteRoute
-    }
   }
 }
 
@@ -1720,7 +1680,6 @@ interface AdminRouteChildren {
   AdminPagosLazyRoute: typeof AdminPagosLazyRoute
   AdminProductorasLazyRoute: typeof AdminProductorasLazyRoute
   AdminSettingsLazyRoute: typeof AdminSettingsLazyRoute
-  AdminSolicitudesLazyRoute: typeof AdminSolicitudesLazyRoute
   AdminUnidadesLazyRoute: typeof AdminUnidadesLazyRoute
   AdminIndexLazyRoute: typeof AdminIndexLazyRoute
   AdminContabilidadCuentasLazyRoute: typeof AdminContabilidadCuentasLazyRoute
@@ -1760,7 +1719,6 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminPagosLazyRoute: AdminPagosLazyRoute,
   AdminProductorasLazyRoute: AdminProductorasLazyRoute,
   AdminSettingsLazyRoute: AdminSettingsLazyRoute,
-  AdminSolicitudesLazyRoute: AdminSolicitudesLazyRoute,
   AdminUnidadesLazyRoute: AdminUnidadesLazyRoute,
   AdminIndexLazyRoute: AdminIndexLazyRoute,
   AdminContabilidadCuentasLazyRoute: AdminContabilidadCuentasLazyRoute,
@@ -1788,7 +1746,6 @@ interface ClienteRouteChildren {
   ClientePortalRoute: typeof ClientePortalRoute
   ClienteRegistroRoute: typeof ClienteRegistroRoute
   ClienteIndexRoute: typeof ClienteIndexRoute
-  ClientePedidosIdEditarRoute: typeof ClientePedidosIdEditarRoute
 }
 
 const ClienteRouteChildren: ClienteRouteChildren = {
@@ -1798,7 +1755,6 @@ const ClienteRouteChildren: ClienteRouteChildren = {
   ClientePortalRoute: ClientePortalRoute,
   ClienteRegistroRoute: ClienteRegistroRoute,
   ClienteIndexRoute: ClienteIndexRoute,
-  ClientePedidosIdEditarRoute: ClientePedidosIdEditarRoute,
 }
 
 const ClienteRouteWithChildren =

@@ -1274,6 +1274,17 @@ migración futura que toque `cuentas`/`dueno`/`destinatario` con un `UPDATE` cie
 existe una fila con el valor destino (mismo patrón de colisión se repite en cualquier columna con
 UNIQUE + un valor sembrado por `init_db()` antes que Alembic corra).
 
+### 2026-07-31 — Se elimina "solicitudes de modificación" del portal cliente; toda modificación va por WhatsApp
+
+Decisión explícita del dueño: la propuesta de cambios del cliente vía portal (tabla
+`solicitudes_modificacion`, 6 endpoints, flujo de aprobación admin) complejizaba el flujo sin
+necesidad — **se borra por completo** (tabla dropeada, no solo dejada sin usar). En su lugar,
+"escribinos por WhatsApp" para cualquier modificación: mail de pedido creado/confirmado, portal
+cliente, y la FAQ pública (ya tenía la Q&A correcta, sin cambio de código). Colapsó de paso la
+dicotomía admin-vs-cliente de `usePedidoDraft`/`useDisponibilidadDraft` a un solo camino admin-only
+(único caller real tras el removido). El supervisor marca cualquier reintroducción de un flujo de
+propuesta/aprobación de cambios del cliente sobre un pedido ya hecho — la única vía es WhatsApp.
+
 ---
 
 ## Preferencias (cómo quiero que se hagan las cosas)

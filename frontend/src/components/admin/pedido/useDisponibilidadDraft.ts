@@ -1,5 +1,5 @@
 /**
- * Disponibilidad DRAFT-AWARE del editor de pedidos (admin y cliente).
+ * Disponibilidad DRAFT-AWARE del editor de pedidos (admin).
  *
  * Fuente única del mapa "unidades libres" que ven las líneas del editor y los
  * buscadores de equipos. El cálculo vive ENTERO en el backend
@@ -18,7 +18,6 @@
 import { useQuery, keepPreviousData } from "@tanstack/react-query";
 
 import { adminApi } from "@/lib/admin/api";
-import { clienteApi } from "@/lib/cliente/api";
 import type { DraftItem } from "./usePedidoDraft";
 
 /** `equipo_id → unidades libres tras el draft` (con signo). */
@@ -39,24 +38,19 @@ export function useDisponibilidadDraft({
   fechaDesde,
   fechaHasta,
   items,
-  mode = "admin",
   enabled = true,
 }: {
   pedidoId: number | undefined;
   fechaDesde: string | undefined;
   fechaHasta: string | undefined;
   items: DraftItem[] | null | undefined;
-  mode?: "admin" | "cliente";
   enabled?: boolean;
 }) {
   const itemsParam = serializarItemsDraft(items);
 
   const q = useQuery({
-    queryKey: [mode, "disponibilidad", fechaDesde, fechaHasta, pedidoId, itemsParam],
-    queryFn: () =>
-      mode === "cliente"
-        ? clienteApi.getDisponibilidad(pedidoId!, fechaDesde!, fechaHasta!, itemsParam)
-        : adminApi.getDisponibilidad(fechaDesde!, fechaHasta!, pedidoId, itemsParam),
+    queryKey: ["admin", "disponibilidad", fechaDesde, fechaHasta, pedidoId, itemsParam],
+    queryFn: () => adminApi.getDisponibilidad(fechaDesde!, fechaHasta!, pedidoId, itemsParam),
     enabled: enabled && !!pedidoId && !!fechaDesde && !!fechaHasta,
     // El mapa cambia con cada tecleo de cantidad: mantener el valor anterior
     // mientras llega el nuevo evita que los badges parpadeen.

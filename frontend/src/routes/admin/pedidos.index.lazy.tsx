@@ -172,12 +172,6 @@ function PedidosPage() {
     staleTime: 0,
   });
 
-  const solicitudesQ = useQuery({
-    queryKey: ["admin", "solicitudes", "count"],
-    queryFn: () => adminApi.listPedidos({ estado: "solicitado", per_page: 1 }),
-  });
-  const pendientes = solicitudesQ.data?.total ?? 0;
-
   const raw = useMemo(() => pedidosQ.data?.items ?? [], [pedidosQ.data]);
 
   // Conteo de activos para el chip de estado.
@@ -244,25 +238,10 @@ function PedidosPage() {
       layout="fullHeight"
       title="Pedidos"
       description={
-        <>
-          Reservas activas y solicitudes de cambio de tus clientes.{" "}
-          {pedidosQ.isLoading ? "Cargando…" : resumenConteo}
-        </>
+        <>Reservas activas de tus clientes. {pedidosQ.isLoading ? "Cargando…" : resumenConteo}</>
       }
       actions={
         <div className="hidden md:flex md:flex-wrap items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={() => navigate({ to: "/admin/solicitudes" })}
-            className="relative"
-          >
-            <Pencil className="h-4 w-4 mr-1" /> Solicitudes
-            {pendientes > 0 && (
-              <span className="ml-1.5 inline-flex min-w-[18px] items-center justify-center rounded-full bg-amber px-1.5 font-mono text-2xs font-bold text-ink">
-                {pendientes}
-              </span>
-            )}
-          </Button>
           <Button onClick={() => navigate({ to: "/admin/pedidos/nuevo" })}>
             <Plus className="h-4 w-4 mr-1" /> Nuevo pedido
           </Button>
@@ -401,20 +380,6 @@ function PedidosPage() {
 
       {/* Mobile: cards */}
       <div className="md:hidden flex-1 overflow-y-auto px-4 pb-24 space-y-2 border-t hairline pt-3">
-        {/* Acceso a Solicitudes (en mobile no está el sidebar para llegar) */}
-        <button
-          type="button"
-          onClick={() => navigate({ to: "/admin/solicitudes" })}
-          className="flex w-full items-center gap-2 rounded-xl border hairline bg-surface-elevated px-4 py-2.5 text-sm text-ink"
-        >
-          <Pencil className="h-4 w-4 text-muted-foreground" />
-          Solicitudes de cambio
-          {pendientes > 0 && (
-            <span className="ml-auto inline-flex min-w-[18px] items-center justify-center rounded-full bg-amber px-1.5 font-mono text-2xs font-bold text-ink">
-              {pendientes}
-            </span>
-          )}
-        </button>
         {pedidosQ.isLoading &&
           Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-28 w-full rounded-xl" />

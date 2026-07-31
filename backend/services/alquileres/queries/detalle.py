@@ -79,7 +79,6 @@ def _get_alquiler_detail(conn, id: int) -> dict:
     pedido = row_to_dict(row)
     pedido["items"] = _get_alquiler_items(conn, id)
     pedido["pagos"] = _get_alquiler_pagos(conn, id)
-    pedido["historial_modificaciones"] = _get_historial_modificaciones(conn, id)
     pedido["clases_taller"] = (
         _clases_del_taller(conn, pedido["taller_edicion_id"])
         if pedido.get("taller_edicion_id") else []
@@ -203,21 +202,3 @@ def _enriquecer_pedido_con_total(conn, pedido: dict) -> dict:
     """
     from services.finanzas_flujo.pedido import desglose_de_pedido
     return desglose_de_pedido(conn, pedido)
-
-
-def _get_historial_modificaciones(conn, pedido_id: int) -> list[dict]:
-    """Timeline de cambios solicitados por el cliente sobre el pedido.
-
-    Incluye tanto solicitudes de aprobación como cambios directos
-    (autosave en `presupuesto`) — el admin se beneficia de ver todo.
-    `cambios_aplicados` puede diferir de `cambios_json` cuando el admin
-    aprobó con contrapropuesta.
-    """
-    rows = conn.execute("""
-        SELECT id, mensaje, estado, respuesta, cambios_json, cambios_aplicados,
-               tipo, resolved_at, resolved_by, created_at
-        FROM solicitudes_modificacion
-        WHERE pedido_id = %s
-        ORDER BY created_at DESC
-    """, (pedido_id,)).fetchall()
-    return [row_to_dict(r) for r in rows]

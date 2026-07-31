@@ -90,14 +90,12 @@ def _funciones_motor():
         validar_stock_hipotetico,
     )
     from reservas.gate import _validar_demanda
-    from routes.cliente_portal import _check_stock_hipotetico
     from services.estudio.queries.disponibilidad import _centinela_libre
 
     return [
         validar_stock,
         validar_stock_hipotetico,
         _validar_demanda,
-        _check_stock_hipotetico,
         calcular_disponibilidad,
         dias_no_disponibles,
         get_buffer_horas,

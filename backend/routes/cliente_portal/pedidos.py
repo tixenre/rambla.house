@@ -201,8 +201,7 @@ def cliente_crear_pedido(
 @router.patch("/api/cliente/pedidos/{id}/cancelar")
 @limiter.limit(CLIENTE_WRITE_LIMIT)
 def cliente_cancelar_pedido(id: int, request: Request):
-    """La legalidad de la transición (qué estados puede cancelar un cliente)
-    y el auto-cancelado de solicitudes pendientes viven en
+    """La legalidad de la transición (qué estados puede cancelar un cliente) vive en
     `services.alquileres.commands.transiciones.cambiar_estado` — única puerta,
     la comparte con la transición de estado del admin."""
     session = require_cliente(request)
@@ -313,18 +312,6 @@ def cliente_pedidos(request: Request):
             """, (p["id"],)).fetchall()
             d["pagos"] = [row_to_dict(pg) for pg in pagos]
 
-            # Solicitudes de modificación que el cliente debe ver — sólo las
-            # de aprobación (las `directo` son auditoría interna del autosave
-            # en presupuesto, no relevantes para el cliente).
-            solic = conn.execute("""
-                SELECT id, mensaje, estado, respuesta, resolved_by,
-                       resolved_at, created_at
-                FROM solicitudes_modificacion
-                WHERE pedido_id = %s AND tipo = 'aprobacion'
-                ORDER BY created_at DESC
-            """, (p["id"],)).fetchall()
-            d["solicitudes"] = [row_to_dict(s) for s in solic]
-
             d["documentos_disponibles"] = {
                 **_documentos_disponibles(d.get("estado", "")),
                 "factura": p["id"] in pedidos_con_factura,
@@ -377,15 +364,6 @@ def cliente_pedido_detalle(id: int, request: Request):
             WHERE pedido_id = %s AND NOT anulado ORDER BY fecha
         """, (id,)).fetchall()
         d["pagos"] = [row_to_dict(p) for p in pagos]
-
-        solicitudes = conn.execute("""
-            SELECT id, mensaje, estado, respuesta, resolved_by,
-                   resolved_at, created_at
-            FROM solicitudes_modificacion
-            WHERE pedido_id = %s AND tipo = 'aprobacion'
-            ORDER BY created_at DESC
-        """, (id,)).fetchall()
-        d["solicitudes"] = [row_to_dict(s) for s in solicitudes]
 
         from services.facturacion.repo import get_factura_principal_emitida
         d["documentos_disponibles"] = {
