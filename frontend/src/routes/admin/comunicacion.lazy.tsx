@@ -9,25 +9,16 @@
  * WhatsApp es un canal de este módulo, no un menú aparte.
  */
 import { createLazyFileRoute } from "@tanstack/react-router";
-import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import {
-  Copy,
-  Mail,
-  MessageCircle,
-  Paperclip,
-  Send,
-  ExternalLink,
-  PlayCircle,
-  UploadCloud,
-} from "lucide-react";
+import { Copy, Mail, MessageCircle, Paperclip, Send, PlayCircle, UploadCloud } from "lucide-react";
 
 import { comunicacionApi, type EventoComunicacion } from "@/lib/admin/api/comunicacion";
 import { whatsappApi } from "@/lib/admin/api/whatsapp";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { AdminPage } from "@/components/admin/AdminPage";
+import { EmailsAdmin } from "@/components/admin/email/EmailsAdmin";
 import { Section } from "@/design-system/composites/Section";
 import { Chequeos } from "@/design-system/composites/Chequeos";
 import { Pill } from "@/design-system/ui/Pill";
@@ -76,6 +67,14 @@ function ComunicacionPage() {
           <Canales canales={q.data.canales} />
           <Eventos eventos={q.data.eventos} />
           <PlantillasMeta />
+          {/* El editor de mails vivía dentro de Settings; se trae acá para que TODA
+              la comunicación (los dos canales + los eventos) esté en un solo lugar. */}
+          <Section
+            title="Plantillas de mail"
+            subtitle="El texto de cada mail, su on/off, la prueba de envío y el registro de lo enviado."
+          >
+            <EmailsAdmin />
+          </Section>
         </div>
       )}
     </AdminPage>
@@ -94,7 +93,7 @@ function Canales({
       <Section
         title="Mail"
         icon={Mail}
-        subtitle="El texto de cada mail se edita en Plantillas de mail."
+        subtitle="Proveedor y remitente del canal."
         actions={
           <Pill tone={canales.mail.activo ? "success" : "neutral"}>
             {canales.mail.activo ? "Activo" : "Modo prueba"}
@@ -115,11 +114,9 @@ function Canales({
             <dd className="break-all">{canales.mail.admin_to || "—"}</dd>
           </div>
         </dl>
-        <Button variant="outline" size="sm" className="mt-3" asChild>
-          <Link to="/admin/email-templates">
-            Editar plantillas de mail <ExternalLink className="ml-1 h-3.5 w-3.5" />
-          </Link>
-        </Button>
+        <p className="mt-3 text-xs text-muted-foreground">
+          Las plantillas se editan más abajo, en esta misma pantalla.
+        </p>
       </Section>
 
       <Section

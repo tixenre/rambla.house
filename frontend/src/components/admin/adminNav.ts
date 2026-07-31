@@ -35,7 +35,6 @@ import {
   Settings,
   AlertTriangle,
   MessagesSquare,
-  Mail,
   type LucideIcon,
 } from "lucide-react";
 
@@ -132,7 +131,6 @@ export const ADMIN_NAV: AdminNavGroup[] = [
       // le decimos al cliente y por dónde sale. WhatsApp no lleva entrada propia —
       // es un canal de este módulo, no una sección aparte.
       { title: "Comunicación", url: "/admin/comunicacion", icon: MessagesSquare },
-      { title: "Plantillas de mail", url: "/admin/email-templates", icon: Mail },
       { title: "Assets y diseño", url: "/admin/diseno", icon: Palette },
       { title: "Marca", url: "/admin/marca", icon: Megaphone },
       { title: "Novedades", url: "/admin/novedades", icon: Sparkles },

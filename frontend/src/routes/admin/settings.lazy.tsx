@@ -3,7 +3,6 @@ import { createLazyFileRoute } from "@tanstack/react-router";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { AdminPage } from "@/components/admin/AdminPage";
 import { AdminSection } from "@/components/admin/AdminSection";
-import { EmailsAdmin } from "@/components/admin/email/EmailsAdmin";
 import { ComisionesSection } from "@/components/admin/settings/ComisionesSection";
 import { DescuentosJornadaSection } from "@/components/admin/settings/DescuentosJornadaSection";
 import { GoogleAnalyticsSection } from "@/components/admin/settings/GoogleAnalyticsSection";
@@ -62,10 +61,6 @@ function SettingsPage() {
           defaultOpen={false}
         >
           <ComisionesSection />
-        </AdminSection>
-
-        <AdminSection title="Emails" storageKey="settings:emails" defaultOpen={false}>
-          <EmailsAdmin />
         </AdminSection>
 
         <AdminSection
