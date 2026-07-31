@@ -81,7 +81,11 @@ __all__ = [
 # `router` compartido; el tuple los mantiene "usados" para ruff. (`documentos`
 # sí re-exporta helpers, arriba — su import ya registra sus rutas.) `pedidos`
 # son los endpoints HTTP del CRUD del pedido (la lógica reusable queda en `core`).
+# `turnos_estudio` (#1308 Fase 4.2): POST/PATCH/DELETE de un turno del Estudio
+# EMBEBIDO en un pedido existente — lógica reusable en
+# `services.estudio.commands.reserva`.
 from routes.alquileres import descuentos as _descuentos
 from routes.alquileres import pedidos as _pedidos
+from routes.alquileres import turnos_estudio as _turnos_estudio
 
-_SUBMODULOS = (_descuentos, _pedidos)
+_SUBMODULOS = (_descuentos, _pedidos, _turnos_estudio)
