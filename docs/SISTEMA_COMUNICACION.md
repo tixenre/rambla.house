@@ -25,9 +25,29 @@ declara su **estrategia** de cómo alcanzar al cliente:
 | `SOLO_MAIL` | Solo mail. Comunicaciones **formales** (contrato / documentos) van siempre por mail. | _(disponible; sin evento cableado aún)_ |
 | `SOLO_WHATSAPP` | Solo WhatsApp. | `recordatorio_devolucion_{d1,d0,vencido}` |
 
+Los 6 eventos tienen hoy plantilla en los dos canales (los 3 de devolución nacieron
+canal-WhatsApp —ese sigue siendo su default— pero tienen su mail para que la elección sea real),
+así que cualquiera de las cuatro formas es elegible en cualquiera de ellos.
+
 El **mail al admin** (`CanalMail.template_admin`) es **independiente** del plan A/B del
 cliente: si el evento lo declara, sale **siempre** por mail (el admin se entera del pedido
 pase lo que pase con el canal del cliente).
+
+### Lo que declara el registro es el DEFAULT — el dueño puede cambiarlo
+
+La estrategia del `REGISTRO` es **el default de fábrica**, no un valor fijo: desde
+`/admin/comunicacion` el dueño elige, por evento, si sale por WhatsApp, por mail o por los dos
+(`services/comunicacion/estrategia.py`, setting `comunicacion_estrategia_<evento>`). Dos reglas
+lo hacen seguro:
+
+- **Solo se puede elegir un canal que el evento tenga cableado** (`posibles()`): un evento sin
+  plantilla de mail no puede quedar en "solo mail". Lo valida el endpoint al guardar **y** la
+  resolución al leer (una fila vieja o corrupta cae al default).
+- **Fail-open**: si la BD no contesta o el valor no sirve, se despacha como declara el código.
+  Un problema de configuración nunca deja al cliente sin aviso.
+
+El despacho cachea la elección en proceso con TTL corto (evita una query por notificación); al
+guardar, el endpoint invalida el cache — con varios workers, los demás convergen en segundos.
 
 **Cómo se decide el fallback (y por qué en background):** el despacho corre el sender de
 WhatsApp **síncrono** y mira su resultado (`wamid` = enviado; `skipped/duplicado` = ya había
@@ -51,6 +71,7 @@ antes (empirismo proporcional, _2026-06-27_).
 | Módulo | Rol |
 | --- | --- |
 | `services/comunicacion/eventos.py` | **Registro fuente única**: `REGISTRO[evento]` = `EventoComunicacion(estrategia=..., mail=CanalMail(...), whatsapp="<template>")`. Un evento declara su template **por canal** + la **estrategia** (plan A/B) con la que se alcanza al cliente. |
+| `services/comunicacion/estrategia.py` | **Por dónde sale HOY cada evento**: `efectiva(ev)` = lo que eligió el dueño (setting `comunicacion_estrategia_<evento>`) o, si no eligió / no sirve / la BD no contesta, el default del registro. `posibles(ev)` acota la elección a los canales que ese evento tiene cableados. |
 | `services/comunicacion/opciones.py` | **Qué se puede configurar de cada evento** (horario del barrido, antelación, números del equipo): declara las perillas de cada evento apuntando a keys de `app_settings` **ya permitidas**. No redeclara keys/env/defaults — los importa de `jobs/recordatorios_config.py` y `jobs/recordatorios_devolucion_config.py`, que siguen siendo la fuente única de la resolución `env > settings > default`. Se guardan por el `PUT /api/admin/settings/{key}` de siempre. |
 | `services/comunicacion/despacho.py` | `notificar_pedido(evento, pedido, ctx=None, *, background)`: lee el registro y resuelve el envío según la estrategia (`_despachar_cliente` = plan A/B; el admin siempre por mail). Arma el contexto (`pedido_email_context`, si no se pasa `ctx`) y el `.ics` (`ics_adjunto_pedido`). Reusa los senders de cada canal — no reimplementa el envío. Devuelve `{"mail": [...], "whatsapp": ...}`. |
 
@@ -72,7 +93,8 @@ nuestro; el WhatsApp es un template rígido pre-aprobado por Meta). Lo que el re
 Una pantalla, **una tarjeta por evento**, y adentro de cada evento **todo lo que hace falta para
 comunicarlo**: el texto que sale por cada canal (la plantilla de WhatsApp con su estado de
 aprobación en Meta + la de mail, con su on/off y su editor), a quién le llega (cliente / equipo)
-y sus perillas (`opciones.py`: encendido, antelación, hora del barrido, números del equipo).
+y sus perillas (`opciones.py`: encendido, antelación, hora del barrido, números del equipo),
+incluido el selector de **por dónde sale** (`estrategia.py`).
 Criterio del dueño: **la configuración vive en el mensaje que corresponde** — antes el
 recordatorio de retiro tenía su propia tarjeta en Settings, suelta de la comunicación que
 gobierna, y las plantillas de mail vivían en otra lista aparte.

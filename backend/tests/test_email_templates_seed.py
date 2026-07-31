@@ -13,6 +13,11 @@ EXPECTED_KEYS = {
     "pedido_confirmado_cliente",
     "pedido_creado_admin",
     "recordatorio_retiro",
+    # Devolución: los 3 avisos existen también como mail para que el dueño pueda
+    # elegir el canal desde /admin/comunicacion (su default sigue siendo WhatsApp).
+    "recordatorio_devolucion_d1",
+    "recordatorio_devolucion_d0",
+    "recordatorio_devolucion_vencido",
     "taller_inscripcion_admin",
     "taller_inscripcion_cliente",
     "taller_cambio_datos",

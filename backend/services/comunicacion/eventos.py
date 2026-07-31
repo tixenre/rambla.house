@@ -126,14 +126,15 @@ REGISTRO: dict[str, EventoComunicacion] = {
         mail=CanalMail(template_cliente="recordatorio_retiro"),
         whatsapp="recordatorio_retiro",
     ),
-    # Los recordatorios de devolución nacieron con el canal WhatsApp (no hay template
-    # de mail): solo WhatsApp. Si algún día se quiere el mail, se suma su template y
-    # se cambia la estrategia a FALLBACK.
+    # Los recordatorios de devolución nacieron canal-WhatsApp: ese sigue siendo su
+    # DEFAULT. Tienen su plantilla de mail para que el dueño pueda elegir el otro
+    # canal (o los dos) desde /admin/comunicacion — ver `estrategia.py`.
     "recordatorio_devolucion_d1": EventoComunicacion(
         key="recordatorio_devolucion_d1",
         titulo="Se acerca la devolución",
         descripcion="Aviso antes del día en que tiene que devolver el equipo.",
         estrategia=SOLO_WHATSAPP,
+        mail=CanalMail(template_cliente="recordatorio_devolucion_d1"),
         whatsapp="recordatorio_devolucion_d1",
     ),
     "recordatorio_devolucion_d0": EventoComunicacion(
@@ -141,6 +142,7 @@ REGISTRO: dict[str, EventoComunicacion] = {
         titulo="Devolución hoy",
         descripcion="Aviso el mismo día en que vence la reserva.",
         estrategia=SOLO_WHATSAPP,
+        mail=CanalMail(template_cliente="recordatorio_devolucion_d0"),
         whatsapp="recordatorio_devolucion_d0",
     ),
     "recordatorio_devolucion_vencido": EventoComunicacion(
@@ -148,6 +150,7 @@ REGISTRO: dict[str, EventoComunicacion] = {
         titulo="Devolución vencida",
         descripcion="Al día siguiente, si el equipo todavía figura sin devolver.",
         estrategia=SOLO_WHATSAPP,
+        mail=CanalMail(template_cliente="recordatorio_devolucion_vencido"),
         whatsapp="recordatorio_devolucion_vencido",
     ),
 }

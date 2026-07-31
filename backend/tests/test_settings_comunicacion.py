@@ -110,3 +110,27 @@ def test_rangos_de_horario_y_antelacion(conn, key, ok, fuera):
     with pytest.raises(HTTPException) as e:
         _put(key, fuera)
     assert e.value.status_code == 400
+
+
+# ── por dónde sale cada evento (la elección del dueño) ───────────────────────
+def test_guardar_por_donde_sale_un_evento(conn):
+    _put("comunicacion_estrategia_pedido_creado", "ambos")
+    assert conn.escrito == ("comunicacion_estrategia_pedido_creado", "ambos")
+
+
+def test_una_forma_de_mandar_inventada_se_rechaza(conn):
+    with pytest.raises(HTTPException) as e:
+        _put("comunicacion_estrategia_pedido_creado", "por_paloma_mensajera")
+    assert e.value.status_code == 400
+    assert conn.escrito is None
+
+
+def test_evento_inexistente_se_rechaza(conn):
+    with pytest.raises(HTTPException) as e:
+        _put("comunicacion_estrategia_no_existe", "ambos")
+    assert e.value.status_code == 400
+
+
+def test_vaciarla_vuelve_al_default_del_registro(conn):
+    _put("comunicacion_estrategia_pedido_creado", "")
+    assert conn.borrado == "comunicacion_estrategia_pedido_creado"

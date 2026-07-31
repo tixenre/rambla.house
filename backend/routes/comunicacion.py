@@ -33,6 +33,7 @@ def listar_eventos(request: Request):
         ESTRATEGIA_LABEL,
         REGISTRO,
     )
+    from services.comunicacion.estrategia import efectiva, posibles, setting_de
     from services.comunicacion.opciones import estado as estado_opciones
     from services.email.service import channel_status
     from services.whatsapp import REGISTRO as WA_REGISTRO
@@ -41,6 +42,9 @@ def listar_eventos(request: Request):
     with get_db() as conn:
         wa_estado = diagnosticar(conn)
         opciones = estado_opciones(conn)
+        # Por dónde sale HOY cada evento: lo elegido por el dueño o el default del
+        # registro. Lectura fresca (con la conexión abierta), no el cache del despacho.
+        estrategias = {ev.key: efectiva(ev, conn) for ev in REGISTRO.values()}
         # Asunto + on/off de TODOS los templates de mail en UNA query (no N+1): los
         # que un evento referencia se muestran adentro del evento, y el resto (los
         # mails que dispara Talleres) en su propia lista, para que no quede ninguno
@@ -96,9 +100,22 @@ def listar_eventos(request: Request):
                 "key": ev.key,
                 "titulo": ev.titulo or ev.key,
                 "descripcion": ev.descripcion,
-                "estrategia": ev.estrategia,
-                "estrategia_label": ESTRATEGIA_LABEL.get(ev.estrategia, ev.estrategia),
-                "estrategia_detalle": ESTRATEGIA_DETALLE.get(ev.estrategia, ""),
+                "estrategia": estrategias[ev.key],
+                "estrategia_label": ESTRATEGIA_LABEL.get(estrategias[ev.key], estrategias[ev.key]),
+                "estrategia_detalle": ESTRATEGIA_DETALLE.get(estrategias[ev.key], ""),
+                # Para poder cambiarla desde la pantalla: dónde se guarda, cuál es el
+                # default del código y qué opciones tiene ESTE evento (solo los canales
+                # que tiene cableados).
+                "estrategia_setting": setting_de(ev.key),
+                "estrategia_default": ev.estrategia,
+                "estrategias_posibles": [
+                    {
+                        "valor": e,
+                        "label": ESTRATEGIA_LABEL.get(e, e),
+                        "detalle": ESTRATEGIA_DETALLE.get(e, ""),
+                    }
+                    for e in posibles(ev)
+                ],
                 "mail_cliente": _mail_info(ev.mail.template_cliente if ev.mail else None),
                 "mail_admin": _mail_info(ev.mail.template_admin if ev.mail else None),
                 "con_adjunto_ics": bool(ev.mail and ev.mail.con_adjunto_ics),

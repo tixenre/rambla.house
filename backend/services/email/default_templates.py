@@ -1,4 +1,4 @@
-"""Contenido por defecto de las plantillas de email (los 7 mails del sistema).
+"""Contenido por defecto de las plantillas de email del sistema.
 
 **Fuente única forward del copy de los templates.** Espeja el end-state de la
 cadena de migraciones (`a4e8c2b9d710` siembra → `e7c3a9f5d1b8` → `c1e9f3a7b5d2`
@@ -12,7 +12,7 @@ migraciones se traben — la red del esquema en dos capas (ver `docs/MEMORIA.md`
 
 El layout branded (header con logo, colores, footer) lo pone el shell común en
 `services/email/service.py` (`_wrap_email_html`); estos bodies guardan **solo el
-contenido editable** (el admin los puede editar desde `/admin/email-templates`).
+contenido editable** (el admin los puede editar desde `/admin/comunicacion`).
 
 Los tokens visuales (colores, fuentes) y los helpers (`btn`, `H`, `LBL`, …) viven
 en `services/email/branding.py` — **fuente única**, no se repiten hex acá.
@@ -151,6 +151,68 @@ Ver en el back-office: {{ admin_url }}""",
 {{ items_text }}
 
 Te esperamos en el galpón. Si necesitás reagendar, escribinos cuanto antes.
+Tu portal: {{ portal_url }}
+
+— El equipo de Rambla""",
+    },
+
+    # ── Devolución ────────────────────────────────────────────────────────────
+    # Los 3 avisos de devolución nacieron canal-WhatsApp; estas plantillas existen
+    # para que el dueño pueda elegir el mail (o los dos) desde /admin/comunicacion.
+    # Su default sigue siendo "solo WhatsApp" (el registro de eventos lo declara).
+    "recordatorio_devolucion_d1": {
+        "subject": "Se acerca la devolución de tu pedido #{{ numero_pedido }} — Rambla Rental",
+        "body_html": f"""<p {b.H}>Se acerca la devolución</p>
+<p style="margin:0 0 8px;">Hola {{{{ cliente_nombre_pila }}}}, te recordamos que tu reserva <strong>#{{{{ numero_pedido }}}}</strong> vence el <strong>{{{{ fecha_hasta }}}}</strong>: pasá a devolver el equipo.</p>
+{{{{ items_html|safe }}}}
+{b.btn("portal_url", "Ver mi pedido")}
+<p {b.MUTED_P}>Si necesitás extender el alquiler, escribinos antes del vencimiento.</p>
+<p style="margin:18px 0 0;">— El equipo de Rambla</p>""",
+        "body_text": """Hola {{ cliente_nombre_pila }},
+
+Tu reserva #{{ numero_pedido }} vence el {{ fecha_hasta }}: pasá a devolver el equipo.
+
+{{ items_text }}
+
+Si necesitás extender el alquiler, escribinos antes del vencimiento.
+Tu portal: {{ portal_url }}
+
+— El equipo de Rambla""",
+    },
+    "recordatorio_devolucion_d0": {
+        "subject": "Hoy vence tu pedido #{{ numero_pedido }} — Rambla Rental",
+        "body_html": f"""<p {b.H}>Hoy vence tu reserva</p>
+<p style="margin:0 0 8px;">Hola {{{{ cliente_nombre_pila }}}}, tu reserva <strong>#{{{{ numero_pedido }}}}</strong> vence <strong>hoy ({{{{ fecha_hasta }}}})</strong>. Coordiná con nosotros la devolución del equipo.</p>
+{{{{ items_html|safe }}}}
+{b.btn("portal_url", "Ver mi pedido")}
+<p {b.MUTED_P}>Si ya lo devolviste, ignorá este mensaje.</p>
+<p style="margin:18px 0 0;">— El equipo de Rambla</p>""",
+        "body_text": """Hola {{ cliente_nombre_pila }},
+
+Tu reserva #{{ numero_pedido }} vence hoy ({{ fecha_hasta }}). Coordiná con nosotros la devolución del equipo.
+
+{{ items_text }}
+
+Si ya lo devolviste, ignorá este mensaje.
+Tu portal: {{ portal_url }}
+
+— El equipo de Rambla""",
+    },
+    "recordatorio_devolucion_vencido": {
+        "subject": "Tu pedido #{{ numero_pedido }} figura sin devolver — Rambla Rental",
+        "body_html": f"""<p {b.H}>El equipo figura sin devolver</p>
+<p style="margin:0 0 8px;">Hola {{{{ cliente_nombre_pila }}}}, tu reserva <strong>#{{{{ numero_pedido }}}}</strong> venció el <strong>{{{{ fecha_hasta }}}}</strong> y el equipo todavía figura sin devolver. Por favor comunicate para coordinar la devolución.</p>
+{{{{ items_html|safe }}}}
+{b.btn("portal_url", "Ver mi pedido")}
+<p {b.MUTED_P}>Si ya lo devolviste y seguís viendo esto, avisanos para corregirlo.</p>
+<p style="margin:18px 0 0;">— El equipo de Rambla</p>""",
+        "body_text": """Hola {{ cliente_nombre_pila }},
+
+Tu reserva #{{ numero_pedido }} venció el {{ fecha_hasta }} y el equipo todavía figura sin devolver. Por favor comunicate para coordinar la devolución.
+
+{{ items_text }}
+
+Si ya lo devolviste y seguís viendo esto, avisanos para corregirlo.
 Tu portal: {{ portal_url }}
 
 — El equipo de Rambla""",

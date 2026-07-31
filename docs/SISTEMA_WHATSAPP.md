@@ -69,17 +69,20 @@ El WhatsApp NO se dispara directo: se dispara como **plan A** de la capa única 
 comunicación (`services/comunicacion/` — ver [`SISTEMA_COMUNICACION.md`](SISTEMA_COMUNICACION.md)).
 El registro `comunicacion/eventos.py` declara, por evento, su template de mail + su template de
 WhatsApp + la **estrategia** (plan A/B); `comunicacion.notificar_pedido(evento, pedido, ctx)` la
-resuelve. Los eventos que hoy salen por WhatsApp:
+resuelve. La columna "Estrategia" de abajo es el **default de fábrica**: el dueño puede cambiar
+por dónde sale cada evento desde `/admin/comunicacion` (ver `SISTEMA_COMUNICACION.md`). Los
+eventos con canal WhatsApp:
 
 | Evento | Template WhatsApp (`plantillas.REGISTRO`) | Estrategia | Disparador |
 | --- | --- | --- | --- |
 | Pedido creado | `pedido_creado` | WhatsApp plan A / mail plan B (+ mail al admin siempre) | `routes/alquileres/core.py` + `routes/estudio.py` → `notificar_pedido` |
 | Pedido confirmado | `pedido_confirmado` | WhatsApp + mail con `.ics` (ambos) | `routes/alquileres/pedidos.py` → `notificar_pedido` |
 | Recordatorio de retiro (D-1) | `recordatorio_retiro` | WhatsApp plan A / mail plan B | `jobs/recordatorios.py` → `notificar_pedido` |
-| Recordatorio de devolución D-1/D-0/vencido | `recordatorio_devolucion_{d1,d0,vencido}` | solo whatsapp | `jobs/recordatorios_devolucion.py` — 3 ventanas prendibles por separado (`jobs/recordatorios_devolucion_config.py`) |
+| Recordatorio de devolución D-1/D-0/vencido | `recordatorio_devolucion_{d1,d0,vencido}` | solo whatsapp (default) | `jobs/recordatorios_devolucion.py` — 3 ventanas prendibles por separado (`jobs/recordatorios_devolucion_config.py`) |
 
 El scheduler in-process (`jobs/scheduler.py`) corre los dos barridos diarios (retiro + devolución),
-cada uno con su gate de hora y su var de dedup; la idempotencia final la da `whatsapp_log`.
+cada uno con su gate de hora y su var de dedup; ninguno de los dos re-lista un pedido ya
+alcanzado por CUALQUIER canal (`whatsapp_log` **o** `emails_log`).
 
 ## Templates a dar de alta en Meta
 

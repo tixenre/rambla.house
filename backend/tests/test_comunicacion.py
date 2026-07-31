@@ -54,10 +54,16 @@ def test_registro_referencia_templates_whatsapp_reales_y_estrategia_valida():
             assert ev.mail and ev.mail.template_cliente, f"{ev.key}: {ev.estrategia} necesita mail al cliente"
 
 
-def test_devolucion_es_solo_whatsapp():
+def test_devolucion_sale_por_whatsapp_por_default_pero_puede_elegir_mail():
+    """Nacieron canal-WhatsApp (ese es su default), pero tienen plantilla de mail:
+    el dueño puede cambiarlos a mail o a los dos desde el back-office."""
+    from services.comunicacion.estrategia import posibles
+
     for k in ("recordatorio_devolucion_d1", "recordatorio_devolucion_d0", "recordatorio_devolucion_vencido"):
         ev = REGISTRO[k]
-        assert ev.estrategia == SOLO_WHATSAPP and ev.mail is None
+        assert ev.estrategia == SOLO_WHATSAPP
+        assert ev.mail and ev.mail.template_cliente == k
+        assert set(posibles(ev)) == set(ESTRATEGIAS)
 
 
 def test_confirmacion_es_ambos_con_ics():
@@ -65,6 +71,33 @@ def test_confirmacion_es_ambos_con_ics():
     assert ev.estrategia == AMBOS
     assert ev.mail.con_adjunto_ics is True
     assert ev.whatsapp == "pedido_confirmado"
+
+
+# ── por dónde sale: el dueño puede elegirlo (estrategia.py) ──────────────
+def test_solo_se_puede_elegir_un_canal_que_el_evento_tenga_cableado():
+    from services.comunicacion.estrategia import posibles
+
+    solo_mail = EventoComunicacion(key="x", descripcion="", mail=CanalMail(template_cliente="t"))
+    solo_wa = EventoComunicacion(key="y", descripcion="", whatsapp="pedido_creado")
+    assert posibles(solo_mail) == [SOLO_MAIL]      # sin WhatsApp: no hay nada que elegir
+    assert posibles(solo_wa) == [SOLO_WHATSAPP]
+    assert set(posibles(REGISTRO["pedido_creado"])) == set(ESTRATEGIAS)
+
+
+def test_el_despacho_usa_la_estrategia_elegida_no_la_del_registro(monkeypatch):
+    """`pedido_creado` es FALLBACK por default; si el dueño lo pasa a solo mail,
+    el WhatsApp no sale."""
+    sink = []
+    _mock_mail(monkeypatch, sink)
+    monkeypatch.setattr(d, "get_admin_to", lambda: "")
+    wa_llamado = []
+    monkeypatch.setattr(
+        wa, "enviar_evento_pedido", lambda *a, **k: wa_llamado.append(a) or {"ok": True, "wamid": "W"}
+    )
+    monkeypatch.setattr(d, "estrategia_efectiva", lambda ev: SOLO_MAIL)
+    res = d.notificar_pedido("pedido_creado", {"id": 1, "cliente_id": 2, "cliente_email": "c@x.com"}, {})
+    assert wa_llamado == [] and res["whatsapp"] is None
+    assert [m["to"] for m in sink] == ["c@x.com"]
 
 
 # ── plan A/B: FALLBACK ────────────────────────────────────────────────────

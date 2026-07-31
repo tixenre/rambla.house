@@ -21,6 +21,7 @@ import {
   MessageCircle,
   Paperclip,
   PlayCircle,
+  RotateCcw,
   Send,
   SlidersHorizontal,
   UploadCloud,
@@ -310,13 +311,7 @@ function EventoCard({
   const ventana = VENTANA_DE_EVENTO[ev.key];
 
   return (
-    <Section
-      title={ev.titulo}
-      subtitle={ev.descripcion}
-      actions={
-        <Pill tone={TONO_ESTRATEGIA[ev.estrategia] ?? "neutral"}>{ev.estrategia_label}</Pill>
-      }
-    >
+    <Section title={ev.titulo} subtitle={ev.descripcion} actions={<PorDondeSale ev={ev} />}>
       <p className="text-xs text-muted-foreground">{ev.estrategia_detalle}</p>
 
       <div className="mt-3 grid gap-4 lg:grid-cols-2">
@@ -344,6 +339,53 @@ function EventoCard({
         <Opciones opciones={ev.opciones} extra={ventana ? <Simular ventana={ventana} /> : null} />
       )}
     </Section>
+  );
+}
+
+/** Por dónde sale este aviso: WhatsApp, mail o los dos. Lo elige el dueño; el
+ *  código solo pone el default. Guarda en `app_settings` por la puerta de siempre. */
+function PorDondeSale({ ev }: { ev: EventoComunicacion }) {
+  const qc = useQueryClient();
+  const guardar = useMutation({
+    mutationFn: (valor: string) => adminApi.updateSetting(ev.estrategia_setting, valor),
+    onSuccess: () => {
+      toast.success("Listo", { description: "Cambiamos por dónde sale este aviso." });
+      void qc.invalidateQueries({ queryKey: ["comunicacion", "eventos"] });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  // Un evento con un solo canal cableado no tiene nada que elegir.
+  if (ev.estrategias_posibles.length <= 1) {
+    return <Pill tone={TONO_ESTRATEGIA[ev.estrategia] ?? "neutral"}>{ev.estrategia_label}</Pill>;
+  }
+
+  return (
+    <div className="flex items-center gap-2">
+      <Select value={ev.estrategia} onValueChange={(v) => guardar.mutate(v)}>
+        <SelectTrigger className="h-9 w-64" disabled={guardar.isPending}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {ev.estrategias_posibles.map((o) => (
+            <SelectItem key={o.valor} value={o.valor}>
+              {o.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      {ev.estrategia !== ev.estrategia_default && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => guardar.mutate(ev.estrategia_default)}
+          disabled={guardar.isPending}
+          title="Volver a como viene de fábrica"
+        >
+          <RotateCcw className="h-3.5 w-3.5" />
+        </Button>
+      )}
+    </div>
   );
 }
 

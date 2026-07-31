@@ -1,4 +1,4 @@
-"""Job de recordatorios de DEVOLUCIÓN por WhatsApp (canal-only).
+"""Job de recordatorios de DEVOLUCIÓN.
 
 Pieza única y testeable (sin FastAPI/request), la corre el scheduler in-process y
 un endpoint de prueba on-demand. Tres ventanas independientes sobre pedidos en
@@ -7,12 +7,12 @@ estado 'retirado' (el equipo está afuera), según cuándo cae `fecha_hasta`:
   - D-0: la devolución es hoy.
   - vencido (D+1): la devolución era ayer y el pedido sigue 'retirado'.
 
-Solo WhatsApp: no hay template de mail de devolución (los recordatorios de
-devolución nacieron con el canal WhatsApp). La idempotencia la garantiza el índice
-único parcial de `whatsapp_log` (un envío 'sent' por (alquiler_id, template_key));
-el `NOT EXISTS` del barrido es la primera línea anti-duplicado. Reusa la boca única
-`services.whatsapp.enviar_evento_pedido` (nunca propaga, se autogatea por
-credencial/opt-in/E.164) y el mismo armador de contexto que los mails.
+Despacha por la capa única de comunicación (`comunicacion.notificar_pedido`): por
+dónde sale cada ventana lo decide su evento — nacieron canal-WhatsApp (ese sigue
+siendo su default) pero el dueño puede pasarlas a mail o a los dos desde
+/admin/comunicacion. Por eso el barrido no re-lista un pedido ya alcanzado por
+CUALQUIER canal (`whatsapp_log` **o** `emails_log`) y cuenta "enviado" sin importar
+por cuál salió — mismo criterio que `jobs/recordatorios.py` (retiro).
 """
 from __future__ import annotations
 
@@ -45,8 +45,8 @@ VENTANA_CONFIGURABLE = "d1"
 
 def _pedidos_para_devolucion(conn, hoy, offset_dias: int, template_key: str) -> list[dict]:
     """Pedidos 'retirado' cuya `fecha_hasta` cae en el día `hoy + offset_dias`
-    (ventana [00:00, +1 00:00)), que todavía no recibieron ESTE template por
-    WhatsApp."""
+    (ventana [00:00, +1 00:00)), que todavía no recibieron ESTE aviso por NINGÚN
+    canal (el evento puede salir por WhatsApp, por mail o por los dos)."""
     dia_ini = (hoy + timedelta(days=offset_dias)).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
@@ -65,9 +65,15 @@ def _pedidos_para_devolucion(conn, hoy, offset_dias: int, template_key: str) -> 
                 AND wl.template_key = %s
                 AND wl.status = 'sent'
           )
+          AND NOT EXISTS (
+              SELECT 1 FROM emails_log el
+              WHERE el.alquiler_id = a.id
+                AND el.template_key = %s
+                AND el.status = 'sent'
+          )
         ORDER BY a.id
     """,
-        (ESTADO_RECORDABLE, dia_ini, dia_fin, template_key),
+        (ESTADO_RECORDABLE, dia_ini, dia_fin, template_key, template_key),
     ).fetchall()
     return [row_to_dict(r) for r in rows]
 
@@ -116,20 +122,25 @@ def enviar_recordatorios_devolucion(
                     v["pedidos"].append(entry)
                     continue
                 ctx = pedido_email_context(p)
-                # Evento SOLO_WHATSAPP (así lo declara el registro de comunicación):
-                # el despacho devuelve el resultado del canal WhatsApp.
-                res = notificar_pedido(template_key, p, ctx)["whatsapp"] or {}
-                if res.get("ok") and not res.get("skipped"):
+                # El canal lo decide la estrategia del evento (WhatsApp, mail o
+                # los dos): se cuenta "enviado" si el cliente fue alcanzado por
+                # CUALQUIERA de los dos.
+                res = notificar_pedido(template_key, p, ctx)
+                wa = res.get("whatsapp") or {}
+                mail_res = (res.get("mail") or [None])[0] or {}
+                wa_ok = wa.get("ok") and not wa.get("skipped")
+                if wa_ok or (mail_res.get("ok") and not mail_res.get("skipped")):
                     v["enviados"] += 1
                     entry["status"] = "sent"
-                elif res.get("skipped"):
+                    entry["canal"] = "whatsapp" if wa_ok else "mail"
+                elif wa.get("skipped") or mail_res.get("skipped"):
                     v["saltados"] += 1
                     entry["status"] = "skipped"
-                    entry["reason"] = res.get("reason")
+                    entry["reason"] = wa.get("reason") or mail_res.get("reason")
                 else:
                     v["fallidos"] += 1
                     entry["status"] = "failed"
-                    entry["error"] = res.get("error")
+                    entry["error"] = wa.get("error") or mail_res.get("error")
                 v["pedidos"].append(entry)
             resumen["ventanas"][clave] = v
         logger.info(

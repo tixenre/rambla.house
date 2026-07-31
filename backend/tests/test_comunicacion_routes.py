@@ -21,6 +21,9 @@ class _FakeCursor:
     def fetchall(self):
         return self._rows
 
+    def fetchone(self):
+        return self._rows[0] if self._rows else None
+
 
 class _FakeConn:
     """Sirve `email_templates` (dict key → (subject, enabled)) y `app_settings`
@@ -103,12 +106,42 @@ def test_marca_un_template_de_mail_que_no_existe(monkeypatch):
     assert all(e["mail_cliente"]["existe"] is False for e in con_mail)
 
 
-def test_confirmado_declara_ics_y_devolucion_no_tiene_mail(monkeypatch):
+def test_confirmado_declara_ics(monkeypatch):
     _fake_deps(monkeypatch, _TODOS)
     por_key = {e["key"]: e for e in rc.listar_eventos(request=None)["eventos"]}
     assert por_key["pedido_confirmado"]["con_adjunto_ics"] is True
-    dev = por_key["recordatorio_devolucion_d1"]
-    assert dev["mail_cliente"] is None and dev["whatsapp"] is not None
+
+
+# ── por dónde sale: elegible desde la pantalla ───────────────────────────────
+def test_evento_trae_como_cambiar_por_donde_sale(monkeypatch):
+    _fake_deps(monkeypatch, _TODOS)
+    ev = {e["key"]: e for e in rc.listar_eventos(request=None)["eventos"]}["pedido_creado"]
+    assert ev["estrategia_setting"] == "comunicacion_estrategia_pedido_creado"
+    assert ev["estrategia_default"] == "fallback"
+    # Tiene los dos canales cableados → puede ser cualquiera de las cuatro formas.
+    assert {o["valor"] for o in ev["estrategias_posibles"]} == set(ESTRATEGIAS)
+    assert all(o["label"] and o["detalle"] for o in ev["estrategias_posibles"])
+
+
+def test_la_elegida_por_el_dueno_pisa_al_default_del_registro(monkeypatch):
+    _fake_deps(
+        monkeypatch, _TODOS,
+        settings={"comunicacion_estrategia_pedido_creado": "solo_mail"},
+    )
+    ev = {e["key"]: e for e in rc.listar_eventos(request=None)["eventos"]}["pedido_creado"]
+    assert ev["estrategia"] == "solo_mail"          # lo que eligió el dueño
+    assert ev["estrategia_default"] == "fallback"   # lo que declara el código
+    assert ev["estrategia_label"] == ESTRATEGIA_LABEL["solo_mail"]
+
+
+def test_un_valor_guardado_que_no_sirve_cae_al_default(monkeypatch):
+    """Una fila vieja/corrupta no puede dejar un evento sin forma de salir."""
+    _fake_deps(
+        monkeypatch, _TODOS,
+        settings={"comunicacion_estrategia_pedido_creado": "por_paloma_mensajera"},
+    )
+    ev = {e["key"]: e for e in rc.listar_eventos(request=None)["eventos"]}["pedido_creado"]
+    assert ev["estrategia"] == "fallback"
 
 
 def test_incluye_estado_de_los_dos_canales(monkeypatch):

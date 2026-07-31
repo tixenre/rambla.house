@@ -24,6 +24,18 @@ export const TEMPLATE_META: Record<string, { label: string; description: string 
     label: "Recordatorio de retiro",
     description: "Recordatorio automático al cliente antes del retiro.",
   },
+  recordatorio_devolucion_d1: {
+    label: "Se acerca la devolución",
+    description: "Aviso antes del día en que el cliente tiene que devolver el equipo.",
+  },
+  recordatorio_devolucion_d0: {
+    label: "Devolución hoy",
+    description: "Aviso el mismo día en que vence la reserva.",
+  },
+  recordatorio_devolucion_vencido: {
+    label: "Devolución vencida",
+    description: "Al día siguiente, si el equipo todavía figura sin devolver.",
+  },
   // ── Talleres (los manda services/talleres directo, no el registro) ──────
   taller_inscripcion_cliente: {
     label: "Inscripción a un taller — cliente",

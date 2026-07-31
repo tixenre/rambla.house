@@ -16,6 +16,8 @@ from fastapi import APIRouter, Request, HTTPException
 from database import get_db, MARCA_SUBQUERY
 from auth.guards import require_admin
 from rate_limit import limiter, ADMIN_WRITE_LIMIT, ADMIN_UPLOAD_LIMIT
+from services.comunicacion import estrategia as _estrategia
+from services.comunicacion.eventos import REGISTRO as _EVENTOS_COMUNICACION
 from services.media.processing import _optimize_og_image
 
 logger = logging.getLogger(__name__)
@@ -204,6 +206,14 @@ ALLOWED_SETTINGS_KEYS = {
     "whatsapp_admin_numeros",     # Números del equipo (E.164, coma-separados) para avisos internos.
 }
 
+# Por dónde sale cada evento de comunicación (WhatsApp / mail / los dos): una key
+# por evento, DERIVADA del registro (`services/comunicacion/eventos.py`, fuente
+# única) — si se agrega un evento, su setting existe sola, sin tocar esta lista.
+# El valor válido depende del evento (`estrategia.posibles`): se valida al guardar.
+ALLOWED_SETTINGS_KEYS |= {
+    _estrategia.setting_de(_k) for _k in _EVENTOS_COMUNICACION
+}
+
 # Subset de ALLOWED_SETTINGS_KEYS que el catálogo ANÓNIMO (sin sesión) puede
 # leer — cada una tiene un consumidor real fuera de /admin (grep confirmado):
 # Logo (wordmark_svg), hero del catálogo (hero_taglines), FAQ (faq_json), meta
@@ -243,6 +253,8 @@ CLEARABLE_SETTINGS_KEYS = {
     "disclaimer_antelacion_texto",       # Vaciarlo vuelve al texto default.
     "disclaimer_horarios_finde_texto",
     "whatsapp_admin_numeros",  # Vaciarlo = no se le avisa a nadie del equipo por WhatsApp.
+    # Vaciar la estrategia de un evento = volver al default que declara el registro.
+    *(_estrategia.setting_de(_k) for _k in _EVENTOS_COMUNICACION),
 }
 
 # Settings booleanas que la UI edita con un switch: se normalizan a "1"/"0" para
@@ -355,6 +367,8 @@ def update_setting(key: str, payload: dict, request: Request):
         with get_db() as conn:
             conn.execute("DELETE FROM app_settings WHERE key = %s", (key,))
             conn.commit()
+            if _estrategia.evento_de_setting(key) is not None:
+                _estrategia.invalidar_cache()  # vuelve al default del registro ya
             return {"key": key, "value": "", "updated_by": None}
     value = str(value).strip()
     # Validaciones livianas para datos de contacto (display-only).
@@ -393,6 +407,19 @@ def update_setting(key: str, payload: dict, request: Request):
             value = str(v)
         except (ValueError, TypeError) as e:
             raise HTTPException(400, f"Valor inválido para '{key}': {que} entre {lo} y {hi} ({e})")
+    evento_key = _estrategia.evento_de_setting(key)
+    if evento_key is not None:
+        # Por dónde sale un evento: solo se puede elegir un canal que ese evento
+        # tenga cableado (un evento sin plantilla de mail no puede ser "solo mail").
+        ev = _EVENTOS_COMUNICACION.get(evento_key)
+        if ev is None:
+            raise HTTPException(400, f"Evento de comunicación desconocido: '{evento_key}'")
+        if value not in _estrategia.posibles(ev):
+            raise HTTPException(
+                400,
+                f"'{value}' no es una forma válida de mandar este aviso "
+                f"(puede ser: {', '.join(_estrategia.posibles(ev))})",
+            )
     if key == "whatsapp_admin_numeros":
         # Los números del equipo pasan por el embudo único (services/telefono) al
         # GUARDARLOS, no recién al enviar: si uno está mal, el admin se entera acá
@@ -452,6 +479,10 @@ def update_setting(key: str, payload: dict, request: Request):
             if key == "buffer_horas_alquiler":
                 from reservas import invalidate_buffer_cache
                 invalidate_buffer_cache()
+            # El despacho cachea por dónde sale cada evento (TTL corto): al
+            # cambiarlo, que aplique al toque en este worker.
+            if evento_key is not None:
+                _estrategia.invalidar_cache()
             return {"key": key, "value": value, "updated_by": actor}
         except Exception:
             conn.rollback()

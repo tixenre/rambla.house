@@ -21,6 +21,7 @@ from fastapi import BackgroundTasks
 
 from config import SITE_URL
 from database import to_datetime, to_iso
+from services.comunicacion.estrategia import efectiva as estrategia_efectiva
 from services.comunicacion.eventos import (
     AMBOS,
     REGISTRO,
@@ -247,7 +248,9 @@ def _despachar_cliente(evento: EventoComunicacion, pedido: dict, ctx: dict) -> d
     con el resultado real del WhatsApp (plan A) y no encolando dos envíos a ciegas.
 
     Devuelve `{"whatsapp": <res|None>, "mail": <res|None>}` (canal del cliente)."""
-    est = evento.estrategia
+    # La estrategia EFECTIVA: la que el dueño eligió en /admin/comunicacion o, si no
+    # eligió (o lo guardado no sirve), la que declara el registro. Ver `estrategia.py`.
+    est = estrategia_efectiva(evento)
     wa = None
     mail = None
 

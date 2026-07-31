@@ -55,9 +55,20 @@ export type EventoComunicacion = {
   /** Nombre corto del evento (título de su tarjeta). */
   titulo: string;
   descripcion: string;
+  /** Por dónde sale HOY: lo que eligió el dueño o, si no eligió, el default del código. */
   estrategia: EstrategiaComunicacion;
   estrategia_label: string;
   estrategia_detalle: string;
+  /** Dónde se guarda la elección (`PUT /api/admin/settings/{key}`). */
+  estrategia_setting: string;
+  /** Lo que declara el registro — a lo que se vuelve si se vacía la elección. */
+  estrategia_default: EstrategiaComunicacion;
+  /** Solo las formas que ESTE evento puede tener (según los canales que tiene). */
+  estrategias_posibles: {
+    valor: EstrategiaComunicacion;
+    label: string;
+    detalle: string;
+  }[];
   mail_cliente: MailDeEvento | null;
   mail_admin: MailDeEvento | null;
   con_adjunto_ics: boolean;
