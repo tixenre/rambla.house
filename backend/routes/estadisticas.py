@@ -33,6 +33,66 @@ _PRORRATEO_CTE = """
     )
 """
 
+# Fragmento SQL compartido (#1308 rediseño "turno como ítem"): cuánto de
+# `alquileres.monto_total` de un pedido viene de un turno del Estudio EMBEBIDO
+# (`alquiler_items.turno_estudio_id`). Un ítem de turno queda excluido del
+# descuento automático del pedido (`services/precios.py::calcular_total`), así
+# que su aporte al NETO es exactamente su `subtotal` — restarlo de
+# `monto_total` da la porción "rental pura" del pedido, sin la plata del
+# Estudio mezclada. Usado por las agregaciones a nivel PEDIDO (totales/
+# por_mes/top_clientes/clientes_recurrentes/mejor_peor_mes): sin esto, un
+# pedido mixto inflaría el negocio de rental con plata que es del Estudio.
+# `top_equipos`/`por_dueno` NO lo necesitan (son a nivel ÍTEM, ya excluyen el
+# centinela vía `es_recurso_interno` y prorratean cada ítem por su propio
+# `subtotal`, sin mezclar).
+_TURNO_NETO_CTE = """
+    turno_neto AS (
+        SELECT pedido_id, COALESCE(SUM(subtotal), 0) AS monto_turnos
+        FROM alquiler_items
+        WHERE turno_estudio_id IS NOT NULL
+        GROUP BY pedido_id
+    )
+"""
+
+# Fragmento SQL compartido (#1308 rediseño "turno como ítem"), usado SOLO por la
+# sección "Estudio" de abajo: unifica los turnos STANDALONE (fila propia
+# `alquileres.tipo IN ('estudio','estudio_fijo')`) con los turnos EMBEBIDOS en
+# un pedido de alquiler normal (`alquiler_turnos_estudio`) en un único universo
+# `eventos_estudio` — mismo shape (mes/tipo/plata/horas), UNION ALL. Sin esto,
+# la plata que `_TURNO_NETO_CTE` resta del lado rental desaparecería sin
+# aparecer del lado Estudio (doble error, no uno).
+#
+# `turno_money` pre-agrega por `turno_estudio_id` ANTES del join a
+# `alquiler_turnos_estudio`/`alquileres`: un turno embebido puede tener varios
+# `alquiler_items` (centinela + sueltos + promo) — joinear directo sin
+# pre-agregar multiplicaría `horas_vendidas` (que sale de las fechas del
+# turno, no de sus ítems) por cada línea.
+#
+# Todo embebido entra como `tipo='estudio'` (turno real, con horas propias) —
+# nunca 'estudio_fijo': ese tipo es exclusivo de la fila recurrente standalone
+# (`_regenerar_pedidos_slot`), que no tiene contraparte embebida hoy.
+_TURNO_EVENTOS_CTE = f"""
+    turno_money AS (
+        SELECT turno_estudio_id AS tid, COALESCE(SUM(subtotal), 0) AS monto
+        FROM alquiler_items
+        WHERE turno_estudio_id IS NOT NULL
+        GROUP BY turno_estudio_id
+    ),
+    eventos_estudio AS (
+        SELECT p.id AS pedido_id, p.cliente_id, p.tipo,
+               p.fecha_desde, p.fecha_hasta, p.monto_total AS monto
+        FROM alquileres p
+        WHERE p.estado = 'finalizado' AND p.tipo IN {TIPOS_ESTUDIO_SQL}
+        UNION ALL
+        SELECT a.id AS pedido_id, a.cliente_id, 'estudio' AS tipo,
+               ate.fecha_desde, ate.fecha_hasta, tm.monto
+        FROM alquiler_turnos_estudio ate
+        JOIN alquileres a ON a.id = ate.pedido_id
+        LEFT JOIN turno_money tm ON tm.tid = ate.id
+        WHERE a.estado = 'finalizado'
+    )
+"""
+
 
 @router.get("/estadisticas")
 def get_estadisticas(request: Request):
@@ -66,23 +126,27 @@ def compute_estadisticas(conn) -> dict:
     # históricos de estas tarjetas cambian (bajan) respecto de antes de cada
     # fase — es la separación intencional, no una regresión.
     totales = conn.execute(f"""
+        WITH {_TURNO_NETO_CTE}
         SELECT
             COUNT(*)                       AS total_pedidos,
             COUNT(DISTINCT p.cliente_id)   AS total_clientes,
-            SUM(p.monto_total)             AS total_ars,
+            SUM(p.monto_total - COALESCE(tn.monto_turnos, 0)) AS total_ars,
             MIN(p.fecha_desde)             AS desde,
             MAX(p.fecha_desde)             AS hasta
         FROM alquileres p
+        LEFT JOIN turno_neto tn ON tn.pedido_id = p.id
         WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
     """).fetchone()
 
     # ── Por mes ───────────────────────────────────────────────────────────────
     por_mes = conn.execute(f"""
+        WITH {_TURNO_NETO_CTE}
         SELECT
             to_char(p.fecha_desde, 'YYYY-MM')    AS mes,
             COUNT(*)                       AS pedidos,
-            SUM(p.monto_total)             AS total_ars
+            SUM(p.monto_total - COALESCE(tn.monto_turnos, 0)) AS total_ars
         FROM alquileres p
+        LEFT JOIN turno_neto tn ON tn.pedido_id = p.id
         WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
         GROUP BY to_char(p.fecha_desde, 'YYYY-MM')
         ORDER BY to_char(p.fecha_desde, 'YYYY-MM') DESC
@@ -92,6 +156,14 @@ def compute_estadisticas(conn) -> dict:
     # ── Top equipos ───────────────────────────────────────────────────────────
     # A nivel ÍTEM: prorratea `monto_total` según la participación de cada línea
     # en el `subtotal` del pedido (mismo patrón que `reportes/liquidacion.py`).
+    # `e.es_recurso_interno = FALSE` (#1308 rediseño "turno como ítem"): excluye
+    # el centinela del Estudio — un pedido `diaria` mixto (equipos + turno
+    # EMBEBIDO) pasa el filtro de pedido de arriba (sigue siendo tipo='diaria'),
+    # así que sin esto su ítem centinela ("Estudio (espacio)") contaminaría
+    # "top equipo" con una línea que no es un equipo real de rental. Mismo campo
+    # que ya usa `routes/dashboard.py::equipos_afuera` para lo mismo. Los
+    # SUELTOS de un turno embebido (equipos reales) NO se excluyen — su uso y
+    # su prorrateo de plata son reales, quedan contados como cualquier ítem.
     top_equipos = conn.execute(f"""
         WITH {_PRORRATEO_CTE}
         SELECT
@@ -103,6 +175,7 @@ def compute_estadisticas(conn) -> dict:
         JOIN equipos e  ON e.id  = pi.equipo_id
         JOIN tot t ON t.pedido_id = p.id
         WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
+          AND e.es_recurso_interno = FALSE
         GROUP BY pi.equipo_id, e.nombre
         ORDER BY total_ars DESC
         LIMIT 15
@@ -110,12 +183,14 @@ def compute_estadisticas(conn) -> dict:
 
     # ── Top clientes ──────────────────────────────────────────────────────────
     top_clientes = conn.execute(f"""
+        WITH {_TURNO_NETO_CTE}
         SELECT
             MAX(COALESCE(c.nombre || ' ' || c.apellido, p.cliente_nombre)) AS cliente,
-            SUM(p.monto_total)             AS total_ars,
+            SUM(p.monto_total - COALESCE(tn.monto_turnos, 0)) AS total_ars,
             COUNT(DISTINCT p.id)           AS pedidos
         FROM alquileres p
         LEFT JOIN clientes c ON c.id = p.cliente_id
+        LEFT JOIN turno_neto tn ON tn.pedido_id = p.id
         WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
         GROUP BY COALESCE(CAST(p.cliente_id AS TEXT), 'txt:' || p.cliente_nombre)
         ORDER BY total_ars DESC
@@ -124,6 +199,9 @@ def compute_estadisticas(conn) -> dict:
 
     # ── Por dueño (basado en equipos.dueno) ───────────────────────────────────
     # Mismo prorrateo que top_equipos, agregado por `equipos.dueno`.
+    # `e.es_recurso_interno = FALSE`: mismo motivo que `top_equipos` — excluye
+    # el centinela (atribuido a un dueño real solo a efectos de la liquidación
+    # del Estudio, no de "por dueño" de rental).
     por_dueno = conn.execute(f"""
         WITH {_PRORRATEO_CTE}
         SELECT
@@ -135,6 +213,7 @@ def compute_estadisticas(conn) -> dict:
         JOIN equipos e ON e.id = pi.equipo_id
         JOIN tot t ON t.pedido_id = p.id
         WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
+          AND e.es_recurso_interno = FALSE
         GROUP BY COALESCE(e.dueno, 'Rental')
         ORDER BY total_ars DESC
     """).fetchall()
@@ -163,12 +242,14 @@ def compute_estadisticas(conn) -> dict:
 
     # ── Clientes más recurrentes ───────────────────────────────────────────────
     clientes_recurrentes = conn.execute(f"""
+        WITH {_TURNO_NETO_CTE}
         SELECT
             MAX(COALESCE(c.nombre || ' ' || c.apellido, p.cliente_nombre)) AS cliente,
             COUNT(DISTINCT p.id)           AS veces_alquiladas,
-            SUM(p.monto_total)             AS total_ars
+            SUM(p.monto_total - COALESCE(tn.monto_turnos, 0)) AS total_ars
         FROM alquileres p
         LEFT JOIN clientes c ON c.id = p.cliente_id
+        LEFT JOIN turno_neto tn ON tn.pedido_id = p.id
         WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
         GROUP BY COALESCE(CAST(p.cliente_id AS TEXT), 'txt:' || p.cliente_nombre)
         HAVING COUNT(DISTINCT p.id) > 1
@@ -183,9 +264,12 @@ def compute_estadisticas(conn) -> dict:
     # mismo universo que antes. `tipo NOT IN (...)` también acá (Fase 7): un mes
     # con mucho volumen de estudio no debe aparecer como "mejor mes" del rental.
     mejor_peor = conn.execute(f"""
-        WITH por_mes_full AS (
-            SELECT to_char(p.fecha_desde, 'YYYY-MM') AS mes, SUM(p.monto_total) AS total
+        WITH {_TURNO_NETO_CTE},
+        por_mes_full AS (
+            SELECT to_char(p.fecha_desde, 'YYYY-MM') AS mes,
+                   SUM(p.monto_total - COALESCE(tn.monto_turnos, 0)) AS total
             FROM alquileres p
+            LEFT JOIN turno_neto tn ON tn.pedido_id = p.id
             WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
             GROUP BY to_char(p.fecha_desde, 'YYYY-MM')
         )
@@ -230,38 +314,43 @@ def compute_estadisticas(conn) -> dict:
 
     # ── Estudio (economía separada, #1283 Fase 7) ─────────────────────────────
     # Mismo universo DEVENGADO (`estado='finalizado'`) que el resto de esta
-    # función. `horas_vendidas` se computa SOLO de `tipo='estudio'` (turnos
-    # reales) vía FILTER: un `estudio_fijo` guarda en `fecha_desde/fecha_hasta`
-    # únicamente la PRIMERA ocurrencia semanal del mes (`_primer_dia_semana`),
-    # no el total de horas de todas las recurrencias — sumarlo ahí subestimaría
-    # feo las horas. La plata y el conteo de pedidos SÍ combinan ambos tipos
-    # (ambos son ingreso real del Estudio), solo separados en columnas propias
-    # (`turnos` vs `meses_slot_fijo`) para no mezclar la unidad de negocio.
+    # función, ahora sobre `eventos_estudio` (#1308 rediseño "turno como
+    # ítem"): une los pedidos standalone (`tipo IN ('estudio','estudio_fijo')`)
+    # con los turnos EMBEBIDOS en un pedido de alquiler normal — sin esto, la
+    # plata que `_TURNO_NETO_CTE` resta del lado rental (arriba) desaparecería
+    # sin sumarse acá. `horas_vendidas` se computa SOLO de `tipo='estudio'`
+    # (turnos reales, standalone o embebido) vía FILTER: un `estudio_fijo`
+    # guarda en `fecha_desde/fecha_hasta` únicamente la PRIMERA ocurrencia
+    # semanal del mes (`_primer_dia_semana`), no el total de horas de todas las
+    # recurrencias — sumarlo ahí subestimaría feo las horas. La plata y el
+    # conteo de pedidos SÍ combinan ambos tipos (ambos son ingreso real del
+    # Estudio), solo separados en columnas propias (`turnos` vs
+    # `meses_slot_fijo`) para no mezclar la unidad de negocio.
     estudio_por_mes = conn.execute(f"""
+        WITH {_TURNO_EVENTOS_CTE}
         SELECT
-            to_char(p.fecha_desde, 'YYYY-MM')                  AS mes,
-            COUNT(*) FILTER (WHERE p.tipo = 'estudio')         AS turnos,
-            COUNT(*) FILTER (WHERE p.tipo = 'estudio_fijo')    AS meses_slot_fijo,
-            SUM(p.monto_total)                                 AS total_ars,
-            COALESCE(SUM(EXTRACT(EPOCH FROM (p.fecha_hasta - p.fecha_desde)) / 3600)
-                     FILTER (WHERE p.tipo = 'estudio'), 0)      AS horas_vendidas
-        FROM alquileres p
-        WHERE p.estado = 'finalizado' AND p.tipo IN {TIPOS_ESTUDIO_SQL}
-        GROUP BY to_char(p.fecha_desde, 'YYYY-MM')
-        ORDER BY to_char(p.fecha_desde, 'YYYY-MM') DESC
+            to_char(fecha_desde, 'YYYY-MM')                  AS mes,
+            COUNT(*) FILTER (WHERE tipo = 'estudio')         AS turnos,
+            COUNT(*) FILTER (WHERE tipo = 'estudio_fijo')    AS meses_slot_fijo,
+            SUM(monto)                                       AS total_ars,
+            COALESCE(SUM(EXTRACT(EPOCH FROM (fecha_hasta - fecha_desde)) / 3600)
+                     FILTER (WHERE tipo = 'estudio'), 0)      AS horas_vendidas
+        FROM eventos_estudio
+        GROUP BY to_char(fecha_desde, 'YYYY-MM')
+        ORDER BY to_char(fecha_desde, 'YYYY-MM') DESC
         LIMIT 24
     """).fetchall()
 
     estudio_totales = conn.execute(f"""
+        WITH {_TURNO_EVENTOS_CTE}
         SELECT
-            COUNT(*) FILTER (WHERE p.tipo = 'estudio')         AS total_turnos,
-            COUNT(*) FILTER (WHERE p.tipo = 'estudio_fijo')    AS total_meses_slot_fijo,
-            COUNT(DISTINCT p.cliente_id)                       AS total_clientes,
-            SUM(p.monto_total)                                 AS total_ars,
-            COALESCE(SUM(EXTRACT(EPOCH FROM (p.fecha_hasta - p.fecha_desde)) / 3600)
-                     FILTER (WHERE p.tipo = 'estudio'), 0)      AS horas_vendidas
-        FROM alquileres p
-        WHERE p.estado = 'finalizado' AND p.tipo IN {TIPOS_ESTUDIO_SQL}
+            COUNT(*) FILTER (WHERE tipo = 'estudio')         AS total_turnos,
+            COUNT(*) FILTER (WHERE tipo = 'estudio_fijo')    AS total_meses_slot_fijo,
+            COUNT(DISTINCT cliente_id)                       AS total_clientes,
+            SUM(monto)                                       AS total_ars,
+            COALESCE(SUM(EXTRACT(EPOCH FROM (fecha_hasta - fecha_desde)) / 3600)
+                     FILTER (WHERE tipo = 'estudio'), 0)      AS horas_vendidas
+        FROM eventos_estudio
     """).fetchone()
 
     return {
