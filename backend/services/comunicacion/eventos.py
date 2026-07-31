@@ -43,6 +43,30 @@ SOLO_WHATSAPP = "solo_whatsapp"  # solo WhatsApp (recordatorios de devolución)
 
 ESTRATEGIAS = (FALLBACK, AMBOS, SOLO_MAIL, SOLO_WHATSAPP)
 
+# Vocabulario humano de cada estrategia — FUENTE ÚNICA para el back-office (la
+# pantalla de Comunicación lo muestra tal cual) y para cualquier doc que la explique.
+# Vive acá, junto a las constantes, para que agregar una estrategia obligue a
+# nombrarla en el mismo lugar (no en el front, que si no se desincroniza).
+ESTRATEGIA_LABEL: dict[str, str] = {
+    FALLBACK: "WhatsApp primero, mail de respaldo",
+    AMBOS: "WhatsApp y mail",
+    SOLO_MAIL: "Solo mail",
+    SOLO_WHATSAPP: "Solo WhatsApp",
+}
+
+ESTRATEGIA_DETALLE: dict[str, str] = {
+    FALLBACK: (
+        "Se intenta por WhatsApp. Si no llega (el cliente no dio su OK, no tiene "
+        "teléfono válido, o el canal está apagado), recién ahí sale el mail. Nunca los dos."
+    ),
+    AMBOS: (
+        "Salen los dos a propósito: el WhatsApp avisa y el mail lleva el archivo de "
+        "calendario (.ics), que WhatsApp no puede adjuntar."
+    ),
+    SOLO_MAIL: "Siempre por mail. Es lo que corresponde para lo formal (contrato, documentos).",
+    SOLO_WHATSAPP: "Solo por WhatsApp. No tiene plantilla de mail.",
+}
+
 
 @dataclass(frozen=True)
 class CanalMail:
