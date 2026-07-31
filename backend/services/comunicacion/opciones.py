@@ -158,6 +158,28 @@ OPCIONES: dict[str, tuple[OpcionEvento, ...]] = {
 }
 
 
+# Perillas de un CANAL (no de un evento puntual): viven en la tarjeta del canal.
+OPCIONES_CANAL: dict[str, tuple[OpcionEvento, ...]] = {
+    "whatsapp": (
+        OpcionEvento(
+            setting="whatsapp_enabled",
+            label="Canal prendido",
+            tipo="switch",
+            ayuda=(
+                "Con el canal apagado no sale ningún WhatsApp (los avisos caen al mail "
+                "cuando su estrategia lo permite). Se prende recién cuando la credencial "
+                "del ambiente está cargada."
+            ),
+            default="0",
+            env="WHATSAPP_ENABLED",
+        ),
+    ),
+    # El canal mail no tiene perillas propias: se activa con la credencial del
+    # proveedor (RESEND_API_KEY) en el ambiente, no desde la UI.
+    "mail": (),
+}
+
+
 def _serializar(op: OpcionEvento, guardadas: dict[str, str]) -> dict:
     env_val = (os.getenv(op.env) or "").strip() if op.env else ""
     valor = env_val or guardadas.get(op.setting, "") or op.default
@@ -190,9 +212,9 @@ def _hora_de_cierre_hoy(conn) -> str:
         return "la hora de cierre"
 
 
-def estado(conn) -> dict[str, list[dict]]:
-    """`{evento_key: [opción con su valor efectivo]}` — una sola query para todas."""
-    keys = sorted({op.setting for ops in OPCIONES.values() for op in ops})
+def _estado_de(conn, mapa: dict[str, tuple[OpcionEvento, ...]]) -> dict[str, list[dict]]:
+    """`{key: [opción con su valor efectivo]}` — una sola query para todas."""
+    keys = sorted({op.setting for ops in mapa.values() for op in ops})
     guardadas: dict[str, str] = {}
     if keys:
         ph = ",".join(["%s"] * len(keys))
@@ -202,7 +224,7 @@ def estado(conn) -> dict[str, list[dict]]:
             guardadas[r["key"]] = (r["value"] or "").strip()
     cierre = _hora_de_cierre_hoy(conn)
     out: dict[str, list[dict]] = {}
-    for ev_key, ops in OPCIONES.items():
+    for clave, ops in mapa.items():
         serializadas = []
         for op in ops:
             d = _serializar(op, guardadas)
@@ -210,5 +232,15 @@ def estado(conn) -> dict[str, list[dict]]:
             # queremos que una llave suelta pueda romper el render.
             d["ayuda"] = d["ayuda"].replace("{cierre}", cierre)
             serializadas.append(d)
-        out[ev_key] = serializadas
+        out[clave] = serializadas
     return out
+
+
+def estado(conn) -> dict[str, list[dict]]:
+    """Las perillas de cada EVENTO, con su valor efectivo."""
+    return _estado_de(conn, OPCIONES)
+
+
+def estado_canales(conn) -> dict[str, list[dict]]:
+    """Las perillas de cada CANAL (hoy: el on/off de WhatsApp)."""
+    return _estado_de(conn, OPCIONES_CANAL)

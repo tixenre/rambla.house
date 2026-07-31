@@ -173,6 +173,9 @@ function Canales({ canales, eventos }: { canales: EstadoCanales; eventos: Evento
           </Pill>
         }
       >
+        {canales.whatsapp.opciones.length > 0 && (
+          <Opciones opciones={canales.whatsapp.opciones} titulo="Encendido" />
+        )}
         <Chequeos items={canales.whatsapp.chequeos} />
         {canales.whatsapp.ambiente !== "produccion" && (
           <p className="mt-3 rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground">
@@ -479,7 +482,15 @@ function BloqueMail({
 
 /* ── Perillas del evento ─────────────────────────────────────────────────── */
 
-function Opciones({ opciones, extra }: { opciones: OpcionEvento[]; extra?: React.ReactNode }) {
+function Opciones({
+  opciones,
+  extra,
+  titulo = "Cuándo y a quién",
+}: {
+  opciones: OpcionEvento[];
+  extra?: React.ReactNode;
+  titulo?: string;
+}) {
   const qc = useQueryClient();
   const [borrador, setBorrador] = useState<Record<string, string>>({});
 
@@ -504,7 +515,7 @@ function Opciones({ opciones, extra }: { opciones: OpcionEvento[]; extra?: React
   return (
     <div className="mt-4 rounded-md border border-dashed px-3 py-3">
       <p className="mb-2.5 inline-flex items-center gap-1 text-2xs font-medium text-muted-foreground">
-        <SlidersHorizontal className="h-3 w-3" /> Cuándo y a quién
+        <SlidersHorizontal className="h-3 w-3" /> {titulo}
       </p>
 
       <div className="space-y-3">

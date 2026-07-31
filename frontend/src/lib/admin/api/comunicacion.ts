@@ -82,12 +82,21 @@ export type EventoComunicacion = {
 export type OtroMail = { template: string; asunto: string | null; activo: boolean };
 
 export type EstadoCanales = {
-  mail: { provider: string; activo: boolean; from_addr: string; admin_to: string };
+  mail: {
+    provider: string;
+    activo: boolean;
+    from_addr: string;
+    admin_to: string;
+    /** Perillas del canal (hoy ninguna: el mail se activa con la credencial). */
+    opciones: OpcionEvento[];
+  };
   whatsapp: {
     listo: boolean;
     chequeos: ChequeoWhatsApp[];
     ambiente: string;
     gestion_plantillas: { disponible: boolean; motivo: string | null };
+    /** Perillas del canal (hoy: el on/off). Mismo shape que las de un evento. */
+    opciones: OpcionEvento[];
   };
 };
 

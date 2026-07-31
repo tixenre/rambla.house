@@ -35,6 +35,7 @@ def listar_eventos(request: Request):
     )
     from services.comunicacion.estrategia import efectiva, posibles, setting_de
     from services.comunicacion.opciones import estado as estado_opciones
+    from services.comunicacion.opciones import estado_canales
     from services.email.service import channel_status
     from services.whatsapp import REGISTRO as WA_REGISTRO
     from services.whatsapp import diagnosticar, estado_plantillas
@@ -42,6 +43,7 @@ def listar_eventos(request: Request):
     with get_db() as conn:
         wa_estado = diagnosticar(conn)
         opciones = estado_opciones(conn)
+        opciones_canal = estado_canales(conn)
         # Por dónde sale HOY cada evento: lo elegido por el dueño o el default del
         # registro. Lectura fresca (con la conexión abierta), no el cache del despacho.
         estrategias = {ev.key: efectiva(ev, conn) for ev in REGISTRO.values()}
@@ -138,8 +140,11 @@ def listar_eventos(request: Request):
             if k not in usados_por_eventos
         ],
         "canales": {
-            "mail": channel_status(),
+            "mail": {**channel_status(), "opciones": opciones_canal.get("mail", [])},
             "whatsapp": {
+                # El on/off del canal se prende ACÁ (antes el chequeo mandaba a una
+                # pantalla donde el switch no existía).
+                "opciones": opciones_canal.get("whatsapp", []),
                 "listo": wa_estado["listo"],
                 "chequeos": wa_estado["chequeos"],
                 "ambiente": wa_estado["ambiente"],

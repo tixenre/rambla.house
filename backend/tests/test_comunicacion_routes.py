@@ -153,6 +153,23 @@ def test_incluye_estado_de_los_dos_canales(monkeypatch):
     assert canales["whatsapp"]["gestion_plantillas"]["disponible"] is False
 
 
+def test_el_canal_whatsapp_trae_su_interruptor(monkeypatch):
+    """El on/off del canal se prende DESDE la pantalla: antes el chequeo mandaba a
+    /admin/settings, donde el switch no existía."""
+    _fake_deps(monkeypatch, _TODOS, settings={"whatsapp_enabled": "1"})
+    wa = rc.listar_eventos(request=None)["canales"]["whatsapp"]
+    op = {o["setting"]: o for o in wa["opciones"]}["whatsapp_enabled"]
+    assert op["tipo"] == "switch" and op["valor"] == "1"
+
+
+def test_el_interruptor_del_canal_lo_puede_pisar_el_ambiente(monkeypatch):
+    monkeypatch.setenv("WHATSAPP_ENABLED", "0")
+    _fake_deps(monkeypatch, _TODOS, settings={"whatsapp_enabled": "1"})
+    wa = rc.listar_eventos(request=None)["canales"]["whatsapp"]
+    op = {o["setting"]: o for o in wa["opciones"]}["whatsapp_enabled"]
+    assert op["valor"] == "0" and op["bloqueada_por_env"] == "WHATSAPP_ENABLED"
+
+
 # ── todo lo del evento, adentro del evento ───────────────────────────────────
 def test_cada_evento_trae_sus_opciones_configurables(monkeypatch):
     """La config de un evento (horario/antelación/destinatarios) viaja DENTRO del

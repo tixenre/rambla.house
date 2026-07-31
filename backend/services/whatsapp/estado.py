@@ -30,7 +30,11 @@ def diagnosticar(conn) -> dict:
             "mensaje": (
                 "Token de acceso configurado (WHATSAPP_ACCESS_TOKEN)"
                 if token_ok
-                else "Falta WHATSAPP_ACCESS_TOKEN en las variables de entorno del ambiente"
+                else (
+                    "Falta WHATSAPP_ACCESS_TOKEN en las variables de entorno del ambiente "
+                    "(Meta → tu app → WhatsApp → API Setup). El token NO se carga por acá: "
+                    "va en el ambiente, así staging nunca hereda el de producción."
+                )
             ),
         }
     )
@@ -44,7 +48,10 @@ def diagnosticar(conn) -> dict:
             "mensaje": (
                 "phone_number_id configurado (WHATSAPP_PHONE_NUMBER_ID)"
                 if pnid_ok
-                else "Falta WHATSAPP_PHONE_NUMBER_ID en las variables de entorno del ambiente"
+                else (
+                    "Falta WHATSAPP_PHONE_NUMBER_ID en las variables de entorno del ambiente "
+                    "(Meta → tu app → WhatsApp → API Setup, debajo del número)"
+                )
             ),
         }
     )
@@ -58,7 +65,7 @@ def diagnosticar(conn) -> dict:
             "mensaje": (
                 "Canal prendido"
                 if enabled
-                else "Canal apagado — prendé 'whatsapp_enabled' en /admin/settings (o WHATSAPP_ENABLED)"
+                else "Canal apagado — prendelo con el interruptor de esta tarjeta (o la env WHATSAPP_ENABLED)"
             ),
         }
     )
