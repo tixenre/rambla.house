@@ -185,6 +185,18 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export ALEMBIC_DB_TEST=1
           python -m pytest tests/test_alembic_upgrade_db.py -v --tb=short -m integration
+      - name: Plantillas de mail contra Postgres real (seed + preview no escapa HTML)
+        run: |
+          cd backend
+          # Este job venía sin correr — dejó pasar en silencio una fila de
+          # email_templates congelada en copy prehistórico (sin `|safe`, tabla de
+          # ítems escapada como texto crudo en el mail real). Corre contra la
+          # MISMA BD que acaba de migrar el paso anterior.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_email_templates_seed_db.py -v --tb=short -m integration
       - name: Identidades de login + magic-link contra Postgres real (Fase 1 identidad)
         run: |
           cd backend

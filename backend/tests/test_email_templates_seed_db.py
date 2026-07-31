@@ -120,3 +120,18 @@ def test_seed_no_pisa_ediciones_del_admin():
     finally:
         conn.close()
     init_db()
+
+
+def test_pedido_creado_cliente_no_escapa_la_tabla_de_items():
+    """Regresión de un bug real en staging (migración `p3d1d0cr34d0`): esta fila
+    había quedado congelada en copy prehistórico con `{{ items_html }}` SIN
+    `|safe` — Jinja (autoescape=True) escapaba el HTML de la tabla entero, que
+    se veía como texto crudo (`<table role="presentation" ...>` visible) en vez
+    de una tabla real. Verifica el contenido HOY vigente en la BD — si alguna
+    vez alguien vuelve a congelar esta fila sin `|safe`, esto lo caza."""
+    from services.email import render_template
+
+    ctx = dict(_CTX, items_html="<table><tr><td>Sony FX3</td></tr></table>")
+    out = render_template("pedido_creado_cliente", ctx)
+    assert "<table><tr><td>Sony FX3</td></tr></table>" in out["html"]
+    assert "&lt;table&gt;" not in out["html"]
