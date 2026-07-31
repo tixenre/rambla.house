@@ -20,7 +20,6 @@ from auth.guards import require_admin
 from busqueda import construir
 from pedidos_vinculados import SIN_PRINCIPAL_SQL, es_turno_vinculado
 from rate_limit import limiter, ADMIN_WRITE_LIMIT
-from services.email import send_email
 from services.facturacion.repo import pedidos_con_factura_emitida
 from services.pedidos_enriquecimiento import (
     _batch_count_turnos_vinculados,
@@ -38,13 +37,12 @@ from routes.alquileres.core import (
     _get_alquiler_detail,
     _batch_get_alquiler_items,
     _enriquecer_pedidos_con_cliente,
-    _pedido_email_context,
-    _ics_adjunto_pedido,
     _apply_pedido_datos,
     _apply_pedido_items,
 )
 from routes.alquileres.transiciones import ESTADOS_QUE_RESERVAN, cambiar_estado
 from services.alquileres.commands.pedido import _delete_pedido
+from services.comunicacion import notificar_pedido
 
 logger = logging.getLogger(__name__)
 
@@ -278,25 +276,24 @@ def update_pedido(id: int, data: PedidoEstado, request: Request, background: Bac
             raise
 
     # Notif al cliente cuando pasamos a 'confirmado' (solo si veníamos de
-    # otro estado — no re-mandamos si ya estaba confirmado).
-    # Un turno del Estudio vinculado NO manda mail propio (#1308): es la misma
+    # otro estado — no re-mandamos si ya estaba confirmado). El evento sale por la
+    # capa única de comunicación: WhatsApp + el mail que lleva el `.ics` (estrategia
+    # AMBOS del registro).
+    # Un turno del Estudio vinculado NO manda aviso propio (#1308): es la misma
     # venta que su principal, que ya mandó el suyo — el cliente no conoce esa
     # fila. (La cascada nunca llegaba acá: llama `cambiar_estado` directo, sin
     # pasar por el endpoint; este guard cubre el PATCH manual al turno, que el
     # gate de FLOW permite cuando iguala al principal.)
+    # NO se gatea por `cliente_email`: con el plan A/B el canal lo decide el
+    # despachador — un cliente con WhatsApp y sin mail igual tiene que enterarse
+    # (`_mail_cliente` ya se saltea solo si no hay dirección).
     if (
         pedido
         and resultado["estado_nuevo"] == "confirmado"
         and resultado["estado_anterior"] != "confirmado"
-        and pedido.get("cliente_email")
         and not es_turno_vinculado(pedido)
     ):
-        ctx = _pedido_email_context(pedido)
-        background.add_task(
-            send_email, "pedido_confirmado_cliente",
-            pedido["cliente_email"], ctx, pedido.get("id"),
-            attachments=_ics_adjunto_pedido(pedido),
-        )
+        notificar_pedido("pedido_confirmado", pedido, background=background)
     return pedido
 
 

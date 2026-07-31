@@ -71,14 +71,16 @@ def _pedido(**over):
 
 @pytest.fixture
 def capture_send(monkeypatch):
-    """Reemplaza send_email por un stub que registra llamadas."""
+    """Reemplaza el despacho (`notificar_pedido`) por un stub que registra llamadas.
+    El job ahora despacha por la capa única de comunicación (mail + WhatsApp); acá se
+    intercepta ahí y se devuelve un resultado de canal mail OK."""
     calls = []
 
-    def fake_send(template_key, to, context, alquiler_id=None):
-        calls.append((template_key, to, alquiler_id, context))
-        return {"ok": True, "provider": "test", "log_id": len(calls)}
+    def fake_notificar(evento_key, pedido, ctx, **k):
+        calls.append((evento_key, pedido.get("cliente_email"), pedido.get("id"), ctx))
+        return {"mail": [{"ok": True, "provider": "test", "log_id": len(calls)}], "whatsapp": {"ok": True}}
 
-    monkeypatch.setattr(rec, "send_email", fake_send)
+    monkeypatch.setattr(rec, "notificar_pedido", fake_notificar)
     return calls
 
 
@@ -145,8 +147,8 @@ class TestEnviar:
 
     def test_send_fallido_se_contabiliza_sin_propagar(self, monkeypatch):
         monkeypatch.setattr(
-            rec, "send_email",
-            lambda *a, **k: {"ok": False, "error": "boom"},
+            rec, "notificar_pedido",
+            lambda *a, **k: {"mail": [{"ok": False, "error": "boom"}], "whatsapp": None},
         )
         conn = FakeJobConn([_pedido()])
         res = rec.enviar_recordatorios_retiro(conn, hoy=HOY)

@@ -1046,6 +1046,71 @@ Gotcha: `get_disponibilidad` se llama DIRECTO desde `routes/estudio.py` → el d
 plano, NUNCA `Query(None)` (truthy → rompía el Estudio con 500). El supervisor marca una resta de
 disponibilidad recalculada en el front, o un editor/buscador de pedido que no consuma el hook único.
 
+### 2026-07-11 — Canal WhatsApp (Meta Cloud API): cuenta única Rambla, token en ENV, embudo de teléfono a E.164
+
+Notificaciones salientes por WhatsApp = **canal nuevo acoplado a la boca de notificaciones que ya
+existe** (no un sistema paralelo; materializa _2026-05-27 — Notificaciones canal-agnósticas_), molde
+`arca_fe`: lib portable `backend/whatsapp_cloud/` (HTTP + errores tipados + retry) + adapter
+`backend/services/whatsapp/` (credencial/gating/estado/envío). **Una sola cuenta de plataforma (marca
+Rambla única, NO multi-emisor):** el token y el `phone_number_id` viven en **ENV**
+(`WHATSAPP_ACCESS_TOKEN`/`_PHONE_NUMBER_ID`), **NO cifrados en `app_settings`** como los certs de ARCA —
+WhatsApp no tiene host de homologación (mismo Graph, envíos reales), y si el token viviera en la BD,
+**staging (clonada de prod) heredaría el de prod y mensajearía clientes reales**; en ENV cada ambiente
+tiene el suyo → staging seguro por construcción (mismo patrón que `RESEND_API_KEY`/`DIDIT_API_KEY`; ARCA
+es la excepción por multi-emisor con certs subidos por UI). **Gating en profundidad:** credencial
+presente → `whatsapp_enabled` (default OFF) → opt-in del cliente (`clientes.whatsapp_opt_in`, Meta lo
+exige) → teléfono E.164 → destinatario permitido (prod: cualquiera; no-prod: solo allowlist
+`WHATSAPP_TEST_RECIPIENTS`). **Idempotencia por pedido** vía índice único parcial en `whatsapp_log`
+(espeja `emails_log`: SIN `cliente_id`, keyea por `alquiler_id` — sobrevive un merge de cuentas con el
+pedido y no suma una FK a `clientes` que clasificar en `identity/merge`). La boca única es
+`enviar_evento_pedido` (contrato de `send_email`: nunca propaga, loguea, idempotente); 4 eventos
+(creado/confirmado/retiro/devolución), la devolución con 3 ventanas D-1/D-0/vencido prendibles desde el
+back-office. **`backend/services/telefono.py` = embudo único** de validación/formateo a E.164
+(libphonenumber, región AR): TODO número pasa por ahí — al guardar (registro/perfil/admin, lenient), al
+re-chequear el `full_number` de Didit (no-op si ya está bien; el fallback local no se normaliza), y al
+enviar (estricto). El **rechazo duro** de un alta con teléfono inválido queda como decisión de UX aparte
+(hoy lenient). El supervisor marca: un token de WhatsApp en `app_settings`; un canal que mensajee fuera
+de la allowlist en no-prod; una boca de WhatsApp ad-hoc fuera de `enviar_evento_pedido`; un teléfono
+guardado o enviado sin pasar por `services/telefono`; o `whatsapp_log` con una FK a `clientes`
+reintroducida. Cómo → [`SISTEMA_WHATSAPP.md`](SISTEMA_WHATSAPP.md); tracking #65 / PR #1268.
+
+### 2026-07-11 — `services/comunicacion/` = capa única de comunicación multi-canal (facade + registro, no CQRS-lite)
+
+Toda notificación al cliente (mail + WhatsApp) pasa por la **capa única** `backend/services/comunicacion/`
+(materializa _2026-05-27 — Notificaciones canal-agnósticas a un punto único_): un **registro fuente única**
+de eventos (`eventos.REGISTRO`: cada evento → su template por canal + su estrategia de despacho) + un
+**despachador** `notificar_pedido(evento, pedido, ctx=None)` que despacha por estrategia (plan A/B, ver
+_2026-07-12_) **reusando** los senders de cada canal (mail `services/email.send_email`; WhatsApp
+`services/whatsapp.enviar_evento_pedido`) — no reimplementa el envío ni nombra plantillas a mano en routes/jobs. **Facade + registro, NO CQRS-lite** (molde
+`services/finanzas_flujo`, no `contabilidad`): comunicación es orquestación + logs append-only (que viven en
+cada sender), no una superficie de mutación de dominio con invariantes que justifique `queries/`+`commands/`;
+el split entraría solo si suma **preferencias por cliente** (CRUD opt-in/out por canal) **+ cola de mensajes
+con estados** — no antes (empirismo proporcional _2026-06-27_ + medir-y-rechazar sobre-consolidación
+_2026-06-23_). **No es "un template para los dos canales":** cada medio tiene el suyo (mail HTML nuestro
+editable; WhatsApp pre-aprobado por Meta); lo que se unifica es el **evento**. `pedido_email_context`/
+`ics_adjunto_pedido` (armado del contexto/`.ics`) viven acá (move-verbatim del ex-`pedidos_notificaciones`,
+que se **eliminó** — los consumidores importan directo, sin shim). El supervisor marca un aviso al cliente
+que nombre plantillas a mano o dispare un canal por fuera de `notificar_pedido`/el registro, o un `commands/`
+agregado sin mutación de dominio real. Cómo → [`SISTEMA_COMUNICACION.md`](SISTEMA_COMUNICACION.md); PR #1268.
+
+### 2026-07-12 — Comunicación plan A/B: WhatsApp primero, mail de respaldo (no los dos); estrategia por evento
+
+Refina _Comunicación multi-canal (2026-07-11)_: el despacho al **cliente** deja de ser fan-out (los dos
+canales a la vez) y pasa a **plan A/B — WhatsApp es plan A, el mail plan B**. Cada evento del `REGISTRO`
+declara su `estrategia`: **`FALLBACK`** (intenta WhatsApp; si no llegó —sin opt-in / sin E.164 / canal
+apagado / falló— recién ahí manda el mail: `pedido_creado`, `recordatorio_retiro`), **`AMBOS`** (WhatsApp
+**y** mail, porque el mail **lleva el `.ics`** que WhatsApp no adjunta: `pedido_confirmado`), **`SOLO_MAIL`**
+(comunicaciones **formales** —contrato / documentos— siempre por mail; disponible en el modelo, sin evento
+cableado aún) y **`SOLO_WHATSAPP`** (devolución). El **mail al admin** (`template_admin`) sale **siempre**,
+**fuera** del plan A/B del cliente (el admin se entera del pedido pase lo que pase con el canal del cliente).
+El fallback decide con el resultado **real** del WhatsApp (`wamid` o `skipped/duplicado` = llegó; cualquier
+otro skip o fallo = cae a mail) → en modo `background` se encola **una sola tarea** que corre todo el plan
+A/B adentro (no dos envíos a ciegas). El job de retiro no re-lista un pedido ya alcanzado por CUALQUIER
+canal (`emails_log` **o** `whatsapp_log`) y cuenta "enviado" sin importar por cuál salió. El supervisor
+marca: un evento al cliente que mande por los dos canales cuando su estrategia es `FALLBACK`; un fallback
+que decida el plan B sin ver el resultado del WhatsApp (dos envíos encolados a ciegas); o una comunicación
+formal (contrato/documento) despachada por WhatsApp. Cómo → [`SISTEMA_COMUNICACION.md`](SISTEMA_COMUNICACION.md);
+PR #1268.
 ### 2026-07-27 — `/api/cotizar` para un pedido existente ignoraba el perfil fiscal/productora elegido para ESE pedido
 
 El editor admin de un pedido ya creado cotizaba el IVA con el perfil default de la cuenta

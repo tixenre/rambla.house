@@ -57,6 +57,10 @@ segno>=1.5.0
 pymupdf==1.28.0
 pyhanko==0.35.1
 
+# Validación/formateo de teléfonos a E.164 (libphonenumber de Google) — el embudo
+# único services/telefono.py, para el canal WhatsApp y para guardar los números bien.
+phonenumbers==9.0.34
+
 # Versiones PINEADAS (==) para builds reproducibles (#925). Estas son el set
 # resuelto y validado por CI al momento de pinear; antes el repo floteaba a la
 # última en cada build de Docker. Para subir una dep: cambiar el == acá, dejar

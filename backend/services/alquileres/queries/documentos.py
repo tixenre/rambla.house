@@ -19,7 +19,7 @@ from services.pedidos_enriquecimiento import (
     _enriquecer_pedido_con_cliente,
     _enriquecer_pedido_con_cliente_fiscal,
 )
-from services.pedidos_notificaciones import _pedido_email_context
+from services.comunicacion import pedido_email_context
 from services.email.service import primer_nombre
 from pdf import _pedido_html, _albaran_html, _contrato_html, _packing_list_html, _pedido_filename
 from services.alquileres.queries.detalle import (
@@ -210,7 +210,7 @@ def _ctx_mail_pedido(conn, id: int, docs: list[str], mensaje: Optional[str],
     ped["items"] = _get_alquiler_items(conn, id)
     _enriquecer_pedido_con_cliente(conn, ped)
     _enriquecer_pedido_con_total(conn, ped)
-    ctx = _pedido_email_context(ped)
+    ctx = pedido_email_context(ped)
     ctx["docs_adjuntos"] = [DOCUMENTOS[k] for k in docs]
     if mensaje and mensaje.strip():
         ctx["mensaje_admin"] = mensaje.strip()

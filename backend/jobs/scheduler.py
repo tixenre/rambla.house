@@ -54,11 +54,14 @@ def _loop() -> None:
     # Import perezoso: evita cargar el job (y sus imports de routes) al importar
     # este módulo, y rompe cualquier ciclo de importación al arrancar.
     from jobs.recordatorios import enviar_recordatorios_retiro
+    from jobs.recordatorios_devolucion import enviar_recordatorios_devolucion
+    from jobs.recordatorios_devolucion_config import resolve as resolve_devolucion
     from jobs.cleanup_livianas import purgar_cuentas_livianas_stale
     from jobs.recheck_didit_pendientes import recheck_verificaciones_pendientes
     from jobs.purgar_auth import purgar_sesiones_y_challenges_expirados
 
     ultima_fecha = None       # recordatorios de retiro
+    ultima_devolucion = None  # recordatorios de devolución (WhatsApp, ventanas D-1/D-0/vencido)
     ultima_limpieza = None    # cleanup de cuentas livianas (independiente)
     ultimo_recheck_didit = None  # recheck de verificaciones pendientes (por intervalo, no por día)
     ultima_purga_auth = None  # housekeeping de auth_sessions/auth_challenges (independiente)
@@ -75,6 +78,23 @@ def _loop() -> None:
                 enviar_recordatorios_retiro(dias_antes=cfg["dias_antes"])
         except Exception:  # nunca dejar morir el thread por un error puntual
             logger.exception("Falló el barrido de recordatorios de retiro")
+        try:
+            # Recordatorios de devolución (WhatsApp): 1×/día, con sus PROPIAS
+            # ventanas (D-1/D-0/vencido) prendibles desde el back-office. Comparte
+            # la mecánica del barrido de retiro pero no su on/off ni su hora.
+            # Idempotencia real vía whatsapp_log (índice único) — un reinicio no
+            # re-manda. Si no hay ninguna ventana activa (o el canal está inerte),
+            # es un no-op.
+            cfg_dev = resolve_devolucion()
+            if (
+                cfg_dev["alguna"]
+                and ahora.hour >= cfg_dev["hora"]
+                and ahora.date() != ultima_devolucion
+            ):
+                ultima_devolucion = ahora.date()
+                enviar_recordatorios_devolucion(ventanas=cfg_dev["ventanas"])
+        except Exception:
+            logger.exception("Falló el barrido de recordatorios de devolución")
         try:
             # Cleanup de cuentas livianas stale: 1×/día, independiente del recordatorio
             # (no comparte su on/off ni su hora). Idempotente → un reinicio puede

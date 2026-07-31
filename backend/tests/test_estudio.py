@@ -666,7 +666,7 @@ def _patch_post_collaborators(monkeypatch, conn, estudio_row):
         lambda c, eid, fd, fh, buf, exclude_pedido_id=None: True,
     )
     monkeypatch.setattr(estudio_mod, "_get_alquiler_detail", lambda c, pid: {"id": pid})
-    monkeypatch.setattr(estudio_mod, "_dispatch_pedido_creado_emails", lambda bg, p: None)
+    monkeypatch.setattr(estudio_mod, "notificar_pedido", lambda *a, **k: None)
     # v2-B: login obligatorio — cliente_id sale de la sesión.
     monkeypatch.setattr(estudio_mod, "_require_cliente", lambda req: {"cliente_id": 7, "role": "cliente"})
 

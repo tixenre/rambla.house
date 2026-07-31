@@ -88,6 +88,20 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = ""
     EMAIL_ADMIN_TO: str = ""
 
+    # ── WhatsApp Business — Meta Cloud API (construido, activado por config) ──
+    # Una sola cuenta de plataforma (marca Rambla única): el token y el número
+    # viven en ENV (como RESEND/DIDIT), NO cifrados en DB — así cada ambiente de
+    # Railway tiene el suyo y staging (BD clonada de prod) nunca hereda el token
+    # de prod. Sin token/phone_number_id el canal es inerte. Ver
+    # services/whatsapp/config.py.
+    WHATSAPP_ACCESS_TOKEN: str = ""
+    WHATSAPP_PHONE_NUMBER_ID: str = ""
+    WHATSAPP_BUSINESS_ACCOUNT_ID: str = ""
+    # Allowlist de destinatarios (E.164 coma-separados) para NO-producción: fuera
+    # de prod solo se le manda a estos números (red anti-spam; el número de test
+    # de Meta igual restringe server-side, esto es defensa en profundidad).
+    WHATSAPP_TEST_RECIPIENTS: str = ""
+
     # ── Integraciones ────────────────────────────────────────────────────
     GOOGLE_MAPS_API_KEY: str = ""
 

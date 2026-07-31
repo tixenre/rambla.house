@@ -18,6 +18,7 @@ from auth.session import signer, _make_session_response
 from identity.anchor import cuil_valido
 from identity.contacts import email_comunicacion, telefono_contacto
 from services.precios import es_responsable_inscripto
+from services.telefono import formatear_para_guardar
 from rate_limit import limiter, CLIENTE_WRITE_LIMIT
 from routes.cliente_portal.core import router, require_cliente, cliente_verificado
 from clientes.queries import identidad as queries_identidad
@@ -98,7 +99,7 @@ def cliente_registro(request: Request, data: RegistroCreate):
                 data.nombre.strip(),
                 data.apellido.strip(),
                 email,
-                data.telefono.strip(),
+                formatear_para_guardar(data.telefono),
                 data.direccion.strip() or "-",
                 data.cuit.strip() or "-",
                 perfil,
@@ -407,7 +408,7 @@ def cliente_update_me(data: PerfilUpdate, request: Request):
     if data.apellido is not None:
         sets.append("apellido = %s"); vals.append(data.apellido.strip())
     if data.telefono is not None:
-        sets.append("telefono = %s"); vals.append(data.telefono.strip())
+        sets.append("telefono = %s"); vals.append(formatear_para_guardar(data.telefono))
     if data.direccion is not None:
         sets.append("direccion = %s"); vals.append(data.direccion.strip())
     if data.apodo is not None:

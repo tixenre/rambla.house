@@ -25,7 +25,7 @@ from services.alquileres.queries.cotizacion import (
     _cliente_es_miembro_de_productora,
 )
 from services.alquileres.queries.detalle import _get_alquiler_detail
-from services.pedidos_notificaciones import _dispatch_pedido_creado_emails
+from services.comunicacion import notificar_pedido
 from reservas import validar_stock as _check_stock
 
 # El modelo Pydantic (contrato HTTP) se queda en routes/alquileres/modelos.py
@@ -182,11 +182,13 @@ def create_pedido(data: "PedidoCreate", background: Optional[BackgroundTasks] = 
             conn.rollback()
             raise
 
-    # Mails fuera del try/finally del DB: si fallan no rollbackean el pedido
-    # (igual send_email no propaga, pero por las dudas). Solo se mandan si
-    # el pedido salió de borrador — drafts no notifican.
+    # Avisos fuera del try/finally del DB: si fallan no rollbackean el pedido
+    # (igual los senders no propagan, pero por las dudas). Solo se mandan si
+    # el pedido salió de borrador — drafts no notifican. El despacho es plan A/B
+    # por la capa única de comunicación (WhatsApp primero, mail de respaldo; el
+    # aviso al admin sale siempre por mail).
     if pedido and pedido.get("estado") != "borrador":
-        _dispatch_pedido_creado_emails(background, pedido)
+        notificar_pedido("pedido_creado", pedido, background=background)
     return pedido
 
 

@@ -12,9 +12,12 @@ reinicia después de la corrida), el segundo `send_email` choca contra el índic
 y `services.email` lo traga: no re-manda. El barrido además filtra con
 `NOT EXISTS` para no intentar siquiera los ya enviados.
 
-Reusa la boca única de envío (`send_email`, canal-agnóstica — decisión
-2026-05-27) y el mismo armador de contexto que el resto de los mails de pedido
-(`_pedido_email_context`), así el template ve exactamente las mismas variables.
+Despacha por la capa única de comunicación (`comunicacion.notificar_pedido`,
+decisión 2026-05-27): el evento `recordatorio_retiro` es **plan A/B** (WhatsApp
+primero; si no llegó, mail), con el mismo contexto que el resto de los mails de
+pedido (`comunicacion.pedido_email_context`). El barrido no re-lista un pedido ya
+alcanzado por CUALQUIER canal (`emails_log` **o** `whatsapp_log`), y cuenta como
+"enviado" al cliente sin importar por cuál salió.
 """
 
 from __future__ import annotations
@@ -25,8 +28,8 @@ from datetime import timedelta
 from database import get_db, now_ar, row_to_dict
 from jobs.recordatorios_config import resolve as _resolve_config
 from pedidos_vinculados import SIN_PRINCIPAL_SQL
-from routes.alquileres import _get_alquiler_items, _pedido_email_context
-from services.email import send_email
+from routes.alquileres import _get_alquiler_items
+from services.comunicacion import notificar_pedido, pedido_email_context
 from tipos_pedido import TIPOS_SIN_RETIRO_SQL
 
 logger = logging.getLogger(__name__)
@@ -73,7 +76,7 @@ def _pedidos_para_retiro(conn, hoy, dias_antes: int) -> list[dict]:
     ph = ",".join(["%s"] * len(ESTADOS_RECORDABLES))
     rows = conn.execute(
         f"""
-        SELECT a.id, a.numero_pedido, a.cliente_nombre, a.cliente_email,
+        SELECT a.id, a.cliente_id, a.numero_pedido, a.cliente_nombre, a.cliente_email,
                a.cliente_telefono, a.fecha_desde, a.fecha_hasta,
                a.monto_total, a.notas
         FROM alquileres a
@@ -90,9 +93,15 @@ def _pedidos_para_retiro(conn, hoy, dias_antes: int) -> list[dict]:
                 AND el.template_key = %s
                 AND el.status = 'sent'
           )
+          AND NOT EXISTS (
+              SELECT 1 FROM whatsapp_log wl
+              WHERE wl.alquiler_id = a.id
+                AND wl.template_key = %s
+                AND wl.status = 'sent'
+          )
         ORDER BY a.id
     """,
-        (*ESTADOS_RECORDABLES, dia_ini, dia_fin, TEMPLATE_KEY),
+        (*ESTADOS_RECORDABLES, dia_ini, dia_fin, TEMPLATE_KEY, TEMPLATE_KEY),
     ).fetchall()
     return [row_to_dict(r) for r in rows]
 
@@ -141,16 +150,31 @@ def enviar_recordatorios_retiro(
                 resumen["pedidos"].append(entry)
                 continue
             p["items"] = _get_alquiler_items(conn, p["id"])
-            ctx = _pedido_email_context(p)
+            ctx = pedido_email_context(p)
             ctx["dias_antes"] = dias_antes  # el copy del recordatorio lo usa
-            res = send_email(TEMPLATE_KEY, p["cliente_email"], ctx, p["id"])
-            if res.get("ok"):
+            # Despacho plan A/B por la capa única de comunicación: intenta WhatsApp
+            # (gateado + idempotente por whatsapp_log) y, si no llegó, cae al mail
+            # (idempotente por emails_log). Síncrono (background=None) → devuelve los
+            # resultados por canal. Se cuenta "enviado" si el cliente fue alcanzado
+            # por CUALQUIERA de los dos canales.
+            res = notificar_pedido(TEMPLATE_KEY, p, ctx)
+            wa = res.get("whatsapp") or {}
+            mail_res = (res.get("mail") or [None])[0] or {}
+            wa_ok = bool(
+                wa.get("wamid") or (wa.get("skipped") and wa.get("reason") == "duplicado")
+            )
+            if wa_ok:
                 resumen["enviados"] += 1
                 entry["status"] = "sent"
+                entry["canal"] = "whatsapp"
+            elif mail_res.get("ok"):
+                resumen["enviados"] += 1
+                entry["status"] = "sent"
+                entry["canal"] = "mail"
             else:
                 resumen["fallidos"] += 1
                 entry["status"] = "failed"
-                entry["error"] = res.get("error")
+                entry["error"] = mail_res.get("error") or wa.get("error")
             resumen["pedidos"].append(entry)
         logger.info(
             "Recordatorios de retiro (%s): %d candidatos, %d enviados, %d fallidos, dry_run=%s",

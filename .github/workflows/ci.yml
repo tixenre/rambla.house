@@ -139,9 +139,9 @@ jobs:
           # vía conftest.
           export SECRET_KEY=ci-test-secret-not-for-production
           export ADMIN_EMAILS=admin@test.com
-          # arca_fe/tests/ vive fuera de `tests/` (es un paquete portable con
-          # su propia suite) — sin esto, nunca corría en CI.
-          python -m pytest tests/ arca_fe/tests/ -v --tb=short
+          # arca_fe/tests/ y whatsapp_cloud/tests/ viven fuera de `tests/` (son
+          # paquetes portables con su propia suite) — sin esto, nunca corrían en CI.
+          python -m pytest tests/ arca_fe/tests/ whatsapp_cloud/tests/ -v --tb=short
 
   db-migrations:
     name: Migraciones Alembic (Postgres real)
