@@ -28,16 +28,24 @@ def _es_historico(fuente: str | None) -> bool:
 
 
 def _get_alquiler_items(conn, pedido_id: int) -> list[dict]:
+    # `ate.fecha_desde/hasta AS turno_fecha_desde/hasta` (#1308 rediseño "turno
+    # como ítem"): la PROPIA ventana horaria de un ítem de turno embebido
+    # (`pi.turno_estudio_id`, ya viene en `pi.*`) — puede no coincidir con el
+    # período del pedido (equipos de un `diaria` mixto). Consumido por
+    # `pdf_templates.py::_turno_embebido_label`. LEFT JOIN: NULL para el 100%
+    # de los ítems sin turno, para siempre.
     rows = conn.execute(f"""
         SELECT pi.*, COALESCE(e.nombre, pi.nombre_libre) AS nombre,
                {MARCA_SUBQUERY},
                e.modelo, e.serie, e.valor_reposicion,
                e.foto_url, e.foto_url_sm, e.foto_url_thumb, e.cantidad AS stock_total,
                e.nombre_publico, e.nombre_publico_largo, e.tipo AS equipo_tipo,
-               ef.contenido_incluido_json
+               ef.contenido_incluido_json,
+               ate.fecha_desde AS turno_fecha_desde, ate.fecha_hasta AS turno_fecha_hasta
         FROM alquiler_items pi
         LEFT JOIN equipos e ON e.id = pi.equipo_id
         LEFT JOIN equipo_fichas ef ON ef.equipo_id = e.id
+        LEFT JOIN alquiler_turnos_estudio ate ON ate.id = pi.turno_estudio_id
         WHERE pi.pedido_id = %s
         ORDER BY pi.orden, pi.id
     """, (pedido_id,)).fetchall()

@@ -552,14 +552,40 @@ def _es_pedido_estudio(pedido) -> bool:
     return pedido.get("tipo") in TIPOS_ESTUDIO
 
 
-def _horas_estudio(pedido) -> int:
-    """Duración en horas de un turno del estudio — la franja siempre es un
-    múltiplo exacto de horas (`_franja_estudio`), `round` es solo defensivo."""
+def _horas_entre(d0, d1) -> int:
+    """Horas entre dos datetime, redondeadas — la franja del Estudio siempre
+    es un múltiplo exacto de horas (`_franja_estudio`), `round` es solo
+    defensivo. Compartida por `_horas_estudio` (período del documento) y
+    `_turno_embebido_label` (período propio de UN ítem, #1308)."""
     try:
-        d0, d1 = _as_dt(pedido["fecha_desde"]), _as_dt(pedido["fecha_hasta"])
         return max(1, round((d1 - d0).total_seconds() / 3600))
     except Exception:
         return 1
+
+
+def _horas_estudio(pedido) -> int:
+    """Duración en horas de un turno del estudio (a nivel documento/pedido)."""
+    try:
+        return _horas_entre(_as_dt(pedido["fecha_desde"]), _as_dt(pedido["fecha_hasta"]))
+    except Exception:
+        return 1
+
+
+def _turno_embebido_label(it) -> str:
+    """"vie 10/03 14:00–16:00 · 2 horas" para UN ítem con `turno_estudio_id`
+    (#1308 rediseño "turno como ítem", `alquiler_turnos_estudio`) — su PROPIA
+    fecha/hora, que puede no coincidir con el período del documento (equipos
+    de un pedido `diaria` mixto). "" si el ítem no es de un turno embebido, o
+    si `_get_alquiler_items` no trajo `turno_fecha_desde/hasta` (documentos
+    que arman su propio SELECT de ítems sin ese join, ej. detalle-seguro)."""
+    if not it.get("turno_estudio_id"):
+        return ""
+    d0, d1 = _as_dt(it.get("turno_fecha_desde")), _as_dt(it.get("turno_fecha_hasta"))
+    if not d0 or not d1:
+        return ""
+    h = _horas_entre(d0, d1)
+    rango = f'{_DOW[d0.weekday()]} {d0.strftime("%d/%m")} {d0.strftime("%H:%M")}–{d1.strftime("%H:%M")}'
+    return f'{rango} · {h} hora{"s" if h != 1 else ""}'
 
 
 def _periodo_label(pedido, j) -> str:
@@ -601,9 +627,18 @@ def _pedido_html(pedido):
     rows = []
     for it in items:
         sub = _bruto_item_pdf(it, j)
+        # Ítem de un turno del Estudio EMBEBIDO (#1308): sub-línea con su
+        # PROPIA fecha/hora — no hereda el "N jornadas" del documento, que es
+        # el período de los EQUIPOS de un pedido `diaria` mixto y puede no
+        # coincidir con el del turno.
+        turno_label = _turno_embebido_label(it)
+        turno_html = (
+            f'<div class="incluye"><span class="incluye-lbl">Turno</span>{html.escape(turno_label)}</div>'
+            if turno_label else ""
+        )
         rows.append(
             f'<tr><td style="width:58px">{_thumb(it)}</td>'
-            f'<td>{_nombre_con_incluye(it)}</td>'
+            f'<td>{_nombre_con_incluye(it)}{turno_html}</td>'
             f'<td class="c num">{it.get("cantidad", 1)}</td>'
             f'<td class="r num">{_fmt_ars(it.get("precio_jornada"))}</td>'
             f'<td class="r num">{_fmt_ars(sub)}</td></tr>'

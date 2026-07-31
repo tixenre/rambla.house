@@ -173,6 +173,50 @@ class TestBrutoItemPdf:
         assert _sum_bruto(items, 3) == (1000 * 3) + 20000
 
 
+class TestTurnoEmbebidoLabel:
+    """`_turno_embebido_label` (#1308 rediseño "turno como ítem", Fase 2.4) —
+    la sub-línea de un ítem con `turno_estudio_id`: su PROPIA fecha/hora, no
+    el período de jornadas del documento (que es el de los EQUIPOS de un
+    pedido `diaria` mixto, puede no coincidir)."""
+
+    def test_item_sin_turno_devuelve_vacio(self):
+        from pdf_templates import _turno_embebido_label
+
+        assert _turno_embebido_label({"turno_estudio_id": None}) == ""
+        assert _turno_embebido_label({}) == ""
+
+    def test_item_con_turno_pero_sin_fechas_devuelve_vacio(self):
+        """Defensivo: un consumidor que no haga el JOIN a
+        `alquiler_turnos_estudio` (ej. detalle-seguro) no debe romper — solo
+        pierde la sub-línea."""
+        from pdf_templates import _turno_embebido_label
+
+        assert _turno_embebido_label({"turno_estudio_id": 5}) == ""
+
+    def test_item_con_turno_arma_fecha_hora_y_horas(self):
+        import datetime as _dt
+
+        from pdf_templates import _DOW, _turno_embebido_label
+
+        it = {
+            "turno_estudio_id": 5,
+            "turno_fecha_desde": "2031-06-10T14:00:00",
+            "turno_fecha_hasta": "2031-06-10T16:00:00",
+        }
+        dow = _DOW[_dt.date(2031, 6, 10).weekday()]
+        assert _turno_embebido_label(it) == f'{dow} 10/06 14:00–16:00 · 2 horas'
+
+    def test_una_hora_usa_singular(self):
+        from pdf_templates import _turno_embebido_label
+
+        it = {
+            "turno_estudio_id": 5,
+            "turno_fecha_desde": "2031-06-10T14:00:00",
+            "turno_fecha_hasta": "2031-06-10T15:00:00",
+        }
+        assert _turno_embebido_label(it).endswith("· 1 hora")
+
+
 class TestAbsImageUrl:
     """Resolver foto_url a URL absoluta para que Playwright pueda cargarla."""
 
