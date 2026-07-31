@@ -77,7 +77,7 @@ eventos con canal WhatsApp:
 | --- | --- | --- | --- |
 | Pedido creado | `pedido_creado` | WhatsApp plan A / mail plan B (+ mail al admin siempre) | `routes/alquileres/core.py` + `routes/estudio.py` → `notificar_pedido` |
 | Pedido confirmado | `pedido_confirmado` | WhatsApp + mail con `.ics` (ambos) | `routes/alquileres/pedidos.py` → `notificar_pedido` |
-| Recordatorio de retiro (D-1) | `recordatorio_retiro` | WhatsApp plan A / mail plan B | `jobs/recordatorios.py` → `notificar_pedido` |
+| Recordatorio de retiro | `recordatorio_retiro` | WhatsApp plan A / mail plan B (default) | `jobs/recordatorios.py` — 2 pasadas por día: el mismo día a la mañana, o la víspera a la hora de cierre si el retiro es temprano (`jobs/recordatorios_config.py`) |
 | Recordatorio de devolución D-1/D-0/vencido | `recordatorio_devolucion_{d1,d0,vencido}` | solo whatsapp (default) | `jobs/recordatorios_devolucion.py` — 3 ventanas prendibles por separado (`jobs/recordatorios_devolucion_config.py`) |
 
 El scheduler in-process (`jobs/scheduler.py`) corre los dos barridos diarios (retiro + devolución),

@@ -100,7 +100,7 @@ def test_switches_se_normalizan_a_1_0(conn, key):
     [
         ("recordatorios_hora", "23", "24"),
         ("recordatorios_devolucion_hora", "0", "-1"),
-        ("recordatorios_dias_antes", "14", "15"),
+        ("recordatorios_corte_manana", "23", "24"),
         ("recordatorios_devolucion_dias_antes", "1", "0"),
     ],
 )

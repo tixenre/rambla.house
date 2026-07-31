@@ -134,19 +134,19 @@ Total: {{ total }}
 Ver en el back-office: {{ admin_url }}""",
     },
     "recordatorio_retiro": {
-        # El copy se adapta a `dias_antes` (configurable desde /admin/settings):
-        # con 1 día dice "mañana"; con N>1 dice "en N días". `dias_antes` lo
-        # inyecta el job (jobs/recordatorios.py) y el preview del admin (=1).
-        "subject": "{% if dias_antes == 1 %}Mañana retirás{% else %}Faltan {{ dias_antes }} días para retirar{% endif %} tu pedido #{{ numero_pedido }} — Rambla Rental",
-        "body_html": f"""<p {b.H}>{{% if dias_antes == 1 %}}¡Mañana es el día!{{% else %}}¡Falta poco!{{% endif %}}</p>
-<p style="margin:0 0 8px;">Hola {{{{ cliente_nombre_pila }}}}, te recordamos que <strong>{{% if dias_antes == 1 %}}mañana{{% else %}}en {{{{ dias_antes }}}} días{{% endif %}} ({{{{ fecha_desde }}}})</strong> retirás tu pedido <strong>#{{{{ numero_pedido }}}}</strong>.</p>
+        # El copy se adapta a la pasada del barrido (jobs/recordatorios.py):
+        # `dias_antes` = 0 cuando sale el MISMO día del retiro y 1 cuando sale la
+        # víspera (retiro temprano). El preview del admin usa 1.
+        "subject": "{% if dias_antes == 0 %}Hoy retirás{% else %}Mañana retirás{% endif %} tu pedido #{{ numero_pedido }} — Rambla Rental",
+        "body_html": f"""<p {b.H}>{{% if dias_antes == 0 %}}¡Hoy es el día!{{% else %}}¡Mañana es el día!{{% endif %}}</p>
+<p style="margin:0 0 8px;">Hola {{{{ cliente_nombre_pila }}}}, te recordamos que <strong>{{% if dias_antes == 0 %}}hoy{{% else %}}mañana{{% endif %}} ({{{{ fecha_desde }}}})</strong> retirás tu pedido <strong>#{{{{ numero_pedido }}}}</strong>.</p>
 {{{{ items_html|safe }}}}
 {b.btn("portal_url", "Ver mi pedido")}
 <p {b.MUTED_P}>Te esperamos en el galpón. Si necesitás reagendar, escribinos cuanto antes.</p>
 <p style="margin:18px 0 0;">— El equipo de Rambla</p>""",
         "body_text": """Hola {{ cliente_nombre_pila }},
 
-{% if dias_antes == 1 %}Mañana{% else %}En {{ dias_antes }} días{% endif %} ({{ fecha_desde }}) retirás tu pedido #{{ numero_pedido }}.
+{% if dias_antes == 0 %}Hoy{% else %}Mañana{% endif %} ({{ fecha_desde }}) retirás tu pedido #{{ numero_pedido }}.
 
 {{ items_text }}
 

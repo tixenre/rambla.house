@@ -6,11 +6,16 @@ Costo extra: $0 (reusa el compute que ya se paga).
 
 **Gating en runtime, no en el arranque (Fase B mails):** el thread arranca
 siempre (salvo el kill-switch `REMINDERS_SCHEDULER_DISABLED`, para CI/tests) y en
-cada ciclo resuelve si está prendido, a qué hora y con cuántos días de
-anticipación vía `jobs/recordatorios_config.resolve()` — env override >
-`app_settings` > default. Así el admin lo prende/apaga y ajusta hora/días desde
-`/admin/settings` **sin redeploy ni tocar env vars**. Se reusa el mismo mecanismo
-de thread+sondeo (no se "recrea" el scheduler).
+cada ciclo resuelve si está prendido y a qué horas corre vía
+`jobs/recordatorios_config.resolve()` — env override > `app_settings` > default.
+Así el admin lo prende/apaga y ajusta desde `/admin/comunicacion` **sin redeploy
+ni tocar env vars**. Se reusa el mismo mecanismo de thread+sondeo (no se "recrea"
+el scheduler).
+
+El recordatorio de retiro corre **dos veces por día** (el aviso depende de la hora
+del retiro, ver `jobs/recordatorios.py`): la pasada de la mañana a la hora
+configurada y la de la víspera a la hora de cierre del galpón. Cada una lleva su
+propia marca de "ya corrió hoy".
 
 **Single-instance:** hoy el backend corre 1 instancia. Si se escala a >1, dos
 schedulers dispararían el barrido en paralelo el mismo día → agregar un lock
@@ -53,14 +58,19 @@ def _hard_disabled() -> bool:
 def _loop() -> None:
     # Import perezoso: evita cargar el job (y sus imports de routes) al importar
     # este módulo, y rompe cualquier ciclo de importación al arrancar.
-    from jobs.recordatorios import enviar_recordatorios_retiro
+    from jobs.recordatorios import (
+        PASADA_MANANA,
+        PASADA_VISPERA,
+        enviar_recordatorios_retiro,
+    )
     from jobs.recordatorios_devolucion import enviar_recordatorios_devolucion
     from jobs.recordatorios_devolucion_config import resolve as resolve_devolucion
     from jobs.cleanup_livianas import purgar_cuentas_livianas_stale
     from jobs.recheck_didit_pendientes import recheck_verificaciones_pendientes
     from jobs.purgar_auth import purgar_sesiones_y_challenges_expirados
 
-    ultima_fecha = None       # recordatorios de retiro
+    ultima_manana = None      # recordatorios de retiro, pasada de la mañana
+    ultima_vispera = None     # recordatorios de retiro, pasada de la víspera
     ultima_devolucion = None  # recordatorios de devolución (WhatsApp, ventanas D-1/D-0/vencido)
     ultima_limpieza = None    # cleanup de cuentas livianas (independiente)
     ultimo_recheck_didit = None  # recheck de verificaciones pendientes (por intervalo, no por día)
@@ -68,14 +78,20 @@ def _loop() -> None:
     while True:
         ahora = now_ar()
         try:
-            cfg = resolve()  # env > settings > default, en cada ciclo
-            if (
-                cfg["enabled"]
-                and ahora.hour >= cfg["hora"]
-                and ahora.date() != ultima_fecha
-            ):
-                ultima_fecha = ahora.date()
-                enviar_recordatorios_retiro(dias_antes=cfg["dias_antes"])
+            cfg = resolve(dia=ahora.date())  # env > settings > default, en cada ciclo
+            if cfg["enabled"]:
+                # Mañana: los retiros de HOY que todavía no ocurrieron.
+                if ahora.hour >= cfg["hora"] and ahora.date() != ultima_manana:
+                    ultima_manana = ahora.date()
+                    enviar_recordatorios_retiro(
+                        pasada=PASADA_MANANA, corte_manana=cfg["corte_manana"]
+                    )
+                # Víspera, a la hora de cierre: los retiros de MAÑANA temprano.
+                if ahora.hour >= cfg["hora_vispera"] and ahora.date() != ultima_vispera:
+                    ultima_vispera = ahora.date()
+                    enviar_recordatorios_retiro(
+                        pasada=PASADA_VISPERA, corte_manana=cfg["corte_manana"]
+                    )
         except Exception:  # nunca dejar morir el thread por un error puntual
             logger.exception("Falló el barrido de recordatorios de retiro")
         try:

@@ -88,21 +88,28 @@ OPCIONES: dict[str, tuple[OpcionEvento, ...]] = {
             env="REMINDERS_ENABLED",
         ),
         OpcionEvento(
-            setting="recordatorios_dias_antes",
-            label="Días antes",
-            ayuda="Con cuánta anticipación al retiro se manda (1 = el día anterior).",
-            default=str(retiro_cfg.DEFAULT_DIAS_ANTES),
-            env="REMINDERS_DIAS_ANTES",
-            minimo=1,
-            maximo=retiro_cfg.MAX_DIAS_ANTES,
-        ),
-        OpcionEvento(
             setting="recordatorios_hora",
-            label="Hora del envío",
-            ayuda="Hora de Argentina en que corre el barrido diario.",
+            label="Hora del aviso, el mismo día",
+            ayuda=(
+                "Hora de Argentina a la que sale el aviso el día del retiro. Solo "
+                "para los retiros del mediodía en adelante."
+            ),
             default=str(retiro_cfg.DEFAULT_HORA),
             env="REMINDERS_HOUR",
             minimo=0,
+            maximo=23,
+        ),
+        OpcionEvento(
+            setting="recordatorios_corte_manana",
+            label="Los retiros antes de esta hora se avisan el día anterior",
+            ayuda=(
+                "Al que retira temprano, avisarle a la mañana del mismo día le llega "
+                "tarde: su aviso sale la víspera, a la hora de cierre del galpón "
+                "(sale de Horarios de retiro — hoy sería a las {cierre})."
+            ),
+            default=str(retiro_cfg.DEFAULT_CORTE_MANANA),
+            env="REMINDERS_CORTE_MANANA",
+            minimo=1,
             maximo=23,
         ),
     ),
@@ -171,6 +178,18 @@ def _serializar(op: OpcionEvento, guardadas: dict[str, str]) -> dict:
     }
 
 
+def _hora_de_cierre_hoy(conn) -> str:
+    """Para explicar en criollo cuándo saldría el aviso de la víspera. Nunca rompe
+    la pantalla: si no se puede resolver, el texto queda sin el dato concreto."""
+    try:
+        from database import now_ar
+        from services.fechas import ultima_hora_laboral
+
+        return f"{ultima_hora_laboral(conn, now_ar().date()):02d}:00"
+    except Exception:  # noqa: BLE001
+        return "la hora de cierre"
+
+
 def estado(conn) -> dict[str, list[dict]]:
     """`{evento_key: [opción con su valor efectivo]}` — una sola query para todas."""
     keys = sorted({op.setting for ops in OPCIONES.values() for op in ops})
@@ -181,6 +200,15 @@ def estado(conn) -> dict[str, list[dict]]:
             f"SELECT key, value FROM app_settings WHERE key IN ({ph})", keys
         ).fetchall():
             guardadas[r["key"]] = (r["value"] or "").strip()
-    return {
-        ev_key: [_serializar(op, guardadas) for op in ops] for ev_key, ops in OPCIONES.items()
-    }
+    cierre = _hora_de_cierre_hoy(conn)
+    out: dict[str, list[dict]] = {}
+    for ev_key, ops in OPCIONES.items():
+        serializadas = []
+        for op in ops:
+            d = _serializar(op, guardadas)
+            # Placeholder literal (no `.format()`): el texto es nuestro, pero no
+            # queremos que una llave suelta pueda romper el render.
+            d["ayuda"] = d["ayuda"].replace("{cierre}", cierre)
+            serializadas.append(d)
+        out[ev_key] = serializadas
+    return out

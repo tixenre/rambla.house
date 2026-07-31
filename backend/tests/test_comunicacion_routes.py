@@ -159,15 +159,15 @@ def test_cada_evento_trae_sus_opciones_configurables(monkeypatch):
     evento — no en una pantalla aparte."""
     from services.comunicacion.opciones import OPCIONES
 
-    _fake_deps(monkeypatch, _TODOS, settings={"recordatorios_dias_antes": "3"})
+    _fake_deps(monkeypatch, _TODOS, settings={"recordatorios_corte_manana": "14"})
     por_key = {e["key"]: e for e in rc.listar_eventos(request=None)["eventos"]}
 
     for ev_key, ops in OPCIONES.items():
         assert {o["setting"] for o in por_key[ev_key]["opciones"]} == {o.setting for o in ops}
 
     retiro = {o["setting"]: o for o in por_key["recordatorio_retiro"]["opciones"]}
-    assert retiro["recordatorios_dias_antes"]["valor"] == "3"  # el guardado
-    assert retiro["recordatorios_enabled"]["valor"] == "0"     # sin fila → default
+    assert retiro["recordatorios_corte_manana"]["valor"] == "14"  # el guardado
+    assert retiro["recordatorios_enabled"]["valor"] == "0"        # sin fila → default
     assert retiro["recordatorios_hora"]["tipo"] == "numero"
 
     # Un evento sin perillas no inventa ninguna.

@@ -102,7 +102,8 @@ def test_pedidos_para_retiro_excluye_taller_y_estudio_fijo():
     ninguno lleva `cliente_email`, así que el filtro de abajo ya los excluiría en
     la práctica, pero el filtro explícito no depende de esa coincidencia."""
     conn = _CapturingConn()
-    rec._pedidos_para_retiro(conn, HOY, dias_antes=1)
+    desde, hasta = rec._ventana(HOY, rec.PASADA_VISPERA, 12)
+    rec._pedidos_para_retiro(conn, desde, hasta)
     assert "a.tipo NOT IN ('taller', 'estudio_fijo')" in conn.sql
 
 
@@ -112,7 +113,7 @@ class TestEnviar:
     def test_manda_uno_por_pedido_y_cuenta(self, capture_send):
         conn = FakeJobConn([_pedido(id=1), _pedido(id=2, numero_pedido=1002,
                                                    cliente_email="b@x.com")])
-        res = rec.enviar_recordatorios_retiro(conn, hoy=HOY)
+        res = rec.enviar_recordatorios_retiro(conn, hoy=HOY, corte_manana=12)
         assert res["candidatos"] == 2
         assert res["enviados"] == 2
         assert res["fallidos"] == 0
@@ -123,27 +124,38 @@ class TestEnviar:
 
     def test_contexto_trae_variables_del_template(self, capture_send):
         conn = FakeJobConn([_pedido(numero_pedido=1234)])
-        rec.enviar_recordatorios_retiro(conn, hoy=HOY)
+        rec.enviar_recordatorios_retiro(conn, hoy=HOY, corte_manana=12)
         ctx = capture_send[0][3]
         assert ctx["numero_pedido"] == 1234
         assert ctx["cliente_nombre"] == "Juana"
         assert "portal_url" in ctx and "fecha_desde" in ctx
 
-    def test_fecha_retiro_es_manana(self, capture_send):
-        conn = FakeJobConn([])
-        res = rec.enviar_recordatorios_retiro(conn, hoy=HOY)
-        assert res["fecha_retiro"] == "2026-06-05"  # HOY + 1 (default)
-        assert res["dias_antes"] == 1
-        assert res["candidatos"] == 0
-        assert capture_send == []
-
-    def test_dias_antes_define_la_ventana_y_el_contexto(self, capture_send):
+    def test_pasada_de_la_manana_mira_lo_que_queda_de_hoy(self, capture_send):
+        """Los retiros de HOY que todavía no ocurrieron (incluye el rescate de un
+        temprano que no recibió el aviso de anoche)."""
         conn = FakeJobConn([_pedido()])
-        res = rec.enviar_recordatorios_retiro(conn, hoy=HOY, dias_antes=3)
-        assert res["dias_antes"] == 3
-        assert res["fecha_retiro"] == "2026-06-07"  # HOY (jun 4) + 3
-        # el copy adaptable necesita dias_antes en el contexto del mail
-        assert capture_send[0][3]["dias_antes"] == 3
+        res = rec.enviar_recordatorios_retiro(
+            conn, hoy=HOY, pasada=rec.PASADA_MANANA, corte_manana=12
+        )
+        assert res["pasada"] == "manana"
+        assert res["desde"] == HOY.isoformat()               # desde AHORA
+        assert res["hasta"] == "2026-06-05T00:00:00"         # hasta el fin de hoy
+        assert capture_send[0][3]["dias_antes"] == 0         # el copy dice "hoy"
+
+    def test_pasada_de_la_vispera_mira_los_de_manana_temprano(self, capture_send):
+        conn = FakeJobConn([_pedido()])
+        res = rec.enviar_recordatorios_retiro(
+            conn, hoy=HOY, pasada=rec.PASADA_VISPERA, corte_manana=12
+        )
+        assert res["pasada"] == "vispera"
+        assert res["desde"] == "2026-06-05T00:00:00"         # mañana 00:00
+        assert res["hasta"] == "2026-06-05T12:00:00"         # …hasta el corte
+        assert capture_send[0][3]["dias_antes"] == 1         # el copy dice "mañana"
+
+    def test_el_corte_mueve_la_ventana_de_la_vispera(self):
+        """Subir el corte hace que más retiros cuenten como "de mañana"."""
+        _, hasta = rec._ventana(HOY, rec.PASADA_VISPERA, 15)
+        assert hasta.isoformat() == "2026-06-05T15:00:00"
 
     def test_send_fallido_se_contabiliza_sin_propagar(self, monkeypatch):
         monkeypatch.setattr(
@@ -151,7 +163,7 @@ class TestEnviar:
             lambda *a, **k: {"mail": [{"ok": False, "error": "boom"}], "whatsapp": None},
         )
         conn = FakeJobConn([_pedido()])
-        res = rec.enviar_recordatorios_retiro(conn, hoy=HOY)
+        res = rec.enviar_recordatorios_retiro(conn, hoy=HOY, corte_manana=12)
         assert res["enviados"] == 0 and res["fallidos"] == 1
         assert res["pedidos"][0]["status"] == "failed"
         assert res["pedidos"][0]["error"] == "boom"
@@ -159,12 +171,12 @@ class TestEnviar:
     def test_conn_propia_se_cierra(self, capture_send, monkeypatch):
         conn = FakeJobConn([_pedido()])
         monkeypatch.setattr(rec, "get_db", lambda: conn)
-        rec.enviar_recordatorios_retiro(hoy=HOY)  # sin conn → la abre y cierra
+        rec.enviar_recordatorios_retiro(hoy=HOY, corte_manana=12)  # sin conn → la abre y cierra
         assert conn.closed is True
 
     def test_conn_ajena_no_se_cierra(self, capture_send):
         conn = FakeJobConn([_pedido()])
-        rec.enviar_recordatorios_retiro(conn, hoy=HOY)
+        rec.enviar_recordatorios_retiro(conn, hoy=HOY, corte_manana=12)
         assert conn.closed is False
 
 
@@ -173,7 +185,7 @@ class TestEnviar:
 class TestDryRun:
     def test_no_manda_nada(self, capture_send):
         conn = FakeJobConn([_pedido(id=1), _pedido(id=2)])
-        res = rec.enviar_recordatorios_retiro(conn, hoy=HOY, dry_run=True)
+        res = rec.enviar_recordatorios_retiro(conn, hoy=HOY, corte_manana=12, dry_run=True)
         assert res["dry_run"] is True
         assert res["candidatos"] == 2
         assert res["enviados"] == 0 and res["fallidos"] == 0
@@ -226,49 +238,67 @@ class FakeSettingsConn:
 
 
 class TestResolveConfig:
-    def test_defaults_sin_env_ni_settings(self, monkeypatch):
-        for v in ("REMINDERS_ENABLED", "REMINDERS_HOUR", "REMINDERS_DIAS_ANTES"):
+    """`hora_vispera` sale de `horarios_retiro` (fuente única de los horarios):
+    el FakeSettingsConn de abajo no lo sirve → cae al default (18)."""
+
+    def _sin_env(self, monkeypatch):
+        for v in ("REMINDERS_ENABLED", "REMINDERS_HOUR", "REMINDERS_CORTE_MANANA"):
             monkeypatch.delenv(v, raising=False)
+
+    def test_defaults_sin_env_ni_settings(self, monkeypatch):
+        self._sin_env(monkeypatch)
         r = cfg.resolve(FakeSettingsConn())
-        assert r == {"enabled": False, "hora": 9, "dias_antes": 1}
+        assert r == {"enabled": False, "hora": 9, "corte_manana": 12, "hora_vispera": 18}
 
     def test_settings_mandan_si_no_hay_env(self, monkeypatch):
-        for v in ("REMINDERS_ENABLED", "REMINDERS_HOUR", "REMINDERS_DIAS_ANTES"):
-            monkeypatch.delenv(v, raising=False)
+        self._sin_env(monkeypatch)
         conn = FakeSettingsConn({
             "recordatorios_enabled": "1",
             "recordatorios_hora": "7",
-            "recordatorios_dias_antes": "2",
+            "recordatorios_corte_manana": "14",
         })
-        assert cfg.resolve(conn) == {"enabled": True, "hora": 7, "dias_antes": 2}
+        assert cfg.resolve(conn) == {
+            "enabled": True, "hora": 7, "corte_manana": 14, "hora_vispera": 18
+        }
 
     def test_env_overridea_settings(self, monkeypatch):
         monkeypatch.setenv("REMINDERS_ENABLED", "0")  # env explícito apaga
         monkeypatch.setenv("REMINDERS_HOUR", "11")
-        monkeypatch.delenv("REMINDERS_DIAS_ANTES", raising=False)
+        monkeypatch.delenv("REMINDERS_CORTE_MANANA", raising=False)
         conn = FakeSettingsConn({
-            "recordatorios_enabled": "1",   # lo pisa el env "0"
-            "recordatorios_hora": "7",      # lo pisa el env "11"
-            "recordatorios_dias_antes": "5",
+            "recordatorios_enabled": "1",         # lo pisa el env "0"
+            "recordatorios_hora": "7",            # lo pisa el env "11"
+            "recordatorios_corte_manana": "10",
         })
-        assert cfg.resolve(conn) == {"enabled": False, "hora": 11, "dias_antes": 5}
+        assert cfg.resolve(conn) == {
+            "enabled": False, "hora": 11, "corte_manana": 10, "hora_vispera": 18
+        }
 
     def test_clamp_valores_fuera_de_rango(self, monkeypatch):
-        for v in ("REMINDERS_ENABLED", "REMINDERS_HOUR", "REMINDERS_DIAS_ANTES"):
-            monkeypatch.delenv(v, raising=False)
+        self._sin_env(monkeypatch)
         conn = FakeSettingsConn({
-            "recordatorios_hora": "99",        # → 23
-            "recordatorios_dias_antes": "999", # → 14 (MAX)
+            "recordatorios_hora": "99",           # → 23
+            "recordatorios_corte_manana": "99",   # → 23
         })
         r = cfg.resolve(conn)
-        assert r["hora"] == 23 and r["dias_antes"] == 14
+        assert r["hora"] == 23 and r["corte_manana"] == 23
 
     def test_valores_basura_caen_al_default(self, monkeypatch):
-        for v in ("REMINDERS_ENABLED", "REMINDERS_HOUR", "REMINDERS_DIAS_ANTES"):
-            monkeypatch.delenv(v, raising=False)
+        self._sin_env(monkeypatch)
         conn = FakeSettingsConn({
             "recordatorios_hora": "xx",
-            "recordatorios_dias_antes": "",
+            "recordatorios_corte_manana": "",
         })
         r = cfg.resolve(conn)
-        assert r["hora"] == 9 and r["dias_antes"] == 1
+        assert r["hora"] == 9 and r["corte_manana"] == 12
+
+    def test_hora_vispera_sale_de_los_horarios_de_retiro(self, monkeypatch):
+        """Si el galpón cierra 17:30, el aviso de la víspera sale a las 17."""
+        self._sin_env(monkeypatch)
+        conn = FakeSettingsConn({
+            "horarios_retiro": '{"lun": {"desde": "09:00", "hasta": "17:30"}}',
+        })
+        from datetime import date
+
+        assert cfg.resolve(conn, dia=date(2026, 6, 1))["hora_vispera"] == 17   # lunes
+        assert cfg.resolve(conn, dia=date(2026, 6, 2))["hora_vispera"] == 18   # martes: sin config

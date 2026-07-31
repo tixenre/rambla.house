@@ -80,5 +80,5 @@ export const AVAILABLE_VARS: { name: string; help: string }[] = [
   { name: "items_text", help: "Lista de equipos como texto plano" },
   { name: "admin_url", help: "Link al pedido en el back-office (solo admin)" },
   { name: "portal_url", help: "Link al portal del cliente (seguir el pedido)" },
-  { name: "dias_antes", help: "Días de anticipación (solo recordatorio)" },
+  { name: "dias_antes", help: "0 = el aviso sale hoy, 1 = sale mañana (solo recordatorio)" },
 ];

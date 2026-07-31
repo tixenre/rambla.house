@@ -5,7 +5,7 @@
  * pantalla NO tiene su propia lista de eventos, la pide. Si alguien agrega un
  * evento en el backend, aparece acá solo.
  */
-import { authedJson } from "@/lib/authedFetch";
+import { authedJson, authedPostJson } from "@/lib/authedFetch";
 
 import type { ChequeoWhatsApp, EstadoMeta } from "./whatsapp";
 
@@ -97,6 +97,27 @@ export type ModuloComunicacion = {
   canales: EstadoCanales;
 };
 
+/** Resultado de una pasada del barrido de recordatorios de retiro. */
+export type PasadaRetiro = {
+  pasada: string;
+  desde: string;
+  hasta: string;
+  candidatos: number;
+  enviados: number;
+  fallidos: number;
+  dry_run: boolean;
+};
+
 export const comunicacionApi = {
   getEventos: () => authedJson<ModuloComunicacion>("/api/admin/comunicacion/eventos"),
+
+  /**
+   * Corre el barrido de recordatorios de retiro (las dos pasadas: la del mismo
+   * día y la de la víspera). `dryRun` (default) solo lista a quién le llegaría.
+   */
+  simularRetiro: (dryRun = true) =>
+    authedPostJson<{ dry_run: boolean; pasadas: Record<string, PasadaRetiro> }>(
+      `/api/admin/recordatorios/retiro/run?dry_run=${dryRun}`,
+      {},
+    ),
 };

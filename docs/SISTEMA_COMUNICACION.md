@@ -99,6 +99,13 @@ Criterio del dueño: **la configuración vive en el mensaje que corresponde** �
 recordatorio de retiro tenía su propia tarjeta en Settings, suelta de la comunicación que
 gobierna, y las plantillas de mail vivían en otra lista aparte.
 
+**Cuándo sale un aviso de barrido** también se configura ahí: el recordatorio de retiro no es
+"N días antes" fijo — depende de la hora del retiro (mismo día a la mañana; la víspera a la hora
+de cierre si el retiro es temprano). El criterio y sus perillas viven en
+`jobs/recordatorios_config.py`; la hora de cierre sale de `horarios_retiro` vía
+`services/fechas.ultima_hora_laboral` (no se re-declara). Los eventos que dispara un barrido
+(retiro y devolución) traen además un botón para **simular** a quién le llegaría hoy, sin mandar.
+
 Lo que queda **fuera** de un evento, porque es transversal: el estado de los dos canales
 (remitente del mail, readiness de WhatsApp, alta de plantillas en Meta, envío de prueba), los
 mails que dispara **Talleres** (no pasan por el registro — decir que son eventos sería mentir

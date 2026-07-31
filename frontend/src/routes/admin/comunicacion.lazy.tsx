@@ -336,7 +336,10 @@ function EventoCard({
       </div>
 
       {ev.opciones.length > 0 && (
-        <Opciones opciones={ev.opciones} extra={ventana ? <Simular ventana={ventana} /> : null} />
+        <Opciones
+          opciones={ev.opciones}
+          extra={<SimularDelEvento evento={ev.key} ventana={ventana} />}
+        />
       )}
     </Section>
   );
@@ -559,18 +562,27 @@ function Opciones({ opciones, extra }: { opciones: OpcionEvento[]; extra?: React
   );
 }
 
-/** Corre el barrido de este aviso en seco: lista a quién le llegaría, sin mandar. */
-function Simular({ ventana }: { ventana: string }) {
+/** Corre el barrido de este aviso en seco: cuenta a quién le llegaría, sin mandar.
+ *  Solo los avisos que dispara un barrido diario (retiro y devolución) se pueden
+ *  simular — los demás salen por un hecho del pedido, no por reloj. */
+function SimularDelEvento({ evento, ventana }: { evento: string; ventana?: string }) {
   const correr = useMutation({
-    mutationFn: () => whatsappApi.correrDevolucion(true, [ventana]),
-    onSuccess: (r) => {
-      const total = Object.values(r.ventanas).reduce((a, v) => a + v.candidatos, 0);
+    mutationFn: async () => {
+      if (ventana) {
+        const r = await whatsappApi.correrDevolucion(true, [ventana]);
+        return Object.values(r.ventanas).reduce((a, v) => a + v.candidatos, 0);
+      }
+      const r = await comunicacionApi.simularRetiro(true);
+      return Object.values(r.pasadas).reduce((a, p) => a + p.candidatos, 0);
+    },
+    onSuccess: (total) =>
       toast.success("Simulación lista (no se envió nada)", {
         description: `${total} pedido(s) recibirían este aviso hoy.`,
-      });
-    },
+      }),
     onError: (e: Error) => toast.error("No se pudo simular", { description: e.message }),
   });
+
+  if (!ventana && evento !== "recordatorio_retiro") return null;
 
   return (
     <Button variant="outline" size="sm" onClick={() => correr.mutate()} disabled={correr.isPending}>

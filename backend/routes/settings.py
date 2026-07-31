@@ -185,12 +185,13 @@ ALLOWED_SETTINGS_KEYS = {
     # ── Reportes ─────────────────────────────────────────────────────
     "comisiones_modelo",       # Reparto de ingresos por dueño (#88). JSON {dueño: {beneficiario: %}}.
     # ── Recordatorio de retiro (Fase B mails) ────────────────────────
-    # Control del job "mañana retirás" desde la UI. Override por env
-    # (REMINDERS_ENABLED/REMINDERS_HOUR/REMINDERS_DIAS_ANTES) — ver
-    # jobs/recordatorios_config.py. Lo resuelve el scheduler en runtime.
-    "recordatorios_enabled",      # Encendido del recordatorio automático. "1"/"0".
-    "recordatorios_hora",         # Hora AR del barrido diario. Int 0-23.
-    "recordatorios_dias_antes",   # Días de anticipación. Int 1-14.
+    # Control del recordatorio de retiro desde la UI. Cuándo sale depende de la
+    # HORA del retiro (mismo día a la mañana / víspera a la hora de cierre) — ver
+    # jobs/recordatorios_config.py. Override por env (REMINDERS_ENABLED/
+    # REMINDERS_HOUR/REMINDERS_CORTE_MANANA). Lo resuelve el scheduler en runtime.
+    "recordatorios_enabled",        # Encendido del recordatorio automático. "1"/"0".
+    "recordatorios_hora",           # Hora AR del aviso del mismo día. Int 0-23.
+    "recordatorios_corte_manana",   # Retiro antes de esta hora → aviso la víspera. Int 1-23.
     # ── Recordatorio de DEVOLUCIÓN (WhatsApp) — 3 ventanas independientes ──
     # Cada una on/off desde el back-office. Override por env (REMINDERS_
     # DEVOLUCION_D1/_D0/_VENCIDO/_HOUR) — ver jobs/recordatorios_devolucion_config.
@@ -270,7 +271,7 @@ BOOL_SETTINGS_KEYS = {
 # Settings numéricas con rango cerrado: {key: (mínimo, máximo, qué es)}.
 RANGO_SETTINGS_KEYS = {
     "recordatorios_hora": (0, 23, "hora"),
-    "recordatorios_dias_antes": (1, 14, "días"),
+    "recordatorios_corte_manana": (1, 23, "hora"),
     "recordatorios_devolucion_hora": (0, 23, "hora"),
     "recordatorios_devolucion_dias_antes": (1, 14, "días"),
 }

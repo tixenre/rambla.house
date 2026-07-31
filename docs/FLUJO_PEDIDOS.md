@@ -96,7 +96,7 @@ destinatarios para el equipo).
 |---|---|---|
 | **Pedido creado** | `pedido_creado_cliente` (al cliente) + `pedido_creado_admin` (al equipo) | Cliente: resumen (fechas/total/items), número de pedido y **link al portal** para seguir el estado, con la aclaración de que el remito y el contrato se van a poder descargar desde ahí **cuando confirmemos**. Equipo: "entró un pedido #N de \<cliente\>" + link al back-office. |
 | **Pedido confirmado** | `pedido_confirmado_cliente` (al cliente) | Confirma el pedido y avisa que **ya puede descargar el remito y el contrato** desde su portal. |
-| **Recordatorio retiro** | `recordatorio_retiro` (al cliente) | Recordatorio D-1 del retiro. |
+| **Recordatorio retiro** | `recordatorio_retiro` (al cliente) | Se acerca el retiro. Sale el MISMO día a la mañana o, si el retiro es temprano, la víspera a la hora de cierre (`jobs/recordatorios_config.py`). |
 
 ### Regla de documentos
 
