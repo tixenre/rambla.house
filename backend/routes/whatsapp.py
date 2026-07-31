@@ -28,10 +28,16 @@ def estado_whatsapp(request: Request):
     qué pedir aprobado. Sin secretos (nunca el token)."""
     require_admin(request)
 
-    from services.whatsapp import REGISTRO, diagnosticar
+    from services.whatsapp import REGISTRO, diagnosticar, estado_plantillas
 
     with get_db() as conn:
         estado = diagnosticar(conn)
+
+    # Estado de aprobación REAL en Meta (una llamada al Graph). Si el canal no está
+    # configurado devuelve `disponible: False` sin romper — la pantalla igual muestra
+    # el copy para dar de alta a mano.
+    remoto = estado_plantillas()
+    por_key = {f["key"]: f for f in remoto.get("plantillas", [])}
 
     plantillas = [
         {
@@ -42,10 +48,31 @@ def estado_whatsapp(request: Request):
             "descripcion": p.descripcion,
             "copy_ejemplo": p.copy_ejemplo,
             "parametros": list(p.campos_ctx),
+            # None cuando no se pudo consultar (canal sin configurar / Meta caído).
+            "estado_meta": (por_key.get(p.key) or {}).get("estado"),
         }
         for p in REGISTRO.values()
     ]
-    return {**estado, "plantillas": plantillas}
+    return {
+        **estado,
+        "plantillas": plantillas,
+        "gestion_plantillas": {
+            "disponible": remoto.get("disponible", False),
+            "motivo": remoto.get("motivo"),
+        },
+    }
+
+
+@router.post("/admin/whatsapp/plantillas/sincronizar")
+@limiter.limit(ADMIN_WRITE_LIMIT)
+def sincronizar_plantillas(request: Request):
+    """Da de alta en Meta las plantillas del registro que falten (las que ya existen
+    no se tocan). No saltea la revisión: nacen en PENDING y Meta las aprueba."""
+    require_admin(request)
+
+    from services.whatsapp import sincronizar
+
+    return sincronizar()
 
 
 @router.post("/admin/whatsapp/test")

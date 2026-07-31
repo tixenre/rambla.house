@@ -15,21 +15,9 @@ from typing import Optional
 
 import httpx
 
-from .errores import (
-    WhatsAppAuthError,
-    WhatsAppNetworkError,
-    WhatsAppRateLimitError,
-    WhatsAppRequestError,
-    WhatsAppResponseError,
-)
+from ._respuesta import interpretar as _interpretar_respuesta
+from .errores import WhatsAppNetworkError, WhatsAppResponseError
 from .modelos import EnvioResult, body_components
-
-# Códigos de error de Meta que son SIEMPRE de credencial/permiso, sin importar el
-# HTTP status con el que vengan (ej. token vencido puede llegar como 400 o 401).
-# https://developers.facebook.com/docs/whatsapp/cloud-api/support/error-codes
-_CODIGOS_AUTH = frozenset({0, 3, 10, 190, 200, 299, 2500})
-# Códigos de límite de tasa / throughput / spam.
-_CODIGOS_RATE = frozenset({4, 80007, 130429, 131048, 131056, 133016})
 
 _TIMEOUT_DEFAULT = 15.0
 
@@ -109,55 +97,11 @@ class WhatsAppClient:
     # ── interpretación de la respuesta → resultado o error tipado ──────────
     @staticmethod
     def _interpretar(resp: httpx.Response, *, to: str, template_name: str) -> EnvioResult:
-        status = resp.status_code
+        """La taxonomía de errores la resuelve `_respuesta.interpretar` (compartida con
+        el cliente de templates); acá solo queda lo propio del envío: sacar el `wamid`."""
         cuerpo = resp.text or ""
-        try:
-            data = resp.json()
-        except ValueError:
-            data = None
+        data = _interpretar_respuesta(resp, contexto="el envío")
 
-        # Error explícito de Meta (`{"error": {...}}`) — puede venir con 200 o 4xx.
-        error = data.get("error") if isinstance(data, dict) else None
-        if error:
-            codigo = error.get("code")
-            mensaje = error.get("message") or "Error de Meta sin mensaje"
-            if isinstance(codigo, int) and codigo in _CODIGOS_AUTH:
-                raise WhatsAppAuthError(f"Meta rechazó por credencial/permiso: {mensaje} (code {codigo})")
-            if isinstance(codigo, int) and codigo in _CODIGOS_RATE:
-                raise WhatsAppRateLimitError(
-                    f"Meta aplicó límite de tasa: {mensaje} (code {codigo})",
-                    retry_after=_retry_after(resp),
-                )
-            if status in (401, 403):
-                raise WhatsAppAuthError(f"Meta rechazó (HTTP {status}): {mensaje}")
-            if status == 429:
-                raise WhatsAppRateLimitError(
-                    f"Meta aplicó límite de tasa (HTTP 429): {mensaje}",
-                    retry_after=_retry_after(resp),
-                )
-            if status >= 500:
-                raise WhatsAppNetworkError(f"Meta 5xx: {mensaje}")
-            # 4xx con error de negocio (número inválido, template no aprobado, fuera de allowlist)
-            raise WhatsAppRequestError(
-                f"Meta rechazó el envío: {mensaje}",
-                errores=((codigo if isinstance(codigo, int) else None, mensaje),),
-            )
-
-        # Sin bloque `error`: decidir por status.
-        if status in (401, 403):
-            raise WhatsAppAuthError(f"Meta rechazó (HTTP {status}) sin cuerpo interpretable")
-        if status == 429:
-            raise WhatsAppRateLimitError(
-                "Meta aplicó límite de tasa (HTTP 429)", retry_after=_retry_after(resp)
-            )
-        if status >= 500:
-            raise WhatsAppNetworkError(f"Meta respondió HTTP {status}")
-        if status >= 400:
-            raise WhatsAppResponseError(
-                f"Meta respondió HTTP {status} sin bloque `error` reconocible", raw=cuerpo
-            )
-
-        # 2xx: extraer el wamid.
         if isinstance(data, dict):
             mensajes = data.get("messages")
             if isinstance(mensajes, list) and mensajes and isinstance(mensajes[0], dict):
@@ -168,13 +112,3 @@ class WhatsAppClient:
             "Meta respondió 2xx pero sin `messages[0].id` (wamid) esperado", raw=cuerpo
         )
 
-
-def _retry_after(resp: httpx.Response) -> Optional[float]:
-    """Segundos sugeridos por Meta para reintentar (header `Retry-After`), o None."""
-    raw = resp.headers.get("Retry-After")
-    if not raw:
-        return None
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return None

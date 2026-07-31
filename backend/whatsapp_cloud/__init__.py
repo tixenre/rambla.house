@@ -19,6 +19,7 @@ __version__ = "0.0.0"
 
 from .modelos import EnvioResult, body_components
 from .client import WhatsAppClient
+from .templates import TemplateRemoto, WhatsAppTemplatesClient
 from .retry import with_retry
 from .errores import (
     WhatsAppError,
@@ -34,8 +35,11 @@ __all__ = [
     # modelos + armado de components
     "EnvioResult",
     "body_components",
-    # cliente HTTP
+    # cliente HTTP de envío (Cloud API, cuelga del phone_number_id)
     "WhatsAppClient",
+    # administración de templates (Business Management API, cuelga del WABA id)
+    "WhatsAppTemplatesClient",
+    "TemplateRemoto",
     # retry/backoff opcional
     "with_retry",
     # taxonomía de errores (todo lo que el cliente levanta hereda de WhatsAppError)

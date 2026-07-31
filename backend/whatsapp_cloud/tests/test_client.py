@@ -19,7 +19,9 @@ from whatsapp_cloud import (
     body_components,
     with_retry,
 )
-from whatsapp_cloud.client import _CODIGOS_AUTH
+# La taxonomía de códigos se mudó a `_respuesta` (compartida entre el cliente de
+# envío y el de templates); antes vivía en `client.py`.
+from whatsapp_cloud._respuesta import CODIGOS_AUTH as _CODIGOS_AUTH
 
 
 def _client() -> WhatsAppClient:

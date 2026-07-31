@@ -15,6 +15,9 @@ export type ChequeoWhatsApp = {
   mensaje: string;
 };
 
+/** Estado de aprobación de un template en Meta. `NO_CREADA` = todavía no existe. */
+export type EstadoMeta = "APPROVED" | "PENDING" | "REJECTED" | "PAUSED" | "DISABLED" | "NO_CREADA";
+
 /** Un template pre-aprobado en Meta, tal como lo declara el registro del backend. */
 export type PlantillaWhatsApp = {
   key: string;
@@ -24,6 +27,8 @@ export type PlantillaWhatsApp = {
   descripcion: string;
   copy_ejemplo: string;
   parametros: string[];
+  /** null = no se pudo consultar (canal sin configurar o Meta no respondió). */
+  estado_meta: EstadoMeta | null;
 };
 
 export type EstadoWhatsApp = {
@@ -32,6 +37,23 @@ export type EstadoWhatsApp = {
   ambiente: "produccion" | "no_produccion";
   graph_version: string;
   plantillas: PlantillaWhatsApp[];
+  /** Si se pueden administrar los templates por API (token + WABA id presentes). */
+  gestion_plantillas: { disponible: boolean; motivo: string | null };
+};
+
+export type ResultadoSync = {
+  ok: boolean;
+  motivo?: string;
+  creadas: number;
+  ya_existian: number;
+  fallidas: number;
+  resultados: Array<{
+    key: string;
+    meta_name: string;
+    resultado: "creada" | "ya_existia" | "error";
+    estado?: string | null;
+    error?: string;
+  }>;
 };
 
 /** Resultado de una ventana del barrido de recordatorios de devolución. */
@@ -69,6 +91,13 @@ export const whatsappApi = {
       "/api/admin/whatsapp/test",
       { to, plantilla },
     ),
+
+  /**
+   * Da de alta en Meta las plantillas del registro que falten. Las que ya existen
+   * no se tocan. No saltea la revisión: nacen en PENDING y Meta las aprueba.
+   */
+  sincronizarPlantillas: () =>
+    authedPostJson<ResultadoSync>("/api/admin/whatsapp/plantillas/sincronizar", {}),
 
   /**
    * Corre el barrido de recordatorios de devolución on-demand. `dryRun` (default)

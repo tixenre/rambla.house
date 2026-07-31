@@ -11,9 +11,18 @@
 import { createLazyFileRoute } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Copy, Mail, MessageCircle, Paperclip, Send, ExternalLink, PlayCircle } from "lucide-react";
+import {
+  Copy,
+  Mail,
+  MessageCircle,
+  Paperclip,
+  Send,
+  ExternalLink,
+  PlayCircle,
+  UploadCloud,
+} from "lucide-react";
 
 import { comunicacionApi, type EventoComunicacion } from "@/lib/admin/api/comunicacion";
 import { whatsappApi } from "@/lib/admin/api/whatsapp";
@@ -294,8 +303,43 @@ function CanalDelEvento({
 
 /* ── Plantillas a dar de alta en Meta ────────────────────────────────────── */
 
+/** Cómo se ve cada estado de aprobación de Meta. */
+const ESTADO_META: Record<
+  string,
+  { tone: "success" | "warning" | "danger" | "neutral"; label: string }
+> = {
+  APPROVED: { tone: "success", label: "Aprobada" },
+  PENDING: { tone: "warning", label: "En revisión" },
+  REJECTED: { tone: "danger", label: "Rechazada" },
+  PAUSED: { tone: "warning", label: "Pausada" },
+  DISABLED: { tone: "danger", label: "Deshabilitada" },
+  NO_CREADA: { tone: "neutral", label: "Sin crear" },
+};
+
 function PlantillasMeta() {
+  const qc = useQueryClient();
   const q = useQuery({ queryKey: ["whatsapp", "estado"], queryFn: whatsappApi.getEstado });
+
+  const sincronizar = useMutation({
+    mutationFn: whatsappApi.sincronizarPlantillas,
+    onSuccess: (r) => {
+      if (!r.ok && r.motivo) {
+        toast.error("No se pudieron crear", { description: r.motivo });
+        return;
+      }
+      const partes = [
+        r.creadas ? `${r.creadas} creada(s)` : null,
+        r.ya_existian ? `${r.ya_existian} ya existía(n)` : null,
+        r.fallidas ? `${r.fallidas} con error` : null,
+      ].filter(Boolean);
+      const msg = r.fallidas ? toast.warning : toast.success;
+      msg("Alta en Meta", {
+        description: `${partes.join(" · ")}. Las nuevas quedan en revisión hasta que Meta las apruebe.`,
+      });
+      void qc.invalidateQueries({ queryKey: ["whatsapp", "estado"] });
+    },
+    onError: (e: Error) => toast.error("No se pudieron crear", { description: e.message }),
+  });
 
   const correr = useMutation({
     mutationFn: () => whatsappApi.correrDevolucion(true),
@@ -315,20 +359,37 @@ function PlantillasMeta() {
 
   return (
     <Section
-      title="Plantillas para dar de alta en Meta"
-      subtitle="Copiá cada texto en el WhatsApp Manager con el MISMO nombre. Categoría utility."
+      title="Plantillas en Meta"
+      subtitle="Se dan de alta solas con el botón. Meta las revisa antes de aprobarlas."
       actions={
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => correr.mutate()}
-          disabled={correr.isPending}
-        >
-          <PlayCircle className="mr-1 h-3.5 w-3.5" />
-          {correr.isPending ? "Simulando…" : "Simular avisos de devolución"}
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => correr.mutate()}
+            disabled={correr.isPending}
+          >
+            <PlayCircle className="mr-1 h-3.5 w-3.5" />
+            {correr.isPending ? "Simulando…" : "Simular avisos de devolución"}
+          </Button>
+          <Button
+            size="sm"
+            onClick={() => sincronizar.mutate()}
+            disabled={sincronizar.isPending || !q.data?.gestion_plantillas.disponible}
+          >
+            <UploadCloud className="mr-1 h-3.5 w-3.5" />
+            {sincronizar.isPending ? "Creando…" : "Crear las que falten"}
+          </Button>
+        </div>
       }
     >
+      {q.data && !q.data.gestion_plantillas.disponible && (
+        <p className="mb-3 rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground">
+          Para darlas de alta automáticamente falta configurar el canal
+          {q.data.gestion_plantillas.motivo ? ` (${q.data.gestion_plantillas.motivo})` : ""}.
+          Mientras tanto podés copiar cada texto y pegarlo a mano en el WhatsApp Manager.
+        </p>
+      )}
       {q.isLoading && <p className="text-sm text-muted-foreground">Cargando…</p>}
       {q.data && (
         <div className="space-y-2">
@@ -337,6 +398,11 @@ function PlantillasMeta() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <code className="text-xs font-medium">{p.meta_name}</code>
                 <div className="flex items-center gap-2">
+                  {p.estado_meta && (
+                    <Pill tone={ESTADO_META[p.estado_meta]?.tone ?? "neutral"} size="compact">
+                      {ESTADO_META[p.estado_meta]?.label ?? p.estado_meta}
+                    </Pill>
+                  )}
                   <Pill tone="neutral" size="compact">
                     {p.lang}
                   </Pill>
