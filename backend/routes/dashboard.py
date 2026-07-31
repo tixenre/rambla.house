@@ -14,6 +14,27 @@ from tipos_pedido import TIPOS_SIN_RETIRO_SQL
 router = APIRouter()
 
 
+def _turnos_embebidos_del_dia(conn, campo: str, valor: str):
+    """Turnos EMBEBIDOS (`alquiler_turnos_estudio`, #1308 rediseño "turno como
+    ítem") cuya PROPIA `campo` (`fecha_desde`/`fecha_hasta` — literal interno,
+    solo lo pasan los 3 call sites de este archivo, nunca input) cae en `valor`
+    (YYYY-MM-DD). Mismo shape que las filas de `alquileres` de salen_hoy/
+    devuelven_hoy/devuelven_manana, pero con la fecha/hora PROPIA del turno —
+    que puede no coincidir con el retiro/devolución de equipos del pedido
+    contenedor (`a`, que sigue siendo `tipo='diaria'`) — y su monto propio
+    (no el del pedido completo, que puede incluir equipos ajenos al turno)."""
+    return conn.execute(f"""
+        SELECT a.id, a.cliente_nombre, ate.fecha_desde, ate.fecha_hasta,
+               COALESCE((SELECT SUM(subtotal) FROM alquiler_items
+                         WHERE turno_estudio_id = ate.id), 0) AS monto_total
+        FROM alquiler_turnos_estudio ate
+        JOIN alquileres a ON a.id = ate.pedido_id
+        WHERE a.estado IN ('confirmado','retirado') AND a.{SIN_PRINCIPAL_SQL}
+          AND ate.{campo}::date = %s
+        ORDER BY ate.fecha_desde
+    """, (valor,)).fetchall()
+
+
 @router.get("/dashboard")
 def get_dashboard(_admin: dict = Depends(require_admin)):
     # now_ar(), no date.today() — este último corre en UTC en la nube/CI y
@@ -38,7 +59,13 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
             f"AND fecha_hasta >= %s AND {SIN_PRINCIPAL_SQL}", (hoy,)
         ).fetchone()[0]
 
-        salen_hoy = conn.execute(f"""
+        # Cada lista suma los turnos EMBEBIDOS cuya PROPIA fecha cae hoy/mañana
+        # (#1308 rediseño "turno como ítem") — sin esto, un pedido `diaria`
+        # mixto cuyo equipo se retira otro día pero tiene un turno del Estudio
+        # hoy no aparecería en ningún lado. Se re-ordena por fecha_desde tras
+        # combinar (dos queries separadas, no UNION, por la subquery de monto
+        # propio del turno).
+        salen_hoy = [row_to_dict(r) for r in conn.execute(f"""
             SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
             WHERE estado IN ('confirmado','retirado')
@@ -46,25 +73,33 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
               AND p.{SIN_PRINCIPAL_SQL}
               AND p.fecha_desde::date = %s
             ORDER BY p.fecha_desde
-        """, (hoy,)).fetchall()
+        """, (hoy,)).fetchall()]
+        salen_hoy.extend(row_to_dict(r) for r in _turnos_embebidos_del_dia(conn, "fecha_desde", hoy))
+        salen_hoy.sort(key=lambda r: r["fecha_desde"])
 
-        devuelven_hoy = conn.execute(f"""
+        devuelven_hoy = [row_to_dict(r) for r in conn.execute(f"""
             SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
             WHERE estado IN ('confirmado','retirado') AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
               AND p.{SIN_PRINCIPAL_SQL}
               AND p.fecha_hasta::date = %s
             ORDER BY p.fecha_hasta
-        """, (hoy,)).fetchall()
+        """, (hoy,)).fetchall()]
+        devuelven_hoy.extend(row_to_dict(r) for r in _turnos_embebidos_del_dia(conn, "fecha_hasta", hoy))
+        devuelven_hoy.sort(key=lambda r: r["fecha_hasta"])
 
-        devuelven_manana = conn.execute(f"""
+        devuelven_manana = [row_to_dict(r) for r in conn.execute(f"""
             SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
             WHERE estado IN ('confirmado','retirado') AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
               AND p.{SIN_PRINCIPAL_SQL}
               AND p.fecha_hasta::date = %s
             ORDER BY p.fecha_hasta
-        """, (manana,)).fetchall()
+        """, (manana,)).fetchall()]
+        devuelven_manana.extend(
+            row_to_dict(r) for r in _turnos_embebidos_del_dia(conn, "fecha_hasta", manana)
+        )
+        devuelven_manana.sort(key=lambda r: r["fecha_hasta"])
 
         ingresos_mes = conn.execute("""
             SELECT COALESCE(SUM(monto_total), 0) FROM alquileres
@@ -94,9 +129,9 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
             "activos":          activos,
             "ingresos_mes":     ingresos_mes,
             "total_clientes":   total_clientes,
-            "salen_hoy":        [row_to_dict(r) for r in salen_hoy],
-            "devuelven_hoy":    [row_to_dict(r) for r in devuelven_hoy],
-            "devuelven_manana": [row_to_dict(r) for r in devuelven_manana],
+            "salen_hoy":        salen_hoy,
+            "devuelven_hoy":    devuelven_hoy,
+            "devuelven_manana": devuelven_manana,
             "equipos_afuera":   [row_to_dict(r) for r in equipos_afuera],
         }
 
@@ -108,12 +143,16 @@ def get_calendario(
     _admin: dict = Depends(require_admin),
 ):
     with get_db() as conn:
+        # `pi.turno_estudio_id IS NULL`: un pedido `diaria` mixto (#1308) no
+        # debe mostrar el centinela del turno mezclado en el label "equipos"
+        # de SU fila de equipamiento — el turno tiene su propia fila abajo,
+        # con su propia ventana horaria (puede no coincidir con estas fechas).
         rows = conn.execute(f"""
             SELECT p.id, p.numero_pedido, p.cliente_nombre, p.estado, p.tipo,
                    p.fecha_desde, p.fecha_hasta, p.monto_total,
                    STRING_AGG(e.nombre, ' / ') AS equipos
             FROM alquileres p
-            JOIN alquiler_items pi ON pi.pedido_id = p.id
+            JOIN alquiler_items pi ON pi.pedido_id = p.id AND pi.turno_estudio_id IS NULL
             JOIN equipos e ON e.id = pi.equipo_id
             WHERE p.estado IN ('solicitado','confirmado','retirado','devuelto','finalizado')
               AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
@@ -122,4 +161,27 @@ def get_calendario(
                      p.fecha_desde, p.fecha_hasta, p.monto_total
             ORDER BY p.fecha_desde
         """, (desde, hasta)).fetchall()
-        return [row_to_dict(r) for r in rows]
+
+        # Turnos EMBEBIDOS: su propia fila, con su propia ventana horaria —
+        # `tipo='estudio'` sintético (mismo criterio que `eventos_estudio` en
+        # `estadisticas.py`) para que el front lo coloree vía
+        # `estadoClaseEstudio` como cualquier turno del Estudio.
+        rows_turnos = conn.execute("""
+            SELECT a.id, a.numero_pedido, a.cliente_nombre, a.estado,
+                   'estudio' AS tipo, ate.fecha_desde, ate.fecha_hasta,
+                   COALESCE((SELECT SUM(subtotal) FROM alquiler_items
+                             WHERE turno_estudio_id = ate.id), 0) AS monto_total,
+                   (SELECT STRING_AGG(e.nombre, ' / ')
+                    FROM alquiler_items ai JOIN equipos e ON e.id = ai.equipo_id
+                    WHERE ai.turno_estudio_id = ate.id) AS equipos
+            FROM alquiler_turnos_estudio ate
+            JOIN alquileres a ON a.id = ate.pedido_id
+            WHERE a.estado IN ('solicitado','confirmado','retirado','devuelto','finalizado')
+              AND ate.fecha_hasta >= %s AND ate.fecha_desde <= %s
+            ORDER BY ate.fecha_desde
+        """, (desde, hasta)).fetchall()
+
+        eventos = [row_to_dict(r) for r in rows]
+        eventos.extend(row_to_dict(r) for r in rows_turnos)
+        eventos.sort(key=lambda r: r["fecha_desde"])
+        return eventos
