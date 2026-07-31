@@ -1115,6 +1115,11 @@ export type PedidoItem = {
   /** Línea personalizada (#805): nombre libre + modo de cobro por línea. */
   nombre_libre?: string | null;
   cobro_modo?: CobroModo;
+  /** Presente si esta línea pertenece a un turno del Estudio EMBEBIDO (#1308
+   *  rediseño "turno como ítem") — agrupa el ítem bajo su
+   *  `turnos_estudio_embebidos[].id`. `null`/ausente = ítem normal del
+   *  pedido (el 100% de los ítems antes de #1308, para siempre). */
+  turno_estudio_id?: number | null;
 };
 
 export type PedidoPago = {
@@ -1152,6 +1157,23 @@ export type ClaseTallerPedido = {
   nota: string;
   portada_media_id: number | null;
   portada_url: string;
+};
+
+/** Metadata liviana de agrupación de un turno del Estudio EMBEBIDO (#1308
+ *  rediseño "turno como ítem") — sus ítems reales viven en `Pedido.items`
+ *  (con `turno_estudio_id === este.id`); esto es solo lo que agrupa: franja
+ *  propia + descuento propio + su aporte a `monto_total` (informativo, ya
+ *  incluido en el total del pedido). A diferencia de un turno VINCULADO
+ *  (`PedidoGeneradoEdicion`, mecanismo viejo), no tiene `estado`/`pagos`
+ *  propios — nunca fue su propia venta, vive la del pedido contenedor. */
+export type TurnoEstudioEmbebido = {
+  id: number;
+  fecha_desde: string;
+  fecha_hasta: string;
+  descuento_pct: number;
+  descuento_manual_tipo: "pct" | "monto";
+  descuento_manual_monto: number;
+  monto_total: number;
 };
 
 export type Pedido = {
@@ -1219,6 +1241,12 @@ export type Pedido = {
    *  Estudio (no cancelados) tiene vinculados este pedido — el turno en sí
    *  ya no aparece como fila propia ahí, esto es la señal de que existen. */
   turnos_vinculados_count?: number;
+  /** Turnos del Estudio EMBEBIDOS en este pedido (#1308 rediseño "turno como
+   *  ítem", Fase 4) — el mecanismo NUEVO, reemplaza a `turnos_estudio_vinculados`
+   *  para cualquier turno creado desde acá en adelante (los ya vinculados
+   *  antes de esta fase se siguen viendo vía ese array hasta que la Fase 5
+   *  los migre). Vacío/ausente = sin turnos embebidos. */
+  turnos_estudio_embebidos?: TurnoEstudioEmbebido[];
   /** ¿Tiene contenido real — al menos un ítem de alquiler O un turno del
    *  Estudio vinculado activo? Lo calcula el backend
    *  (`_pedido_tiene_contenido`, services/alquileres/queries/detalle.py) en

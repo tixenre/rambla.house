@@ -118,10 +118,14 @@ export const estudioAdminApi = {
     con_promo?: boolean;
     pintura_reciente?: boolean;
     sueltos?: EstudioSueltoInput[];
-    /** Al cotizar la EDICIÓN de un turno ya existente: se excluye a sí mismo
-     *  del chequeo de disponibilidad (si no, siempre se vería "ocupado" por
-     *  su propia franja). Omitir en una reserva nueva. */
+    /** Al cotizar la EDICIÓN de un turno STANDALONE ya existente: se excluye
+     *  a sí mismo del chequeo de disponibilidad (si no, siempre se vería
+     *  "ocupado" por su propia franja). Omitir en una reserva nueva. */
     pedido_id?: number;
+    /** Equivalente a `pedido_id` para un turno EMBEBIDO (#1308 Fase 4.4) —
+     *  mutuamente excluyente: excluir por el pedido CONTENEDOR escondería un
+     *  conflicto real contra un turno hermano del mismo pedido. */
+    exclude_turno_estudio_id?: number;
     /** Tarifa NEGOCIADA del espacio (lo que el admin tipeó en la fila
      *  "Espacio"). Sin esto la cotización devolvía el precio de LISTA aunque
      *  el guardado persistiera la negociada — la pantalla mostraba un número
@@ -142,6 +146,8 @@ export const estudioAdminApi = {
       sueltos_json: JSON.stringify(params.sueltos ?? []),
     });
     if (params.pedido_id != null) sp.set("pedido_id", String(params.pedido_id));
+    if (params.exclude_turno_estudio_id != null)
+      sp.set("exclude_turno_estudio_id", String(params.exclude_turno_estudio_id));
     if (params.espacio_monto != null) sp.set("espacio_monto", String(params.espacio_monto));
     if (params.descuento_pct != null) sp.set("descuento_pct", String(params.descuento_pct));
     if (params.descuento_manual_tipo) sp.set("descuento_manual_tipo", params.descuento_manual_tipo);

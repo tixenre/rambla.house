@@ -1627,6 +1627,7 @@ def cotizar_reserva_estudio(
     pintura_reciente: bool = False,
     sueltos_json: str = Query("[]"),
     pedido_id: Optional[int] = None,
+    exclude_turno_estudio_id: Optional[int] = None,
     espacio_monto: Optional[int] = None,
     descuento_pct: float = 0,
     descuento_manual_tipo: str = "pct",
@@ -1635,9 +1636,14 @@ def cotizar_reserva_estudio(
     """Desglose de plata de una reserva ANTES de crearla — no muta nada (el
     front no calcula plata, MEMORIA 2026-06-29). `sueltos_json` es
     `[{"equipo_id":N,"cantidad":N}]` codificado. `pedido_id`: al cotizar la
-    EDICIÓN de un turno ya existente, se excluye a sí mismo del chequeo de
-    disponibilidad — si no, un turno siempre se vería "ocupado" por su propia
-    franja (bug real encontrado al verificar el editor: #1283 Fase 6).
+    EDICIÓN de un turno STANDALONE ya existente, se excluye a sí mismo del
+    chequeo de disponibilidad — si no, un turno siempre se vería "ocupado" por
+    su propia franja (bug real encontrado al verificar el editor: #1283 Fase
+    6). `exclude_turno_estudio_id` es el equivalente para un turno EMBEBIDO
+    (#1308 Fase 4.4) — mutuamente excluyente con `pedido_id`: excluir por
+    `pedido_id` (el pedido CONTENEDOR) escondería un conflicto real contra un
+    turno HERMANO del mismo pedido (Fase 1, mismo motivo que
+    `_centinela_libre`/`_estudio_disponible` distinguen los dos parámetros).
 
     `espacio_monto`: tarifa NEGOCIADA del espacio, la que el admin tipea en la
     fila "Espacio". Sin esto, la cotización siempre devolvía el precio de LISTA
@@ -1707,7 +1713,9 @@ def cotizar_reserva_estudio(
         }
 
         libre, motivo = _estudio_disponible(
-            conn, estudio, fecha_desde, fecha_hasta, exclude_pedido_id=pedido_id,
+            conn, estudio, fecha_desde, fecha_hasta,
+            exclude_pedido_id=pedido_id,
+            exclude_turno_estudio_id=exclude_turno_estudio_id,
         )
         desglose["espacio_disponible"] = libre
         desglose["espacio_motivo"] = motivo

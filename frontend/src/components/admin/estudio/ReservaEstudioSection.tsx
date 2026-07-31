@@ -15,6 +15,18 @@
  * el modo alta de `ReservaDialog` — incluida la franja horaria, que
  * `EstudioIncluyeList` absorbe como parte de la fila "Espacio" (#1308: ya no
  * hay un grid Fecha/Hora/Horas aparte acá, quedaba duplicado con el del alta).
+ *
+ * `cotizar`/`guardar` (#1308 Fase 4.4, rediseño "turno como ítem") son
+ * INYECTABLES: por default pegan contra el turno STANDALONE
+ * (`GET .../reservas/cotizar` + `PATCH .../reservas/{pedido.id}`, el
+ * comportamiento de siempre, cero cambio para `ReservaDialog`/la página de un
+ * pedido `tipo='estudio'`). Un turno EMBEBIDO (grupo de ítems de OTRO pedido,
+ * `alquiler_turnos_estudio`) no comparte id con su contenedor — el caller
+ * (`TurnoEmbebidoCard`, `TurnosEstudioSection.tsx`) inyecta versiones que
+ * pegan a `POST/PATCH .../alquileres/{contenedorId}/turnos-estudio[/{turnoId}]`
+ * y arma un `pedido` SINTÉTICO (franja + ítems propios del turno, filtrados
+ * de `contenedor.items` por `turno_estudio_id`) — la sección en sí no sabe ni
+ * le importa cuál mecanismo es, solo pide/guarda por las funciones que le dan.
  */
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -30,7 +42,13 @@ import { DescuentoControl, type DescuentoManual } from "@/components/admin/pedid
 import { formatARS } from "@/lib/format";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { espacioOverrideInicial } from "@/lib/estudio-slots";
-import { estudioAdminApi, type Equipo, type EstudioConfig, type Pedido } from "@/lib/admin/api";
+import {
+  estudioAdminApi,
+  type Equipo,
+  type EstudioConfig,
+  type EstudioReservaUpdateInput,
+  type Pedido,
+} from "@/lib/admin/api";
 import { EstudioIncluyeList, type SueltoLocal } from "./EstudioIncluyeList";
 
 // Debe coincidir con `NOMBRE_ITEM_PINTURA_RECIENTE`
@@ -44,14 +62,34 @@ function horasEntre(desde?: string | null, hasta?: string | null, fallback = 2):
   return Math.max(1, Math.round(ms / 3_600_000));
 }
 
+/** Lo mínimo que la sección necesita del pedido para hidratarse — un turno
+ *  STANDALONE (`Pedido` completo) y uno EMBEBIDO (objeto sintético armado por
+ *  `TurnoEmbebidoCard`) satisfacen esto por igual. */
+type PedidoParaReserva = Pick<
+  Pedido,
+  | "id"
+  | "fecha_desde"
+  | "fecha_hasta"
+  | "items"
+  | "descuento_pct"
+  | "descuento_manual_tipo"
+  | "descuento_manual_monto"
+>;
+
+type CotizarReservaFn = (
+  params: Omit<Parameters<typeof estudioAdminApi.cotizarReserva>[0], "pedido_id">,
+) => ReturnType<typeof estudioAdminApi.cotizarReserva>;
+
 export function ReservaEstudioSection({
   pedido,
   estudio,
   accion,
   anidada = false,
   onSaved,
+  cotizar,
+  guardar,
 }: {
-  pedido: Pedido;
+  pedido: PedidoParaReserva;
   estudio: EstudioConfig;
   /** El ✕ que saca el turno del pedido. Dónde cae depende de `anidada`: en el
    *  encabezado propio, o —si no lo hay— arriba a la derecha de la banda de
@@ -64,7 +102,16 @@ export function ReservaEstudioSection({
    *  redundante"). El recuadro queda: separa un turno del siguiente. */
   anidada?: boolean;
   onSaved?: (pedido: Pedido) => void;
+  /** Ver el docstring del módulo — default: turno STANDALONE. */
+  cotizar?: CotizarReservaFn;
+  guardar?: (payload: EstudioReservaUpdateInput) => Promise<Pedido>;
 }) {
+  // `false` = un turno EMBEBIDO (el caller inyectó `cotizar`/`guardar`) — ver
+  // el uso en `mutation.onSuccess` abajo.
+  const esStandalone = !guardar;
+  const cotizarFn: CotizarReservaFn =
+    cotizar ?? ((params) => estudioAdminApi.cotizarReserva({ ...params, pedido_id: pedido.id }));
+  const guardarFn = guardar ?? ((payload) => estudioAdminApi.updateReserva(pedido.id, payload));
   const qc = useQueryClient();
 
   const [fecha, setFecha] = useState(() => pedido.fecha_desde?.slice(0, 10) ?? "");
@@ -141,9 +188,6 @@ export function ReservaEstudioSection({
       con_promo: conPromo,
       pintura_reciente: pinturaReciente,
       sueltos: sueltosInput,
-      // Excluye el propio turno del chequeo de disponibilidad — si no,
-      // siempre se vería "ocupado" por su propia franja.
-      pedido_id: pedido.id,
       // La MISMA tarifa que se va a persistir al guardar (línea de abajo) —
       // así lo que muestra la fila "Espacio" y el Total es lo que se cobra, no
       // el precio de lista.
@@ -152,23 +196,19 @@ export function ReservaEstudioSection({
       descuento_manual_tipo: descuento.tipo,
       descuento_manual_monto: descuento.monto,
     }),
-    [
-      fecha,
-      start,
-      horas,
-      conPromo,
-      pinturaReciente,
-      sueltosInput,
-      pedido.id,
-      espacioOverride,
-      descuento,
-    ],
+    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput, espacioOverride, descuento],
   );
   const cotizarDebounced = useDebouncedValue(cotizarParams, 400);
 
   const cotizarQ = useQuery({
-    queryKey: ["admin", "estudio", "cotizar", cotizarDebounced],
-    queryFn: () => estudioAdminApi.cotizarReserva(cotizarDebounced),
+    // `pedido.id` (aparte de `cotizarDebounced`, que YA NO trae el
+    // pedido_id/exclude_turno_estudio_id — eso lo agrega `cotizarFn`) separa
+    // la cache entre turnos hermanos montados a la vez (varios turnos en
+    // "Turnos del Estudio") que por un instante compartan los mismos
+    // fecha/start/horas/sueltos — sin esto, dos turnos recién creados con los
+    // mismos defaults pisarían la cotización en pantalla del otro.
+    queryKey: ["admin", "estudio", "cotizar", pedido.id, cotizarDebounced],
+    queryFn: () => cotizarFn(cotizarDebounced),
     enabled: !!fecha && !!start && horas >= (estudio.min_horas || 1),
     // Sin esto los números PESTAÑEAN al tocar cualquier cosa (lo reportó el
     // dueño al agregar/sacar un add-on): cada cambio arma una queryKey NUEVA,
@@ -202,7 +242,7 @@ export function ReservaEstudioSection({
   const guardadoRef = useRef<string | null>(null);
 
   const mutation = useMutation({
-    mutationFn: () => estudioAdminApi.updateReserva(pedido.id, payload),
+    mutationFn: () => guardarFn(payload),
     onSuccess: (actualizado) => {
       guardadoRef.current = payloadKey;
       if (actualizado.promo_advertencia) {
@@ -215,8 +255,14 @@ export function ReservaEstudioSection({
       // vez de invalidar. Invalidar disparaba un GET del pedido entero por cada
       // guardado —y como el caller invalidaba la misma key, salían dos— y con
       // él un re-render de toda la pantalla: eso es lo que se sentía como que
-      // "se recarga la página".
-      qc.setQueryData(["admin", "pedido", pedido.id], actualizado);
+      // "se recarga la página". SOLO para un turno STANDALONE: ahí `pedido.id`
+      // es el id REAL de la query `["admin","pedido",id]` que ve su propia
+      // página. Para un turno EMBEBIDO `pedido.id` es el id SINTÉTICO del
+      // turno (ver el docstring del módulo) — escribir acá pisaría una cache
+      // key que no corresponde a ningún pedido real (o, peor, una que sí, por
+      // coincidencia numérica). Ese caso lo resuelve el CALLER (`onSaved`,
+      // `TurnoEmbebidoCard`), que sabe cuál es el id del pedido contenedor.
+      if (esStandalone) qc.setQueryData(["admin", "pedido", pedido.id], actualizado);
       // Estas son de OTRAS pantallas (agenda/lista del Estudio): no están
       // montadas acá, así que invalidarlas no dispara ningún fetch ahora —
       // solo marca que están viejas para cuando se abran.

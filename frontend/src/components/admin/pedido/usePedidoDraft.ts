@@ -90,20 +90,36 @@ function pedidoToDatos(p: Pedido, keepDateTime = false): DraftDatos {
 }
 
 function pedidoToItems(p: Pedido): DraftItem[] {
-  return p.items.map((it) => ({
-    // uid estable desde el server: equipo → `e<equipo_id>` (consolidado, único);
-    // línea personalizada → `c<id de la fila>`.
-    uid: it.equipo_id != null ? `e${it.equipo_id}` : `c${it.id}`,
-    equipo_id: it.equipo_id,
-    cantidad: it.cantidad,
-    precio_jornada: it.precio_jornada,
-    nombre: it.nombre,
-    marca: it.marca,
-    nombre_publico: it.nombre_publico ?? null,
-    foto_url: it.foto_url ?? null,
-    nombre_libre: it.nombre_libre ?? null,
-    cobro_modo: it.cobro_modo ?? "jornada",
-  }));
+  return (
+    p.items
+      // Un ítem con `turno_estudio_id` (#1308 Fase 4, "turno como ítem") es del
+      // grupo de un turno del Estudio EMBEBIDO — se administra desde
+      // `TurnosEstudioSection`/`ReservaEstudioSection`, no desde acá. SIN este
+      // filtro, el centinela/sueltos/pintura del turno aparecían TAMBIÉN como
+      // filas de "Alquiler de equipos" (doble listado) y, peor, el próximo
+      // autosave de equipos los reenviaba a `PUT .../items` SIN su
+      // `turno_estudio_id` (`DraftItem` no lo lleva) — el backend los insertaba
+      // de nuevo como ítems NUEVOS sin marca de turno, duplicando el centinela
+      // y volando el total (confirmado en vivo: $114.000 en vez de $69.000 con
+      // un solo turno de por medio). El total en vivo (`useCotizacion`) SÍ
+      // necesita verlos — los suma aparte, directo de `pedido.items`, en
+      // `pedidos.$id.lazy.tsx` (no desde acá).
+      .filter((it) => it.turno_estudio_id == null)
+      .map((it) => ({
+        // uid estable desde el server: equipo → `e<equipo_id>` (consolidado, único);
+        // línea personalizada → `c<id de la fila>`.
+        uid: it.equipo_id != null ? `e${it.equipo_id}` : `c${it.id}`,
+        equipo_id: it.equipo_id,
+        cantidad: it.cantidad,
+        precio_jornada: it.precio_jornada,
+        nombre: it.nombre,
+        marca: it.marca,
+        nombre_publico: it.nombre_publico ?? null,
+        foto_url: it.foto_url ?? null,
+        nombre_libre: it.nombre_libre ?? null,
+        cobro_modo: it.cobro_modo ?? "jornada",
+      }))
+  );
 }
 
 function shallowDatosEq(a: DraftDatos, b: DraftDatos): boolean {

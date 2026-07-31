@@ -19,7 +19,23 @@ import type {
   ReconciliacionData,
   GrupoDuplicado,
   RepartoPagoLinea,
+  EstudioReservaCreateInput,
+  EstudioReservaUpdateInput,
 } from "./types";
+
+/** Body de `POST /alquileres/{id}/turnos-estudio` (#1308 Fase 4.4) — mismos
+ *  campos que dar de alta un turno standalone, sin cliente/estado/
+ *  pedido_principal_id: el turno embebido siempre hereda del pedido
+ *  contenedor (ni siquiera los manda, a diferencia del mecanismo viejo que
+ *  los ignoraba en el backend pero los ofrecía en el body). */
+export type TurnoEmbebidoCreateInput = Omit<
+  EstudioReservaCreateInput,
+  "cliente_id" | "cliente_nombre" | "estado" | "pedido_principal_id"
+>;
+
+/** Body de `PATCH /alquileres/{id}/turnos-estudio/{turnoId}` — mismo shape
+ *  que editar un turno standalone (incluido su descuento propio). */
+export type TurnoEmbebidoUpdateInput = EstudioReservaUpdateInput;
 
 export const pedidosMethods = {
   // pedidos / alquileres
@@ -184,6 +200,24 @@ export const pedidosMethods = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ items }),
     }),
+
+  // turnos del Estudio EMBEBIDOS en este pedido (#1308 Fase 4.4) — las 3
+  // devuelven el pedido CONTENEDOR completo (mismo shape que `getPedido`),
+  // no "un turno": no hay una fila `alquileres` propia que devolver.
+  agregarTurnoEstudio: (id: number, data: TurnoEmbebidoCreateInput) =>
+    authedJson<Pedido>(`/api/alquileres/${id}/turnos-estudio`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+  editarTurnoEstudio: (id: number, turnoId: number, data: TurnoEmbebidoUpdateInput) =>
+    authedJson<Pedido>(`/api/alquileres/${id}/turnos-estudio/${turnoId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(data),
+    }),
+  eliminarTurnoEstudio: (id: number, turnoId: number) =>
+    authedJson<Pedido>(`/api/alquileres/${id}/turnos-estudio/${turnoId}`, { method: "DELETE" }),
 
   // clientes — detalle / edición
   getCliente: (id: number) => authedJson<Cliente>(`/api/clientes/${id}`),

@@ -169,14 +169,29 @@ function PedidoEditorPage() {
     enabled: !!p,
   });
 
-  // Cotización en vivo (useCotizacion) — recalcula al editar items/fechas/descuento
+  // Cotización en vivo (useCotizacion) — recalcula al editar items/fechas/descuento.
+  // `draft.items` (el editor de "Alquiler de equipos") YA NO trae los ítems de
+  // un turno del Estudio EMBEBIDO (#1308 Fase 4 — `usePedidoDraft.ts` los
+  // filtra, ver ahí el porqué) — así que acá se suman aparte, DIRECTO de `p`
+  // (el pedido tal cual lo tiene el server, nunca tocado por ese editor): sin
+  // esto el Total en vivo del rail perdía la plata del turno apenas se
+  // agregaba uno.
+  const itemsTurnosEmbebidos = (p?.items ?? []).filter((it) => it.turno_estudio_id != null);
   const cotizacionQ = useCotizacion({
-    items: (draft.items ?? []).map((it) => ({
-      equipoId: it.equipo_id,
-      cantidad: it.cantidad,
-      precioJornada: it.precio_jornada,
-      cobroModo: it.cobro_modo,
-    })),
+    items: [
+      ...(draft.items ?? []).map((it) => ({
+        equipoId: it.equipo_id,
+        cantidad: it.cantidad,
+        precioJornada: it.precio_jornada,
+        cobroModo: it.cobro_modo,
+      })),
+      ...itemsTurnosEmbebidos.map((it) => ({
+        equipoId: it.equipo_id,
+        cantidad: it.cantidad,
+        precioJornada: it.precio_jornada,
+        cobroModo: it.cobro_modo,
+      })),
+    ],
     fechaDesde: draft.datos?.fecha_desde || null,
     fechaHasta: draft.datos?.fecha_hasta || null,
     clienteId: p?.cliente_id ?? null,
