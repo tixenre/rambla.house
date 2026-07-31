@@ -1458,7 +1458,7 @@ def listar_reservas_estudio(
             """
             SELECT a.id, a.numero_pedido, a.cliente_id, a.cliente_nombre,
                    a.fecha_desde, a.fecha_hasta, a.monto_total, a.monto_pagado,
-                   a.estado
+                   a.estado, a.pedido_principal_id
             FROM alquileres a
             WHERE a.tipo = 'estudio'
               AND (%s::date IS NULL OR a.fecha_hasta >= %s::date)

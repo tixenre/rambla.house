@@ -18,10 +18,13 @@ pytestmark = pytest.mark.unit
 
 
 class FakeConn:
-    """Devuelve filas de `clientes` desde un mapa {id: dict}."""
+    """Devuelve filas de `clientes` desde un mapa {id: dict}, y de `alquileres`
+    (para resolver el cliente_id de un pedido principal) desde un segundo mapa
+    {id: cliente_id}."""
 
-    def __init__(self, clientes: dict[int, dict]):
+    def __init__(self, clientes: dict[int, dict], principales: dict[int, int | None] | None = None):
         self._clientes = clientes
+        self._principales = principales or {}
         self._sql = ""
         self._params = ()
 
@@ -31,11 +34,20 @@ class FakeConn:
         return self
 
     def fetchone(self):
+        if "FROM alquileres WHERE id" in self._sql:
+            if self._params[0] not in self._principales:
+                return None
+            return {"cliente_id": self._principales[self._params[0]]}
         if "FROM clientes WHERE id" in self._sql:
             return self._clientes.get(self._params[0])
         return None
 
     def fetchall(self):
+        if "FROM alquileres WHERE id IN" in self._sql:
+            return [
+                {"id": i, "cliente_id": self._principales[i]}
+                for i in self._params if i in self._principales
+            ]
         if "FROM clientes WHERE id IN" in self._sql:
             return [self._clientes[i] for i in self._params if i in self._clientes]
         return []
@@ -114,3 +126,44 @@ def test_batch_listado():
     assert pedidos[0]["cliente_nombre"] == "Juan Pereyra"
     assert pedidos[1]["cliente_nombre"] == "Ana Gómez"
     assert pedidos[2]["cliente_nombre"] == "Manual"  # sin cliente vinculado, intacto
+
+
+def test_turno_vinculado_resuelve_el_cliente_del_principal_en_vivo():
+    """Reproduce el bug real: el turno se creó cuando su pedido principal
+    todavía no tenía cliente asignado (`cliente_id`/`cliente_nombre` propios
+    vacíos, foto congelada por `_resolver_pedido_principal` en ese momento) —
+    el principal consiguió cliente DESPUÉS. El turno tiene que mostrar el
+    cliente ACTUAL del principal, no quedarse en "Sin cliente" para siempre."""
+    conn = FakeConn(
+        clientes={9: {"nombre": "Agustina", "apellido": "Gusman",
+                      "email": "ag@mail.com", "telefono": "444"}},
+        principales={452: 9},
+    )
+    turno = {"id": 451, "cliente_id": None, "cliente_nombre": None,
+             "pedido_principal_id": 452}
+    _enriquecer_pedido_con_cliente(conn, turno)
+    assert turno["cliente_nombre"] == "Agustina Gusman"
+    assert turno["cliente_email"] == "ag@mail.com"
+
+
+def test_turno_vinculado_sin_cliente_en_el_principal_sigue_sin_cliente():
+    conn = FakeConn(clientes={}, principales={452: None})
+    turno = {"id": 451, "cliente_id": None, "cliente_nombre": None,
+             "pedido_principal_id": 452}
+    _enriquecer_pedido_con_cliente(conn, turno)
+    assert turno["cliente_nombre"] is None
+
+
+def test_batch_turno_vinculado_resuelve_el_cliente_del_principal_en_vivo():
+    conn = FakeConn(
+        clientes={9: {"id": 9, "nombre": "Agustina", "apellido": "Gusman",
+                      "email": "ag@mail.com", "telefono": "444"}},
+        principales={452: 9},
+    )
+    pedidos = [
+        {"id": 452, "cliente_id": 9, "cliente_nombre": "Agustina Gusman"},
+        {"id": 451, "cliente_id": None, "cliente_nombre": None,
+         "pedido_principal_id": 452},
+    ]
+    _enriquecer_pedidos_con_cliente(conn, pedidos)
+    assert pedidos[1]["cliente_nombre"] == "Agustina Gusman"
