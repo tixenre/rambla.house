@@ -13,7 +13,7 @@ from fastapi import Request, HTTPException
 from pydantic import BaseModel
 from itsdangerous import BadSignature, SignatureExpired
 
-from database import get_db, row_to_dict
+from database import get_db, now_ar, row_to_dict
 from auth.session import signer, _make_session_response
 from identity.anchor import cuil_valido
 from identity.contacts import email_comunicacion, telefono_contacto
@@ -197,7 +197,8 @@ def cliente_me(request: Request):
                       dni, cuil, dni_validado_at,
                       nombre_renaper, apellido_renaper, fecha_nacimiento_renaper,
                       direccion_renaper, apodo,
-                      dni_verificacion_estado, dni_verificacion_motivo
+                      dni_verificacion_estado, dni_verificacion_motivo,
+                      whatsapp_opt_in
                FROM clientes WHERE id = %s""",
             (cliente_id,)
         ).fetchone()
@@ -364,6 +365,9 @@ class PerfilUpdate(BaseModel):
     telefono:  Optional[str] = None
     direccion: Optional[str] = None
     apodo:     Optional[str] = None
+    # Consentimiento para recibir WhatsApp. Meta lo exige DEMOSTRABLE, así que solo
+    # se prende con un acto explícito del cliente (nunca se infiere de tener teléfono).
+    whatsapp_opt_in: Optional[bool] = None
 
 
 @router.patch("/api/cliente/me")
@@ -413,6 +417,11 @@ def cliente_update_me(data: PerfilUpdate, request: Request):
         sets.append("direccion = %s"); vals.append(data.direccion.strip())
     if data.apodo is not None:
         sets.append("apodo = %s"); vals.append(data.apodo.strip() or None)
+    if data.whatsapp_opt_in is not None:
+        # `whatsapp_opt_in_at` = cuándo se registró ESTE valor. Es el rastro que pide
+        # Meta para poder demostrar el consentimiento (y, si se revoca, desde cuándo).
+        sets.append("whatsapp_opt_in = %s"); vals.append(bool(data.whatsapp_opt_in))
+        sets.append("whatsapp_opt_in_at = %s"); vals.append(now_ar())
 
     if not sets:
         raise HTTPException(400, "Sin cambios")
@@ -429,7 +438,8 @@ def cliente_update_me(data: PerfilUpdate, request: Request):
                           dni, cuil, dni_validado_at,
                           nombre_renaper, apellido_renaper, fecha_nacimiento_renaper,
                           direccion_renaper, apodo,
-                          dni_verificacion_estado, dni_verificacion_motivo
+                          dni_verificacion_estado, dni_verificacion_motivo,
+                          whatsapp_opt_in
                    FROM clientes WHERE id = %s""",
                 (cliente_id,),
             ).fetchone()

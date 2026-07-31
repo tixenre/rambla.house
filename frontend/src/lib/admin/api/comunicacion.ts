@@ -7,7 +7,7 @@
  */
 import { authedJson } from "@/lib/authedFetch";
 
-import type { ChequeoWhatsApp } from "./whatsapp";
+import type { ChequeoWhatsApp, EstadoMeta } from "./whatsapp";
 
 /** Estrategia de despacho: por dónde sale un evento (plan A/B). */
 export type EstrategiaComunicacion = "fallback" | "ambos" | "solo_mail" | "solo_whatsapp";
@@ -21,8 +21,39 @@ export type MailDeEvento = {
   existe: boolean;
 };
 
+/** La plantilla de WhatsApp de un evento, con su estado de aprobación en Meta. */
+export type WhatsAppDeEvento = {
+  key: string;
+  meta_name: string;
+  lang: string;
+  copy_ejemplo: string;
+  parametros: string[];
+  /** null = no se pudo consultar (canal sin configurar / Meta no respondió). */
+  estado_meta: EstadoMeta | null;
+};
+
+/**
+ * Una perilla configurable de un evento (horario, antelación, destinatarios).
+ * Se guarda con `PUT /api/admin/settings/{setting}` — la misma puerta de siempre.
+ */
+export type OpcionEvento = {
+  setting: string;
+  label: string;
+  tipo: "switch" | "numero" | "texto";
+  ayuda: string;
+  valor: string;
+  default: string;
+  minimo: number | null;
+  maximo: number | null;
+  placeholder: string;
+  /** Nombre de la env var que la está pisando → no se puede editar desde acá. */
+  bloqueada_por_env: string | null;
+};
+
 export type EventoComunicacion = {
   key: string;
+  /** Nombre corto del evento (título de su tarjeta). */
+  titulo: string;
   descripcion: string;
   estrategia: EstrategiaComunicacion;
   estrategia_label: string;
@@ -30,23 +61,31 @@ export type EventoComunicacion = {
   mail_cliente: MailDeEvento | null;
   mail_admin: MailDeEvento | null;
   con_adjunto_ics: boolean;
-  whatsapp: {
-    key: string;
-    meta_name: string;
-    lang: string;
-    copy_ejemplo: string;
-    parametros: string[];
-  } | null;
+  whatsapp: WhatsAppDeEvento | null;
+  /** Aviso interno al equipo por WhatsApp (independiente del canal del cliente). */
+  whatsapp_admin: WhatsAppDeEvento | null;
+  opciones: OpcionEvento[];
 };
+
+/** Un mail que no dispara ningún evento del registro (hoy, los de Talleres). */
+export type OtroMail = { template: string; asunto: string | null; activo: boolean };
 
 export type EstadoCanales = {
   mail: { provider: string; activo: boolean; from_addr: string; admin_to: string };
-  whatsapp: { listo: boolean; chequeos: ChequeoWhatsApp[]; ambiente: string };
+  whatsapp: {
+    listo: boolean;
+    chequeos: ChequeoWhatsApp[];
+    ambiente: string;
+    gestion_plantillas: { disponible: boolean; motivo: string | null };
+  };
+};
+
+export type ModuloComunicacion = {
+  eventos: EventoComunicacion[];
+  otros_mails: OtroMail[];
+  canales: EstadoCanales;
 };
 
 export const comunicacionApi = {
-  getEventos: () =>
-    authedJson<{ eventos: EventoComunicacion[]; canales: EstadoCanales }>(
-      "/api/admin/comunicacion/eventos",
-    ),
+  getEventos: () => authedJson<ModuloComunicacion>("/api/admin/comunicacion/eventos"),
 };

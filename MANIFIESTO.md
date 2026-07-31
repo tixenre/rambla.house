@@ -323,7 +323,7 @@ Histórico: `docs/archive/` conserva auditorías viejas (`BUGS.md`, `MEJORAS.md`
 
 Aclaración para no buscarlas en vano: pagos online (Stripe/MercadoPago), multi-tenant, dark mode, app mobile nativa.
 
-Las **notificaciones por email** sí están **construidas** (`backend/services/email/`, plantillas editables en `/admin/email-templates`) pero **no activadas** — caen al backend `test` hasta configurar el proveedor (`RESEND_API_KEY`/`SMTP_*`). Ver [`docs/FLUJO_PEDIDOS.md`](docs/FLUJO_PEDIDOS.md) §3.
+Las **notificaciones por email** sí están **construidas** (`backend/services/email/`, plantillas editables en `/admin/comunicacion`) pero **no activadas** — caen al backend `test` hasta configurar el proveedor (`RESEND_API_KEY`/`SMTP_*`). Ver [`docs/FLUJO_PEDIDOS.md`](docs/FLUJO_PEDIDOS.md) §3.
 
 ### Sesión nueva pierde el rumbo
 

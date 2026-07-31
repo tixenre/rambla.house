@@ -242,6 +242,25 @@ CLEARABLE_SETTINGS_KEYS = {
     "ga4_measurement_id",  # Vaciarlo apaga Google Analytics.
     "disclaimer_antelacion_texto",       # Vaciarlo vuelve al texto default.
     "disclaimer_horarios_finde_texto",
+    "whatsapp_admin_numeros",  # Vaciarlo = no se le avisa a nadie del equipo por WhatsApp.
+}
+
+# Settings booleanas que la UI edita con un switch: se normalizan a "1"/"0" para
+# que el lector (env > settings > default) no tenga que adivinar formatos.
+BOOL_SETTINGS_KEYS = {
+    "recordatorios_enabled",
+    "recordatorios_devolucion_d1_enabled",
+    "recordatorios_devolucion_d0_enabled",
+    "recordatorios_devolucion_vencido_enabled",
+    "whatsapp_enabled",
+}
+
+# Settings numéricas con rango cerrado: {key: (mínimo, máximo, qué es)}.
+RANGO_SETTINGS_KEYS = {
+    "recordatorios_hora": (0, 23, "hora"),
+    "recordatorios_dias_antes": (1, 14, "días"),
+    "recordatorios_devolucion_hora": (0, 23, "hora"),
+    "recordatorios_devolucion_dias_antes": (1, 14, "días"),
 }
 
 # Formato de un Measurement ID de GA4: 'G-' seguido de alfanuméricos.
@@ -362,25 +381,41 @@ def update_setting(key: str, payload: dict, request: Request):
             value = str(v)
         except (ValueError, TypeError) as e:
             raise HTTPException(400, f"Valor inválido para '{key}': debe ser un entero >= 0 ({e})")
-    if key == "recordatorios_enabled":
-        # Checkbox → normalizamos a "1"/"0".
+    if key in BOOL_SETTINGS_KEYS:
+        # Switch → normalizamos a "1"/"0".
         value = "1" if value.lower() in ("1", "true", "yes", "on") else "0"
-    if key == "recordatorios_hora":
+    if key in RANGO_SETTINGS_KEYS:
+        lo, hi, que = RANGO_SETTINGS_KEYS[key]
         try:
             v = int(value)
-            if not (0 <= v <= 23):
-                raise ValueError("fuera de rango 0-23")
+            if not (lo <= v <= hi):
+                raise ValueError(f"fuera de rango {lo}-{hi}")
             value = str(v)
         except (ValueError, TypeError) as e:
-            raise HTTPException(400, f"Valor inválido para '{key}': hora entre 0 y 23 ({e})")
-    if key == "recordatorios_dias_antes":
-        try:
-            v = int(value)
-            if not (1 <= v <= 14):
-                raise ValueError("fuera de rango 1-14")
-            value = str(v)
-        except (ValueError, TypeError) as e:
-            raise HTTPException(400, f"Valor inválido para '{key}': días entre 1 y 14 ({e})")
+            raise HTTPException(400, f"Valor inválido para '{key}': {que} entre {lo} y {hi} ({e})")
+    if key == "whatsapp_admin_numeros":
+        # Los números del equipo pasan por el embudo único (services/telefono) al
+        # GUARDARLOS, no recién al enviar: si uno está mal, el admin se entera acá
+        # y no cuando un aviso no llegó. Se persisten normalizados a E.164.
+        from services.telefono import normalizar_e164
+
+        numeros, invalidos = [], []
+        for parte in value.split(","):
+            crudo = parte.strip()
+            if not crudo:
+                continue
+            num = normalizar_e164(crudo)
+            if num is None:
+                invalidos.append(crudo)
+            elif num not in numeros:
+                numeros.append(num)
+        if invalidos:
+            raise HTTPException(
+                400,
+                "No pude leer estos números: " + ", ".join(invalidos) +
+                ". Escribilos con código de país (ej. +5492235550000).",
+            )
+        value = ", ".join(numeros)
     if key == "ga4_measurement_id":
         # GA4 IDs son case-insensitive pero conviven mejor en mayúscula.
         value = value.upper()

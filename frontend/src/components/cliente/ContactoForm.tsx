@@ -19,7 +19,11 @@ export function ContactoForm({
   const [saving, setSaving] = useState(false);
   const [telefono, setTelefono] = useState(perfil.telefono ?? "");
   const [apodo, setApodo] = useState(perfil.apodo ?? "");
-  const dirty = telefono !== (perfil.telefono ?? "") || apodo !== (perfil.apodo ?? "");
+  const [wa, setWa] = useState(Boolean(perfil.whatsapp_opt_in));
+  const dirty =
+    telefono !== (perfil.telefono ?? "") ||
+    apodo !== (perfil.apodo ?? "") ||
+    wa !== Boolean(perfil.whatsapp_opt_in);
 
   async function handleSave(e: React.FormEvent) {
     e.preventDefault();
@@ -29,6 +33,7 @@ export function ContactoForm({
       await patchPerfil(perfil, onPerfilChange, {
         telefono: telefono.trim(),
         apodo: apodo.trim() || null,
+        whatsapp_opt_in: wa,
       });
       toast.success("Contacto actualizado");
     } catch (err) {
@@ -77,6 +82,24 @@ export function ContactoForm({
           className="w-full rounded-md border hairline bg-background px-3 py-2 text-base sm:text-sm text-ink"
         />
       </Field>
+
+      {/* Consentimiento explícito: Meta exige poder demostrarlo, así que se prende
+          con un acto del cliente — nunca se infiere de que haya cargado un teléfono. */}
+      <label className="flex cursor-pointer items-start gap-2.5">
+        <input
+          type="checkbox"
+          checked={wa}
+          onChange={(e) => setWa(e.target.checked)}
+          className="mt-0.5 h-4 w-4 shrink-0 rounded border-hairline accent-ink"
+        />
+        <span className="text-sm text-ink">
+          Quiero recibir avisos por WhatsApp
+          <span className="mt-0.5 block text-xs text-muted-foreground">
+            Te escribimos solo por tu reserva: cuando la recibimos, cuando se confirma y los
+            recordatorios de retiro y devolución. Podés desactivarlo cuando quieras.
+          </span>
+        </span>
+      </label>
 
       <SaveButton saving={saving} disabled={!dirty} />
     </form>

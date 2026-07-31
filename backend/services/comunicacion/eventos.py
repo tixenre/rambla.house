@@ -7,7 +7,7 @@ senders de cada canal — así no hay nombres de template hardcodeados y desparr
 por routes/jobs.
 
 Nota sobre templates: NO es "un template para los dos canales". Cada medio tiene el
-suyo por diseño — el mail es HTML nuestro (editable en `/admin/email-templates`,
+suyo por diseño — el mail es HTML nuestro (editable en `/admin/comunicacion`,
 tabla `email_templates`), el WhatsApp es un template **pre-aprobado por Meta**
 (rígido, con `{{n}}`, registrado en `services/whatsapp/plantillas.py`). Lo que este
 registro unifica es el **evento**: el mismo disparador y contexto eligen, por canal,
@@ -88,6 +88,9 @@ class EventoComunicacion:
 
     key: str
     descripcion: str
+    # Nombre corto y humano del evento (lo muestra el back-office como título de
+    # su tarjeta). Vive acá, con el resto de la definición del evento.
+    titulo: str = ""
     estrategia: str = FALLBACK
     mail: Optional[CanalMail] = None
     whatsapp: Optional[str] = None
@@ -100,7 +103,8 @@ class EventoComunicacion:
 REGISTRO: dict[str, EventoComunicacion] = {
     "pedido_creado": EventoComunicacion(
         key="pedido_creado",
-        descripcion="Entró una solicitud de reserva (acuse al cliente por WhatsApp/mail + aviso al admin por mail).",
+        titulo="Entró una solicitud",
+        descripcion="El cliente mandó su pedido: le acusamos recibo y avisamos al equipo.",
         estrategia=FALLBACK,
         mail=CanalMail(template_cliente="pedido_creado_cliente", template_admin="pedido_creado_admin"),
         whatsapp="pedido_creado",
@@ -108,14 +112,16 @@ REGISTRO: dict[str, EventoComunicacion] = {
     ),
     "pedido_confirmado": EventoComunicacion(
         key="pedido_confirmado",
-        descripcion="La reserva pasó a confirmada: WhatsApp de confirmación + un mail que lleva el .ics.",
+        titulo="Reserva confirmada",
+        descripcion="El pedido pasó a confirmado: se lo confirmamos al cliente.",
         estrategia=AMBOS,
         mail=CanalMail(template_cliente="pedido_confirmado_cliente", con_adjunto_ics=True),
         whatsapp="pedido_confirmado",
     ),
     "recordatorio_retiro": EventoComunicacion(
         key="recordatorio_retiro",
-        descripcion="Recordatorio D-1 del retiro del equipo (WhatsApp plan A, mail plan B).",
+        titulo="Recordatorio de retiro",
+        descripcion="Le recordamos al cliente que se acerca el día de retirar el equipo.",
         estrategia=FALLBACK,
         mail=CanalMail(template_cliente="recordatorio_retiro"),
         whatsapp="recordatorio_retiro",
@@ -125,19 +131,22 @@ REGISTRO: dict[str, EventoComunicacion] = {
     # se cambia la estrategia a FALLBACK.
     "recordatorio_devolucion_d1": EventoComunicacion(
         key="recordatorio_devolucion_d1",
-        descripcion="Recordatorio la víspera de la devolución (D-1).",
+        titulo="Se acerca la devolución",
+        descripcion="Aviso antes del día en que tiene que devolver el equipo.",
         estrategia=SOLO_WHATSAPP,
         whatsapp="recordatorio_devolucion_d1",
     ),
     "recordatorio_devolucion_d0": EventoComunicacion(
         key="recordatorio_devolucion_d0",
-        descripcion="Aviso el día de la devolución (D-0).",
+        titulo="Devolución hoy",
+        descripcion="Aviso el mismo día en que vence la reserva.",
         estrategia=SOLO_WHATSAPP,
         whatsapp="recordatorio_devolucion_d0",
     ),
     "recordatorio_devolucion_vencido": EventoComunicacion(
         key="recordatorio_devolucion_vencido",
-        descripcion="Aviso al día siguiente si el equipo figura sin devolver (D+1).",
+        titulo="Devolución vencida",
+        descripcion="Al día siguiente, si el equipo todavía figura sin devolver.",
         estrategia=SOLO_WHATSAPP,
         whatsapp="recordatorio_devolucion_vencido",
     ),

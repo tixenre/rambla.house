@@ -23,19 +23,24 @@ class _FakeCursor:
 
 
 class _FakeConn:
-    """Sirve `email_templates` desde un dict key → (subject, enabled)."""
+    """Sirve `email_templates` (dict key → (subject, enabled)) y `app_settings`
+    (dict key → value), que es lo que el endpoint consulta."""
 
-    def __init__(self, templates):
+    def __init__(self, templates, settings=None):
         self._t = templates
+        self._s = settings or {}
 
     def execute(self, sql, params=()):
-        return _FakeCursor(
-            [
-                {"key": k, "subject": v[0], "enabled": v[1]}
-                for k, v in self._t.items()
-                if k in list(params)
-            ]
-        )
+        if "email_templates" in sql:
+            return _FakeCursor(
+                [{"key": k, "subject": v[0], "enabled": v[1]} for k, v in self._t.items()]
+            )
+        if "app_settings" in sql:
+            pedidas = list(params)
+            return _FakeCursor(
+                [{"key": k, "value": v} for k, v in self._s.items() if k in pedidas]
+            )
+        raise AssertionError(f"query inesperada: {sql}")
 
     def __enter__(self):
         return self
@@ -44,9 +49,9 @@ class _FakeConn:
         return False
 
 
-def _fake_deps(monkeypatch, templates):
+def _fake_deps(monkeypatch, templates, settings=None):
     monkeypatch.setattr(rc, "require_admin", lambda request: None)
-    monkeypatch.setattr(rc, "get_db", lambda: _FakeConn(templates))
+    monkeypatch.setattr(rc, "get_db", lambda: _FakeConn(templates, settings))
     import services.email.service as es
     import services.whatsapp as wa
 
@@ -55,6 +60,11 @@ def _fake_deps(monkeypatch, templates):
     )
     monkeypatch.setattr(
         wa, "diagnosticar", lambda conn: {"listo": False, "chequeos": [], "ambiente": "no_produccion"}
+    )
+    # Sin red: el estado de aprobación en Meta se simula (el endpoint lo pide para
+    # mostrarlo adentro de cada evento).
+    monkeypatch.setattr(
+        wa, "estado_plantillas", lambda: {"disponible": False, "motivo": "sin credencial", "plantillas": []}
     )
 
 
@@ -106,3 +116,53 @@ def test_incluye_estado_de_los_dos_canales(monkeypatch):
     canales = rc.listar_eventos(request=None)["canales"]
     assert "provider" in canales["mail"]
     assert "listo" in canales["whatsapp"]
+    # Para poder ofrecer "crear las que falten" desde la pantalla.
+    assert canales["whatsapp"]["gestion_plantillas"]["disponible"] is False
+
+
+# ── todo lo del evento, adentro del evento ───────────────────────────────────
+def test_cada_evento_trae_sus_opciones_configurables(monkeypatch):
+    """La config de un evento (horario/antelación/destinatarios) viaja DENTRO del
+    evento — no en una pantalla aparte."""
+    from services.comunicacion.opciones import OPCIONES
+
+    _fake_deps(monkeypatch, _TODOS, settings={"recordatorios_dias_antes": "3"})
+    por_key = {e["key"]: e for e in rc.listar_eventos(request=None)["eventos"]}
+
+    for ev_key, ops in OPCIONES.items():
+        assert {o["setting"] for o in por_key[ev_key]["opciones"]} == {o.setting for o in ops}
+
+    retiro = {o["setting"]: o for o in por_key["recordatorio_retiro"]["opciones"]}
+    assert retiro["recordatorios_dias_antes"]["valor"] == "3"  # el guardado
+    assert retiro["recordatorios_enabled"]["valor"] == "0"     # sin fila → default
+    assert retiro["recordatorios_hora"]["tipo"] == "numero"
+
+    # Un evento sin perillas no inventa ninguna.
+    assert por_key["pedido_confirmado"]["opciones"] == []
+
+
+def test_opcion_pisada_por_env_se_devuelve_bloqueada(monkeypatch):
+    """Si la env var manda, la UI no puede dejar editar la de la BD (guardaría un
+    valor que el ambiente ignora)."""
+    monkeypatch.setenv("REMINDERS_HOUR", "21")
+    _fake_deps(monkeypatch, _TODOS, settings={"recordatorios_hora": "9"})
+    por_key = {e["key"]: e for e in rc.listar_eventos(request=None)["eventos"]}
+    hora = {o["setting"]: o for o in por_key["recordatorio_retiro"]["opciones"]}["recordatorios_hora"]
+    assert hora["valor"] == "21" and hora["bloqueada_por_env"] == "REMINDERS_HOUR"
+
+
+def test_evento_trae_su_plantilla_de_whatsapp_con_estado_en_meta(monkeypatch):
+    _fake_deps(monkeypatch, _TODOS)
+    por_key = {e["key"]: e for e in rc.listar_eventos(request=None)["eventos"]}
+    wa = por_key["pedido_creado"]["whatsapp"]
+    assert wa["meta_name"] and wa["parametros"] and "estado_meta" in wa
+    # El aviso interno al equipo también es parte del evento.
+    assert por_key["pedido_creado"]["whatsapp_admin"]["key"] == "pedido_creado_admin"
+
+
+def test_los_mails_que_ningun_evento_dispara_se_listan_aparte(monkeypatch):
+    """Ningún template queda sin lugar donde editarse: los de Talleres (que no
+    pasan por el registro) van en `otros_mails`."""
+    _fake_deps(monkeypatch, {**_TODOS, "taller_inscripcion_cliente": ("Inscripción", True)})
+    out = rc.listar_eventos(request=None)
+    assert [m["template"] for m in out["otros_mails"]] == ["taller_inscripcion_cliente"]

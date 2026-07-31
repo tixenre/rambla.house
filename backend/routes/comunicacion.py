@@ -24,7 +24,7 @@ def listar_eventos(request: Request):
     """Los eventos de comunicación + el estado de cada canal.
 
     Cada evento trae su copy por canal ya resuelto: el asunto/cuerpo del mail sale
-    de `email_templates` (editable desde /admin/email-templates) y el de WhatsApp
+    de `email_templates` (editable en la misma pantalla) y el de WhatsApp
     del registro de plantillas (lo aprueba Meta, no se edita acá)."""
     require_admin(request)
 
@@ -33,31 +33,30 @@ def listar_eventos(request: Request):
         ESTRATEGIA_LABEL,
         REGISTRO,
     )
+    from services.comunicacion.opciones import estado as estado_opciones
     from services.email.service import channel_status
     from services.whatsapp import REGISTRO as WA_REGISTRO
-    from services.whatsapp import diagnosticar
+    from services.whatsapp import diagnosticar, estado_plantillas
 
     with get_db() as conn:
         wa_estado = diagnosticar(conn)
-        # Asunto + on/off de cada template de mail referenciado por el registro,
-        # en UNA query (no N+1) — es lo que la pantalla muestra por evento.
-        keys = sorted(
-            {
-                t
-                for ev in REGISTRO.values()
-                if ev.mail
-                for t in (ev.mail.template_cliente, ev.mail.template_admin)
-                if t
-            }
-        )
-        mails: dict[str, dict] = {}
-        if keys:
-            ph = ",".join(["%s"] * len(keys))
+        opciones = estado_opciones(conn)
+        # Asunto + on/off de TODOS los templates de mail en UNA query (no N+1): los
+        # que un evento referencia se muestran adentro del evento, y el resto (los
+        # mails que dispara Talleres) en su propia lista, para que no quede ninguno
+        # sin lugar donde editarlo.
+        mails: dict[str, dict] = {
+            r["key"]: {"subject": r["subject"], "enabled": bool(r["enabled"])}
             for r in conn.execute(
-                f"SELECT key, subject, enabled FROM email_templates WHERE key IN ({ph})",
-                keys,
-            ).fetchall():
-                mails[r["key"]] = {"subject": r["subject"], "enabled": bool(r["enabled"])}
+                "SELECT key, subject, enabled FROM email_templates ORDER BY key"
+            ).fetchall()
+        }
+
+    # Estado de aprobación real en Meta, por template (una llamada al Graph). Si el
+    # canal no está configurado devuelve `disponible: False` y cada evento muestra
+    # su plantilla igual, para copiarla a mano.
+    remoto = estado_plantillas()
+    estado_meta = {f["key"]: f.get("estado") for f in remoto.get("plantillas", [])}
 
     def _mail_info(key: str | None) -> dict | None:
         if not key:
@@ -72,12 +71,30 @@ def listar_eventos(request: Request):
             "existe": found is not None,
         }
 
+    def _wa_info(key: str | None) -> dict | None:
+        wa = WA_REGISTRO.get(key) if key else None
+        if wa is None:
+            return None
+        return {
+            "key": wa.key,
+            "meta_name": wa.meta_name,
+            "lang": wa.lang,
+            "copy_ejemplo": wa.copy_ejemplo,
+            "parametros": list(wa.campos_ctx),
+            # None = no se pudo consultar (canal sin configurar / Meta no respondió).
+            "estado_meta": estado_meta.get(wa.key),
+        }
+
+    usados_por_eventos: set[str] = set()
     eventos = []
     for ev in REGISTRO.values():
-        wa = WA_REGISTRO.get(ev.whatsapp) if ev.whatsapp else None
+        for t in (ev.mail.template_cliente, ev.mail.template_admin) if ev.mail else ():
+            if t:
+                usados_por_eventos.add(t)
         eventos.append(
             {
                 "key": ev.key,
+                "titulo": ev.titulo or ev.key,
                 "descripcion": ev.descripcion,
                 "estrategia": ev.estrategia,
                 "estrategia_label": ESTRATEGIA_LABEL.get(ev.estrategia, ev.estrategia),
@@ -85,28 +102,34 @@ def listar_eventos(request: Request):
                 "mail_cliente": _mail_info(ev.mail.template_cliente if ev.mail else None),
                 "mail_admin": _mail_info(ev.mail.template_admin if ev.mail else None),
                 "con_adjunto_ics": bool(ev.mail and ev.mail.con_adjunto_ics),
-                "whatsapp": (
-                    {
-                        "key": wa.key,
-                        "meta_name": wa.meta_name,
-                        "lang": wa.lang,
-                        "copy_ejemplo": wa.copy_ejemplo,
-                        "parametros": list(wa.campos_ctx),
-                    }
-                    if wa
-                    else None
-                ),
+                "whatsapp": _wa_info(ev.whatsapp),
+                "whatsapp_admin": _wa_info(ev.whatsapp_admin),
+                # Perillas configurables de ESTE evento (horario, antelación,
+                # destinatarios internos). Se guardan por PUT /api/admin/settings/{key}.
+                "opciones": opciones.get(ev.key, []),
             }
         )
 
     return {
         "eventos": eventos,
+        # Templates de mail que no dispara ningún evento del registro (hoy: los de
+        # Talleres, que `services/talleres` manda directo). Se listan aparte —
+        # decir que son eventos del registro sería mentir sobre quién los dispara.
+        "otros_mails": [
+            {"template": k, "asunto": v["subject"], "activo": v["enabled"]}
+            for k, v in mails.items()
+            if k not in usados_por_eventos
+        ],
         "canales": {
             "mail": channel_status(),
             "whatsapp": {
                 "listo": wa_estado["listo"],
                 "chequeos": wa_estado["chequeos"],
                 "ambiente": wa_estado["ambiente"],
+                "gestion_plantillas": {
+                    "disponible": remoto.get("disponible", False),
+                    "motivo": remoto.get("motivo"),
+                },
             },
         },
     }

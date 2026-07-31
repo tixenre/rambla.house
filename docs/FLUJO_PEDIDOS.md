@@ -82,7 +82,7 @@ disparar). Carrito y estudio comparten exactamente el mismo flujo.
 ### Estado actual: **construido pero NO activado**
 
 La infraestructura de mails está **completa y cableada** (`backend/services/email/`): plantillas
-editables desde `/admin/email-templates`, render con Jinja2, backends Resend/SMTP, y log de envíos
+editables desde `/admin/comunicacion`, render con Jinja2, backends Resend/SMTP, y log de envíos
 en la tabla `emails_log`. **No envía nada todavía** porque no hay proveedor configurado: cae al
 backend `test` (que loguea pero no manda).
 

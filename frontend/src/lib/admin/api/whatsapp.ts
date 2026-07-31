@@ -103,8 +103,9 @@ export const whatsappApi = {
    * Corre el barrido de recordatorios de devolución on-demand. `dryRun` (default)
    * solo lista candidatos — preview seguro, no manda nada.
    */
-  correrDevolucion: (dryRun = true) =>
+  correrDevolucion: (dryRun = true, ventanas?: string[]) =>
     authedPostJson<CorridaDevolucion>("/api/admin/whatsapp/recordatorios-devolucion/run", {
       dry_run: dryRun,
+      ...(ventanas ? { ventanas } : {}),
     }),
 };

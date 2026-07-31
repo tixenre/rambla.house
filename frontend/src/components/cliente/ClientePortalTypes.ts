@@ -36,6 +36,8 @@ export type Perfil = {
   fecha_nacimiento_renaper?: string | null;
   direccion_renaper?: string | null;
   apodo?: string | null;
+  /** Consentimiento explícito para recibir avisos por WhatsApp (lo exige Meta). */
+  whatsapp_opt_in?: boolean | null;
 };
 
 export type Item = {

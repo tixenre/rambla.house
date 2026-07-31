@@ -51,6 +51,7 @@ antes (empirismo proporcional, _2026-06-27_).
 | Módulo | Rol |
 | --- | --- |
 | `services/comunicacion/eventos.py` | **Registro fuente única**: `REGISTRO[evento]` = `EventoComunicacion(estrategia=..., mail=CanalMail(...), whatsapp="<template>")`. Un evento declara su template **por canal** + la **estrategia** (plan A/B) con la que se alcanza al cliente. |
+| `services/comunicacion/opciones.py` | **Qué se puede configurar de cada evento** (horario del barrido, antelación, números del equipo): declara las perillas de cada evento apuntando a keys de `app_settings` **ya permitidas**. No redeclara keys/env/defaults — los importa de `jobs/recordatorios_config.py` y `jobs/recordatorios_devolucion_config.py`, que siguen siendo la fuente única de la resolución `env > settings > default`. Se guardan por el `PUT /api/admin/settings/{key}` de siempre. |
 | `services/comunicacion/despacho.py` | `notificar_pedido(evento, pedido, ctx=None, *, background)`: lee el registro y resuelve el envío según la estrategia (`_despachar_cliente` = plan A/B; el admin siempre por mail). Arma el contexto (`pedido_email_context`, si no se pasa `ctx`) y el `.ics` (`ics_adjunto_pedido`). Reusa los senders de cada canal — no reimplementa el envío. Devuelve `{"mail": [...], "whatsapp": ...}`. |
 
 Todos los consumidores llaman `notificar_pedido` / importan `pedido_email_context`/
@@ -59,18 +60,41 @@ jobs de recordatorios) — no hay capa de compatibilidad intermedia.
 
 ## Canales (senders que el despachador reusa)
 
-- **Mail** → `services/email.send_email` (templates HTML en la DB `email_templates`, editables en `/admin/email-templates`). Ver el propio `services/email`.
+- **Mail** → `services/email.send_email` (templates HTML en la DB `email_templates`, editables en `/admin/comunicacion`). Ver el propio `services/email`.
 - **WhatsApp** → `services/whatsapp.enviar_evento_pedido` (templates pre-aprobados por Meta). Ver [`SISTEMA_WHATSAPP.md`](SISTEMA_WHATSAPP.md).
 
 **No es "un template para los dos canales"**: cada medio tiene el suyo por diseño (el mail es HTML
 nuestro; el WhatsApp es un template rígido pre-aprobado por Meta). Lo que el registro unifica es el
 **evento** — el mismo disparador y contexto eligen, por canal, su template, y qué medios salen.
 
+## El back-office: `/admin/comunicacion`
+
+Una pantalla, **una tarjeta por evento**, y adentro de cada evento **todo lo que hace falta para
+comunicarlo**: el texto que sale por cada canal (la plantilla de WhatsApp con su estado de
+aprobación en Meta + la de mail, con su on/off y su editor), a quién le llega (cliente / equipo)
+y sus perillas (`opciones.py`: encendido, antelación, hora del barrido, números del equipo).
+Criterio del dueño: **la configuración vive en el mensaje que corresponde** — antes el
+recordatorio de retiro tenía su propia tarjeta en Settings, suelta de la comunicación que
+gobierna, y las plantillas de mail vivían en otra lista aparte.
+
+Lo que queda **fuera** de un evento, porque es transversal: el estado de los dos canales
+(remitente del mail, readiness de WhatsApp, alta de plantillas en Meta, envío de prueba), los
+mails que dispara **Talleres** (no pasan por el registro — decir que son eventos sería mentir
+sobre quién los manda) y el **registro de envíos**.
+
+`GET /api/admin/comunicacion/eventos` (`routes/comunicacion.py`) arma todo eso: espeja el
+`REGISTRO`, resuelve el asunto/on-off de cada template de mail (una query), pregunta a Meta el
+estado de aprobación de cada plantilla y adjunta las opciones con su valor efectivo. Una opción
+pisada por una **env var** viaja con `bloqueada_por_env` y la pantalla la muestra en solo-lectura
+(si la dejara editar, el admin guardaría un valor que el ambiente ignora).
+
 ## Cómo se agrega un evento nuevo
 
 1. Dar de alta el/los template(s): mail en `email_templates` (o migración), WhatsApp en Meta +
    `services/whatsapp/plantillas.py`.
-2. Sumar la entrada al `REGISTRO` de `comunicacion/eventos.py` (templates por canal + `estrategia`).
+2. Sumar la entrada al `REGISTRO` de `comunicacion/eventos.py` (`titulo` + templates por canal +
+   `estrategia`). Si el evento tiene perillas (horario, antelación, destinatarios), declararlas en
+   `comunicacion/opciones.py` — la pantalla las muestra adentro de su tarjeta sola.
 3. Disparar con `comunicacion.notificar_pedido("<evento>", pedido, ctx, background=...)`.
 
 El plan A/B, el gating por canal (WhatsApp gateado por credencial/opt-in/E.164), la
@@ -78,6 +102,10 @@ idempotencia y el fail-safe salen gratis de los senders y de la estrategia decla
 
 ## Tests
 
-`tests/test_comunicacion.py` (registro consistente + fan-out por evento/canal/override; `ctx`
-opcional). El armado de contexto/`.ics` lo cubren `tests/test_pedido_email_context.py` y
-`tests/test_ics_adjunto.py`.
+`tests/test_comunicacion.py` (registro consistente + plan A/B por evento/canal; `ctx` opcional),
+`tests/test_comunicacion_routes.py` (el endpoint espeja el registro, cada evento trae sus opciones
+y su plantilla, ningún mail queda sin lugar donde editarse) y
+`tests/test_settings_comunicacion.py` (las settings que edita la pantalla se normalizan/validan en
+el endpoint: switches a `"1"/"0"`, rangos de hora/antelación, números del equipo por el embudo
+único `services/telefono`). El armado de contexto/`.ics` lo cubren
+`tests/test_pedido_email_context.py` y `tests/test_ics_adjunto.py`.
