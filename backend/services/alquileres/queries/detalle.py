@@ -96,10 +96,18 @@ def _get_alquiler_detail(conn, id: int) -> dict:
         if pedido.get("pedido_principal_id") else None
     )
     pedido["turnos_estudio_vinculados"] = _turnos_vinculados(conn, id)
+    # Turnos EMBEBIDOS (#1308 rediseño "turno como ítem", Fase 4) — a
+    # diferencia de los vinculados (arriba, fila `alquileres` aparte), sus
+    # ítems YA están en `pedido["items"]` (con `turno_estudio_id`) — este
+    # array es SOLO metadata de agrupación (fecha/hora propia + descuento
+    # propio) para que el front pueda listar "Turnos del Estudio" de este
+    # pedido sin tener que reagrupar `items` a mano.
+    pedido["turnos_estudio_embebidos"] = _turnos_embebidos(conn, id)
     # ¿Tiene contenido real (ítems O un turno vinculado activo)? Fuente única
     # (`_pedido_tiene_contenido`) que el front consume en vez de mirar solo
     # `items.length` — un pedido "2 horas de estudio y nada más" SÍ tiene
-    # contenido (#1313/#1314-adjacent).
+    # contenido (#1313/#1314-adjacent). Un turno EMBEBIDO no necesita entrar
+    # acá aparte: sus ítems ya cuentan en `pedido["items"]`.
     pedido["tiene_contenido"] = _pedido_tiene_contenido(
         pedido["items"],
         any(t["estado"] != "cancelado" for t in pedido["turnos_estudio_vinculados"]),
@@ -187,6 +195,34 @@ def _turnos_vinculados(conn, pedido_id: int) -> list[dict]:
     for t in turnos:
         t["pagos"] = _get_alquiler_pagos(conn, t["id"])
     return turnos
+
+
+def _turnos_embebidos(conn, pedido_id: int) -> list[dict]:
+    """Turnos del Estudio EMBEBIDOS en este pedido (#1308 rediseño "turno
+    como ítem", Fase 4) — mismo propósito liviano que `_turnos_vinculados`
+    (mecanismo VIEJO) para que el front pueda listar "Turnos del Estudio" de
+    la misma forma sea cual sea el mecanismo de cada pedido.
+
+    Sin `estado`/`monto_pagado`/`pagos` propios (a diferencia de un
+    vinculado): un turno embebido NUNCA fue su propia venta — no tiene
+    estado ni cobro aparte, vive el del pedido contenedor. `monto_total` acá
+    es la suma de SUS `alquiler_items` (no una columna propia en la tabla —
+    `alquiler_turnos_estudio` no tiene `monto_total`), informativo para el
+    front; la plata real ya está en `pedido["items"]`, este número no se usa
+    para calcular nada."""
+    rows = conn.execute(
+        """
+        SELECT ate.id, ate.fecha_desde, ate.fecha_hasta,
+               ate.descuento_pct, ate.descuento_manual_tipo, ate.descuento_manual_monto,
+               COALESCE((SELECT SUM(subtotal) FROM alquiler_items
+                         WHERE turno_estudio_id = ate.id), 0) AS monto_total
+        FROM alquiler_turnos_estudio ate
+        WHERE ate.pedido_id = %s
+        ORDER BY ate.fecha_desde
+        """,
+        (pedido_id,),
+    ).fetchall()
+    return [row_to_dict(r) for r in rows]
 
 
 def _clases_del_taller(conn, edicion_id: int) -> list[dict]:

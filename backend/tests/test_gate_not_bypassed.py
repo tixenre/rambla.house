@@ -83,6 +83,12 @@ GATE_SYMBOLS = {
 #     `_centinela_libre`. Se inserta directo desde `_crear_pedido_estudio`/
 #     `editar_reserva`, DESPUÉS de que esas funciones ya validaron
 #     espacio/promo/sueltos vía el gate real.
+#   - _insertar_item_centinela (services/estudio/commands/reserva.py, #1308
+#     rediseño "turno como ítem" Fase 4 — extraído del INSERT que antes vivía
+#     inline en `_crear_pedido_estudio`): el chequeo real (`_centinela_libre`,
+#     bajo el `FOR UPDATE` del centinela) pasa SIEMPRE en el CALLER
+#     (`_crear_pedido_estudio`/`agregar_turno_embebido`), inmediatamente antes
+#     de llamar a este helper — que solo hace el INSERT, sin decidir nada.
 # Clave = path relativo a routes/ (ej. "alquileres/core.py") o al árbol
 # services/estudio|talleres/ con su prefijo (ver `fuentes` abajo), así
 # desambigua entre los varios core.py de los paquetes split (#501) y entre árboles.
@@ -91,6 +97,7 @@ ALLOWLIST_DELEGADORES = {
     ("estudio.py", "_regenerar_pedidos_slot"),
     ("services/talleres/commands/economia.py", "_regenerar_pedidos_taller"),
     ("services/estudio/commands/reserva.py", "_insertar_item_pintura"),
+    ("services/estudio/commands/reserva.py", "_insertar_item_centinela"),
 }
 
 
