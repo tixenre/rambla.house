@@ -307,6 +307,13 @@ def reservado_directo_batch(
     `gate._validar_demanda`, sin re-copiar SQL. Todos los valores van como bound
     params; los únicos tokens interpolados son la constante interna ESTADOS_RESERVADO
     y el placeholder `ph` del IN. Equipos sin reserva NO aparecen (caller → 0).
+
+    `COALESCE(ate.fecha_desde, p.fecha_desde)`/`fecha_hasta` (turno del Estudio EMBEBIDO,
+    `alquiler_turnos_estudio`, #1308 rediseño "turno como ítem"): un ítem de OTRO pedido
+    puede tener su propia ventana horaria distinta de la del pedido contenedor — sin el
+    COALESCE, un turno de 2hs embebido en un pedido de 3 días contaría como reservado los
+    3 días enteros. Para un ítem sin turno (100% de los casos hoy) es un no-op algebraico:
+    `ate.fecha_desde` es NULL, `COALESCE` cae a `p.fecha_desde`, igual que antes.
     """
     ids = list(equipo_ids)
     if not ids:
@@ -316,11 +323,12 @@ def reservado_directo_batch(
         SELECT pi2.equipo_id, COALESCE(SUM(pi2.cantidad), 0)
         FROM alquiler_items pi2
         JOIN alquileres p ON p.id = pi2.pedido_id
+        LEFT JOIN alquiler_turnos_estudio ate ON ate.id = pi2.turno_estudio_id
         WHERE pi2.equipo_id IN ({ph})
           AND p.id != %s
           AND p.estado IN {ESTADOS_RESERVADO}
-          AND p.fecha_desde < %s
-          AND p.fecha_hasta > %s
+          AND COALESCE(ate.fecha_desde, p.fecha_desde) < %s
+          AND COALESCE(ate.fecha_hasta, p.fecha_hasta) > %s
         GROUP BY pi2.equipo_id
     """, (*ids, excl_pedido_id, fh_buf, fd_buf)).fetchall()
     return {r[0]: int(r[1] or 0) for r in rows}

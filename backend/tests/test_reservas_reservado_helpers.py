@@ -50,8 +50,9 @@ class _Conn:
         s = " ".join(sql.split()).upper()
         self.calls.append((s, params))
         # reservado_directo (escalar) delega en reservado_directo_batch → IN + GROUP BY;
-        # params = (*equipo_ids, excl, fh_buf, fd_buf).
-        if "FROM ALQUILER_ITEMS PI2 JOIN ALQUILERES P ON P.ID = PI2.PEDIDO_ID WHERE PI2.EQUIPO_ID IN" in s:
+        # params = (*equipo_ids, excl, fh_buf, fd_buf). Substrings (no un match
+        # contiguo): #1308 sumó un LEFT JOIN alquiler_turnos_estudio en el medio.
+        if "FROM ALQUILER_ITEMS PI2" in s and "WHERE PI2.EQUIPO_ID IN" in s:
             eq_ids = params[:-3]
             return FakeCursor([FakeRow({0: e, 1: self.directo}) for e in eq_ids])
         return FakeCursor([])
@@ -80,7 +81,7 @@ class _RevConn:
             ]
             return FakeCursor(rows)
         # reservado_directo (escalar → reservado_directo_batch): IN + GROUP BY.
-        if "FROM ALQUILER_ITEMS PI2 JOIN ALQUILERES P ON P.ID = PI2.PEDIDO_ID WHERE PI2.EQUIPO_ID IN" in s:
+        if "FROM ALQUILER_ITEMS PI2" in s and "WHERE PI2.EQUIPO_ID IN" in s:
             eq_ids = params[:-3]
             return FakeCursor([FakeRow({0: e, 1: self.directas.get(e, 0)}) for e in eq_ids])
         return FakeCursor([])

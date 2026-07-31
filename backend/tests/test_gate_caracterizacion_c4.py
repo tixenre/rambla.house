@@ -54,7 +54,14 @@ class _World:
             eq_ids = params[:-2]
             return _Cur([_Row({0: e, 1: self.mantenimiento.get(e, 0)}) for e in eq_ids])
         if s.startswith("SELECT EQUIPO_ID, CANTIDAD FROM ALQUILER_ITEMS WHERE PEDIDO_ID = %S"):
-            return _Cur([_Row(r) for r in self.pedido_items])
+            # `AND TURNO_ESTUDIO_ID IS NULL` (#1308 rediseño "turno como ítem",
+            # Fase 1): un ítem de `pedido_items` puede llevar `turno_estudio_id`
+            # (ver `test_gate_turno_embebido_c5.py`) — invisible para el gate
+            # genérico, igual que en la query real. No-op para `_mundo_aleatorio`
+            # de este archivo: nunca setea esa clave.
+            return _Cur([
+                _Row(r) for r in self.pedido_items if not r.get("turno_estudio_id")
+            ])
         if s.startswith("SELECT EQUIPO_ID, COMPONENTE_ID, CANTIDAD") and "FROM KIT_COMPONENTES" in s:
             return _Cur([
                 _Row(equipo_id=k, componente_id=c, cantidad=q, esencial=e)
@@ -65,7 +72,11 @@ class _World:
         if "SELECT CANTIDAD FROM EQUIPOS WHERE ID = %S FOR UPDATE" in s:
             eq = self.equipos.get(params[0])
             return _Cur([_Row(cantidad=eq["cantidad"])] if eq else [])
-        if "FROM ALQUILER_ITEMS PI2 JOIN ALQUILERES P ON P.ID = PI2.PEDIDO_ID WHERE PI2.EQUIPO_ID IN" in s:
+        if ("FROM ALQUILER_ITEMS PI2" in s and "WHERE PI2.EQUIPO_ID IN" in s):
+            # Substrings (no un solo `in` contiguo): #1308 rediseño "turno como
+            # ítem" sumó un `LEFT JOIN alquiler_turnos_estudio` entre el JOIN a
+            # `alquileres` y el `WHERE` — un match de una sola cadena larga se
+            # habría roto con ese JOIN nuevo en el medio.
             eq_ids = params[:-3]  # (*equipo_ids, excl, fh_buf, fd_buf)
             return _Cur([_Row({0: e, 1: self.reservas_directas.get(e, 0)}) for e in eq_ids])
         return _Cur([])

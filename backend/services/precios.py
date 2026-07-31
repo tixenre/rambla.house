@@ -53,12 +53,17 @@ class ItemPrecio(TypedDict, total=False):
     horneado en `precio_jornada` (`precio_combo`); el descuento GLOBAL
     (cliente/jornadas/manual) no se le vuelve a aplicar encima. Resolverlo es
     responsabilidad del caller (ver `tipos_equipo_batch`).
+    `turno_estudio_id` (opcional, #1308 rediseño "turno como ítem", Fase 3):
+    la línea pertenece a un turno del Estudio EMBEBIDO
+    (`alquiler_items.turno_estudio_id`) — mismo tratamiento que `es_combo`,
+    excluida del descuento global (ya resolvió su propio precio al insertarse).
     """
     equipo_id: Optional[int]
     cantidad: int
     precio_jornada: int
     cobro_modo: str
     es_combo: bool
+    turno_estudio_id: Optional[int]
 
 
 class TotalDesglose(TypedDict):
@@ -296,13 +301,23 @@ def calcular_total(
     NO-combo (``bruto_descontable``) y no las toca. ``bruto`` (el subtotal que
     se MUESTRA) sigue siendo la suma de TODAS las líneas.
 
+    Turno del Estudio EMBEBIDO (#1308 rediseño "turno como ítem", Fase 3): una
+    línea con ``turno_estudio_id`` (verdadero, cualquier id de
+    ``alquiler_turnos_estudio``) recibe el MISMO tratamiento que un combo —
+    excluida de ``bruto_descontable`` — porque ya resolvió su propio precio
+    desde su propia duración/tarifa negociada al insertarse (mismo criterio
+    que aísla hoy a un turno STANDALONE del descuento del pedido). Callers que
+    no pasan esta clave (el 100% de los existentes) no cambian de
+    comportamiento: ``it.get("turno_estudio_id")`` da ``None``/falsy.
+
     El backend debe PERSISTIR ``neto`` en ``alquileres.monto_total`` (sin IVA).
     El ``total_final`` (con IVA si aplica) es lo que se MUESTRA al cliente RI.
     """
     j = max(1, int(jornadas or 1))
     bruto = sum(bruto_linea(it, j) for it in items)
     bruto_descontable = sum(
-        bruto_linea(it, j) for it in items if not it.get("es_combo")
+        bruto_linea(it, j) for it in items
+        if not it.get("es_combo") and not it.get("turno_estudio_id")
     )
     resuelto = resolver_descuento_monto_pedido(
         bruto_descontable, descuento_manual_tipo, descuento_manual_pct, descuento_manual_monto,

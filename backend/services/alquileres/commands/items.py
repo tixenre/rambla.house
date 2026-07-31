@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import HTTPException
 
-from database import to_datetime
+from database import row_to_dict, to_datetime
 from clientes.queries.identidad import nombre_completo_cliente
 from services.precios import bruto_linea, calcular_total, jornadas_periodo, tipos_equipo_batch
 from services.fechas import validar_rango_fechas
@@ -137,8 +137,12 @@ def _recalcular_total_pedido(conn, id: int) -> None:
     d0 = to_datetime(p["fecha_desde"]) if p["fecha_desde"] else None
     d1 = to_datetime(p["fecha_hasta"]) if p["fecha_hasta"] else None
     jornadas = jornadas_periodo(d0, d1)
+    # `turno_estudio_id`: para excluir del descuento global las líneas de un turno
+    # del Estudio EMBEBIDO (#1308 rediseño "turno como ítem", Fase 3) — ver
+    # `calcular_total`. Sin efecto en pedidos sin ninguno (la columna es NULL).
     items = conn.execute(
-        "SELECT id, equipo_id, cantidad, precio_jornada, cobro_modo FROM alquiler_items WHERE pedido_id=%s",
+        "SELECT id, equipo_id, cantidad, precio_jornada, cobro_modo, turno_estudio_id "
+        "FROM alquiler_items WHERE pedido_id=%s",
         (id,),
     ).fetchall()
     # Subtotales persistidos por línea (los usan los visores). `bruto_linea`
@@ -158,7 +162,8 @@ def _recalcular_total_pedido(conn, id: int) -> None:
         items=[
             {"equipo_id": it["equipo_id"], "cantidad": it["cantidad"],
              "precio_jornada": it["precio_jornada"], "cobro_modo": it["cobro_modo"],
-             "es_combo": tipos.get(it["equipo_id"]) == "combo"}
+             "es_combo": tipos.get(it["equipo_id"]) == "combo",
+             "turno_estudio_id": it["turno_estudio_id"]}
             for it in items
         ],
         jornadas=jornadas,
@@ -560,8 +565,24 @@ def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
         descuento_jornadas_pct, descuento_cliente_pct = 0, 0
     else:
         descuento_jornadas_pct, descuento_cliente_pct = _resolver_descuentos_snapshot_o_vivo(conn, p, jornadas)
+        # Sumar los ítems de los turnos del Estudio EMBEBIDOS (si hay) — este
+        # reemplazo solo conoce la lista de EQUIPOS que llegó del front
+        # (`items`/`lineas`); sin esto, `calcular_total` de abajo ignoraría por
+        # completo cualquier turno embebido que el DELETE más abajo va a
+        # PRESERVAR, y `monto_total` quedaría corto (le faltaría la plata del
+        # turno) en cuanto se guardara la lista de equipos de un pedido mixto —
+        # el turno sobreviviría en la base, pero el total persistido mentiría.
+        # Se suman con su `turno_estudio_id` tal cual está persistido:
+        # `calcular_total` las excluye del descuento global igual que a un
+        # combo (ya resolvieron su propio precio al insertarse) — ver su
+        # docstring, Fase 3 de este rediseño.
+        items_turnos = conn.execute(
+            "SELECT equipo_id, cantidad, precio_jornada, cobro_modo, turno_estudio_id "
+            "FROM alquiler_items WHERE pedido_id = %s AND turno_estudio_id IS NOT NULL",
+            (id,),
+        ).fetchall()
         total_desglose = calcular_total(
-            items=lineas,  # incluye cobro_modo por línea (líneas 'fijo' no × jornadas)
+            items=lineas + [row_to_dict(it) for it in items_turnos],  # cobro_modo por línea
             jornadas=jornadas,
             descuento_cliente_pct=descuento_cliente_pct,
             descuento_jornadas_pct=descuento_jornadas_pct,
@@ -572,7 +593,16 @@ def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
         )
         monto_total = total_desglose["neto"]
 
-    conn.execute("DELETE FROM alquiler_items WHERE pedido_id=%s", (id,))
+    # `AND turno_estudio_id IS NULL`: un pedido `diaria` puede tener un turno del
+    # Estudio EMBEBIDO (#1308 rediseño "turno como ítem", `alquiler_turnos_estudio`)
+    # — sus ítems (centinela + opcional promo/sueltos/pintura) NO son parte de la
+    # lista de equipos que este endpoint reemplaza, y un DELETE sin esta cláusula
+    # los borraría en silencio en el primer guardado del editor genérico después
+    # de agregar un turno. Mismo criterio que ya protege al centinela de un turno
+    # STANDALONE (`editar_reserva`, `equipo_id IS DISTINCT FROM %s`).
+    conn.execute(
+        "DELETE FROM alquiler_items WHERE pedido_id=%s AND turno_estudio_id IS NULL", (id,)
+    )
     conn.executemany("""
         INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, orden, nombre_libre, cobro_modo)
         VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
