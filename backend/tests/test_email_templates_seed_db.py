@@ -146,3 +146,30 @@ def test_pedido_creado_cliente_no_escapa_la_tabla_de_items():
     out = render_template("pedido_creado_cliente", ctx)
     assert "<table><tr><td>Sony FX3</td></tr></table>" in out["html"]
     assert "&lt;table&gt;" not in out["html"]
+
+
+def test_ninguna_plantilla_con_items_html_escapa_la_tabla():
+    """Generaliza la regresión anterior a TODA la clase de bug (migración
+    `1t3mss4f3f1x`): se encontró el mismo defecto en `pedido_confirmado_cliente`
+    (screenshot del dueño) después de haber arreglado solo `pedido_creado_cliente`
+    — dos filas con el mismo síntoma confirman que es una clase, no un caso
+    aislado. Recorre TODAS las keys cuya plantilla canónica usa
+    `items_html|safe` y verifica que la fila vigente en la BD renderiza la
+    tabla sin escapar, para que un tercer caso no vuelva a colarse en silencio."""
+    from database import init_db
+    from services.email import render_template
+    from services.email.default_templates import DEFAULT_TEMPLATES
+
+    init_db()  # asegura el esquema + el seed canónico, por si corre solo
+
+    keys_con_items = [
+        key for key, tpl in DEFAULT_TEMPLATES.items()
+        if "{{ items_html|safe }}" in tpl["body_html"]
+    ]
+    assert keys_con_items  # sanity: la lista no está vacía
+
+    ctx = dict(_CTX, items_html="<table><tr><td>Sony FX3</td></tr></table>")
+    for key in keys_con_items:
+        out = render_template(key, ctx)
+        assert "<table><tr><td>Sony FX3</td></tr></table>" in out["html"], key
+        assert "&lt;table&gt;" not in out["html"], key
