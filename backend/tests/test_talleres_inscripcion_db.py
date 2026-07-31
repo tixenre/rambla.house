@@ -67,9 +67,8 @@ def client(monkeypatch):
     try:
         _limpiar(conn)
         conn.execute(
-            "INSERT INTO talleres (id, slug, nombre, instructor_nombre, fecha_inicio, fecha_fin) "
-            "VALUES (%s, %s, %s, %s, %s, %s)",
-            (TALLER_ID, SLUG + "-base", "Taller Test", "Instructor Test", "2099-01-01", "2099-01-02"),
+            "INSERT INTO talleres (id, slug, nombre) VALUES (%s, %s, %s)",
+            (TALLER_ID, SLUG + "-base", "Taller Test"),
         )
         # cupos LLENOS (1/1) → toda inscripción cae a lista de espera (sin comprobante).
         conn.execute(

@@ -200,11 +200,14 @@ def test_create_pedido_arma_la_linea_personalizada(setup, monkeypatch):
     None) NO debe dar 404 ni perder nombre_libre/cobro_modo. Antes armaba los ítems
     inline asumiendo equipo_id válido (lookup con None → 404, INSERT de solo 5
     columnas); ahora delega en `_apply_pedido_items`. Regresión de punta a punta."""
-    import routes.alquileres.core as ac
+    import services.alquileres.commands.creacion as cr
     from database import get_db
     from routes.alquileres import PedidoCreate, PedidoItem, create_pedido, _get_alquiler_items
 
-    monkeypatch.setattr(ac, "notificar_pedido", lambda *a, **k: None)
+    # El despacho del aviso vive en `services/alquileres/commands/creacion.py` (ahí
+    # quedó `create_pedido` tras el split del motor de pedidos): se stubea DONDE se
+    # llama, no en `routes.alquileres.core` — que hoy solo re-exporta la función.
+    monkeypatch.setattr(cr, "notificar_pedido", lambda *a, **k: None)
 
     pedido = create_pedido(
         PedidoCreate(

@@ -6,45 +6,63 @@ import datetime
 
 from fastapi import APIRouter, Depends, Query
 
-from database import get_db, row_to_dict
+from database import get_db, now_ar, row_to_dict
 from auth.guards import require_admin
+from pedidos_vinculados import SIN_PRINCIPAL_SQL
+from tipos_pedido import TIPOS_SIN_RETIRO_SQL
 
 router = APIRouter()
 
 
 @router.get("/dashboard")
 def get_dashboard(_admin: dict = Depends(require_admin)):
-    hoy     = datetime.date.today().isoformat()
-    manana  = (datetime.date.today() + datetime.timedelta(days=1)).isoformat()
+    # now_ar(), no date.today() — este último corre en UTC en la nube/CI y
+    # desfasa un día entre 00:00-03:00 UTC (21:00-24:00 hora Argentina),
+    # ver services/fechas.py.
+    hoy_date = now_ar().date()
+    hoy     = hoy_date.isoformat()
+    manana  = (hoy_date + datetime.timedelta(days=1)).isoformat()
     mes_ini = hoy[:7] + "-01"
     with get_db() as conn:
+        # `SIN_PRINCIPAL_SQL` en los conteos y listas de PEDIDOS: un turno del
+        # Estudio vinculado no es un pedido aparte (#1308) — su principal ya está
+        # en la lista. `ingresos_mes` (una SUM sin identidad) y el `calendario`
+        # (agenda real del espacio) NO lo llevan a propósito: ahí la fila del
+        # turno aporta plata/ocupación reales que no están duplicadas.
         pendientes = conn.execute(
-            "SELECT COUNT(*) FROM alquileres WHERE estado='solicitado'"
+            f"SELECT COUNT(*) FROM alquileres WHERE estado='solicitado' AND {SIN_PRINCIPAL_SQL}"
         ).fetchone()[0]
 
         activos = conn.execute(
-            "SELECT COUNT(*) FROM alquileres WHERE estado IN ('confirmado','retirado') AND fecha_hasta >= %s", (hoy,)
+            "SELECT COUNT(*) FROM alquileres WHERE estado IN ('confirmado','retirado') "
+            f"AND fecha_hasta >= %s AND {SIN_PRINCIPAL_SQL}", (hoy,)
         ).fetchone()[0]
 
-        salen_hoy = conn.execute("""
+        salen_hoy = conn.execute(f"""
             SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
             WHERE estado IN ('confirmado','retirado')
+              AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
+              AND p.{SIN_PRINCIPAL_SQL}
               AND p.fecha_desde::date = %s
             ORDER BY p.fecha_desde
         """, (hoy,)).fetchall()
 
-        devuelven_hoy = conn.execute("""
+        devuelven_hoy = conn.execute(f"""
             SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
-            WHERE estado IN ('confirmado','retirado') AND p.fecha_hasta::date = %s
+            WHERE estado IN ('confirmado','retirado') AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
+              AND p.{SIN_PRINCIPAL_SQL}
+              AND p.fecha_hasta::date = %s
             ORDER BY p.fecha_hasta
         """, (hoy,)).fetchall()
 
-        devuelven_manana = conn.execute("""
+        devuelven_manana = conn.execute(f"""
             SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
-            WHERE estado IN ('confirmado','retirado') AND p.fecha_hasta::date = %s
+            WHERE estado IN ('confirmado','retirado') AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
+              AND p.{SIN_PRINCIPAL_SQL}
+              AND p.fecha_hasta::date = %s
             ORDER BY p.fecha_hasta
         """, (manana,)).fetchall()
 
@@ -66,6 +84,7 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
             LEFT JOIN marcas mb ON mb.id = e.brand_id
             JOIN alquileres p ON p.id = pi.pedido_id
             WHERE p.estado IN ('confirmado','retirado') AND p.fecha_hasta >= %s
+              AND e.es_recurso_interno = FALSE
             GROUP BY pi.equipo_id, p.id, e.nombre, mb.nombre, p.cliente_nombre, p.fecha_hasta
             ORDER BY p.fecha_hasta
         """, (hoy,)).fetchall()
@@ -89,16 +108,17 @@ def get_calendario(
     _admin: dict = Depends(require_admin),
 ):
     with get_db() as conn:
-        rows = conn.execute("""
-            SELECT p.id, p.numero_pedido, p.cliente_nombre, p.estado,
+        rows = conn.execute(f"""
+            SELECT p.id, p.numero_pedido, p.cliente_nombre, p.estado, p.tipo,
                    p.fecha_desde, p.fecha_hasta, p.monto_total,
                    STRING_AGG(e.nombre, ' / ') AS equipos
             FROM alquileres p
             JOIN alquiler_items pi ON pi.pedido_id = p.id
             JOIN equipos e ON e.id = pi.equipo_id
             WHERE p.estado IN ('solicitado','confirmado','retirado','devuelto','finalizado')
+              AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
               AND p.fecha_hasta >= %s AND p.fecha_desde <= %s
-            GROUP BY p.id, p.numero_pedido, p.cliente_nombre, p.estado,
+            GROUP BY p.id, p.numero_pedido, p.cliente_nombre, p.estado, p.tipo,
                      p.fecha_desde, p.fecha_hasta, p.monto_total
             ORDER BY p.fecha_desde
         """, (desde, hasta)).fetchall()

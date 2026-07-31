@@ -13,6 +13,8 @@ import {
   Repeat,
   Search,
   SearchX,
+  Clapperboard,
+  Clock,
 } from "lucide-react";
 
 import { adminApi } from "@/lib/admin/api";
@@ -216,6 +218,43 @@ function EstadisticasPage() {
                 />
               </Section>
             </div>
+
+            {/* Estudio: economía separada (#1283) — las tarjetas/rankings de
+                arriba ya la excluyen (backend filtra tipo NOT IN ('estudio',
+                'estudio_fijo')); acá se muestra aparte, no mezclada. */}
+            <Section title="Estudio" subtitle="Economía separada — no se mezcla con el resto">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
+                <StatCard
+                  icon={Clapperboard}
+                  label="Turnos"
+                  value={String(data.estudio.totales.total_turnos ?? 0)}
+                />
+                <StatCard
+                  icon={Calendar}
+                  label="Slots fijos (meses)"
+                  value={String(data.estudio.totales.total_meses_slot_fijo ?? 0)}
+                />
+                <StatCard
+                  icon={Clock}
+                  label="Horas vendidas"
+                  value={String(Math.round(data.estudio.totales.horas_vendidas ?? 0))}
+                />
+                <StatCard
+                  icon={DollarSign}
+                  label="Facturado"
+                  value={fmtArs(data.estudio.totales.total_ars ?? 0)}
+                />
+              </div>
+              <BarChart
+                data={[...data.estudio.por_mes]
+                  .slice(0, 12)
+                  .reverse()
+                  .map((m) => ({
+                    label: m.mes,
+                    value: Number(m.total_ars) || 0,
+                  }))}
+              />
+            </Section>
           </>
         )}
 

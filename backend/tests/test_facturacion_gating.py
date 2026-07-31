@@ -241,9 +241,10 @@ def test_cert_cargado_false_si_enc_null(monkeypatch):
 
 class _FakeEmisorRow:
     """Simula una row de emisores_arca."""
-    def __init__(self, nombre, condicion_iva="monotributo"):
+    def __init__(self, nombre, condicion_iva="monotributo", activo=True):
         self.nombre = nombre
         self.condicion_iva = condicion_iva
+        self.activo = activo
 
     def __getitem__(self, k):
         return getattr(self, k)
@@ -344,3 +345,49 @@ def test_emisor_para_sin_emisor_activo_levanta(monkeypatch):
     )
     with pytest.raises(ValueError, match="No hay emisor activo"):
         mod.emisor_para("monotributo", _FakeConnEmisor())
+
+
+# ── override_emisor_id: caso "cliente RI que pide igual Factura C" ──────────
+
+
+def test_emisor_para_override_ignora_la_condicion_automatica(monkeypatch):
+    """Con override_emisor_id seteado, ni siquiera se consulta get_activo_para_condicion
+    — un cliente RI puede facturar con el emisor monotributista (Factura C: legal, la
+    letra depende del EMISOR, no del receptor) sin que la resolución automática interfiera."""
+    from services.facturacion import emisores as mod
+
+    def _raise_si_se_llama(condicion, conn):
+        raise AssertionError("no debería resolver automáticamente si hay override")
+
+    monkeypatch.setattr(
+        "services.facturacion.emisores_repo.get_activo_para_condicion", _raise_si_se_llama
+    )
+    monkeypatch.setattr(
+        "services.facturacion.emisores_repo.get_by_id",
+        lambda emisor_id, conn: _FakeEmisorRow("santini", "monotributo", activo=True),
+    )
+    result = mod.emisor_para("responsable_inscripto", _FakeConnEmisor(), override_emisor_id=7)
+    assert result == "santini"
+
+
+def test_emisor_para_override_inactivo_levanta(monkeypatch):
+    """Override a un emisor inactivo → ValueError descriptivo (no factura en silencio)."""
+    from services.facturacion import emisores as mod
+
+    monkeypatch.setattr(
+        "services.facturacion.emisores_repo.get_by_id",
+        lambda emisor_id, conn: _FakeEmisorRow("pablo", "responsable_inscripto", activo=False),
+    )
+    with pytest.raises(ValueError, match="inactivo"):
+        mod.emisor_para("responsable_inscripto", _FakeConnEmisor(), override_emisor_id=7)
+
+
+def test_emisor_para_override_inexistente_levanta(monkeypatch):
+    """Override a un id que no existe → ValueError descriptivo."""
+    from services.facturacion import emisores as mod
+
+    monkeypatch.setattr(
+        "services.facturacion.emisores_repo.get_by_id", lambda emisor_id, conn: None
+    )
+    with pytest.raises(ValueError, match="no encontrado"):
+        mod.emisor_para("responsable_inscripto", _FakeConnEmisor(), override_emisor_id=999)

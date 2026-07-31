@@ -44,14 +44,14 @@ export const PLANTILLAS_MAIL: { value: string; label: string }[] = [
 
 // eslint-disable-next-line react-refresh/only-export-components -- constante de datos (no componente); coexiste con EnviarDocsDialog intencionalmente
 export const DOCS_PEDIDO: {
-  kind: "pdf" | "albaran" | "contrato" | "packing-list";
+  kind: "remito" | "detalle-seguro" | "contrato" | "checklist-retiro";
   label: string;
   Icon: LucideIcon;
 }[] = [
   { kind: "contrato", label: "Contrato", Icon: FileSignature },
-  { kind: "pdf", label: "Remito", Icon: FileText },
-  { kind: "albaran", label: "Detalle de seguro", Icon: Truck },
-  { kind: "packing-list", label: "Checklist de retiro", Icon: ClipboardList },
+  { kind: "remito", label: "Remito", Icon: FileText },
+  { kind: "detalle-seguro", label: "Detalle de seguro", Icon: Truck },
+  { kind: "checklist-retiro", label: "Checklist de retiro", Icon: ClipboardList },
 ];
 
 export function EnviarDocsDialog({
@@ -65,7 +65,7 @@ export function EnviarDocsDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
 }) {
-  const [seleccion, setSeleccion] = useState<Record<string, boolean>>({ pdf: true });
+  const [seleccion, setSeleccion] = useState<Record<string, boolean>>({ remito: true });
   const [to, setTo] = useState(clienteEmail);
   const [mensaje, setMensaje] = useState("");
   const [plantilla, setPlantilla] = useState(PLANTILLA_SIMPLE);

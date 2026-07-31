@@ -623,6 +623,9 @@ def import_alquileres(
     """
     items = _validate_rows(rows, schema.Alquiler, "alquileres")
     stats = {"inserted": 0, "updated": 0, "skipped": 0}
+    # (id_local, numero_del_principal) — se resuelve al final: el principal
+    # puede venir DESPUÉS que su turno en el archivo (#1308).
+    vinculos_pendientes: list[tuple[int, int]] = []
     # Nota: alquileres.numero_pedido NO tiene UNIQUE constraint (es una
     # secuencia generada por la app), así que NO podemos usar ON CONFLICT.
     # Pre-check + insert/update manual. El import es single-threaded por
@@ -651,12 +654,13 @@ def import_alquileres(
                     cliente_telefono = %s, notas = %s, estado = %s,
                     fecha_desde = %s, fecha_hasta = %s, monto_total = %s,
                     monto_pagado = %s, descuento_pct = %s, fuente = %s,
+                    tipo = %s,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
                 """,
                 (cliente_id, a.cliente_nombre, a.cliente_email, a.cliente_telefono,
                  a.notas, estado, a.fecha_desde, a.fecha_hasta, a.monto_total,
-                 a.monto_pagado, a.descuento_pct, a.fuente,
+                 a.monto_pagado, a.descuento_pct, a.fuente, a.tipo,
                  alq_id),
             )
             stats["updated"] += 1
@@ -666,17 +670,20 @@ def import_alquileres(
                 INSERT INTO alquileres (
                     numero_pedido, cliente_id, cliente_nombre, cliente_email,
                     cliente_telefono, notas, estado, fecha_desde, fecha_hasta,
-                    monto_total, monto_pagado, descuento_pct, fuente
+                    monto_total, monto_pagado, descuento_pct, fuente, tipo
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id
                 """,
                 (a.numero_pedido, cliente_id, a.cliente_nombre, a.cliente_email,
                  a.cliente_telefono, a.notas, estado, a.fecha_desde, a.fecha_hasta,
-                 a.monto_total, a.monto_pagado, a.descuento_pct, a.fuente),
+                 a.monto_total, a.monto_pagado, a.descuento_pct, a.fuente, a.tipo),
             )
             alq_id = cur.fetchone()["id"]
             stats["inserted"] += 1
+
+        if a.pedido_principal_numero is not None:
+            vinculos_pendientes.append((alq_id, a.pedido_principal_numero))
 
         # Items: replace. Borrar todos los del pedido y reinsertar.
         conn.execute(
@@ -715,6 +722,20 @@ def import_alquileres(
                 (alq_id, p.monto, p.concepto, p.fecha,
                  p.anulado, p.anulado_por, p.anulado_at, p.anulado_motivo),
             )
+
+    # Segunda pasada: atar cada turno del Estudio a su pedido principal (#1308).
+    # Va acá, no en el loop, porque el principal puede aparecer DESPUÉS que su
+    # turno en el archivo. Si el principal no vino en el backup, queda NULL (el
+    # turno sobrevive como pedido suelto en vez de romper el import).
+    for alq_id, principal_numero in vinculos_pendientes:
+        principal = conn.execute(
+            "SELECT id FROM alquileres WHERE numero_pedido = %s LIMIT 1",
+            (principal_numero,),
+        ).fetchone()
+        conn.execute(
+            "UPDATE alquileres SET pedido_principal_id = %s WHERE id = %s",
+            (principal["id"] if principal else None, alq_id),
+        )
 
     resolver.refresh_alquileres()
     return stats

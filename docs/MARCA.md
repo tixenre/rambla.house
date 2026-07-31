@@ -56,11 +56,11 @@ desde el celular — sin llamadas, sin sorpresas.
 
 ---
 
-### Workshops — rambla.house/talleres
+### Escuela — rambla.house/escuela
 
 > Talleres y capacitaciones sobre técnica audiovisual, iluminación, postproducción y más.
 
-<!-- TODO: el dueño completa tagline + selling points de Workshops -->
+<!-- TODO: el dueño completa tagline + selling points de la Escuela -->
 <!-- Sugerencia: para quién son, qué aprenden, quién los da, cuándo son -->
 
 ---

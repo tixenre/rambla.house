@@ -29,10 +29,13 @@ CANON = "('solicitado','confirmado','retirado')"
 ESTADOS_CANONICOS = {"solicitado", "confirmado", "retirado"}
 
 # Tokens que el motor PUEDE interpolar en su SQL sin riesgo de inyección:
-#   ESTADOS_RESERVADO → constante interna (su seguridad se verifica abajo)
-#   ph                → string de placeholders "?,?,?" para cláusulas IN (no datos)
+#   ESTADOS_RESERVADO   → constante interna (su seguridad se verifica abajo)
+#   ph                  → string de placeholders "?,?,?" para cláusulas IN (no datos)
+#   TIPOS_SIN_RETIRO_SQL → tipos_pedido.py, mismo perfil que ESTADOS_RESERVADO:
+#                          tupla SQL literal fija ('taller','estudio_fijo'),
+#                          nunca derivada de input (2026-07-28, F0.1/`_centinela_libre`).
 # Cualquier otro token interpolado en SQL del motor hace fallar el test.
-ALLOWLIST_INTERPOLACIONES = {"ESTADOS_RESERVADO", "ph"}
+ALLOWLIST_INTERPOLACIONES = {"ESTADOS_RESERVADO", "ph", "TIPOS_SIN_RETIRO_SQL"}
 
 SQL_KEYWORDS = ("SELECT ", "INSERT ", "UPDATE ", "DELETE ", " FROM ", " WHERE ")
 
@@ -88,7 +91,7 @@ def _funciones_motor():
     )
     from reservas.gate import _validar_demanda
     from routes.cliente_portal import _check_stock_hipotetico
-    from routes.estudio import _centinela_libre
+    from services.estudio.queries.disponibilidad import _centinela_libre
 
     return [
         validar_stock,

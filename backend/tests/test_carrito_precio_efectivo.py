@@ -18,7 +18,7 @@ import inspect
 import pytest
 
 import services.precios as precios
-from routes.alquileres import cotizacion as ruta_cotizar
+from services.alquileres.queries import cotizacion as ruta_cotizar
 from routes.cliente_portal import pedidos as ruta_crear
 from routes.cliente_portal import solicitudes as ruta_modificar
 from services.carrito import readiness as carrito_readiness

@@ -22,7 +22,14 @@ _CLEAN_START = f"AND a.fecha_desde >= '{LIQUIDACION_INICIO}'"
 def _pedidos_para_desglose(conn) -> list[dict]:
     """Pedidos activos (no cancelados, `monto_total > 0`) dentro del clean start,
     con sus ítems — la forma que espera `finanzas_flujo.pedido.desglose_de_pedido`.
-    Un solo `IN` para los ítems (no N+1 por pedido)."""
+    Un solo `IN` para los ítems (no N+1 por pedido).
+
+    Cubre TAMBIÉN los pedidos del Estudio (Fase 2, ítems veraces): sus ítems
+    llevan el monto real (`cobro_modo='fijo'`, `subtotal` = precio del espacio/
+    promo) en vez de $0, así que `desglose_de_pedido` cierra contra
+    `monto_total` igual que un alquiler normal — no hace falta excluirlos.
+    Backfill de los pedidos creados ANTES de este cambio: migración
+    `q2r3s4t5u6v7_backfill_items_estudio_veraces`."""
     from database import row_to_dict
 
     rows = conn.execute(
@@ -167,7 +174,7 @@ def reconciliar(conn) -> dict:
     modelo = cargar_modelo(conn)
     canonicos = set(modelo.keys())
     duenos = conn.execute(
-        "SELECT DISTINCT COALESCE(dueno, 'Rambla') AS dueno FROM equipos"
+        "SELECT DISTINCT COALESCE(dueno, 'Rental') AS dueno FROM equipos"
     ).fetchall()
     no_canonicos = sorted(
         row_to_dict(d)["dueno"] for d in duenos if row_to_dict(d)["dueno"] not in canonicos

@@ -71,8 +71,8 @@ function MarcaPage() {
           <TodoBanner area="Estudio" />
         </Section>
 
-        <Section variant="plain" title="Workshops" subtitle="rambla.house/talleres">
-          <TodoBanner area="Workshops" />
+        <Section variant="plain" title="Escuela" subtitle="rambla.house/escuela">
+          <TodoBanner area="Escuela" />
         </Section>
 
         <Section variant="plain" title="Assets canónicos">

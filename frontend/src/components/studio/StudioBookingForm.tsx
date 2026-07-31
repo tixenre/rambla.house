@@ -8,7 +8,6 @@ import { Button } from "@/design-system/ui/button";
 import { Pill } from "@/design-system/ui/Pill";
 import { Spinner } from "@/design-system/ui/spinner";
 import { GoogleIcon } from "@/design-system/ui/GoogleIcon";
-import { Calendar } from "@/design-system/ui/calendar";
 import {
   Dialog,
   DialogContent,
@@ -16,7 +15,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/design-system/ui/dialog";
-import { Popover, PopoverContent, PopoverTrigger } from "@/design-system/ui/popover";
 import { FieldLabel } from "@/design-system/ui/Field";
 import { cn } from "@/lib/utils";
 import { formatARS } from "@/lib/format";
@@ -27,37 +25,26 @@ import {
   type VerificacionPanelEstado,
 } from "@/components/rental/account/VerificacionRequeridaPanel";
 import { STUDIO, STUDIO_PHONE } from "@/data/studio";
-import { apiGetEstudioDisponibilidad, apiCrearReservaEstudio } from "@/lib/api";
+import { apiGetEstudioDisponibilidad, apiCrearReservaEstudio, type EstudioPromo } from "@/lib/api";
+import { pad, buildTimeSlots } from "@/lib/estudio-slots";
+import { EstudioWeekGrid } from "@/components/studio/EstudioWeekGrid";
 
 export type StudioBookingConfig = {
   pricePerHour: number;
   minHours: number;
   openHour: number;
   closeHour: number;
-  packActivo: boolean;
-  packPrecio: number;
+  promo?: EstudioPromo | null;
+  /** Add-on independiente "recién pintado" — cargo fijo opcional, se suma
+   *  sea cual sea la elección de con_promo (no la reemplaza). */
+  precioPinturaReciente?: number;
+  /** Anticipación mínima general del estudio (h). */
+  anticipacionMinHoras?: number;
+  /** Anticipación PROPIA del add-on "recién pintado" — se exige ADEMÁS de
+   *  `anticipacionMinHoras`, no en su lugar (pintar/secar el ciclorama lleva
+   *  más tiempo que una reserva común). */
+  anticipacionPinturaHoras?: number;
 };
-
-function pad(n: number) {
-  return n.toString().padStart(2, "0");
-}
-
-function buildTimeSlots(openHour: number, closeHour: number, minHours: number) {
-  const slots: { value: string; label: string; hour: number; minute: 0 | 30 }[] = [];
-  const lastStartMin = closeHour * 60 - minHours * 60;
-  for (let h = openHour; h < closeHour; h++) {
-    for (const m of [0, 30] as const) {
-      if (h * 60 + m > lastStartMin) continue;
-      slots.push({
-        value: `${pad(h)}:${pad(m)}`,
-        label: `${pad(h)}:${pad(m)}`,
-        hour: h,
-        minute: m,
-      });
-    }
-  }
-  return slots;
-}
 
 type Disponibilidad = "idle" | "checking" | "libre" | "ocupado" | "error";
 
@@ -83,7 +70,7 @@ function Section({
   );
 }
 
-const QUERY_KEYS = { d: "d", h: "h", dur: "dur", pack: "pack" } as const;
+const QUERY_KEYS = { d: "d", h: "h", dur: "dur", promo: "promo", pintura: "pintura" } as const;
 
 function readBookingFromQuery() {
   if (typeof window === "undefined") return null;
@@ -91,8 +78,9 @@ function readBookingFromQuery() {
   const d = sp.get(QUERY_KEYS.d);
   const h = sp.get(QUERY_KEYS.h);
   const dur = sp.get(QUERY_KEYS.dur);
-  const pack = sp.get(QUERY_KEYS.pack);
-  if (!d && !h && !dur && !pack) return null;
+  const promo = sp.get(QUERY_KEYS.promo);
+  const pintura = sp.get(QUERY_KEYS.pintura);
+  if (!d && !h && !dur && !promo && !pintura) return null;
   let parsedDate: Date | undefined;
   if (d) {
     const [y, mo, da] = d.split("-").map((n) => parseInt(n, 10));
@@ -105,7 +93,8 @@ function readBookingFromQuery() {
     date: parsedDate,
     start: h && /^\d{2}:\d{2}$/.test(h) ? h : null,
     hours: dur && /^\d+$/.test(dur) ? parseInt(dur, 10) : null,
-    withPack: pack === "1",
+    withPromo: promo === "1",
+    pinturaReciente: pintura === "1",
   };
 }
 
@@ -118,36 +107,41 @@ function clearBookingQuery() {
 
 export function StudioBookingForm({
   config,
-  withPack,
-  onPackChange,
+  withPromo,
+  onPromoChange,
 }: {
   config?: StudioBookingConfig;
   /** Estado controlado por el padre — permite que el aside sea reactivo */
-  withPack: boolean;
-  onPackChange: (v: boolean) => void;
+  withPromo: boolean;
+  onPromoChange: (v: boolean) => void;
 }) {
   const navigate = useNavigate();
   const pricePerHour = config?.pricePerHour ?? STUDIO.pricePerHour;
   const minHours = config?.minHours ?? STUDIO.minHours;
   const openHour = config?.openHour ?? STUDIO.openHour;
   const closeHour = config?.closeHour ?? STUDIO.closeHour;
-  const packActivo = config?.packActivo ?? false;
-  const packPrecio = config?.packPrecio ?? 0;
+  const promo = config?.promo ?? null;
+  const precioPintura = config?.precioPinturaReciente ?? 0;
+  const anticipacionMinHoras = config?.anticipacionMinHoras ?? 0;
+  const anticipacionPinturaHoras = config?.anticipacionPinturaHoras ?? 0;
 
   const initial = useMemo(() => readBookingFromQuery(), []);
   const [date, setDate] = useState<Date | undefined>(initial?.date);
   const [startSlot, setStartSlot] = useState<string>(initial?.start ?? `${pad(openHour)}:00`);
   const [hours, setHours] = useState<number>(initial?.hours ?? minHours);
+  const [pinturaReciente, setPinturaReciente] = useState<boolean>(
+    initial?.pinturaReciente ?? false,
+  );
   const [returnedFromLogin, setReturnedFromLogin] = useState<boolean>(!!initial);
 
   useEffect(() => {
     if (initial) {
       clearBookingQuery();
-      if (initial.withPack) onPackChange(true);
+      if (initial.withPromo) onPromoChange(true);
       const t = setTimeout(() => setReturnedFromLogin(false), 12_000);
       return () => clearTimeout(t);
     }
-  }, [initial, onPackChange]);
+  }, [initial, onPromoChange]);
 
   const [auth, setAuth] = useState<"checking" | "in" | "out">("checking");
   const [verificado, setVerificado] = useState(false);
@@ -189,7 +183,6 @@ export function StudioBookingForm({
   const [motivo, setMotivo] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [calendarOpen, setCalendarOpen] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [needsVerif, setNeedsVerif] = useState(false);
   const [iniciandoVerif, setIniciandoVerif] = useState(false);
@@ -198,11 +191,6 @@ export function StudioBookingForm({
     () => buildTimeSlots(openHour, closeHour, minHours),
     [openHour, closeHour, minHours],
   );
-  const today = useMemo(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
-  }, []);
 
   const slot = useMemo(
     () =>
@@ -229,8 +217,9 @@ export function StudioBookingForm({
   }, [slots, startSlot]);
 
   const subtotal = pricePerHour * hours;
-  const packTotal = withPack ? packPrecio : 0;
-  const total = subtotal + packTotal;
+  const promoTotal = withPromo ? (promo?.precio ?? 0) : 0;
+  const pinturaTotal = pinturaReciente ? precioPintura : 0;
+  const total = subtotal + promoTotal + pinturaTotal;
 
   const fechaISO = date ? format(date, "yyyy-MM-dd") : null;
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
@@ -253,7 +242,7 @@ export function StudioBookingForm({
     let cancelado = false;
     setDisponibilidad("checking");
     setMotivo(null);
-    apiGetEstudioDisponibilidad(fechaISO, startSlot, hours)
+    apiGetEstudioDisponibilidad(fechaISO, startSlot, hours, pinturaReciente)
       .then((res) => {
         if (cancelado) return;
         setDisponibilidad(res.libre ? "libre" : "ocupado");
@@ -265,7 +254,7 @@ export function StudioBookingForm({
     return () => {
       cancelado = true;
     };
-  }, [fechaISO, startSlot, hours]);
+  }, [fechaISO, startSlot, hours, pinturaReciente]);
 
   const canSubmit = !!fechaISO && disponibilidad === "libre" && !submitting;
 
@@ -274,7 +263,8 @@ export function StudioBookingForm({
       [QUERY_KEYS.d]: fechaISO ?? "",
       [QUERY_KEYS.h]: startSlot,
       [QUERY_KEYS.dur]: String(hours),
-      [QUERY_KEYS.pack]: withPack ? "1" : "0",
+      [QUERY_KEYS.promo]: withPromo ? "1" : "0",
+      [QUERY_KEYS.pintura]: pinturaReciente ? "1" : "0",
     }).toString();
 
   const handleVerificar = async () => {
@@ -310,12 +300,19 @@ export function StudioBookingForm({
         fecha: fechaISO,
         start: startSlot,
         horas: hours,
-        con_pack: withPack,
+        con_promo: withPromo,
+        pintura_reciente: pinturaReciente,
       });
       toast.success(`Reserva #${res.numero_pedido ?? res.id} enviada`, {
         description: "Te llevamos a tu portal para seguir el estado.",
         duration: 6000,
       });
+      if (res.promo_advertencia) {
+        toast.warning("La promo se reservó incompleta", {
+          description: res.promo_advertencia,
+          duration: 7000,
+        });
+      }
       setReturnedFromLogin(false);
       navigate({ to: "/cliente/portal", search: { nuevo: res.id } });
     } catch (err) {
@@ -342,7 +339,8 @@ export function StudioBookingForm({
       `Hola! Quiero consultar por el estudio.`,
       `📅 ${format(date, "EEEE d 'de' MMMM, yyyy", { locale: es })}`,
       `🕒 ${startSlot} – ${endTime} (${hours} h)`,
-      withPack ? `➕ Con equipos (luces, griperías y modificadores)` : null,
+      withPromo && promo ? `➕ ${promo.nombre}` : null,
+      pinturaReciente ? `🎨 Recién pintado` : null,
       total > 0 ? `💵 Total estimado: ${formatARS(total)}` : null,
     ].filter(Boolean);
     window.open(
@@ -364,38 +362,20 @@ export function StudioBookingForm({
 
       {/* ── 1. ¿Cuándo? ─────────────────────────────────────────────── */}
       <Section step={1} title="¿Cuándo?">
-        <div className="grid gap-3 sm:grid-cols-[1.4fr_1fr_1fr]">
-          {/* Fecha */}
+        <div className="mb-4 grid gap-3 sm:grid-cols-[1.4fr_1fr_1fr]">
+          {/* Fecha — solo lectura: se elige clickeando la grilla de abajo,
+              no tiene sentido un segundo selector (calendario) en paralelo. */}
           <div>
             <FieldLabel>Fecha</FieldLabel>
-            <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className={cn(
-                    "mt-1.5 h-11 w-full justify-start text-left font-normal",
-                    !date && "text-muted-foreground",
-                  )}
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4 shrink-0" />
-                  <span className="truncate">{dateLabel}</span>
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <Calendar
-                  mode="single"
-                  selected={date}
-                  onSelect={(d) => {
-                    setDate(d);
-                    if (d) setCalendarOpen(false);
-                  }}
-                  disabled={{ before: today }}
-                  initialFocus
-                  locale={es}
-                  className="p-3 pointer-events-auto"
-                />
-              </PopoverContent>
-            </Popover>
+            <div
+              className={cn(
+                "mt-1.5 flex h-11 w-full items-center rounded-md border hairline bg-muted/20 px-3 text-sm text-ink",
+                !date && "text-muted-foreground",
+              )}
+            >
+              <CalendarIcon className="mr-2 h-4 w-4 shrink-0 text-muted-foreground" />
+              <span className="truncate">{date ? dateLabel : "Elegí un día en la grilla"}</span>
+            </div>
           </div>
 
           {/* Hora inicio */}
@@ -443,8 +423,25 @@ export function StudioBookingForm({
           </div>
         </div>
 
+        <EstudioWeekGrid
+          openHour={openHour}
+          closeHour={closeHour}
+          minHours={minHours}
+          hours={hours}
+          anticipacionHoras={
+            pinturaReciente
+              ? Math.max(anticipacionMinHoras, anticipacionPinturaHoras)
+              : anticipacionMinHoras
+          }
+          selected={date ? { date, startSlot } : null}
+          onSelectSlot={(d, slot) => {
+            setDate(d);
+            setStartSlot(slot);
+          }}
+        />
+
         {/* ¿Qué reservás? — sin expansión de equipos inline */}
-        {packActivo && (
+        {promo && (
           <fieldset
             className="mt-5 grid gap-2.5 sm:grid-cols-2"
             role="radiogroup"
@@ -456,7 +453,7 @@ export function StudioBookingForm({
             <label
               className={cn(
                 "flex cursor-pointer flex-col gap-1 rounded-xl border p-4 transition",
-                !withPack
+                !withPromo
                   ? "border-[var(--area-accent)] bg-[color-mix(in_oklch,var(--area-accent)_10%,transparent)]"
                   : "hairline hover:border-ink/40",
               )}
@@ -464,8 +461,8 @@ export function StudioBookingForm({
               <input
                 type="radio"
                 name="studio-modalidad"
-                checked={!withPack}
-                onChange={() => onPackChange(false)}
+                checked={!withPromo}
+                onChange={() => onPromoChange(false)}
                 className="sr-only"
               />
               <span className="font-semibold">Solo el estudio</span>
@@ -474,11 +471,11 @@ export function StudioBookingForm({
               </p>
             </label>
 
-            {/* Card B — Estudio + equipos (sin StudioPackKit inline) */}
+            {/* Card B — Estudio + promo de equipos */}
             <label
               className={cn(
                 "flex cursor-pointer flex-col gap-1 rounded-xl border p-4 transition",
-                withPack
+                withPromo
                   ? "border-[var(--area-accent)] bg-[color-mix(in_oklch,var(--area-accent)_10%,transparent)]"
                   : "hairline hover:border-ink/40",
               )}
@@ -486,17 +483,52 @@ export function StudioBookingForm({
               <input
                 type="radio"
                 name="studio-modalidad"
-                checked={withPack}
-                onChange={() => onPackChange(true)}
+                checked={withPromo}
+                onChange={() => onPromoChange(true)}
                 className="sr-only"
               />
-              <span className="font-semibold">Estudio + equipos</span>
-              <p className="text-xs text-muted-foreground">
-                Sumás <span className="text-ink font-medium">luces, griperías y modificadores</span>{" "}
-                durante toda la reserva. Llegás con la cámara y filmás.
-              </p>
+              <span className="font-semibold">Estudio + {promo.nombre}</span>
+              <p className="text-xs text-muted-foreground">{promo.descripcion}</p>
             </label>
           </fieldset>
+        )}
+
+        {/* Add-on independiente "recién pintado" — se suma a cualquiera de
+            las dos opciones de arriba, no las reemplaza. Oculto hasta que el
+            dueño cargue un precio real (evita mostrar "+$0" en producción). */}
+        {precioPintura > 0 && (
+          <label
+            className={cn(
+              "mt-3 flex cursor-pointer items-center gap-3 rounded-xl border p-3.5 transition",
+              pinturaReciente
+                ? "border-[var(--area-accent)] bg-[color-mix(in_oklch,var(--area-accent)_10%,transparent)]"
+                : "hairline hover:border-ink/40",
+            )}
+          >
+            <input
+              type="checkbox"
+              checked={pinturaReciente}
+              onChange={(e) => setPinturaReciente(e.target.checked)}
+              className="sr-only"
+            />
+            <span
+              className={cn(
+                "grid h-5 w-5 shrink-0 place-items-center rounded border transition",
+                pinturaReciente
+                  ? "border-[var(--area-accent)] bg-[var(--area-accent)]"
+                  : "border-ink/30",
+              )}
+            >
+              {pinturaReciente && <Check className="h-3.5 w-3.5 text-ink" />}
+            </span>
+            <span className="flex-1">
+              <span className="block font-semibold">Estudio recién pintado</span>
+              <span className="block text-xs text-muted-foreground">
+                Ciclorama repintado antes de tu sesión
+              </span>
+            </span>
+            <span className="font-mono tabular text-sm text-ink">+{formatARS(precioPintura)}</span>
+          </label>
         )}
       </Section>
 
@@ -514,12 +546,18 @@ export function StudioBookingForm({
                 {subtotal > 0 ? formatARS(subtotal) : "—"}
               </span>
             </div>
-            {withPack && (
+            {withPromo && promo && (
               <div className="flex justify-between items-baseline text-sm text-muted-foreground">
-                <span>Pack de equipos</span>
+                <span>{promo.nombre}</span>
                 <span className="font-mono tabular text-ink">
-                  {packPrecio > 0 ? formatARS(packPrecio) : "—"}
+                  {promo.precio > 0 ? formatARS(promo.precio) : "—"}
                 </span>
+              </div>
+            )}
+            {pinturaReciente && (
+              <div className="flex justify-between items-baseline text-sm text-muted-foreground">
+                <span>Recién pintado</span>
+                <span className="font-mono tabular text-ink">{formatARS(pinturaTotal)}</span>
               </div>
             )}
           </div>
@@ -641,9 +679,14 @@ export function StudioBookingForm({
               </span>{" "}
               · {hours} h
             </div>
-            {withPack && (
+            {withPromo && promo && (
               <div className="mt-1 text-muted-foreground">
-                + <span className="text-ink">Con equipos</span> (luces, griperías y modificadores)
+                + <span className="text-ink">{promo.nombre}</span>
+              </div>
+            )}
+            {pinturaReciente && (
+              <div className="mt-1 text-muted-foreground">
+                + <span className="text-ink">Recién pintado</span>
               </div>
             )}
             <div className="mt-2 flex items-baseline justify-between border-t hairline pt-2">

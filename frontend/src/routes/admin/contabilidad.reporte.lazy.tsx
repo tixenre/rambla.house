@@ -1,8 +1,8 @@
 /**
- * contabilidad.reporte.lazy.tsx — Reporte mensual de Rambla (#809).
+ * contabilidad.reporte.lazy.tsx — Reporte mensual de Rental (#809).
  *
  * Todo derivado del motor (endpoint `reporte/{mes}`), sin recalcular en el front:
- * facturado (devengado) · comisiones a dueños · gastos · ganancia de Rambla
+ * facturado (devengado) · comisiones a dueños · gastos · ganancia de Rental
  * (facturado − comisiones − gastos) · cobrado · cuenta corriente al día. La
  * comisión de los dueños es un COSTO, no ganancia. Devengado y percibido van
  * separados, nunca sumados.
@@ -47,7 +47,7 @@ function ReporteMensualPage() {
     <AdminPage
       title="Reporte mensual"
       maxW="detail"
-      description="El mes de Rambla, completo: lo facturado, lo que se llevan los dueños de los equipos, los gastos, y lo que realmente le queda a Rambla. Todo sale del mismo motor — no hay un peso sumado dos veces."
+      description="El mes de Rental, completo: lo facturado, lo que se llevan los dueños de los equipos, los gastos, y lo que realmente le queda a Rental. Todo sale del mismo motor — no hay un peso sumado dos veces."
       backTo={{ to: "/admin/contabilidad", label: "Tablero" }}
       actions={
         <Input
@@ -72,7 +72,7 @@ function ReporteMensualPage() {
 
             {/* Cascada del mes: facturado − comisiones a dueños − gastos = ganancia */}
             <div className="max-w-xl card-elevated p-5 sm:p-6">
-              <div className="t-eyebrow">El mes de Rambla</div>
+              <div className="t-eyebrow">El mes de Rental</div>
               <div className="mt-3 space-y-0.5">
                 <CascadaRow
                   label="Facturado"
@@ -86,6 +86,12 @@ function ReporteMensualPage() {
                   cost
                 />
                 <CascadaRow
+                  label="Parte del Estudio"
+                  note="otra unidad de negocio, no una comisión"
+                  value={`− ${formatARS(r.parte_estudio)}`}
+                  cost
+                />
+                <CascadaRow
                   label="Gastos operativos"
                   value={`− ${formatARS(r.gastos.total)}`}
                   cost
@@ -93,17 +99,19 @@ function ReporteMensualPage() {
               </div>
               <div className="my-3 border-t-2 border-ink/15" />
               <CascadaRow
-                label="Ganancia de Rambla"
+                label="Ganancia de Rental"
                 value={formatARS(r.ganancia_neta)}
                 total
                 negative={r.ganancia_neta < 0}
               />
             </div>
 
-            {/* Por socio: devengado vs percibido + movimientos del mes */}
+            {/* Por socio: devengado vs percibido + movimientos del mes.
+                "Estudio" entra sin cargos/pagos (no es socio humano, no tiene
+                cuenta corriente) — el gate de abajo ya lo deja en "—". */}
             <Section variant="plain" title="Por socio">
               <AdminTable<string>
-                rows={["Pablo", "Tincho", "Rambla"]}
+                rows={["Pablo", "Tincho", "Rental", "Estudio"]}
                 getRowKey={(s) => s}
                 columns={[
                   {
@@ -236,9 +244,9 @@ function CuentaCorrienteMini({ socio }: { socio: CuentaSaldo }) {
   const abs = Math.abs(socio.saldo);
   const frase =
     socio.estado === "deudor"
-      ? `${socio.nombre} le debe a Rambla`
+      ? `${socio.nombre} le debe a Rental`
       : socio.estado === "acreedor"
-        ? `Rambla le debe a ${socio.nombre}`
+        ? `Rental le debe a ${socio.nombre}`
         : "A mano";
   const color =
     socio.estado === "deudor"

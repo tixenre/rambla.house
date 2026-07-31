@@ -75,7 +75,7 @@ def _limpiar(conn):
 def _insertar(conn):
     conn.execute(
         "INSERT INTO equipos (id, nombre, cantidad, dueno, precio_jornada) "
-        "VALUES (%s, %s, 1, 'Rambla', %s)",
+        "VALUES (%s, %s, 1, 'Rental', %s)",
         (E_ID, NOMBRE_EQUIPO, PRECIO_JORNADA),
     )
     conn.execute(
@@ -121,7 +121,7 @@ def test_estadisticas_usa_monto_total_no_reconstruye_descuento_de_jornadas(conn)
     antes = compute_estadisticas(conn)
     total_antes = antes["totales"]["total_ars"] or 0
     dueno_antes = next(
-        (d["total_ars"] or 0 for d in antes["por_dueno"] if d["dueno"] == "Rambla"), 0
+        (d["total_ars"] or 0 for d in antes["por_dueno"] if d["dueno"] == "Rental"), 0
     )
 
     _insertar(conn)
@@ -152,9 +152,9 @@ def test_estadisticas_usa_monto_total_no_reconstruye_descuento_de_jornadas(conn)
     assert fila_equipo["total_ars"] == NETO
     assert fila_equipo["total_ars"] != BRUTO
 
-    # ── Por dueño (agregado GLOBAL por equipos.dueno='Rambla'): delta.
+    # ── Por dueño (agregado GLOBAL por equipos.dueno='Rental'): delta.
     dueno_despues = next(
-        (d["total_ars"] or 0 for d in despues["por_dueno"] if d["dueno"] == "Rambla"), 0
+        (d["total_ars"] or 0 for d in despues["por_dueno"] if d["dueno"] == "Rental"), 0
     )
     assert dueno_despues - dueno_antes == NETO
     assert dueno_despues - dueno_antes != BRUTO
@@ -195,12 +195,12 @@ def test_estadisticas_excluye_confirmado_y_retirado(conn):
         antes = compute_estadisticas(conn)
         total_antes = antes["totales"]["total_ars"] or 0
         dueno_antes = next(
-            (d["total_ars"] or 0 for d in antes["por_dueno"] if d["dueno"] == "Rambla"), 0
+            (d["total_ars"] or 0 for d in antes["por_dueno"] if d["dueno"] == "Rental"), 0
         )
 
         conn.execute(
             "INSERT INTO equipos (id, nombre, cantidad, dueno, precio_jornada) "
-            "VALUES (%s, %s, 1, 'Rambla', %s)",
+            "VALUES (%s, %s, 1, 'Rental', %s)",
             (E_ID2, NOMBRE_EQUIPO2, PRECIO_JORNADA),
         )
         for pid, estado in ((P_ID_CONF, "confirmado"), (P_ID_RET, "retirado")):
@@ -222,7 +222,7 @@ def test_estadisticas_excluye_confirmado_y_retirado(conn):
         assert (despues["totales"]["total_ars"] or 0) == total_antes
         assert not any(e["equipo"] == NOMBRE_EQUIPO2 for e in despues["top_equipos"])
         dueno_despues = next(
-            (d["total_ars"] or 0 for d in despues["por_dueno"] if d["dueno"] == "Rambla"), 0
+            (d["total_ars"] or 0 for d in despues["por_dueno"] if d["dueno"] == "Rental"), 0
         )
         assert dueno_despues == dueno_antes
     finally:

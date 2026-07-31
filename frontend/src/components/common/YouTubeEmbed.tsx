@@ -12,9 +12,12 @@ interface YouTubeEmbedProps {
    * Variantes del poster almacenado en R2 (resultado de store_youtube_poster).
    * Si están disponibles, se muestran en lugar del thumbnail de YouTube (mejor LCP
    * y sin request a YouTube antes del play → privacidad mejorada).
-   * Si no se pasan, cae al thumbnail público de YouTube.
+   * Si no se pasan, cae a `posterUrl` y despues al thumbnail público de YouTube.
    */
   posterVariants?: MediaVariant[];
+  /** Poster ya resuelto como URL plana (p.ej. `taller_trabajos.poster_url`,
+   *  denormalizado — no siempre hay un `MediaAsset` con variantes a mano). */
+  posterUrl?: string | null;
   className?: string;
 }
 
@@ -30,6 +33,7 @@ export function YouTubeEmbed({
   videoId,
   title = "Video demo",
   posterVariants,
+  posterUrl,
   className,
 }: YouTubeEmbedProps) {
   const [active, setActive] = useState(false);
@@ -43,7 +47,7 @@ export function YouTubeEmbed({
           findVariant(posterVariants, SM_VARIANT) ??
           posterVariants[0]
         )?.url
-      : youtubeThumbnailUrl(videoId);
+      : (posterUrl ?? youtubeThumbnailUrl(videoId));
 
   return (
     <div

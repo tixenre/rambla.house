@@ -191,14 +191,23 @@ export const facturacionApi = {
   getGuiaAfip: () => authedJson<{ markdown: string }>("/api/admin/emisores-arca/guia"),
 
   // Facturas
-  previewFactura: (pedidoId: number) =>
-    authedJson<PreviewFactura>(`/api/alquileres/${pedidoId}/facturar/preview`),
+  // `emisorId`: override excepcional — factura con un emisor puntual distinto al que
+  // resolvería automáticamente el perfil del cliente (ver services.facturacion.emisores.emisor_para).
+  // Default (undefined) = automático, mismo comportamiento de siempre.
+  previewFactura: (pedidoId: number, emisorId?: number) =>
+    authedJson<PreviewFactura>(
+      `/api/alquileres/${pedidoId}/facturar/preview${emisorId ? `?emisor_id=${emisorId}` : ""}`,
+    ),
   // HTML completo del documento (mismo layout real, CAE/QR placeholder) — se embebe en un
   // <iframe src={blobUrl}>, mismo patrón que ContratoPreviewModal (obtenerContratoPreviewHtml).
-  previewFacturaHtml: async (pedidoId: number, layout: string): Promise<string> => {
-    const res = await authedFetch(
-      `/api/alquileres/${pedidoId}/facturar/preview-html?layout=${encodeURIComponent(layout)}`,
-    );
+  previewFacturaHtml: async (
+    pedidoId: number,
+    layout: string,
+    emisorId?: number,
+  ): Promise<string> => {
+    const qs = new URLSearchParams({ layout });
+    if (emisorId) qs.set("emisor_id", String(emisorId));
+    const res = await authedFetch(`/api/alquileres/${pedidoId}/facturar/preview-html?${qs}`);
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       let message = "";
@@ -211,8 +220,11 @@ export const facturacionApi = {
     }
     return res.text();
   },
-  facturarPedido: (pedidoId: number) =>
-    authedPostJson<Factura>(`/api/alquileres/${pedidoId}/facturar`, {}),
+  facturarPedido: (pedidoId: number, emisorId?: number) =>
+    authedPostJson<Factura>(
+      `/api/alquileres/${pedidoId}/facturar`,
+      emisorId ? { emisor_id: emisorId } : {},
+    ),
   listFacturasPedido: (pedidoId: number) =>
     authedJson<Factura[]>(`/api/alquileres/${pedidoId}/facturas`),
   notaCreditoFactura: (facturaId: number) =>

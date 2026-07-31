@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import { MESES, ymd, mesCells } from "@/lib/calendario-mes";
 import { fmtArs, formatFechaCorta } from "@/lib/format";
 import { Button } from "@/design-system/ui/button";
 import { SegmentedControl } from "@/design-system/ui/segmented-control";
@@ -14,24 +15,25 @@ import {
   TooltipTrigger,
 } from "@/design-system/ui/tooltip";
 import { Popover, PopoverContent, PopoverTrigger } from "@/design-system/ui/popover";
-import { adminApi, type CalendarioPedido, type PedidoEstado } from "@/lib/admin/api";
+import {
+  adminApi,
+  estudioAdminApi,
+  type CalendarioPedido,
+  type CalendarioBloqueo,
+  type PedidoEstado,
+} from "@/lib/admin/api";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
-import { estadoClase } from "@/design-system/ui/estado-color";
+import { estadoClase, estadoClaseEstudio } from "@/design-system/ui/estado-color";
+import { esPedidoEstudio } from "@/lib/tipos-pedido";
+import {
+  minutosDelDia,
+  mismoDiaCalendario,
+  ubicarEnCarriles,
+  type SegmentoHora,
+} from "@/lib/calendario-horas";
 
-const MESES = [
-  "Enero",
-  "Febrero",
-  "Marzo",
-  "Abril",
-  "Mayo",
-  "Junio",
-  "Julio",
-  "Agosto",
-  "Septiembre",
-  "Octubre",
-  "Noviembre",
-  "Diciembre",
-];
+const PX_POR_HORA_EJE = 48;
+
 const DIAS = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"];
 
 /** Estados que se muestran en la leyenda y sirven de filtro clickeable —
@@ -44,52 +46,54 @@ const LEGEND_ESTADOS: PedidoEstado[] = [
   "finalizado",
 ];
 
-const ymd = (d: Date) => {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-};
-
 type View = "mes" | "semana";
 
-/** Un pedido dentro de UNA semana del grid: en qué columna (0-6, lun-dom)
+/** Unión de lo que puede pintarse en el calendario: un pedido real, o un
+ * bloqueo del estudio que no es un pedido (slot fijo / clase de taller —
+ * `GET /admin/estudio/ocupacion`, `get_calendario` no los ve). `id` string
+ * sintético para los bloqueos (no tienen fila propia en la base). */
+type CalendarioItem =
+  | ({ kind: "pedido" } & CalendarioPedido)
+  | ({ kind: "bloqueo"; id: string } & CalendarioBloqueo);
+
+/** Un item dentro de UNA semana del grid: en qué columna (0-6, lun-dom)
  * arranca/termina EN ESA FILA, y si continúa más allá de sus bordes (la
  * misma reserva puede cruzar varias filas-semana). */
 type Segmento = {
-  pedido: CalendarioPedido;
+  item: CalendarioItem;
   colStart: number;
   colEnd: number;
   continuaIzq: boolean;
   continuaDer: boolean;
 };
 
-/** Para una semana (7 días consecutivos), calcula qué pedidos la atraviesan y
+/** Para una semana (7 días consecutivos), calcula qué items la atraviesan y
  * en qué rango de columnas. Reusa `byDay` (no recalcula fechas a mano) para
  * que la inclusión de días sea IDÉNTICA a la que ya usa el resto del widget —
  * sin esto, un desajuste de horas en fecha_desde/hasta correría el segmento
  * un día de más o de menos respecto de los chips que antes se veían por día. */
-function segmentosDeSemana(semana: Date[], byDay: Map<string, CalendarioPedido[]>): Segmento[] {
-  const rango = new Map<number, { colStart: number; colEnd: number }>();
-  const porId = new Map<number, CalendarioPedido>();
+function segmentosDeSemana(semana: Date[], byDay: Map<string, CalendarioItem[]>): Segmento[] {
+  const rango = new Map<string, { colStart: number; colEnd: number }>();
+  const porId = new Map<string, CalendarioItem>();
   semana.forEach((d, col) => {
-    for (const p of byDay.get(ymd(d)) ?? []) {
-      porId.set(p.id, p);
-      const r = rango.get(p.id);
+    for (const it of byDay.get(ymd(d)) ?? []) {
+      const key = String(it.id);
+      porId.set(key, it);
+      const r = rango.get(key);
       if (r) r.colEnd = col;
-      else rango.set(p.id, { colStart: col, colEnd: col });
+      else rango.set(key, { colStart: col, colEnd: col });
     }
   });
-  return [...rango.entries()].map(([id, { colStart, colEnd }]) => {
-    const pedido = porId.get(id)!;
+  return [...rango.entries()].map(([key, { colStart, colEnd }]) => {
+    const item = porId.get(key)!;
     return {
-      pedido,
+      item,
       colStart,
       colEnd,
       // Si el propio fecha_desde/hasta cae ANTES/DESPUÉS de esta semana, el
       // segmento está recortado (clamped) → borde plano, sigue en la fila vecina.
-      continuaIzq: new Date(pedido.fecha_desde) < semana[0],
-      continuaDer: new Date(pedido.fecha_hasta) > semana[6],
+      continuaIzq: new Date(item.fecha_desde) < semana[0],
+      continuaDer: new Date(item.fecha_hasta) > semana[6],
     };
   });
 }
@@ -118,6 +122,164 @@ function asignarCarriles(segmentos: Segmento[], maxCarriles: number) {
   return { ubicados, overflow };
 }
 
+/** "2026-09-05T08:30:00" → "08:30". Slice directo, no `Date` — son horas
+ * locales "naive" (sin offset) del backend; pasarlas por `Date` las
+ * reinterpretaría en el timezone del browser. */
+function bloqueoHora(iso: string): string {
+  return iso.slice(11, 16);
+}
+
+/** Una barra del calendario — pedido (clickeable, coloreado por estado) o
+ * bloqueo del estudio (informativo, sin click: no hay a dónde navegar). */
+function ItemBar({
+  item,
+  colStart,
+  colEnd,
+  carril,
+  continuaIzq,
+  continuaDer,
+  onNavigatePedido,
+}: {
+  item: CalendarioItem;
+  colStart: number;
+  colEnd: number;
+  carril: number;
+  continuaIzq: boolean;
+  continuaDer: boolean;
+  onNavigatePedido: (id: number) => void;
+}) {
+  const gridStyle = { gridColumn: `${colStart + 1} / ${colEnd + 2}`, gridRow: carril + 2 };
+  // Aire para que la barra no toque las líneas del grid. Un extremo que
+  // continúa en otra fila-semana SÍ pega al borde (se lee como una barra que sigue).
+  const roundedCls = cn(
+    continuaIzq ? "rounded-l-none" : "ml-1 rounded-l-md",
+    continuaDer ? "rounded-r-none" : "mr-1 rounded-r-md",
+  );
+
+  if (item.kind === "bloqueo") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            style={gridStyle}
+            className={cn(
+              "flex min-w-0 items-center self-center truncate border border-dashed border-muted-foreground/40 bg-muted/50 px-1.5 py-1 text-left text-2xs leading-tight text-muted-foreground sm:text-xs",
+              roundedCls,
+            )}
+          >
+            {continuaIzq && "◂ "}
+            {item.label}
+            {continuaDer && " ▸"}
+          </div>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-64 whitespace-normal">
+          <div className="font-semibold">{item.label}</div>
+          <div className="mt-0.5 opacity-80">
+            {bloqueoHora(item.fecha_desde)} – {bloqueoHora(item.fecha_hasta)} hs
+          </div>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  const p = item;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          onClick={() => onNavigatePedido(p.id)}
+          style={gridStyle}
+          className={cn(
+            "block min-w-0 self-center truncate px-1.5 py-1 text-left text-2xs leading-tight transition hover:opacity-80 sm:text-xs",
+            esPedidoEstudio(p) ? estadoClaseEstudio(p.estado) : estadoClase(p.estado),
+            roundedCls,
+          )}
+        >
+          {continuaIzq && "◂ "}#{p.numero_pedido ?? p.id} · {p.cliente_nombre || "Sin cliente"}
+          {continuaDer && " ▸"}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-64 whitespace-normal">
+        <div className="font-semibold">
+          #{p.numero_pedido ?? p.id} · {p.cliente_nombre || "Sin cliente"}
+        </div>
+        <div className="mt-0.5 opacity-80">
+          {formatFechaCorta(p.fecha_desde)} → {formatFechaCorta(p.fecha_hasta)}
+        </div>
+        {p.equipos && <div className="mt-0.5 opacity-80">{p.equipos}</div>}
+        <div className="mt-0.5 opacity-80">{fmtArs(p.monto_total)}</div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+/** Bloque posicionado por hora — mismo criterio de color/click que `ItemBar`,
+ *  pero dentro de la grilla de horas (vista Semana, ítems de un solo día:
+ *  turnos del Estudio + sus bloqueos). Un pedido multi-día no llega acá —
+ *  ver el partition `itemsBarra`/`itemsHora` en el componente principal. */
+function HoraBloque({
+  seg,
+  onNavigatePedido,
+}: {
+  seg: SegmentoHora<CalendarioItem>;
+  onNavigatePedido: (id: number) => void;
+}) {
+  const { item, carril, totalCarriles, top, height } = seg;
+  const widthPct = 100 / totalCarriles;
+  const style = { top, height, left: `${carril * widthPct}%`, width: `${widthPct}%` };
+  const horaLabel = `${item.fecha_desde.slice(11, 16)}–${item.fecha_hasta.slice(11, 16)}`;
+
+  if (item.kind === "bloqueo") {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            style={style}
+            className="absolute overflow-hidden rounded-md border border-dashed border-muted-foreground/40 bg-muted/50 px-1.5 py-1 text-left text-2xs leading-tight text-muted-foreground"
+          >
+            <div className="truncate font-medium">{item.label}</div>
+            <div className="truncate opacity-80">{horaLabel}</div>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-64 whitespace-normal">
+          <div className="font-semibold">{item.label}</div>
+          <div className="mt-0.5 opacity-80">{horaLabel} hs</div>
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  const p = item;
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={() => onNavigatePedido(p.id)}
+          style={style}
+          className={cn(
+            "absolute overflow-hidden rounded-md border px-1.5 py-1 text-left text-2xs leading-tight transition hover:opacity-80",
+            esPedidoEstudio(p) ? estadoClaseEstudio(p.estado) : estadoClase(p.estado),
+          )}
+        >
+          <div className="truncate font-medium">
+            #{p.numero_pedido ?? p.id} · {p.cliente_nombre || "Sin cliente"}
+          </div>
+          <div className="truncate opacity-80">{horaLabel}</div>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent className="max-w-64 whitespace-normal">
+        <div className="font-semibold">
+          #{p.numero_pedido ?? p.id} · {p.cliente_nombre || "Sin cliente"}
+        </div>
+        <div className="mt-0.5 opacity-80">{horaLabel} hs</div>
+        {p.equipos && <div className="mt-0.5 opacity-80">{p.equipos}</div>}
+        <div className="mt-0.5 opacity-80">{fmtArs(p.monto_total)}</div>
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
 export type CalendarioWidgetProps = {
   /** "compact" baja la altura de cada celda y muestra menos pedidos por día. */
   variant?: "full" | "compact";
@@ -144,7 +306,7 @@ export function CalendarioWidget({
   // Filtro por estado (clic en la leyenda). null = todos.
   const [filtroEstado, setFiltroEstado] = useState<PedidoEstado | null>(null);
 
-  const { cells, rangeStart, rangeEnd, headerLabel } = useMemo(() => {
+  const { cells, rangeStart, rangeEnd, headerLabel, semanas } = useMemo(() => {
     if (view === "semana") {
       // Lunes = 0
       const dow = (cursor.getDay() + 6) % 7;
@@ -160,32 +322,37 @@ export function CalendarioWidget({
       const label = sameMonth
         ? `${start.getDate()}–${end.getDate()} ${MESES[start.getMonth()]} ${start.getFullYear()}`
         : `${start.getDate()} ${MESES[start.getMonth()].slice(0, 3)} – ${end.getDate()} ${MESES[end.getMonth()].slice(0, 3)} ${end.getFullYear()}`;
-      return { cells: days, rangeStart: ymd(start), rangeEnd: ymd(end), headerLabel: label };
+      return {
+        cells: days,
+        rangeStart: ymd(start),
+        rangeEnd: ymd(end),
+        headerLabel: label,
+        semanas: [days],
+      };
     }
-    // Mes
-    const year = cursor.getFullYear();
-    const month = cursor.getMonth();
-    const firstDay = new Date(year, month, 1);
-    const lastDay = new Date(year, month + 1, 0);
-    const startOffset = (firstDay.getDay() + 6) % 7;
-    const gridStart = new Date(year, month, 1 - startOffset);
-    const totalCells = Math.ceil((startOffset + lastDay.getDate()) / 7) * 7;
-    const days = Array.from({ length: totalCells }, (_, i) => {
-      const d = new Date(gridStart);
-      d.setDate(gridStart.getDate() + i);
-      return d;
-    });
+    // Mes — mismo cálculo de grilla que usa AgendaMensual del Estudio.
+    const m = mesCells(cursor);
     return {
-      cells: days,
-      rangeStart: ymd(days[0]),
-      rangeEnd: ymd(days[days.length - 1]),
-      headerLabel: `${MESES[month]} ${year}`,
+      cells: m.cells,
+      rangeStart: m.rangeStart,
+      rangeEnd: m.rangeEnd,
+      headerLabel: m.headerLabel,
+      semanas: m.weeks,
     };
   }, [cursor, view]);
 
   const calQ = useQuery({
     queryKey: ["admin", "calendario", rangeStart, rangeEnd],
     queryFn: () => adminApi.getCalendario(rangeStart, rangeEnd),
+    staleTime: 30_000,
+  });
+
+  // Bloqueos del estudio (slot fijo / taller) que no son pedidos — overlay
+  // aparte, mismo rango. Si falla, el calendario de pedidos igual funciona
+  // (error silencioso, no bloqueante — es un agregado, no el dato principal).
+  const ocupQ = useQuery({
+    queryKey: ["admin", "estudio-ocupacion", rangeStart, rangeEnd],
+    queryFn: () => estudioAdminApi.getOcupacion(rangeStart, rangeEnd),
     staleTime: 30_000,
   });
 
@@ -197,21 +364,83 @@ export function CalendarioWidget({
     return filtroEstado ? data.filter((p) => p.estado === filtroEstado) : data;
   }, [calQ.data, filtroEstado]);
 
+  const hayTurnosEstudio = useMemo(() => pedidosVisibles.some(esPedidoEstudio), [pedidosVisibles]);
+
+  const bloqueosVisibles = useMemo<CalendarioItem[]>(() => {
+    const data = ocupQ.data?.bloqueos ?? [];
+    return data.map((b, i) => ({
+      kind: "bloqueo" as const,
+      id: `bloqueo-${i}-${b.fecha_desde}`,
+      ...b,
+    }));
+  }, [ocupQ.data]);
+
+  // El filtro de estado es de pedidos — los bloqueos del estudio no tienen
+  // estado, así que se agregan siempre (no forman parte de lo que el filtro
+  // esconde/muestra).
+  const itemsVisibles = useMemo<CalendarioItem[]>(() => {
+    const pedidos: CalendarioItem[] = pedidosVisibles.map((p) => ({
+      kind: "pedido" as const,
+      ...p,
+    }));
+    return [...pedidos, ...bloqueosVisibles];
+  }, [pedidosVisibles, bloqueosVisibles]);
+
+  // En vista Semana, un ítem de UN SOLO día calendario (turno del Estudio,
+  // su bloqueo) se posiciona por hora en vez de como barra de todo el día —
+  // mucho más legible (ver `lib/calendario-horas.ts`). Multi-día (la mayoría
+  // de los alquileres normales) sigue como barra, sin cambios. En Mes no hay
+  // espacio para un eje de horas — todo sigue como barra, como siempre.
+  const { itemsBarra, itemsHora } = useMemo(() => {
+    if (view !== "semana") return { itemsBarra: itemsVisibles, itemsHora: [] as CalendarioItem[] };
+    const barra: CalendarioItem[] = [];
+    const hora: CalendarioItem[] = [];
+    for (const it of itemsVisibles) {
+      (mismoDiaCalendario(it.fecha_desde, it.fecha_hasta) ? hora : barra).push(it);
+    }
+    return { itemsBarra: barra, itemsHora: hora };
+  }, [itemsVisibles, view]);
+
   const byDay = useMemo(() => {
-    const map = new Map<string, CalendarioPedido[]>();
-    for (const p of pedidosVisibles) {
-      const start = new Date(p.fecha_desde);
-      const end = new Date(p.fecha_hasta);
+    const map = new Map<string, CalendarioItem[]>();
+    for (const it of itemsBarra) {
+      const start = new Date(it.fecha_desde);
+      const end = new Date(it.fecha_hasta);
       const cur = new Date(start);
       while (cur <= end) {
         const k = ymd(cur);
         if (!map.has(k)) map.set(k, []);
-        map.get(k)!.push(p);
+        map.get(k)!.push(it);
         cur.setDate(cur.getDate() + 1);
       }
     }
     return map;
-  }, [pedidosVisibles]);
+  }, [itemsBarra]);
+
+  const itemsHoraPorDia = useMemo(() => {
+    const map = new Map<string, CalendarioItem[]>();
+    for (const it of itemsHora) {
+      const k = it.fecha_desde.slice(0, 10);
+      if (!map.has(k)) map.set(k, []);
+      map.get(k)!.push(it);
+    }
+    return map;
+  }, [itemsHora]);
+
+  // Rango de horas del eje: ajustado a lo que hay que mostrar esta semana
+  // (con un poco de aire), no un horario fijo — así una clase a las 7 u
+  // otra a las 23 entran igual sin recortarse. `null` = no hay nada de un
+  // solo día esta semana → la sección de horas ni se renderiza.
+  const rangoHoras = useMemo(() => {
+    if (itemsHora.length === 0) return null;
+    let min = 24;
+    let max = 0;
+    for (const it of itemsHora) {
+      min = Math.min(min, Math.floor(minutosDelDia(it.fecha_desde) / 60));
+      max = Math.max(max, Math.ceil(minutosDelDia(it.fecha_hasta) / 60));
+    }
+    return { desde: Math.max(0, min), hasta: Math.min(24, Math.max(max, min + 1)) };
+  }, [itemsHora]);
 
   const cursorMonth = cursor.getMonth();
   const compact = variant === "compact";
@@ -225,13 +454,6 @@ export function CalendarioWidget({
   // La barra se centra en su carril (self-center) → el sobrante es el aire
   // entre barras apiladas.
   const altoCarril = compact ? 22 : 28;
-
-  // Filas-semana de 7 días — la vista "semana" ya es una sola.
-  const semanas = useMemo(() => {
-    const out: Date[][] = [];
-    for (let i = 0; i < cells.length; i += 7) out.push(cells.slice(i, i + 7));
-    return out;
-  }, [cells]);
 
   const goPrev = () => {
     const d = new Date(cursor);
@@ -251,7 +473,11 @@ export function CalendarioWidget({
     <div className="space-y-3">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-2">
         <div className="font-display text-lg md:text-xl text-ink">{headerLabel}</div>
-        <div className="flex items-center gap-2">
+        {/* `flex-wrap`: `size="icon"` creció de 36 a 44px (gate táctil mobile)
+            — a 320px esta fila ya no entraba en una sola línea sin recorte.
+            Envolver a una segunda línea es un fallback seguro; a 375px+ (el
+            ancho real que importa) sigue entrando en una sola fila. */}
+        <div className="flex flex-wrap items-center gap-2">
           {!hideViewSwitch && (
             <SegmentedControl
               variant="pill"
@@ -340,46 +566,20 @@ export function CalendarioWidget({
                     </div>
                   );
                 })}
-                {ubicados.map(
-                  ({ pedido: p, colStart, colEnd, carril, continuaIzq, continuaDer }) => (
-                    <Tooltip key={p.id}>
-                      <TooltipTrigger asChild>
-                        <button
-                          onClick={() =>
-                            navigate({ to: "/admin/pedidos/$id", params: { id: String(p.id) } })
-                          }
-                          style={{
-                            gridColumn: `${colStart + 1} / ${colEnd + 2}`,
-                            gridRow: carril + 2,
-                          }}
-                          className={cn(
-                            "block min-w-0 self-center truncate px-1.5 py-1 text-left text-2xs leading-tight transition hover:opacity-80 sm:text-xs",
-                            estadoClase(p.estado),
-                            // Aire para que la barra no toque las líneas del grid.
-                            // Un extremo que continúa en otra fila-semana SÍ pega
-                            // al borde (se lee como una sola barra que sigue).
-                            continuaIzq ? "rounded-l-none" : "ml-1 rounded-l-md",
-                            continuaDer ? "rounded-r-none" : "mr-1 rounded-r-md",
-                          )}
-                        >
-                          {continuaIzq && "◂ "}#{p.numero_pedido ?? p.id} ·{" "}
-                          {p.cliente_nombre || "Sin cliente"}
-                          {continuaDer && " ▸"}
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent className="max-w-64 whitespace-normal">
-                        <div className="font-semibold">
-                          #{p.numero_pedido ?? p.id} · {p.cliente_nombre || "Sin cliente"}
-                        </div>
-                        <div className="mt-0.5 opacity-80">
-                          {formatFechaCorta(p.fecha_desde)} → {formatFechaCorta(p.fecha_hasta)}
-                        </div>
-                        {p.equipos && <div className="mt-0.5 opacity-80">{p.equipos}</div>}
-                        <div className="mt-0.5 opacity-80">{fmtArs(p.monto_total)}</div>
-                      </TooltipContent>
-                    </Tooltip>
-                  ),
-                )}
+                {ubicados.map((u) => (
+                  <ItemBar
+                    key={u.item.id}
+                    item={u.item}
+                    colStart={u.colStart}
+                    colEnd={u.colEnd}
+                    carril={u.carril}
+                    continuaIzq={u.continuaIzq}
+                    continuaDer={u.continuaDer}
+                    onNavigatePedido={(id) =>
+                      navigate({ to: "/admin/pedidos/$id", params: { id: String(id) } })
+                    }
+                  />
+                ))}
                 {overflowPorDia.map((n, i) => {
                   if (n <= 0) return null;
                   const d = semana[i];
@@ -400,26 +600,41 @@ export function CalendarioWidget({
                       <PopoverContent align="start" className="w-72 p-2">
                         <div className="mb-1.5 px-1 text-xs font-semibold text-ink">
                           {d.getDate()} {MESES[d.getMonth()].slice(0, 3)} · {delDia.length}{" "}
-                          {delDia.length === 1 ? "pedido" : "pedidos"}
+                          {delDia.length === 1 ? "evento" : "eventos"}
                         </div>
                         <div className="flex max-h-72 flex-col gap-0.5 overflow-auto">
-                          {delDia.map((p) => (
-                            <button
-                              key={p.id}
-                              onClick={() =>
-                                navigate({ to: "/admin/pedidos/$id", params: { id: String(p.id) } })
-                              }
-                              className="flex items-center gap-2 rounded-sm px-1.5 py-1 text-left text-xs transition hover:bg-muted"
-                            >
-                              <span className="shrink-0 font-mono text-2xs text-muted-foreground">
-                                #{p.numero_pedido ?? p.id}
-                              </span>
-                              <span className="flex-1 truncate">
-                                {p.cliente_nombre || "Sin cliente"}
-                              </span>
-                              <EstadoBadge estado={p.estado} className="shrink-0" />
-                            </button>
-                          ))}
+                          {delDia.map((it) =>
+                            it.kind === "bloqueo" ? (
+                              <div
+                                key={it.id}
+                                className="flex items-center gap-2 rounded-sm px-1.5 py-1 text-left text-xs text-muted-foreground"
+                              >
+                                <span className="flex-1 truncate">{it.label}</span>
+                                <span className="shrink-0 font-mono text-2xs">
+                                  {bloqueoHora(it.fecha_desde)}–{bloqueoHora(it.fecha_hasta)}
+                                </span>
+                              </div>
+                            ) : (
+                              <button
+                                key={it.id}
+                                onClick={() =>
+                                  navigate({
+                                    to: "/admin/pedidos/$id",
+                                    params: { id: String(it.id) },
+                                  })
+                                }
+                                className="flex items-center gap-2 rounded-sm px-1.5 py-1 text-left text-xs transition hover:bg-muted"
+                              >
+                                <span className="shrink-0 font-mono text-2xs text-muted-foreground">
+                                  #{it.numero_pedido ?? it.id}
+                                </span>
+                                <span className="flex-1 truncate">
+                                  {it.cliente_nombre || "Sin cliente"}
+                                </span>
+                                <EstadoBadge estado={it.estado} className="shrink-0" />
+                              </button>
+                            ),
+                          )}
                         </div>
                       </PopoverContent>
                     </Popover>
@@ -431,14 +646,96 @@ export function CalendarioWidget({
         </div>
       </TooltipProvider>
 
+      {view === "semana" && rangoHoras && (
+        <TooltipProvider delayDuration={200}>
+          <div className="overflow-x-auto rounded-lg border hairline bg-background">
+            <div className="grid min-w-[720px] grid-cols-[48px_repeat(7,1fr)]">
+              <div
+                className="relative"
+                style={{ height: (rangoHoras.hasta - rangoHoras.desde) * PX_POR_HORA_EJE }}
+              >
+                {Array.from(
+                  { length: rangoHoras.hasta - rangoHoras.desde },
+                  (_, i) => rangoHoras.desde + i,
+                ).map((h) => (
+                  <div
+                    key={h}
+                    className="absolute right-1 -translate-y-1/2 font-mono text-2xs text-muted-foreground"
+                    style={{ top: (h - rangoHoras.desde) * PX_POR_HORA_EJE }}
+                  >
+                    {String(h).padStart(2, "0")}h
+                  </div>
+                ))}
+              </div>
+              {cells.map((d) => {
+                const key = ymd(d);
+                const items = itemsHoraPorDia.get(key) ?? [];
+                const segmentos = ubicarEnCarriles(items, rangoHoras.desde, PX_POR_HORA_EJE);
+                return (
+                  <div
+                    key={key}
+                    className="relative border-l hairline"
+                    style={{ height: (rangoHoras.hasta - rangoHoras.desde) * PX_POR_HORA_EJE }}
+                  >
+                    {Array.from(
+                      { length: rangoHoras.hasta - rangoHoras.desde },
+                      (_, i) => rangoHoras.desde + i,
+                    ).map((h) => (
+                      <div
+                        key={h}
+                        className="absolute left-0 right-0 border-t hairline"
+                        style={{ top: (h - rangoHoras.desde) * PX_POR_HORA_EJE }}
+                      />
+                    ))}
+                    {segmentos.map((seg) => (
+                      <HoraBloque
+                        key={`${seg.item.kind}-${seg.item.id}`}
+                        seg={seg}
+                        onNavigatePedido={(id) =>
+                          navigate({ to: "/admin/pedidos/$id", params: { id: String(id) } })
+                        }
+                      />
+                    ))}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </TooltipProvider>
+      )}
+
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div className="text-xs text-muted-foreground">
           {calQ.isLoading
             ? "Cargando…"
             : `${pedidosVisibles.length} ${pedidosVisibles.length === 1 ? "pedido" : "pedidos"} en pantalla`}
+          {bloqueosVisibles.length > 0 && (
+            <span className="text-muted-foreground/70">
+              {" "}
+              · +{bloqueosVisibles.length} del estudio
+            </span>
+          )}
         </div>
         {showLegend && (
           <div className="flex flex-wrap items-center gap-1.5 text-xs">
+            {bloqueosVisibles.length > 0 && (
+              <span className="mr-1 inline-flex items-center gap-1.5 border-r hairline pr-2 text-2xs text-muted-foreground">
+                <span className="inline-block h-2.5 w-4 rounded-sm border border-dashed border-muted-foreground/50 bg-muted/50" />
+                Estudio (slot fijo / taller)
+              </span>
+            )}
+            {hayTurnosEstudio && (
+              <span className="mr-1 inline-flex items-center gap-2.5 border-r hairline pr-2 text-2xs text-muted-foreground">
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-2.5 w-4 rounded-sm border border-[var(--color-estudio)]/40 bg-[var(--color-estudio-soft)]" />
+                  Estudio: por venir
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block h-2.5 w-4 rounded-sm border border-[var(--color-estudio)] bg-[var(--color-estudio)]" />
+                  realizado
+                </span>
+              </span>
+            )}
             {LEGEND_ESTADOS.map((e) => {
               const activo = filtroEstado === e;
               return (

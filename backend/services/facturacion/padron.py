@@ -49,7 +49,7 @@ _PADRON_PROD = "https://aws.afip.gov.ar/sr-padron/webservices/personaServiceA5?w
 # concurrentes dando de alta el primer perfil con CUITs DISTINTOS ven ambos
 # "todavía no tiene ninguno" y computan `es_default=True` los dos; el segundo
 # INSERT viola `uq_cliente_perfiles_fiscales_default` sin capturar → 500 crudo.
-# Mismo patrón que `_ADVISORY_NS_PEDIDO` (routes/alquileres/core.py, 5390412),
+# Mismo patrón que `_ADVISORY_NS_PEDIDO` (services/alquileres/commands/creacion.py, 5390412),
 # `_ADVISORY_NS_ESTUDIO` (5390413), `_ADVISORY_NS_CONTAB_MES` (5390420) y
 # `_ADVISORY_NS_REPORTES_MES` (5390421); siguiente número libre.
 _ADVISORY_NS_PERFIL_FISCAL = 5390422

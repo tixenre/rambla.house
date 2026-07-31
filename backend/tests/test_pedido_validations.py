@@ -62,8 +62,9 @@ class MinimalFakeConn:
 
 @pytest.fixture
 def fake_db(monkeypatch):
-    """Reemplaza routes.alquileres.core.get_db por una conn fake."""
-    monkeypatch.setattr("routes.alquileres.core.get_db", lambda: MinimalFakeConn())
+    """Reemplaza get_db por una conn fake donde `create_pedido` la resuelve
+    (services.alquileres.commands.creacion, #1312 Fase 4 — antes routes.alquileres.core)."""
+    monkeypatch.setattr("services.alquileres.commands.creacion.get_db", lambda: MinimalFakeConn())
     yield
 
 
@@ -214,3 +215,16 @@ class TestPedidoCreateSchema:
     def test_cantidad_minimo_uno_acepta(self):
         item = PedidoItem(equipo_id=1, cantidad=1, precio_jornada=1000)
         assert item.cantidad == 1
+
+    def test_item_de_catalogo_puede_cobrarse_fijo(self):
+        # Talleres (`_regenerar_pedidos_taller`): el centinela del Estudio es
+        # un ítem de catálogo (equipo_id presente) con cobro_modo='fijo'. El
+        # front no expone el control para elegirlo a mano en una línea de
+        # catálogo, pero el pedido SÍ trae esta combinación de fábrica y debe
+        # sobrevivir un guardado del editor genérico.
+        item = PedidoItem(equipo_id=1, cantidad=1, precio_jornada=35000, cobro_modo="fijo")
+        assert item.cobro_modo == "fijo"
+
+    def test_linea_personalizada_sin_nombre_sigue_rechazada(self):
+        with pytest.raises(Exception):
+            PedidoItem(equipo_id=None, cantidad=1, precio_jornada=1000, nombre_libre="")

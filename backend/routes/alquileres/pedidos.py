@@ -18,8 +18,14 @@ from fastapi import Request, HTTPException, Query, BackgroundTasks
 from database import get_db, row_to_dict
 from auth.guards import require_admin
 from busqueda import construir
+from pedidos_vinculados import SIN_PRINCIPAL_SQL, es_turno_vinculado
 from rate_limit import limiter, ADMIN_WRITE_LIMIT
 from services.facturacion.repo import pedidos_con_factura_emitida
+from services.pedidos_enriquecimiento import (
+    _batch_count_turnos_vinculados,
+    _batch_plata_turnos_vinculados,
+)
+from services.alquileres.queries.detalle import _pedido_tiene_contenido, _tiene_saldo_pendiente
 from reservas import validar_stock as _check_stock
 from routes.alquileres.core import (
     router,
@@ -35,6 +41,7 @@ from routes.alquileres.core import (
     _apply_pedido_items,
 )
 from routes.alquileres.transiciones import ESTADOS_QUE_RESERVAN, cambiar_estado
+from services.alquileres.commands.pedido import _delete_pedido
 from services.comunicacion import notificar_pedido
 
 logger = logging.getLogger(__name__)
@@ -73,7 +80,11 @@ def list_pedidos(
     require_admin(request)
     offset = (page - 1) * per_page
     params: list = []
-    where  = "WHERE 1=1"
+    # Un turno del Estudio vinculado (`pedido_principal_id`) no es una venta
+    # propia — se administra desde "Turnos del Estudio" en la página de su
+    # principal (#1308). Sin este filtro aparecía como fila propia acá,
+    # duplicando la venta a la vista del admin.
+    where  = f"WHERE {SIN_PRINCIPAL_SQL}"
 
     with get_db() as conn:
         if estado:
@@ -122,14 +133,38 @@ def list_pedidos(
 
         col = SORT_COLS.get(sort_by, "p.numero_pedido")
         direction = "ASC" if sort_dir == "asc" else "DESC"
-        # Poner "Registro manual" (sin número de pedido) al final.
-        has_numero = "(p.numero_pedido IS NOT NULL)"
-        order = f"{has_numero} DESC, {col} {direction} NULLS LAST"
+        # Tres grupos, en este orden:
+        #   0. BORRADORES — son lo que se está armando ahora mismo, y desde que
+        #      nacen sin número (2026-07-29) caían en el mismo saco que los
+        #      registros manuales viejos: al fondo de todo, después de ~200
+        #      pedidos, o sea fuera de la primera página. El dueño no los
+        #      encontraba ("este borrador no me aparece en el listado").
+        #   1. Los pedidos con número — la lista de siempre.
+        #   2. "Registro manual" sin número — histórico, al final, como estaba.
+        grupo = (
+            "(CASE WHEN p.estado = 'borrador' THEN 0"
+            "      WHEN p.numero_pedido IS NOT NULL THEN 1 ELSE 2 END)"
+        )
+        # Dentro de los borradores, el más nuevo primero (no tienen número con
+        # el cual desempatar). El CASE deja NULL para todo lo demás → con NULLS
+        # LAST empatan entre sí y caen al criterio de siempre, así el orden del
+        # resto de la lista queda EXACTAMENTE como estaba.
+        recientes_borrador = "(CASE WHEN p.estado = 'borrador' THEN p.created_at END)"
+        order = (
+            f"{grupo} ASC, {recientes_borrador} DESC NULLS LAST, {col} {direction} NULLS LAST"
+        )
         # secundario: número descendente para desempate
         if col != "p.numero_pedido":
             order += ", p.numero_pedido DESC NULLS LAST"
 
         total = conn.execute(f"SELECT COUNT(*) FROM alquileres p {where}", params).fetchone()[0]
+        # Los borradores se cuentan APARTE: son presupuestos rápidos, no ventas
+        # (decisión del dueño) — siguen listándose junto al resto, pero el
+        # "N pedidos" del header no los suma. `total` NO cambia: es la verdad de
+        # la paginación (cuántas filas hay para recorrer), no un número de negocio.
+        borradores = conn.execute(
+            f"SELECT COUNT(*) FROM alquileres p {where} AND p.estado = 'borrador'", params
+        ).fetchone()[0]
         rows  = conn.execute(
             f"SELECT p.* FROM alquileres p {where} ORDER BY {order} LIMIT %s OFFSET %s",
             params + [per_page, offset]
@@ -141,6 +176,9 @@ def list_pedidos(
 
         # Pedidos con solicitud de modificación pendiente — para badge en UI.
         pedido_ids = [p["id"] for p in pedidos]
+        # Turnos del Estudio vinculados por pedido — para el badge de la
+        # lista (el turno en sí ya no aparece como fila propia, ver `where`).
+        turnos_count_map = _batch_count_turnos_vinculados(conn, pedido_ids)
         # `facturado` = tiene factura PRINCIPAL emitida. La puerta única
         # `pedidos_con_factura_emitida` excluye las notas de crédito (una NC
         # también es una fila 'emitida' → un EXISTS crudo marcaría "facturado" un
@@ -156,12 +194,37 @@ def list_pedidos(
             ).fetchall():
                 pendientes.add(r["pedido_id"])
 
+        turnos_plata_map = _batch_plata_turnos_vinculados(conn, pedido_ids)
+
         for p in pedidos:
             p["items"] = items_map.get(p["id"], [])
             p["tiene_solicitud_pendiente"] = p["id"] in pendientes
             p["facturado"] = p["id"] in facturados
+            p["turnos_vinculados_count"] = turnos_count_map.get(p["id"], 0)
+            # Mismo campo que expone el detalle (`_get_alquiler_detail`) — sin
+            # query extra, reusa `items`/`turnos_count_map` ya batcheados.
+            p["tiene_contenido"] = _pedido_tiene_contenido(p["items"], p["turnos_vinculados_count"])
+            # Con los montos DE LA FILA (antes de combinar con el turno abajo)
+            # — mismos que ve `cambiar_estado` (SELECT * FOR UPDATE de la fila
+            # individual, sin combinar), así que el botón "Finalizar" del
+            # front bloquea EXACTAMENTE lo mismo que el backend rechazaría.
+            p["saldo_pendiente"] = _tiene_saldo_pendiente(p["monto_total"], p["monto_pagado"])
+            # La plata del turno se SUMA a la del pedido (#1308: una sola venta).
+            # `monto_total`/`monto_pagado` de la fila quedan pisados con el
+            # combinado — es lo que la lista tiene que leer para no contradecir
+            # al detalle, a la factura y a Cuentas por cobrar, que ya combinan.
+            t_total, t_pagado = turnos_plata_map.get(p["id"], (0, 0))
+            if t_total or t_pagado:
+                p["monto_total"] = (p["monto_total"] or 0) + t_total
+                p["monto_pagado"] = (p["monto_pagado"] or 0) + t_pagado
 
-        return {"total": total, "page": page, "per_page": per_page, "items": pedidos}
+        return {
+            "total": total,
+            "borradores": borradores,
+            "page": page,
+            "per_page": per_page,
+            "items": pedidos,
+        }
 
 
 @router.get("/alquileres/{id}")
@@ -175,15 +238,11 @@ def get_pedido(id: int, request: Request):
 @router.delete("/alquileres/{id}", status_code=204)
 @limiter.limit(ADMIN_WRITE_LIMIT)
 def delete_pedido(id: int, request: Request):
+    """Elimina un pedido (o un turno del Estudio vinculado). Ver `_delete_pedido`."""
     require_admin(request)
     with get_db() as conn:
         try:
-            if not conn.execute("SELECT id FROM alquileres WHERE id=%s", (id,)).fetchone():
-                raise HTTPException(404, "Pedido no encontrado")
-            # Borrar ítems, pagos e historicos asociados (FK cascade si está activada, pero por las dudas)
-            conn.execute("DELETE FROM alquiler_items  WHERE pedido_id=%s", (id,))
-            conn.execute("DELETE FROM alquiler_pagos  WHERE pedido_id=%s", (id,))
-            conn.execute("DELETE FROM alquileres       WHERE id=%s",        (id,))
+            _delete_pedido(conn, id)
             conn.commit()
         except Exception:
             logger.error("Error eliminando pedido %s", id, exc_info=True)
@@ -206,19 +265,33 @@ def update_pedido(id: int, data: PedidoEstado, request: Request, background: Bac
             resultado = cambiar_estado(conn, id, data.estado, es_admin=True, actor="system")
             conn.commit()
             pedido = _get_alquiler_detail(conn, id)
+            # Bolt-on, mismo patrón que `promo_advertencia`: si `id` es un
+            # pedido principal, la cascada a sus turnos vinculados (#1308) ya
+            # corrió dentro de `cambiar_estado` — acá solo se propaga el
+            # resultado para que el admin vea cuál turno no pudo avanzar.
+            pedido["turnos_vinculados_sin_avanzar"] = resultado.get("turnos_vinculados_sin_avanzar", [])
         except Exception:
             logger.error("Error actualizando estado del pedido %s", id, exc_info=True)
             conn.rollback()
             raise
 
-    # Notif al cliente cuando pasamos a 'confirmado' (solo si veníamos de otro
-    # estado — no re-mandamos si ya estaba confirmado). El evento sale por la capa
-    # única de comunicación: mail (con el .ics, gateado por cliente_email) + WhatsApp
-    # (por opt-in/E.164), según el registro.
+    # Notif al cliente cuando pasamos a 'confirmado' (solo si veníamos de
+    # otro estado — no re-mandamos si ya estaba confirmado). El evento sale por la
+    # capa única de comunicación: WhatsApp + el mail que lleva el `.ics` (estrategia
+    # AMBOS del registro).
+    # Un turno del Estudio vinculado NO manda aviso propio (#1308): es la misma
+    # venta que su principal, que ya mandó el suyo — el cliente no conoce esa
+    # fila. (La cascada nunca llegaba acá: llama `cambiar_estado` directo, sin
+    # pasar por el endpoint; este guard cubre el PATCH manual al turno, que el
+    # gate de FLOW permite cuando iguala al principal.)
+    # NO se gatea por `cliente_email`: con el plan A/B el canal lo decide el
+    # despachador — un cliente con WhatsApp y sin mail igual tiene que enterarse
+    # (`_mail_cliente` ya se saltea solo si no hay dirección).
     if (
         pedido
         and resultado["estado_nuevo"] == "confirmado"
         and resultado["estado_anterior"] != "confirmado"
+        and not es_turno_vinculado(pedido)
     ):
         notificar_pedido("pedido_confirmado", pedido, background=background)
     return pedido

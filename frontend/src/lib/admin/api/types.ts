@@ -565,8 +565,8 @@ export type EquipoPendienteCompat = {
 };
 
 // Pagos: destinatario (a quién se cobró) y método. Espeja las constantes del
-// backend (`routes/alquileres.py`); los defaults se aplican en el modal.
-export const DESTINATARIOS_PAGO = ["Rambla", "Tincho", "Pablo"] as const;
+// backend (`contabilidad/constants.py::COBRADORES`); los defaults se aplican en el modal.
+export const DESTINATARIOS_PAGO = ["Rental", "Tincho", "Pablo", "Estudio"] as const;
 export const METODOS_PAGO = ["transferencia", "efectivo"] as const;
 
 export interface PagoLogRow {
@@ -776,8 +776,10 @@ export interface ReporteMensual {
   devengado: { total: number; pedidos: number; por_socio: Record<string, number> };
   cobrado: { por_socio: Record<string, number>; total: number };
   gastos: { total: number; por_categoria: { categoria: string; monto: number }[] };
-  /** Lo facturado que NO es de Rambla (parte de los dueños): un costo, no ganancia. */
+  /** Lo facturado que NO es de Rental (parte de los dueños): un costo, no ganancia. */
   comisiones_duenos: number;
+  /** Lo facturado que es del Estudio (otra unidad de negocio, no una comisión). */
+  parte_estudio: number;
   ganancia_neta: number;
   socios_mes: {
     cargos: Record<string, number>;
@@ -895,10 +897,23 @@ export type CalendarioPedido = {
   numero_pedido: number | null;
   cliente_nombre: string | null;
   estado: PedidoEstado;
+  /** "diaria" (default) | "estudio"/"estudio_fijo" | "taller" — ver
+   *  `lib/tipos-pedido.ts`. Distingue el color de un turno del Estudio en el
+   *  calendario general. */
+  tipo?: "diaria" | "estudio" | "estudio_fijo" | "taller";
   fecha_desde: string;
   fecha_hasta: string;
   monto_total: number;
   equipos: string | null;
+};
+
+/** Bloqueo del estudio que no es un pedido (slot fijo recurrente o clase de
+ * taller publicada) — overlay del calendario admin, GET /admin/estudio/ocupacion. */
+export type CalendarioBloqueo = {
+  tipo: "slot_fijo" | "taller";
+  label: string;
+  fecha_desde: string;
+  fecha_hasta: string;
 };
 
 /** Una fila agregada de búsquedas: un término normalizado con cuántas veces se
@@ -994,6 +1009,24 @@ export type EstadisticasData = {
   };
   por_dueno: { dueno: string; total_ars: number; items: number }[];
   favoritos_equipo?: { equipo: string; total_favoritos: number; clientes_unicos: number }[];
+  /** Economía separada del Estudio (#1283 Fase 7) — turnos reales +
+   *  meses de slot fijo, aparte de las tarjetas de rental de arriba. */
+  estudio: {
+    totales: {
+      total_turnos: number;
+      total_meses_slot_fijo: number;
+      total_clientes: number;
+      total_ars: number;
+      horas_vendidas: number;
+    };
+    por_mes: {
+      mes: string;
+      turnos: number;
+      meses_slot_fijo: number;
+      total_ars: number;
+      horas_vendidas: number;
+    }[];
+  };
 };
 
 export type Cliente = {
@@ -1090,12 +1123,35 @@ export type PedidoPago = {
   monto: number;
   concepto: string | null;
   fecha: string;
+  /** A quién entró la plata y cómo. El backend los devuelve desde siempre
+   *  (`SELECT * FROM alquiler_pagos`) y el modal de cobro OBLIGA a elegirlos,
+   *  pero el tipo no los declaraba y la ficha del pedido no los mostraba: se
+   *  elegía "Cobró: Tincho / efectivo" y quedaba invisible acá, había que
+   *  irse a Finanzas para saber quién tiene esa plata. */
+  destinatario?: string | null;
+  metodo?: string | null;
   created_at?: string;
   created_by?: string | null;
   anulado?: boolean;
   anulado_por?: string | null;
   anulado_at?: string | null;
   anulado_motivo?: string | null;
+};
+
+/** Una clase real de una edición de taller — mismo shape que
+ *  `services.talleres.queries.clases._clase_dict` (backend). */
+export type ClaseTallerPedido = {
+  id: number;
+  fecha: string;
+  hora_inicio_min: number;
+  hora_fin_min: number;
+  hora_inicio_str: string;
+  hora_fin_str: string;
+  titulo: string;
+  descripcion: string;
+  nota: string;
+  portada_media_id: number | null;
+  portada_url: string;
 };
 
 export type Pedido = {
@@ -1132,6 +1188,74 @@ export type Pedido = {
   descuento_origen?: "manual" | "cliente" | "jornadas" | "ninguno" | null;
   notas: string | null;
   created_at?: string;
+  /** "diaria" (default, alquiler normal) | "estudio"/"estudio_fijo" (turno o
+   *  slot mensual del Estudio, #1283) | "taller" (resumen mensual de una
+   *  edición, ver `_regenerar_pedidos_taller`) — ver `lib/tipos-pedido.ts`.
+   *  Ítems/fechas de un pedido del Estudio se editan desde Estudio → Reservas;
+   *  un pedido de taller (Fase 1, #1308) también las tiene blindadas —
+   *  fecha/ítem-auto rechazan el editor genérico, aunque sí permite agregar
+   *  una línea nueva (matrícula). */
+  tipo?: "diaria" | "estudio" | "estudio_fijo" | "taller";
+  /** Presente solo si `tipo === "taller"`: la edición que lo generó. */
+  taller_edicion_id?: number | null;
+  /** Presente solo en un turno del Estudio creado desde la página de un
+   *  pedido de alquiler normal (#1308, sección "Reserva del Estudio" en el
+   *  pedido principal) — el pedido del que "cuelga". `cliente_id`/nombre del
+   *  turno se heredan SIEMPRE de este pedido (lo fuerza el backend, nunca
+   *  desincroniza). `null`/ausente = turno sin vincular (el caso normal). */
+  pedido_principal_id?: number | null;
+  /** Breadcrumb liviano de vuelta al pedido principal — solo en el detalle
+   *  (`getPedido`) de un turno vinculado. */
+  pedido_principal?: {
+    id: number;
+    numero_pedido: number | null;
+    cliente_nombre: string | null;
+  } | null;
+  /** Solo presente en el detalle de un pedido de alquiler normal: los turnos
+   *  del Estudio vinculados (#1308) — mismo shape que `PedidoGeneradoEdicion`
+   *  (Talleres → Pedidos). Vacío/ausente = sin turnos vinculados. */
+  turnos_estudio_vinculados?: PedidoGeneradoEdicion[];
+  /** Solo presente en `GET /alquileres` (la lista): cuántos turnos del
+   *  Estudio (no cancelados) tiene vinculados este pedido — el turno en sí
+   *  ya no aparece como fila propia ahí, esto es la señal de que existen. */
+  turnos_vinculados_count?: number;
+  /** ¿Tiene contenido real — al menos un ítem de alquiler O un turno del
+   *  Estudio vinculado activo? Lo calcula el backend
+   *  (`_pedido_tiene_contenido`, services/alquileres/queries/detalle.py) en
+   *  tanto el detalle como la lista — el front lo usa tal cual (`blockReason`,
+   *  `lib/pedido-estados.ts`) en vez de mirar `items.length` por su cuenta,
+   *  que bloqueaba para siempre un pedido "2 horas de estudio y nada más"
+   *  (hallazgo real, #1313/#1314-adjacent). */
+  tiene_contenido: boolean;
+  /** ¿Todavía tiene plata por cobrar? Lo calcula el backend
+   *  (`_tiene_saldo_pendiente`, services/alquileres/queries/detalle.py) sobre
+   *  monto_total/monto_pagado de la FILA individual — el front lo usa tal
+   *  cual (`blockReason`) para bloquear "Cobrar saldo y finalizar" en vez de
+   *  restar los montos por su cuenta; el gate real vive en el backend
+   *  (`cambiar_estado`). Antes nada lo chequeaba: el botón dejaba marcar
+   *  Finalizado un pedido real sin cobrar (hallazgo del dueño, 2026-07-30). */
+  saldo_pendiente: boolean;
+  /** Solo presente en la respuesta de `PATCH /alquileres/{id}` cuando `id` es
+   *  un pedido PRINCIPAL con turnos vinculados (#1308, cascada de estado
+   *  "avanzan juntos"): qué turno no pudo seguir el mismo paso (bloqueado por
+   *  una validación de negocio propia, ej. sin ítems) — el pedido principal
+   *  SIGUE avanzando igual, esto es solo una advertencia a mostrar. Vacío =
+   *  todos los turnos avanzaron sin problema (o no hay turnos vinculados). */
+  turnos_vinculados_sin_avanzar?: {
+    turno_id: number;
+    numero_pedido: number | null;
+    error: string;
+  }[];
+  /** Solo presente en el detalle (`getPedido`) de un pedido de taller: las
+   *  clases REALES (fecha + franja horaria) de la edición — la verdad
+   *  temporal que `fecha_desde`/`fecha_hasta` no representan (esas son el mes
+   *  contable completo). Vacío para cualquier otro tipo. Bug real #445. */
+  clases_taller?: ClaseTallerPedido[];
+  /** Presente solo en la respuesta de crear/editar un turno del Estudio: si
+   *  la promo (combo) se reservó con algún componente sin stock — best-effort,
+   *  nunca bloquea la reserva, pero el admin/cliente debe saberlo. `null`/
+   *  ausente = todo lo de la promo estaba disponible. */
+  promo_advertencia?: string | null;
   items: PedidoItem[];
   pagos?: PedidoPago[];
   /** True si hay una `solicitudes_modificacion` con estado='pendiente' para
@@ -1176,7 +1300,11 @@ export type PedidoHistorialItem = {
 };
 
 export type PedidosListResp = {
+  /** Filas totales del filtro — la verdad de la PAGINACIÓN, incluye borradores. */
   total: number;
+  /** Cuántas de esas filas son borradores. Un borrador es un presupuesto rápido,
+   *  no una venta: se lista igual, pero no suma al "N pedidos" del header. */
+  borradores?: number;
   page: number;
   per_page: number;
   items: Pedido[];
@@ -1220,10 +1348,21 @@ export type EstudioConfig = {
   close_hour: number;
   buffer_horas: number;
   anticipacion_min_horas: number;
-  pack_activo: boolean;
+  // pack_nombre/pack_precio: defaults de una-vez leídos por
+  // crear_promo_desde_pack — ya no tienen UI de edición (Fase 8, #1283).
+  // pack_descripcion SIGUE viva: es la descripción de la promo actual
+  // (_promo_info la reusa), editable desde PromoSection.
   pack_nombre: string;
   pack_descripcion: string;
   pack_precio: number;
+  promo_combo_id: number | null;
+  promo?: EstudioPromo | null;
+  /** Add-on independiente "recién pintado" — cargo fijo opcional, se suma a
+   *  cualquier elección de con_promo (no la reemplaza). 0 = sin cargar todavía. */
+  precio_pintura_reciente: number;
+  /** Anticipación PROPIA del add-on "recién pintado" — se exige ADEMÁS de
+   *  `anticipacion_min_horas`, no en su lugar. 0 = sin restricción extra. */
+  anticipacion_pintura_horas: number;
   features: Array<{ label: string; value: string }> | null;
   faq: Array<{ q: string; a: string }> | null;
   direccion: string;
@@ -1234,6 +1373,16 @@ export type EstudioConfig = {
   updated_at: string | null;
   fotos: EstudioFoto[];
   trabajos: EstudioTrabajo[];
+};
+
+/** La promo de equipos (combo real que reemplaza al pack, #1283 Fase 5). */
+export type EstudioPromo = {
+  equipo_id: number;
+  nombre: string;
+  descripcion: string;
+  foto_url: string | null;
+  precio: number;
+  disponible?: boolean;
 };
 
 export type EstudioTrabajoFoto = {
@@ -1315,10 +1464,9 @@ export type EstudioInput = {
   close_hour?: number;
   buffer_horas?: number;
   anticipacion_min_horas?: number;
-  pack_activo?: boolean;
-  pack_nombre?: string;
+  precio_pintura_reciente?: number;
+  anticipacion_pintura_horas?: number;
   pack_descripcion?: string;
-  pack_precio?: number;
   features_json?: string;
   faq_json?: string;
   direccion?: string;
@@ -1343,12 +1491,89 @@ export type EstudioSlotFijo = {
 
 export type EstudioSlotInput = Omit<EstudioSlotFijo, "id">;
 
-export type EstudioPackEquipoCurado = {
+// ── Reservas del Estudio (admin, #1283 Fase 6) ───────────────────────────────
+
+/** Fila liviana de `GET /admin/estudio/reservas` — para la lista. El detalle
+ *  completo (tras crear/editar) es un `Pedido` normal (misma puerta,
+ *  `_get_alquiler_detail`). */
+export type EstudioReservaListItem = {
   id: number;
-  nombre: string;
-  marca: string | null;
-  foto_url: string | null;
-  orden: number;
+  numero_pedido: number | null;
+  cliente_id: number | null;
+  cliente_nombre: string | null;
+  cliente_email?: string | null;
+  cliente_telefono?: string | null;
+  fecha_desde: string;
+  fecha_hasta: string;
+  monto_total: number;
+  monto_pagado: number;
+  estado: PedidoEstado;
+};
+
+export type EstudioAgendaBloque = {
+  tipo: "turno" | "slot" | "taller";
+  id: number;
+  numero_pedido: number | null;
+  titulo: string;
+  fecha_desde: string;
+  fecha_hasta: string;
+  estado: string;
+};
+
+export type EstudioSueltoInput = { equipo_id: number; cantidad: number };
+
+/** Desglose de `GET /admin/estudio/reservas/cotizar` — el front no calcula
+ *  plata, solo lo muestra (MEMORIA 2026-06-29). No muta nada. */
+export type EstudioCotizacion = {
+  espacio: number;
+  promo: number;
+  sueltos: Array<{ equipo_id: number; cantidad: number; precio_jornada: number; subtotal: number }>;
+  pintura_reciente: number;
+  /** NETO: lo que se persiste en `alquileres.monto_total` (ya con el descuento
+   *  del turno aplicado, sin IVA — el IVA lo resuelve el pedido principal). */
+  monto_total: number;
+  /** Antes del descuento del turno (#1308). */
+  bruto: number;
+  /** Bruto SIN las líneas de combo (la promo ya trae su propio descuento) — el
+   *  tope real de un descuento en $. */
+  bruto_descontable: number;
+  descuento_pct: number;
+  descuento_monto: number;
+  espacio_disponible: boolean;
+  espacio_motivo: string | null;
+};
+
+export type EstudioReservaCreateInput = {
+  fecha: string; // YYYY-MM-DD
+  start: string; // HH:MM
+  horas: number;
+  cliente_id?: number | null;
+  cliente_nombre?: string | null;
+  con_promo?: boolean;
+  pintura_reciente?: boolean;
+  sueltos?: EstudioSueltoInput[];
+  espacio_monto?: number | null;
+  estado?: "solicitado" | "confirmado" | "retirado";
+  /** Vincula el turno a un pedido de alquiler normal (#1308) — cuando viene,
+   *  el backend ignora `cliente_id`/`cliente_nombre` de este mismo body y
+   *  hereda el contacto del pedido principal. */
+  pedido_principal_id?: number;
+};
+
+export type EstudioReservaUpdateInput = {
+  fecha?: string;
+  start?: string;
+  horas?: number;
+  con_promo?: boolean;
+  pintura_reciente?: boolean;
+  sueltos?: EstudioSueltoInput[];
+  espacio_monto?: number | null;
+  /** Descuento propio del turno (#1308) — reusa las columnas de descuento
+   *  manual que la fila de `alquileres` ya tiene. `undefined` = no tocar lo
+   *  persistido (≠ `espacio_monto`, donde `null` vuelve a precio de lista). */
+  descuento_pct?: number;
+  descuento_manual_tipo?: "pct" | "monto";
+  descuento_manual_monto?: number;
 };
 
 // ── Descuentos por jornadas ──────────────────────────────────────────────────
@@ -1357,7 +1582,36 @@ export type DescuentoJornada = { id: number; jornadas: number; pct: number };
 
 // ── Talleres ──────────────────────────────────────────────────────────────────
 
-export type ClaseBody = { fecha: string; hora_inicio: number; hora_fin: number };
+// Horas en MINUTOS desde medianoche (510 = 8:30). Los `_str` vienen resueltos
+// del backend en las lecturas; al ESCRIBIR solo viajan los `_min` + contenido.
+// F2 (clase rica): `id` presente al escribir = actualizar esa clase (preserva
+// su portada); ausente = clase nueva. La portada solo cambia por sus endpoints.
+export type ClaseBody = {
+  id?: number | null;
+  fecha: string;
+  hora_inicio_min: number;
+  hora_fin_min: number;
+  hora_inicio_str?: string;
+  hora_fin_str?: string;
+  titulo?: string;
+  descripcion?: string;
+  nota?: string;
+  portada_media_id?: number | null;
+  portada_url?: string;
+};
+
+// F4a: modalidad de pago de una edición. `id` presente al escribir = editar
+// esa fila (preserva su posición salvo reorden); ausente = nueva. Sin motor
+// de descuentos: `monto_total` lo carga el admin a mano, los "%" son texto
+// libre en `nota`. `monto_total_str` viene resuelto del backend en lecturas.
+export type ModalidadPagoBody = {
+  id?: number | null;
+  codigo: string;
+  label: string;
+  nota?: string;
+  monto_total: number;
+  monto_total_str?: string;
+};
 
 export type EdicionAdmin = {
   id: number;
@@ -1380,6 +1634,65 @@ export type EdicionAdmin = {
   activo: boolean;
   frozen_at: string | null;
   clases: ClaseBody[];
+  // F4a: RAW (sin fallback sintético — [] = "no configuradas todavía").
+  modalidades: ModalidadPagoBody[];
+  // F4c: NULL = sin cierre (siempre abierto).
+  fecha_cierre_inscripcion: string | null;
+  // Economía del taller (ver `_regenerar_pedidos_taller`, backend): si la
+  // edición usa el espacio del Estudio y/o equipos de alquiler, con un valor
+  // que el admin tipea a mano — 'mensual' (mismo valor cada mes) o 'total'
+  // (se reparte en partes iguales entre los meses de la edición).
+  usa_estudio: boolean;
+  valor_estudio: number;
+  valor_estudio_modo: "mensual" | "total";
+  usa_equipos: boolean;
+  valor_equipos: number;
+  valor_equipos_modo: "mensual" | "total";
+};
+
+// F4c: mini-KPIs de una edición — plata ya resuelta por el backend (el front
+// solo la muestra, nunca la calcula).
+export type EdicionKpis = {
+  senas_verificadas: number;
+  senas_pendientes: number;
+  en_espera: number;
+  cupo_ofrecido: number;
+  plata_recibida_str: string;
+  plata_esperada_str: string;
+};
+
+/** Un pedido mensual que `_regenerar_pedidos_taller` generó para una edición
+ *  (Fase 1, #1308) — puente Talleres → Pedidos, `GET /admin/ediciones/{id}/pedidos`. */
+export type PedidoGeneradoEdicion = {
+  id: number;
+  numero_pedido: number | null;
+  estado: string;
+  fecha_desde: string | null;
+  fecha_hasta: string | null;
+  monto_total: number;
+  monto_pagado: number;
+  /** Solo presente en `turnos_estudio_vinculados` (#1308) — el pago combinado
+   *  reparte filas reales de `alquiler_pagos` con el `pedido_id` del turno;
+   *  Talleres → Pedidos no lo necesita y no lo manda. */
+  pagos?: PedidoPago[];
+};
+
+/** Una línea del reparto de un pago combinado (#1308) — a qué pedido real
+ *  (principal o un turno vinculado) se le aplicó qué parte del monto
+ *  cobrado. `excedente` marca la línea del sobrante (siempre sobre el
+ *  pedido principal, nunca sobre un turno). */
+export type RepartoPagoLinea = { pedido_id: number; monto: number; excedente?: boolean };
+
+// F4c: FAQ del concepto — ninguna pregunta es obligatoria.
+export type FaqItem = { pregunta: string; respuesta: string };
+
+// F4c: trabajo pasado del taller (link de YouTube, sin testimonios/reseñas).
+export type Trabajo = {
+  id: number;
+  titulo: string;
+  youtube_url: string;
+  poster_url: string;
+  poster_media_id: number | null;
 };
 
 export type TallerConcepto = {
@@ -1387,17 +1700,53 @@ export type TallerConcepto = {
   slug_base: string;
   nombre: string;
   subtitulo: string;
-  instructor_nombre: string;
-  instructor_bio: string;
-  instructor_proyectos: string;
   descripcion: string;
   publico_objetivo: string;
-  programa_teorica: string[];
-  programa_practica: string[];
-  instructor_foto_url: string;
-  instructor_media_id: number | null;
   notif_email: string;
+  // F2: T&C propios ('' → /terminos general), beneficios, pregunta del form
+  // configurable y mensaje post-inscripción.
+  terminos: string;
+  beneficios: string;
+  pregunta_experiencia: string;
+  mensaje_confirmacion: string;
+  // F4a: video hero (YouTube). '' → sin video.
+  video_url: string;
+  video_poster_url: string;
+  // F3: instructores como entidad (además de instructor_* legacy arriba).
+  instructores: Instructor[];
+  // Instituciones co-presentadoras (ej. "Rambla" + "Filmar").
+  instituciones: Institucion[];
   ediciones: EdicionAdmin[];
+  // F4c: FAQ del concepto + trabajos pasados (solo YouTube).
+  faqs: FaqItem[];
+  trabajos: Trabajo[];
+};
+
+// F3: instructor como entidad propia (N↔N con talleres — fuente única desde
+// F6, reemplazó a los campos instructor_* legacy del concepto).
+export type Instructor = {
+  id: number;
+  nombre: string;
+  rol: string;
+  descripcion: string;
+  instagram: string;
+  web: string;
+  foto_url: string;
+  foto_media_id: number | null;
+  // F6: "Trabajó con" — reemplaza el legacy `instructor_proyectos` (1 por taller).
+  proyectos: string;
+};
+
+// Institución co-presentadora de un taller (ej. "Rambla" + "Filmar") — mismo
+// patrón que Instructor: entidad propia, N↔N con talleres.
+export type Institucion = {
+  id: number;
+  nombre: string;
+  descripcion: string;
+  instagram: string;
+  web: string;
+  logo_url: string;
+  logo_media_id: number | null;
 };
 
 export type Inscripcion = {
@@ -1413,6 +1762,22 @@ export type Inscripcion = {
   numero_edicion: number | null;
   edicion_slug: string | null;
   created_at: string | null;
+  tyc_aceptado_at: string | null;
+  // F4a: snapshot de la modalidad de pago elegida (null = inscripción previa a F4a).
+  modalidad_codigo: string | null;
+  modalidad_label: string | null;
+  modalidad_monto: number | null;
+};
+
+// F4b: interesado (lead sin cupo en su momento). notificado_at = ya se le avisó
+// de una nueva edición (el admin puede re-avisar, no queda bloqueado).
+export type Interesado = {
+  id: number;
+  nombre: string;
+  email: string;
+  telefono: string;
+  created_at: string | null;
+  notificado_at: string | null;
 };
 
 // ── Solicitudes ───────────────────────────────────────────────────────────────

@@ -1,19 +1,23 @@
 // ── Áreas de Rambla — fuente única ─────────────────────────────────────────────
 // Las 3 áreas públicas con su identidad de marca. La consumen el TopBar
-// (SECTION_CONFIG), el menú de navegación (AreaMenu) y el hub. Cambiar el color,
-// la ruta o el label de un área se hace acá una sola vez.
+// (SECTION_CONFIG), el menú de navegación (AreaMenu), el hub y el SectionBanner.
+// Cambiar el color, la ruta o el label de un área se hace acá una sola vez.
 //
-// - `label`: nombre con punto, font-display lowercase ("rental.")
-// - `desc`:  bajada corta (menú de áreas)
-// - `href`:   root del área
-// - `bg`:     clase de fondo de marca (topbar)
-// - `fg`:     color de texto legible sobre `bg` (logo/contenido sobre el color)
-// - `accent`: color de marca como texto (wordmark/label en el SectionBanner)
+// - `label`:   nombre con punto, font-display lowercase ("rental.")
+// - `desc`:    bajada corta (menú de áreas)
+// - `eyebrow`: categoría corta SIN repetir el nombre del área (evita el
+//              "RAMBLA estudio. / estudio." repetido — un eyebrow no puede
+//              decir lo mismo que el label que tiene justo debajo)
+// - `href`:    root del área
+// - `bg`:      clase de fondo de marca (topbar)
+// - `fg`:      color de texto legible sobre `bg` (logo/contenido sobre el color)
+// - `accent`:  color de marca como texto (wordmark/label en el SectionBanner)
 
 export const AREAS = {
   rental: {
     label: "rental.",
     desc: "Alquiler de equipos",
+    eyebrow: "Equipos audiovisuales",
     href: "/rental",
     bg: "bg-amber",
     fg: "text-ink",
@@ -22,15 +26,27 @@ export const AREAS = {
   estudio: {
     label: "estudio.",
     desc: "Set de foto y video",
+    eyebrow: "Foto & video",
     href: "/estudio",
     bg: "bg-estudio",
     fg: "text-ink",
     accent: "text-estudio",
   },
-  workshops: {
-    label: "workshops.",
-    desc: "Talleres y formación",
-    href: "/workshops",
+  // La vertical de formación: key `escuela` y `[data-area="escuela"]` (theming)
+  // se quedan singular — son identificadores internos, no texto visible. Lo que
+  // SÍ pasó a plural (2026-07-30): el `label`/`desc`/`eyebrow` visibles Y la
+  // `href` pública (`/escuela` → `/escuelas`) — Rambla no ES la escuela, aloja
+  // distintas entidades/talleres adentro; "escuela." (singular) sonaba a que
+  // Rambla fuera la única. Las clases que ofrece se siguen llamando "talleres"
+  // — la API `/api/talleres` y la tabla `talleres` NO se renombran (un taller es
+  // un taller; la escuela los ofrece). `/escuela` y `/workshops` (el nombre más
+  // viejo) redirigen los dos a `/escuelas` — ver `escuela.tsx`/`escuela.index.tsx`/
+  // `escuela.$slug.tsx`/`escuela.sena.$token.tsx` (stubs de redirect).
+  escuela: {
+    label: "escuelas.",
+    desc: "Talleres y workshops",
+    eyebrow: "Formación",
+    href: "/escuelas",
     bg: "bg-rosa",
     fg: "text-ink",
     accent: "text-rosa",

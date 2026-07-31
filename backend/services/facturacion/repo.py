@@ -122,6 +122,23 @@ def get_factura_principal_emitida(pedido_id: int, conn) -> Optional[Factura]:
     return _row_to_factura(row) if row else None
 
 
+def factura_c_vigente(pedido_id: int, conn) -> bool:
+    """True si el pedido tiene una Factura C (emisor Monotributo) ya emitida.
+
+    Un emisor Monotributo nunca discrimina NI suma IVA (2026-07-27,
+    `comprobante_pedido.construir_comprobante`) — este helper es para que otros
+    consumidores del pedido (ej. el Desglose en vivo del editor admin,
+    `routes/alquileres/cotizacion.py::cotizar`) sepan que el cliente NO va a pagar
+    el 21% que su perfil fiscal por sí solo sugeriría, una vez que la factura real
+    ya se emitió así. Se anula (NC) → deja de contar (`get_factura_principal_emitida`
+    ya filtra `nota_credito_de IS NULL` y `estado='emitida'`, y la NC deja a la
+    original en `estado='anulada'`)."""
+    from arca_fe import CbteTipo
+
+    factura = get_factura_principal_emitida(pedido_id, conn)
+    return bool(factura and factura.cbte_tipo == int(CbteTipo.FACTURA_C))
+
+
 def pedidos_con_factura_emitida(pedido_ids: list[int], conn) -> set[int]:
     """Subconjunto de `pedido_ids` que tienen una factura principal 'emitida'
     (batch, para listados — evita N+1)."""

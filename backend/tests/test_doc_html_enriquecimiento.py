@@ -8,8 +8,8 @@ Contrato) comparten la plantilla `_cliente_block` (pdf_templates.py), que
 muestra el CUIT si `pedido["cliente_cuit"]` está seteado — así que los 4
 branches de `_doc_html` deben llamar `_enriquecer_pedido_con_cliente_fiscal`
 para que ese dato llegue. Hallazgo de auditoría (#1254): "Detalle de seguro"
-(nombre visible de `kind="albaran"` — el nombre interno quedó desactualizado)
-era el único que no lo hacía.
+(entonces `kind="albaran"` — el nombre interno quedó desactualizado; renombrado
+a `kind="detalle-seguro"` en #1313) era el único que no lo hacía.
 """
 import inspect
 
@@ -32,7 +32,7 @@ def _src_kind(kind: str) -> str:
     return resto[:siguiente] if siguiente != -1 else resto
 
 
-@pytest.mark.parametrize("kind", ["pdf", "albaran", "packing-list", "contrato"])
+@pytest.mark.parametrize("kind", ["remito", "detalle-seguro", "checklist-retiro", "contrato"])
 def test_doc_html_enriquece_datos_fiscales(kind):
     bloque = _src_kind(kind)
     assert "_enriquecer_pedido_con_cliente_fiscal" in bloque, (

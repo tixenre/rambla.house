@@ -166,6 +166,7 @@ class TestTemplatesEnriquecidos:
         "fecha_desde": "20 may · 10:00",
         "fecha_hasta": "24 may · 18:00",
         "cantidad_jornadas": 4,
+        "periodo_label": "4 jornadas",  # lo que produciría _pedido_email_context para cantidad_jornadas=4
         "total": "$ 12.500",
         "pago_estado": "Pagado $ 6.250 · saldo pendiente $ 6.250",
         "items_html": "<table></table>",
@@ -213,10 +214,10 @@ class TestTemplatesEnriquecidos:
             "docs_adjuntos": ["Contrato", "Cotización"],
         }
         html, text = self._render(key, ctx)
-        assert "Jornadas:</strong> 4" in html
+        assert "Duración:</strong> 4 jornadas" in html
         assert "¡Te esperamos el jueves!" in html
         assert "Contrato, Cotización" in html
-        assert "Jornadas: 4" in text
+        assert "Duración: 4 jornadas" in text
         assert "Contrato, Cotización" in text
 
     def test_confirmado_sin_adjuntos_cae_al_portal(self):
@@ -236,7 +237,7 @@ class TestTemplatesEnriquecidos:
 class TestCuerpoMailSimple:
     def test_subject_y_lista_de_docs(self):
         subject, body_html, text = _cuerpo_mail_simple(
-            1023, "Juan Pérez", ["contrato", "pdf"], None
+            1023, "Juan Pérez", ["contrato", "remito"], None
         )
         assert subject == "Documentos de tu pedido #1023"
         # El saludo es por nombre de pila, no el nombre completo.
@@ -246,12 +247,12 @@ class TestCuerpoMailSimple:
         assert "Contrato, Remito" in text
 
     def test_sin_nombre_usa_saludo_generico(self):
-        _, body_html, _ = _cuerpo_mail_simple(1, "", ["pdf"], None)
+        _, body_html, _ = _cuerpo_mail_simple(1, "", ["remito"], None)
         assert "<p>Hola,</p>" in body_html
 
     def test_nota_del_admin_se_escapa(self):
         # El mensaje lo escribe el admin; igual se escapa por las dudas (XSS).
-        _, body_html, _ = _cuerpo_mail_simple(1, "Ana", ["pdf"], "<b>ojo</b>")
+        _, body_html, _ = _cuerpo_mail_simple(1, "Ana", ["remito"], "<b>ojo</b>")
         assert "&lt;b&gt;ojo&lt;/b&gt;" in body_html
         assert "<b>ojo</b>" not in body_html
 

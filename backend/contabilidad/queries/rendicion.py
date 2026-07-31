@@ -7,10 +7,11 @@ ledger `alquiler_pagos`, por destinatario). Está atada al MISMO universo de
 pedidos saldados del mes que el reporte → los dos lados suman el mismo total y la
 rendición cierra en cero.
 
-Las partes son tres: **Pablo**, **Tincho** y **Rambla** — los tres pueden cobrar
-(Rambla es el cobrador por defecto y su plata cae en la caja Fondo Rambla). El
-netting calcula quién le debe a quién para que cada parte termine con lo que le
-corresponde; la parte de Rambla NO se reparte entre Pablo y Tincho.
+Las partes son **Pablo**, **Tincho**, **Rental** y **Estudio** (constante `PARTES`)
+— todas pueden cobrar (Rental es el cobrador por defecto y su plata cae en la
+caja Fondo Rental; Estudio, en Caja Estudio). El netting calcula quién le debe a
+quién para que cada parte termine con lo que le corresponde; ninguna parte se
+reparte entre las demás — es una transferencia 1:1 sugerida.
 
 El núcleo (`_netting`) es puro y testeable sin DB.
 """
@@ -65,7 +66,7 @@ def _netting(corresponde: dict, cobrado: dict, ya_transferido: dict) -> dict:
 def cobrado_por_socio(conn, desde: str, hasta: str) -> dict:
     """Σ `alquiler_pagos.monto` por destinatario, SOLO sobre los pedidos saldados
     del mes (mismo `SALDADO_CTE` que el reporte). Devuelve
-    {'Pablo', 'Tincho', 'Rambla', 'sin_asignar', 'total'}."""
+    {cada parte de PARTES, 'sin_asignar', 'total'}."""
     sql = f"""
         WITH {SALDADO_CTE},
         en_rango AS (
@@ -78,7 +79,7 @@ def cobrado_por_socio(conn, desde: str, hasta: str) -> dict:
         WHERE NOT ap.anulado
         GROUP BY 1
     """
-    out = {p: 0 for p in PARTES}  # Pablo, Tincho, Rambla — los tres pueden cobrar
+    out = {p: 0 for p in PARTES}  # cualquier parte de PARTES puede cobrar
     out["sin_asignar"] = 0
     for row in conn.execute(sql, (desde, hasta)).fetchall():
         quien, monto = row["quien"], int(row["monto"] or 0)
@@ -91,11 +92,11 @@ def cobrado_por_socio(conn, desde: str, hasta: str) -> dict:
 
 
 def _parte_de_cuenta(socio, tipo, nombre) -> str | None:
-    """Mapea una cuenta a su parte de rendición (Pablo/Tincho/Rambla) o None."""
+    """Mapea una cuenta a su parte de rendición (Pablo/Tincho/Rental) o None."""
     if socio in PARTES:
         return socio
-    if tipo == "fondo" or (nombre or "").strip().lower() == "fondo rambla":
-        return "Rambla"
+    if tipo == "fondo" or (nombre or "").strip().lower() == "fondo rental":
+        return "Rental"
     return None
 
 
@@ -142,7 +143,7 @@ def _movimientos_rendicion(conn, mes: str) -> list[dict]:
 
 def cuenta_de_parte(conn, parte: str) -> int | None:
     """La caja que representa a una parte (vínculo por la columna `socio`):
-    Caja Pablo/Tincho, o Fondo Rambla."""
+    Caja Pablo/Tincho, o Fondo Rental."""
     if parte not in PARTES:
         return None
     row = conn.execute(
@@ -150,10 +151,10 @@ def cuenta_de_parte(conn, parte: str) -> int | None:
     ).fetchone()
     if row:
         return row[0]
-    if parte == "Rambla":  # fallback si el Fondo no quedó vinculado al cobrador
+    if parte == "Rental":  # fallback si el Fondo no quedó vinculado al cobrador
         row = conn.execute(
             """SELECT id FROM cuentas
-               WHERE activa = TRUE AND (tipo = 'fondo' OR nombre = 'Fondo Rambla')
+               WHERE activa = TRUE AND (tipo = 'fondo' OR nombre = 'Fondo Rental')
                ORDER BY id LIMIT 1"""
         ).fetchone()
     return row[0] if row else None
@@ -173,7 +174,7 @@ def rendicion(conn, mes: str) -> dict:
     total_reporte = int(data["resumen"]["total"])
 
     cob = cobrado_por_socio(conn, desde, hasta)
-    cobrado = {p: cob[p] for p in PARTES}  # los tres pueden cobrar (incluida Rambla)
+    cobrado = {p: cob[p] for p in PARTES}  # cualquier parte de PARTES puede cobrar
     ya = ya_transferido(conn, mes)
 
     net = _netting(corresponde, cobrado, ya)

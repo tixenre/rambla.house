@@ -83,7 +83,7 @@ def _init_db_schema(conn):
             fecha_compra     DATE,
             serie            TEXT,
             bh_url           TEXT,
-            dueno            TEXT DEFAULT 'Rambla',
+            dueno            TEXT DEFAULT 'Rental',
             visible_catalogo INTEGER DEFAULT 1,
             estado           TEXT DEFAULT 'operativo',
             created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -489,9 +489,12 @@ def _init_db_schema(conn):
     """)
 
     # Estudio E2: tipo de alquiler ('diaria' = pedido normal por jornada;
-    # 'estudio' = reserva del espacio por horas). El DEFAULT 'diaria' es clave:
-    # las reservas existentes y las queries de overlap (que NO filtran por tipo)
-    # quedan idénticas. `estudio_con_pack` se reserva para E3 (pack Grip/Luz).
+    # 'estudio'/'estudio_fijo' = reserva del espacio por horas / slot mensual;
+    # 'taller' = resumen mensual de una edición de taller, ver
+    # `_regenerar_pedidos_taller`). El DEFAULT 'diaria' es clave: las reservas
+    # existentes y las queries de overlap (que NO filtran por tipo) quedan
+    # idénticas. `estudio_con_pack` se reserva para E3 (pack Grip/Luz). Sin
+    # CHECK constraint — cualquier texto es válido, el enum vive en el código.
     conn.execute("ALTER TABLE alquileres ADD COLUMN IF NOT EXISTS tipo TEXT NOT NULL DEFAULT 'diaria'")
     conn.execute("ALTER TABLE alquileres ADD COLUMN IF NOT EXISTS estudio_con_pack BOOLEAN NOT NULL DEFAULT FALSE")
 
@@ -1269,7 +1272,8 @@ def _init_db_schema(conn):
         INSERT INTO cuentas (nombre, tipo, socio, moneda, orden) VALUES
             ('Caja Tincho', 'socio', 'Tincho', 'ARS', 1),
             ('Caja Pablo',  'socio', 'Pablo',  'ARS', 2),
-            ('Fondo Rambla','fondo', 'Rambla',  'ARS', 5)
+            ('Fondo Rental','fondo', 'Rental',  'ARS', 5),
+            ('Caja Estudio','fondo', 'Estudio', 'ARS', 6)
         ON CONFLICT DO NOTHING
     """)
     # `ON CONFLICT DO NOTHING` SIN target (no `(nombre) WHERE activa`): la tabla
@@ -1278,11 +1282,11 @@ def _init_db_schema(conn):
     # pero su socio sigue en idx_cuentas_socio → el ON CONFLICT (nombre) no lo
     # atrapaba y el seed reventaba con UniqueViolation en cada boot (#932). Sin
     # target, salta ante CUALQUIER choque → idempotente de verdad.
-    # Rambla también cobra (default): la caja Fondo Rambla representa al cobrador
-    # 'Rambla'. Backfill para BDs que ya tenían la caja con socio NULL (migración
+    # Rental también cobra (default): la caja Fondo Rental representa al cobrador
+    # 'Rental'. Backfill para BDs que ya tenían la caja con socio NULL (migración
     # c3d4e5f6a7b8). Idempotente.
     conn.execute(
-        "UPDATE cuentas SET socio = 'Rambla' WHERE nombre = 'Fondo Rambla' AND socio IS NULL"
+        "UPDATE cuentas SET socio = 'Rental' WHERE nombre = 'Fondo Rental' AND socio IS NULL"
     )
     conn.execute("""
         CREATE TABLE IF NOT EXISTS gasto_categorias (
@@ -1685,6 +1689,23 @@ def _init_db_schema(conn):
             UNIQUE (estudio_id, equipo_id)
         )
     """)
+    # Promo combo (#1283 Fase 5): reemplaza al pack curado por un equipo real
+    # tipo='combo' (dueno='Rental', oculto del catálogo) — el precio deriva de
+    # sus componentes (precio_combo) en vez de un `pack_precio` fijo suelto.
+    # NULL = todavía no se creó (el pack sigue siendo el mecanismo vigente,
+    # ⏰ LEGACY hasta que la Fase 8 lo retire). ON DELETE SET NULL: si el combo
+    # se borra, el estudio no rompe — vuelve al estado "sin promo".
+    conn.execute("ALTER TABLE estudio ADD COLUMN IF NOT EXISTS promo_combo_id INTEGER REFERENCES equipos(id) ON DELETE SET NULL")
+    # Add-on "recién pintado" (#1300 seguimiento): cargo fijo opcional, independiente
+    # de la promo/sueltos — el cliente lo tilda aparte, no reemplaza ninguna opción.
+    # 0 = todavía no lo cargó el dueño (el checkbox sigue disponible, sin costo).
+    conn.execute("ALTER TABLE estudio ADD COLUMN IF NOT EXISTS precio_pintura_reciente INTEGER NOT NULL DEFAULT 0")
+    # Anticipación PROPIA del add-on "recién pintado" (#1300 seguimiento): pintar/
+    # secar el ciclorama necesita más lead time que una reserva común —
+    # independiente de `anticipacion_min_horas` (se exige ADEMÁS, no en su lugar).
+    # 0 = sin restricción extra (mismo criterio "apagado por default" que el resto
+    # de las anticipaciones del repo).
+    conn.execute("ALTER TABLE estudio ADD COLUMN IF NOT EXISTS anticipacion_pintura_horas INTEGER NOT NULL DEFAULT 0")
 
     # Registro de búsquedas del catálogo público (analítica interna). Acompaña a
     # la migración i1c2d3e4f5a6 — acá garantizamos su creación en cada boot
@@ -1790,11 +1811,15 @@ def _init_db_schema(conn):
     # SAGRADO sin lógica nueva. Es un recurso interno: invisible al catálogo,
     # filtros, listado admin, ranking y specs (es_recurso_interno=TRUE). Idempotente:
     # solo se crea si el estudio todavía no tiene un equipo asociado.
+    # `dueno='Estudio'` (economía separada, Fase 4 de #1283 — antes 'Rambla'): las
+    # horas del espacio se atribuyen al Estudio en la liquidación/P&L, no a Rambla
+    # rental. Una BD que YA tenía el centinela con dueno='Rambla' la migra la
+    # migración de backfill (esquema en dos capas para este dato puntual).
     est_row = conn.execute("SELECT equipo_id FROM estudio WHERE id = 1").fetchone()
     if est_row is not None and est_row["equipo_id"] is None:
         cur_cent = conn.execute("""
             INSERT INTO equipos (nombre, cantidad, visible_catalogo, dueno, es_recurso_interno)
-            VALUES ('Estudio (espacio)', 1, 0, 'Rambla', TRUE)
+            VALUES ('Estudio (espacio)', 1, 0, 'Estudio', TRUE)
             RETURNING id
         """)
         centinela_id = cur_cent.fetchone()["id"]
@@ -1871,30 +1896,19 @@ def _init_db_schema(conn):
     conn.execute("ALTER TABLE marcas ADD COLUMN IF NOT EXISTS media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL")
 
     # ── Talleres (workshops públicos con formulario de inscripción) ──────────
+    # Concepto (F1-F3 lo redujeron a datos estables): fechas/precio/cupos/pago/
+    # dirección/tipo viven en `ediciones_taller`; instructor(es) en `instructores`
+    # + `taller_instructores`; el contenido de clase en `clases_taller`. Escuela
+    # v2 F6 retiró las columnas legacy que las duplicaban acá (ver migración
+    # esc7l8i9m0p1 + docs/MEMORIA.md 2026-07-23 — Escuela v2 F6).
     conn.execute("""
         CREATE TABLE IF NOT EXISTS talleres (
             id                   SERIAL PRIMARY KEY,
             slug                 VARCHAR(120) NOT NULL UNIQUE,
             nombre               TEXT NOT NULL,
             subtitulo            TEXT NOT NULL DEFAULT '',
-            instructor_nombre    TEXT NOT NULL,
-            instructor_bio       TEXT NOT NULL DEFAULT '',
-            instructor_proyectos TEXT NOT NULL DEFAULT '',
             descripcion          TEXT NOT NULL DEFAULT '',
             publico_objetivo     TEXT NOT NULL DEFAULT '',
-            programa_teorica     JSONB NOT NULL DEFAULT '[]',
-            programa_practica    JSONB NOT NULL DEFAULT '[]',
-            fecha_inicio         DATE NOT NULL,
-            fecha_fin            DATE NOT NULL,
-            horario              TEXT NOT NULL DEFAULT '',
-            cupos_total          INTEGER NOT NULL DEFAULT 12,
-            cupos_confirmados    INTEGER NOT NULL DEFAULT 0,
-            precio_total         INTEGER NOT NULL DEFAULT 0,
-            precio_sena          INTEGER NOT NULL DEFAULT 0,
-            pago_alias           TEXT NOT NULL DEFAULT '',
-            pago_cbu             TEXT NOT NULL DEFAULT '',
-            pago_banco           TEXT NOT NULL DEFAULT '',
-            direccion            TEXT NOT NULL DEFAULT '',
             notif_email          TEXT NOT NULL DEFAULT '',
             activo               BOOLEAN NOT NULL DEFAULT TRUE,
             created_at           TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1918,180 +1932,19 @@ def _init_db_schema(conn):
         "CREATE INDEX IF NOT EXISTS idx_taller_inscripciones_taller "
         "ON taller_inscripciones(taller_id)"
     )
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS taller_sesiones (
-            id          SERIAL PRIMARY KEY,
-            taller_id   INTEGER NOT NULL REFERENCES talleres(id) ON DELETE CASCADE,
-            fecha       DATE    NOT NULL,
-            hora_inicio INTEGER NOT NULL,
-            hora_fin    INTEGER NOT NULL,
-            created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_taller_sesiones_taller "
-        "ON taller_sesiones(taller_id)"
-    )
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_taller_sesiones_fecha "
-        "ON taller_sesiones(fecha)"
-    )
-    # Seed idempotente del workshop de Jime Troncoso (julio 2026)
-    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS instructor_foto_url TEXT NOT NULL DEFAULT ''")
-    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS numero_edicion INTEGER NOT NULL DEFAULT 1")
-    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS proxima_edicion_slug TEXT NOT NULL DEFAULT ''")
     conn.execute("ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS comprobante_key TEXT")
-    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS instructor_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL")
-    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS tipo_taller TEXT NOT NULL DEFAULT 'intensivo'")
-    import json as _json_t
-    _programa_teorica = _json_t.dumps([
-        "Qué es la dirección de arte y cuál es su función dentro de un proyecto",
-        "Cómo se compone y se coordina un equipo",
-        "Análisis de proyectos reales: videoclip, publicidad, ambientación en evento y foto producto",
-        "Armado de presupuesto (sí, vamos a hablar de números)",
-        "Cómo mostrar tus proyectos y crecer dentro de la industria",
-    ])
-    _programa_practica = _json_t.dumps([
-        "Llegamos a la mejor parte (o la que a mí más me divierte): crear el set.",
-        "En esta instancia se suman el director de fotografía (Pablo Isa) y el gaffer (Tincho Santini), "
-        "que se encargarán del equipo técnico, junto con Rambla Rental, para que la práctica sea aún "
-        "más real y podamos ver el resultado final.",
-    ])
-    _instructor_proyectos = (
-        "Universal LATAM, CheNetflix, Shorta, Spotify, Gancia, Skyy, Dr Lemon, Luigi Bosca, "
-        "Las Pastillas del Abuelo, Kevin Johansen, Los Pericos & El Plan de la Mariposa, "
-        "Agapornis, Guolis, Lucciano's, La Fonte D'Oro, Billabong, Atomik, Kappa x Huracán, "
-        "Bruto, Turboblender, Shell, Hops"
-    )
-    conn.execute(
-        """
-        INSERT INTO talleres (
-            slug, nombre, subtitulo,
-            instructor_nombre, instructor_bio, instructor_proyectos,
-            descripcion, publico_objetivo,
-            programa_teorica, programa_practica,
-            fecha_inicio, fecha_fin, horario,
-            cupos_total, precio_total, precio_sena,
-            pago_alias, pago_cbu, pago_banco,
-            direccion, notif_email, activo
-        )
-        VALUES (
-            'direccion-de-arte-jime-troncoso',
-            'Workshop Dirección de Arte', 'x Jime Troncoso',
-            'Jime Troncoso',
-            '26 años, marplatense viviendo en CABA. Desde 2020 colabora con marcas, agencias y equipos '
-            'creativos en proyectos artísticos, audiovisuales y fotográficos, pensados para entornos '
-            'digitales y físicos.',
-            %s,
-            'Si llegaste hasta acá: gracias, estoy muy emocionada por hacer realidad este proyecto. '
-            'El workshop incluye 2 clases en Rambla Estudio y son 12 cupos, porque quiero que sea '
-            'un espacio donde podamos tener un intercambio de aprendizajes y conocimientos.',
-            'Directores/as, asistentes y ayudantes de arte · Creadores de contenido, fotógrafos/as, filmmakers · '
-            'Estudiantes de comunicación audiovisual, cine o fotografía · '
-            'Personas que les interese trabajar sobre lo artístico y estético a la hora de crear proyectos',
-            %s::jsonb, %s::jsonb,
-            '2026-07-11', '2026-07-18', '9 a 13 hs',
-            12, 200000, 100000,
-            'rambla.estudio', '0170239440000032889112', 'BBVA',
-            'Chaco 1392 — Rambla Estudio',
-            'jimetroncoso44@gmail.com',
-            TRUE
-        )
-        ON CONFLICT (slug) DO NOTHING
-        """,
-        (_instructor_proyectos, _programa_teorica, _programa_practica),
-    )
-    # Actualizaciones idempotentes para filas ya existentes (ON CONFLICT DO NOTHING no las toca).
-    conn.execute(
-        "UPDATE talleres SET notif_email = %s WHERE slug = %s AND notif_email = ''",
-        ("jimetroncoso44@gmail.com", "direccion-de-arte-jime-troncoso"),
-    )
-    conn.execute(
-        "UPDATE talleres SET instructor_proyectos = %s WHERE slug = %s",
-        (_instructor_proyectos, "direccion-de-arte-jime-troncoso"),
-    )
-    conn.execute(
-        "UPDATE talleres SET programa_teorica = %s::jsonb, programa_practica = %s::jsonb WHERE slug = %s",
-        (_programa_teorica, _programa_practica, "direccion-de-arte-jime-troncoso"),
-    )
-    conn.execute(
-        "UPDATE talleres SET instructor_bio = %s WHERE slug = %s",
-        (
-            "26 años, marplatense viviendo en CABA. Desde 2020 colabora con marcas, agencias y equipos "
-            "creativos en proyectos artísticos, audiovisuales y fotográficos, pensados para entornos "
-            "digitales y físicos.",
-            "direccion-de-arte-jime-troncoso",
-        ),
-    )
-    conn.execute(
-        "UPDATE talleres SET publico_objetivo = %s WHERE slug = %s",
-        (
-            "Directores/as, asistentes y ayudantes de arte · Creadores de contenido, fotógrafos/as, filmmakers · "
-            "Estudiantes de comunicación audiovisual, cine o fotografía · "
-            "Personas que les interese trabajar sobre lo artístico y estético a la hora de crear proyectos",
-            "direccion-de-arte-jime-troncoso",
-        ),
-    )
-    # Seed 2da edición (agosto 2026) — mismos contenidos, fechas distintas.
-    _descripcion_taller = (
-        "Si llegaste hasta acá: gracias, estoy muy emocionada por hacer realidad este proyecto. "
-        "El workshop incluye 2 clases en Rambla Estudio y son 12 cupos, porque quiero que sea "
-        "un espacio donde podamos tener un intercambio de aprendizajes y conocimientos."
-    )
-    _publico_objetivo_taller = (
-        "Directores/as, asistentes y ayudantes de arte · Creadores de contenido, fotógrafos/as, filmmakers · "
-        "Estudiantes de comunicación audiovisual, cine o fotografía · "
-        "Personas que les interese trabajar sobre lo artístico y estético a la hora de crear proyectos"
-    )
-    _instructor_bio_taller = (
-        "26 años, marplatense viviendo en CABA. Desde 2020 colabora con marcas, agencias y equipos "
-        "creativos en proyectos artísticos, audiovisuales y fotográficos, pensados para entornos "
-        "digitales y físicos."
-    )
-    conn.execute(
-        """
-        INSERT INTO talleres (
-            slug, nombre, subtitulo,
-            instructor_nombre, instructor_bio, instructor_proyectos,
-            descripcion, publico_objetivo,
-            programa_teorica, programa_practica,
-            fecha_inicio, fecha_fin, horario,
-            cupos_total, precio_total, precio_sena,
-            pago_alias, pago_cbu, pago_banco,
-            direccion, notif_email, activo,
-            numero_edicion
-        )
-        VALUES (
-            'direccion-de-arte-jime-troncoso-2',
-            'Workshop Dirección de Arte', 'x Jime Troncoso',
-            'Jime Troncoso',
-            %s, %s, %s, %s,
-            %s::jsonb, %s::jsonb,
-            '2026-08-15', '2026-08-22', '9 a 13 hs',
-            12, 200000, 100000,
-            'rambla.estudio', '0170239440000032889112', 'BBVA',
-            'Chaco 1392 — Rambla Estudio',
-            'jimetroncoso44@gmail.com',
-            TRUE, 2
-        )
-        ON CONFLICT (slug) DO NOTHING
-        """,
-        (
-            _instructor_bio_taller, _instructor_proyectos,
-            _descripcion_taller, _publico_objetivo_taller,
-            _programa_teorica, _programa_practica,
-        ),
-    )
-    # Linkear ediciones y asegurar numero_edicion correcto.
-    conn.execute(
-        "UPDATE talleres SET numero_edicion = 1, proxima_edicion_slug = 'direccion-de-arte-jime-troncoso-2' WHERE slug = 'direccion-de-arte-jime-troncoso'",
-    )
-    conn.execute(
-        "UPDATE talleres SET numero_edicion = 2, proxima_edicion_slug = '' WHERE slug = 'direccion-de-arte-jime-troncoso-2'",
-    )
-    # Las sesiones de talleres existentes no se seedean con fechas hardcodeadas:
-    # el admin las carga desde el back-office post-deploy con los datos reales.
-    # Mientras no haya sesiones, la página pública muestra el campo `horario` de texto.
+    # Escuela v2 F2: T&C propios del taller ('' → linkea /terminos general),
+    # beneficios ("15% off en rental..."), pregunta del form configurable
+    # ('' → default actual) y mensaje de confirmación post-inscripción.
+    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS terminos TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS beneficios TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS pregunta_experiencia TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS mensaje_confirmacion TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS tyc_aceptado_at TIMESTAMPTZ")
+    # Escuela v2 F4c: FAQ editable del taller — [{pregunta, respuesta}]. El
+    # admin arma la lista de a una (hay preguntas sugeridas precargables en
+    # el front); ninguna es obligatoria.
+    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS faqs JSONB NOT NULL DEFAULT '[]'")
 
     # ── Modelo de ediciones (F1): talleres → concepto + ediciones_taller + clases_taller ──
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS slug_base VARCHAR(120)")
@@ -2130,19 +1983,205 @@ def _init_db_schema(conn):
     # TABLE de arriba — era 100% redundante (ver migración
     # q4r5s6t7u8v9_drop_redundant_plain_indexes).
 
+    # Economía del taller (#1283-adjacent): si la edición usa el espacio del
+    # Estudio y/o equipos de alquiler, con un valor que el admin tipea a mano
+    # (no se deriva de asistencia real) — `_regenerar_pedidos_taller` los
+    # traduce en ítems del pedido mensual, atribuidos automático vía
+    # `equipos.dueno` (Estudio / Rental), igual que hace el Estudio con sus
+    # slots fijos. La matrícula/curso en sí NO tiene columna — se tipea como
+    # línea personalizada dentro del pedido ya generado.
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS usa_estudio BOOLEAN NOT NULL DEFAULT FALSE")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_estudio INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_estudio_modo TEXT NOT NULL DEFAULT 'mensual'")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS usa_equipos BOOLEAN NOT NULL DEFAULT FALSE")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_equipos INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_equipos_modo TEXT NOT NULL DEFAULT 'mensual'")
+    # Migración idempotente (mismo patrón que spec_propuestas_pendientes_tipo_check):
+    # dropear+re-crear en vez de "ADD CONSTRAINT IF NOT EXISTS" (Postgres no lo soporta para CHECK).
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_estudio_modo_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_estudio_modo_check "
+        "CHECK (valor_estudio_modo IN ('mensual','total'))"
+    )
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_equipos_modo_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_equipos_modo_check "
+        "CHECK (valor_equipos_modo IN ('mensual','total'))"
+    )
+    # Vincula cada pedido mensual generado con su edición, para regenerar
+    # futuros sin tocar pasados/pagados (mismo patrón que `estudio_slot_id`).
+    # NULL en todo pedido normal → cero impacto.
+    conn.execute("ALTER TABLE alquileres ADD COLUMN IF NOT EXISTS taller_edicion_id INTEGER REFERENCES ediciones_taller(id) ON DELETE SET NULL")
+
+    # Horas en MINUTOS desde medianoche (0..1440) — soporta medias horas (8:30).
+    # El sufijo _min es deliberado: un lector legacy que espere horas enteras
+    # falla ruidoso en SQL en vez de comparar horas contra minutos en silencio.
+    # (Migración esc1m2i3n4t5 convirtió los datos existentes ×60.)
+    # Escuela v2 F2: la clase es RICA — titulo/descripcion/nota/portada son el
+    # contenido de marketing que muestra la landing (colapsables por clase).
     conn.execute("""
         CREATE TABLE IF NOT EXISTS clases_taller (
-            id          SERIAL PRIMARY KEY,
-            edicion_id  INTEGER NOT NULL REFERENCES ediciones_taller(id) ON DELETE CASCADE,
-            fecha       DATE    NOT NULL,
-            hora_inicio INTEGER NOT NULL,
-            hora_fin    INTEGER NOT NULL,
-            created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+            id              SERIAL PRIMARY KEY,
+            edicion_id      INTEGER NOT NULL REFERENCES ediciones_taller(id) ON DELETE CASCADE,
+            fecha           DATE    NOT NULL,
+            hora_inicio_min INTEGER NOT NULL,
+            hora_fin_min    INTEGER NOT NULL,
+            titulo          TEXT NOT NULL DEFAULT '',
+            descripcion     TEXT NOT NULL DEFAULT '',
+            nota            TEXT NOT NULL DEFAULT '',
+            portada_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL,
+            portada_url     TEXT NOT NULL DEFAULT '',
+            orden           INTEGER NOT NULL DEFAULT 0,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
         )
     """)
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_clases_taller_edicion "
         "ON clases_taller(edicion_id)"
+    )
+    conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS titulo TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS descripcion TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS nota TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS portada_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL")
+    conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS portada_url TEXT NOT NULL DEFAULT ''")
+    # Orden manual (independiente de fecha) — el backfill de datos existentes
+    # vive SOLO en la migración Alembic (y3z4a5b6c7d8), no acá: repetirlo en
+    # cada arranque pisaría cualquier reorden manual ya guardado.
+    conn.execute("ALTER TABLE clases_taller ADD COLUMN IF NOT EXISTS orden INTEGER NOT NULL DEFAULT 0")
+
+    # Escuela v2 F3: instructores como ENTIDAD propia (antes solo texto suelto en
+    # `talleres.instructor_*`) — un taller puede tener varios, un instructor puede
+    # dar varios talleres (caso Filmar: mismo instructor en Principiante y
+    # Avanzado). Fuente única desde F6 (las columnas legacy de `talleres` que
+    # las precedían ya no existen).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS instructores (
+            id            SERIAL PRIMARY KEY,
+            nombre        TEXT NOT NULL,
+            rol           TEXT NOT NULL DEFAULT '',
+            descripcion   TEXT NOT NULL DEFAULT '',
+            instagram     TEXT NOT NULL DEFAULT '',
+            web           TEXT NOT NULL DEFAULT '',
+            foto_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL,
+            foto_url      TEXT NOT NULL DEFAULT '',
+            activo        BOOLEAN NOT NULL DEFAULT TRUE,
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS taller_instructores (
+            taller_id     INTEGER NOT NULL REFERENCES talleres(id) ON DELETE CASCADE,
+            instructor_id INTEGER NOT NULL REFERENCES instructores(id) ON DELETE CASCADE,
+            orden         INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (taller_id, instructor_id)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_instructores_taller "
+        "ON taller_instructores(taller_id, orden)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_instructores_instructor "
+        "ON taller_instructores(instructor_id)"
+    )
+    # Escuela v2 F6: proyectos por-instructor (reemplaza `talleres.instructor_proyectos`,
+    # dropeada en la misma fase) — "Trabajó con" ahora lee de acá.
+    conn.execute("ALTER TABLE instructores ADD COLUMN IF NOT EXISTS proyectos TEXT NOT NULL DEFAULT ''")
+
+    # Instituciones (co-presentadoras de un taller, ej. "Rambla" + "Filmar") —
+    # mismo patrón que instructores (entidad propia + N↔N con talleres, un
+    # taller puede tener varias, una institución puede co-presentar varios
+    # talleres). A propósito SIN `rol`/`proyectos` (no aplican a una
+    # organización) y SIN `activo` (en instructores quedó vestigial — nadie lo
+    # lee ni lo filtra — no se copia un campo que no rinde).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS instituciones (
+            id            SERIAL PRIMARY KEY,
+            nombre        TEXT NOT NULL,
+            descripcion   TEXT NOT NULL DEFAULT '',
+            instagram     TEXT NOT NULL DEFAULT '',
+            web           TEXT NOT NULL DEFAULT '',
+            logo_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL,
+            logo_url      TEXT NOT NULL DEFAULT '',
+            created_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at    TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS taller_instituciones (
+            taller_id      INTEGER NOT NULL REFERENCES talleres(id) ON DELETE CASCADE,
+            institucion_id INTEGER NOT NULL REFERENCES instituciones(id) ON DELETE CASCADE,
+            orden          INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (taller_id, institucion_id)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_instituciones_taller "
+        "ON taller_instituciones(taller_id, orden)"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_instituciones_institucion "
+        "ON taller_instituciones(institucion_id)"
+    )
+
+    # Escuela v2 F4a: video hero (YouTube) del concepto. Mismo extractor que
+    # estudio_trabajos (services.media.youtube.extract_video_id), pero acá SÍ
+    # se descarga y guarda el poster en R2 (store_youtube_poster) — es
+    # contenido sobre-el-pliegue (hero de la landing), no una card en un grid
+    # más abajo: vale la mejora de LCP de no pegarle a img.youtube.com.
+    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_url TEXT NOT NULL DEFAULT ''")
+    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_poster_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL")
+    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_poster_url TEXT NOT NULL DEFAULT ''")
+
+    # Escuela v2 F4a: modalidades de pago por edición — montos finales
+    # cargados a mano por el admin (cero motor de descuentos/cuotas real; los
+    # "%" de ahorro son display en `nota`). Sin modalidades configuradas, el
+    # público ve un fallback sintético de 1 sola opción ("Pago total" =
+    # precio_total) — cero ruptura para ediciones que no las configuran.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS edicion_modalidades_pago (
+            id          SERIAL PRIMARY KEY,
+            edicion_id  INTEGER NOT NULL REFERENCES ediciones_taller(id) ON DELETE CASCADE,
+            orden       INTEGER NOT NULL DEFAULT 0,
+            codigo      TEXT NOT NULL,
+            label       TEXT NOT NULL,
+            nota        TEXT NOT NULL DEFAULT '',
+            monto_total INTEGER NOT NULL,
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(edicion_id, codigo)
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_edicion_modalidades_pago_edicion "
+        "ON edicion_modalidades_pago(edicion_id, orden)"
+    )
+
+    # Escuela v2 F4c: cierre de inscripciones por fecha. NULL = sin cierre
+    # (comportamiento actual, siempre abierto). Pasada la fecha, el público
+    # ve "inscripciones cerradas" y el POST de inscripción rechaza con 400.
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS fecha_cierre_inscripcion DATE"
+    )
+
+    # Escuela v2 F4c: trabajos pasados del taller — SOLO links de YouTube (sin
+    # testimonios/reseñas, decisión del dueño), mismo patrón de poster que el
+    # video hero del concepto (F4a: se descarga y guarda en R2).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS taller_trabajos (
+            id                SERIAL PRIMARY KEY,
+            taller_id         INTEGER NOT NULL REFERENCES talleres(id) ON DELETE CASCADE,
+            titulo            TEXT NOT NULL DEFAULT '',
+            youtube_url       TEXT NOT NULL,
+            poster_media_id   BIGINT REFERENCES media_assets(id) ON DELETE SET NULL,
+            poster_url        TEXT NOT NULL DEFAULT '',
+            orden             INTEGER NOT NULL DEFAULT 0,
+            created_at        TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_trabajos_taller "
+        "ON taller_trabajos(taller_id, orden)"
     )
 
     conn.execute("""
@@ -2186,6 +2225,28 @@ def _init_db_schema(conn):
     )
     conn.execute(
         "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS pago_completo_at TIMESTAMPTZ"
+    )
+    # Escuela v2 F4a: snapshot de la modalidad de pago elegida al inscribirse
+    # (mismo criterio que el precio de línea de un pedido: congelado, no en
+    # vivo — si el admin edita las modalidades después, esta inscripción ya
+    # hecha no cambia retroactivamente). NULL = inscripción anterior a F4a.
+    conn.execute(
+        "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS modalidad_codigo TEXT"
+    )
+    conn.execute(
+        "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS modalidad_label TEXT"
+    )
+    conn.execute(
+        "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS modalidad_monto INTEGER"
+    )
+    # Escuela v2 F4b: "ofrecer cupo al siguiente" — cuando se libera un cupo
+    # (baja de un confirmado), el admin le manda al primero de la lista un
+    # link tokenizado para completar la seña. NO toca cupos_confirmados ni
+    # en_lista_espera hasta que la persona efectivamente reclama el cupo
+    # (POST /talleres/sena/{token}) — así el admin puede re-ofrecer a otro si
+    # no responde, sin tener que "devolver" nada.
+    conn.execute(
+        "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS cupo_ofrecido_at TIMESTAMPTZ"
     )
 
     # ── Carritos activos (#280 Fase 1): persistencia server-side ──────────────
@@ -2605,6 +2666,24 @@ def _init_db_schema(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_aceptaciones_tyc_cliente "
         "ON aceptaciones_tyc(cliente_id)"
+    )
+
+    # Vincula un turno del Estudio (tipo='estudio') a un pedido de alquiler
+    # normal (tipo='diaria') del que "cuelga" — el pedido de rental de varios
+    # días y el turno puntual del Estudio son registros distintos (fechas con
+    # significado incompatible: rango vs. franja horaria, ver `tipos_pedido.py`)
+    # pero se administran en una sola pantalla (el pedido principal muestra sus
+    # turnos vinculados inline, el turno muestra un link de vuelta). Self-FK
+    # nullable, ON DELETE SET NULL: si se borra el pedido principal, el turno
+    # sobrevive como turno normal (no huérfano, no se re-elimina en cascada).
+    # NULL en todo pedido existente → cero impacto. Esquema en dos capas
+    # (MEMORIA 2026-06-03): también en la migración pv1nc2l3a4d5.
+    conn.execute(
+        "ALTER TABLE alquileres ADD COLUMN IF NOT EXISTS pedido_principal_id "
+        "INTEGER REFERENCES alquileres(id) ON DELETE SET NULL"
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_pedidos_principal ON alquileres(pedido_principal_id)"
     )
 
     conn.commit()

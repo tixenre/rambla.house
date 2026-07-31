@@ -2,10 +2,10 @@
 
 Hay DOS tipos de cuenta, que se calculan distinto:
 
-**Cajas (plata real del negocio)** — Efectivo, Banco, Fondo Rambla, Dólares, etc.:
+**Cajas (plata real del negocio)** — Efectivo, Banco, Fondo Rental, Dólares, etc.:
 
     saldo = saldo_inicial
-          + ingresos_alquiler   (cobrador Rambla: Σ alquiler_pagos del cobrador)
+          + ingresos_alquiler   (cobrador Rental: Σ alquiler_pagos del cobrador)
           + entradas            (Σ movimientos donde la cuenta es destino)
           − egresos             (Σ movimientos donde la cuenta es origen)
 
@@ -18,8 +18,8 @@ bolsillo plata del negocio → debe esa plata, menos la parte que es suya:
              − su_parte           (su comisión devengada — la liquidación)
              + entradas − egresos (rendiciones: al rendir, baja su deuda)
 
-    saldo_cc > 0 → DEUDOR   (el socio le debe a Rambla)
-    saldo_cc < 0 → ACREEDOR (Rambla le debe al socio)
+    saldo_cc > 0 → DEUDOR   (el socio le debe a Rental)
+    saldo_cc < 0 → ACREEDOR (Rental le debe al socio)
     saldo_cc = 0 → saldado (a mano)
 
 `ingresos_alquiler`/`cobrado` DERIVAN de `alquiler_pagos` (única fuente del cobro,
@@ -52,7 +52,7 @@ def partes_socios(conn) -> dict[str, int]:
 
 
 def ingresos_derivados(conn, desde: str | None = None, hasta: str | None = None) -> dict[str, int]:
-    """Σ de `alquiler_pagos.monto` por `destinatario` (Pablo/Tincho/Rambla), solo de
+    """Σ de `alquiler_pagos.monto` por `destinatario` (Pablo/Tincho/Rental), solo de
     pedidos cuyo ALQUILER cae en el clean start (`fecha_desde >= LIQUIDACION_INICIO`).
     Devuelve `{'Tincho': 480000, 'Pablo': 120000}`. Ventana opcional `desde`/`hasta`
     (por fecha de pago, inclusive por día)."""
@@ -160,7 +160,7 @@ def calcular_saldos(
             fila["estado"] = "deudor" if saldo > 0 else ("acreedor" if saldo < 0 else "saldado")
             fila["saldo"] = saldo
         else:
-            # Caja de plata real (incluye el Fondo Rambla, que sí es cash del negocio).
+            # Caja de plata real (incluye el Fondo Rental, que sí es cash del negocio).
             fila["saldo"] = saldo_inicial + cobrado + entradas - egresos
         filas.append(fila)
     return filas

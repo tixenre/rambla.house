@@ -227,7 +227,9 @@ export type EstudioConfig = {
   close_hour: number;
   buffer_horas: number;
   anticipacion_min_horas: number;
-  pack_activo: boolean;
+  // pack_nombre/pack_precio: defaults de una-vez leídos por
+  // crear_promo_desde_pack, sin UI de edición (Fase 8, #1283). pack_descripcion
+  // SIGUE viva: es la descripción EN VIVO de la promo actual (`_promo_info`).
   pack_nombre: string;
   pack_descripcion: string;
   pack_precio: number;
@@ -243,9 +245,31 @@ export type EstudioConfig = {
   mapa_embed_url: string;
   updated_at: string | null;
   fotos: EstudioFoto[];
-  // Lista curada del pack con cantidades (stock total) para la ficha pública.
-  pack_equipos?: EstudioPackEquipo[];
+  promo_combo_id?: number | null;
+  promo?: EstudioPromo | null;
+  /** Add-on independiente "recién pintado" — cargo fijo opcional, se suma a
+   *  cualquier elección de con_promo (no la reemplaza). 0 = sin cargar todavía. */
+  precio_pintura_reciente: number;
+  /** Anticipación PROPIA del add-on "recién pintado" — se exige ADEMÁS de
+   *  `anticipacion_min_horas`, no en su lugar. 0 = sin restricción extra. */
+  anticipacion_pintura_horas: number;
   trabajos?: EstudioTrabajo[];
+};
+
+/** La promo de equipos (combo real que reemplaza al pack, #1283 Fase 5).
+ *  `disponible` solo viene presente cuando se consultó con una franja
+ *  (fecha/start/horas) — en `GET /api/estudio` sin fechas no viene. */
+export type EstudioPromo = {
+  equipo_id: number;
+  nombre: string;
+  descripcion: string;
+  foto_url: string | null;
+  precio: number;
+  disponible?: boolean;
+  /** Listado público "qué incluye" — misma fuente que el catálogo
+   *  (services.contenido), nunca se puede desincronizar de lo que la promo
+   *  realmente reserva. */
+  componentes: Array<{ nombre: string; cantidad: number; foto_url: string | null }>;
 };
 
 /** Un medio del carrusel de un trabajo: link externo (YouTube/Instagram) o foto
@@ -332,40 +356,62 @@ export function apiLogSearchClick(queryId: number, equipoId: number | null) {
   });
 }
 
-export type EstudioPackEquipo = {
-  id: number;
-  nombre: string;
-  marca: string | null;
-  foto_url: string | null;
-  cantidad: number;
-};
-
 /** ¿El estudio está libre en [fecha start, +horas]? El backend aplica el buffer
- *  propio del estudio. `pack` = equipos disponibles en la franja (Grip/Luz/Mod). */
-export function apiGetEstudioDisponibilidad(fecha: string, start: string, horas: number) {
-  return get<{ libre: boolean; motivo?: string | null; pack?: EstudioPackEquipo[] }>(
-    "/api/estudio/disponibilidad",
-    { fecha, start, horas: String(horas) },
-  );
+ *  propio del estudio. `promo` = disponibilidad del combo real de equipos. */
+export function apiGetEstudioDisponibilidad(
+  fecha: string,
+  start: string,
+  horas: number,
+  pinturaReciente?: boolean,
+) {
+  return get<{
+    libre: boolean;
+    motivo?: string | null;
+    promo?: EstudioPromo | null;
+  }>("/api/estudio/disponibilidad", {
+    fecha,
+    start,
+    horas: String(horas),
+    pintura_reciente: String(!!pinturaReciente),
+  });
+}
+
+/** Bloques ocupados del estudio en [desde, hasta] (YYYY-MM-DD, inclusive) —
+ *  vista pública y anónima (sin cliente/nombre/número de pedido) para la
+ *  grilla semanal del selector de fechas. Es un atajo visual: la franja
+ *  elegida igual se re-valida con `apiGetEstudioDisponibilidad` antes de
+ *  confirmar la reserva. */
+export function apiGetEstudioOcupacionPublica(desde: string, hasta: string) {
+  return get<{
+    bloques: { fecha_desde: string; fecha_hasta: string }[];
+  }>("/api/estudio/ocupacion-publica", { desde, hasta });
 }
 
 export type EstudioReservaBody = {
   fecha: string;
   start: string;
   horas: number;
-  con_pack?: boolean;
+  con_promo?: boolean;
+  /** Add-on independiente "recién pintado" — se suma sea cual sea con_promo. */
+  pintura_reciente?: boolean;
   // Datos del cliente: NO van en el body, salen de la sesión (login obligatorio).
 };
 
 /** Crea una reserva real del estudio (entra como solicitud, estado='solicitado').
  *  Requiere cliente logueado: usa authedPostJson (manda la cookie de sesión). */
 export async function apiCrearReservaEstudio(body: EstudioReservaBody) {
-  const res = await authedPostJson<{ id: number; numero_pedido: number | null }>(
-    "/api/estudio/reservas",
-    body,
-  );
+  const res = await authedPostJson<{
+    id: number;
+    numero_pedido: number | null;
+    /** Si la promo se reservó con algún componente sin stock (best-effort,
+     *  nunca bloquea) — ver `routes/estudio.py::_crear_pedido_estudio`. */
+    promo_advertencia?: string | null;
+  }>("/api/estudio/reservas", body);
   // Analytics: estudio reservado (no-op si GA no está activo).
-  trackReservarEstudio({ horas: body.horas, conPack: body.con_pack ?? false });
+  trackReservarEstudio({
+    horas: body.horas,
+    conPromo: body.con_promo ?? false,
+  });
   return res;
 }
 
@@ -392,20 +438,28 @@ export type EdicionLite = {
   direccion: string;
 };
 
-export type Sesion = { fecha: string; hora_inicio: number; hora_fin: number };
+// Horas en MINUTOS desde medianoche (510 = 8:30, Escuela v2 F1); los `_str`
+// ("08:30") vienen resueltos del backend — el front no formatea horarios a mano.
+export type Sesion = {
+  fecha: string;
+  hora_inicio_min: number;
+  hora_fin_min: number;
+  hora_inicio_str: string;
+  hora_fin_str: string;
+  // F2: clases ricas — talleres sin estos datos cargados los reciben en "".
+  titulo: string;
+  descripcion: string;
+  nota: string;
+  portada_url: string;
+};
 
 export type Taller = {
   id: number;
   slug: string;
   nombre: string;
   subtitulo: string;
-  instructor_nombre: string;
-  instructor_bio: string;
-  instructor_proyectos: string;
   descripcion: string;
   publico_objetivo: string;
-  programa_teorica: string[];
-  programa_practica: string[];
   fecha_inicio: string;
   fecha_fin: string;
   horario: string;
@@ -418,17 +472,61 @@ export type Taller = {
   pago_cbu: string;
   pago_banco: string;
   direccion: string;
-  instructor_foto_url?: string;
-  instructor_media_id?: number | null;
   numero_edicion: number;
-  proxima_edicion_slug: string;
   proxima_edicion?: EdicionLite | null;
   edicion_anterior?: EdicionLite | null;
   activo: boolean;
   tipo_taller: string;
   notif_email: string;
   frozen_at: string | null;
+  // F2: textos configurables del taller + flag de preview admin.
+  terminos: string;
+  beneficios: string;
+  pregunta_experiencia: string;
+  mensaje_confirmacion: string;
+  /** True solo cuando una sesión admin previsualiza una edición despublicada. */
+  borrador: boolean;
+  // F3: instructores como entidad.
+  instructores: {
+    id: number;
+    nombre: string;
+    rol: string;
+    descripcion: string;
+    instagram: string;
+    web: string;
+    foto_url: string;
+    foto_media_id: number | null;
+    // F6: "Trabajó con" — reemplaza el legacy `instructor_proyectos` (1 por taller).
+    proyectos: string;
+  }[];
+  // Instituciones co-presentadoras (ej. "Rambla" + "Filmar").
+  instituciones: {
+    id: number;
+    nombre: string;
+    descripcion: string;
+    instagram: string;
+    web: string;
+    logo_url: string;
+    logo_media_id: number | null;
+  }[];
   sesiones: Sesion[];
+  // F4a: video hero (YouTube) — null si no hay video configurado o la URL no
+  // se pudo interpretar. El embed es siempre youtube-nocookie.com.
+  video: { youtube_id: string; embed_url: string; poster: string | null } | null;
+  // F4a: modalidades de pago. NUNCA vacío para el público — sin configurar
+  // ninguna, el backend sintetiza 1 sola opción ("Pago total" = precio_total).
+  modalidades: {
+    codigo: string;
+    label: string;
+    nota: string;
+    monto_total: number;
+    monto_total_str: string;
+  }[];
+  // F4c: FAQ del concepto, trabajos pasados (solo YouTube, sin testimonios) y
+  // cierre de inscripciones de ESTA edición (null = sin cierre).
+  faqs: { pregunta: string; respuesta: string }[];
+  trabajos: { id: number; titulo: string; youtube_url: string; poster_url: string }[];
+  fecha_cierre_inscripcion: string | null;
 };
 
 export type InscripcionBody = {
@@ -438,6 +536,11 @@ export type InscripcionBody = {
   experiencia?: string;
   comprobante_url?: string;
   comprobante_key?: string;
+  /** F4a: código de la modalidad elegida (de `Taller.modalidades`). Cableado-
+   *  apagado: el form v1 (pre-F5) no lo manda — default a la primera. */
+  modalidad_codigo?: string;
+  /** F2: checkbox "Acepto los términos" — el form v2 (F5) lo manda siempre. */
+  acepta_terminos?: boolean;
 };
 
 export type InscripcionResult = {
@@ -473,4 +576,74 @@ export async function apiUploadComprobante(
 
 export function apiCrearInscripcion(slug: string, body: InscripcionBody) {
   return post<InscripcionResult>(`/api/talleres/${slug}/inscripcion`, body);
+}
+
+// ── F5: página pública "completá tu seña" (/escuelas/sena/$token) ──────────
+
+export type OfertaCupo = {
+  taller_nombre: string;
+  nombre_pila: string;
+  fecha_inicio_str: string;
+  fecha_fin_str: string;
+  horario: string;
+  direccion: string;
+  precio_sena_str: string;
+  pago_alias: string;
+  pago_cbu: string;
+  pago_banco: string;
+};
+
+class ApiStatusError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+/** 404 = link inválido/vencido; 410 = oferta ya no vigente (reclamada o
+ *  nunca ofrecida) — el caller distingue por `err.status`, no por texto. */
+export async function apiGetOfertaCupo(token: string): Promise<OfertaCupo> {
+  const res = await fetch(`${API_BASE}/api/talleres/sena/${token}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new ApiStatusError(res.status, err?.detail ?? `Error ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function apiUploadComprobanteSena(
+  token: string,
+  file: File,
+): Promise<{ url: string; key: string }> {
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${API_BASE}/api/talleres/sena/${token}/upload-comprobante`, {
+    method: "POST",
+    body: formData,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new ApiStatusError(
+      res.status,
+      err?.detail ?? `No se pudo subir el comprobante (${res.status})`,
+    );
+  }
+  return res.json();
+}
+
+export async function apiClaimOfertaCupo(
+  token: string,
+  body: { comprobante_url?: string; comprobante_key?: string },
+): Promise<{ ok: boolean }> {
+  const res = await fetch(`${API_BASE}/api/talleres/sena/${token}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new ApiStatusError(res.status, err?.detail ?? `Error ${res.status}`);
+  }
+  return res.json();
 }

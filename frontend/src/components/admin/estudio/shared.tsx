@@ -33,16 +33,23 @@ export function Field({
   label,
   error,
   hint,
+  accion,
   children,
 }: {
   label: string;
   error?: string;
   hint?: string;
+  /** Acción a la derecha del label (ej. el ✕ que descarta el bloque entero) —
+   *  mismo lugar que el slot `actions` del `Section` del DS. */
+  accion?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1">
-      <label className="t-eyebrow">{label}</label>
+      <div className="flex items-center gap-2">
+        <label className="t-eyebrow">{label}</label>
+        {accion && <div className="ml-auto shrink-0">{accion}</div>}
+      </div>
       {children}
       {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
       {error && <p className="text-xs text-destructive">{error}</p>}

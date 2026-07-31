@@ -410,15 +410,18 @@ def desactivar_emisor(emisor_id: int, request: Request):
 
 
 @router.get("/alquileres/{pedido_id}/facturar/preview")
-def preview_factura(pedido_id: int, request: Request):
+def preview_factura(pedido_id: int, request: Request, emisor_id: Optional[int] = None):
     """Arma el comprobante y calcula sus importes SIN emitir — para que el
-    admin confirme los datos antes de pedir un CAE real (irreversible)."""
+    admin confirme los datos antes de pedir un CAE real (irreversible).
+
+    `emisor_id`: override excepcional — facturar con un emisor puntual distinto al que
+    resolvería automáticamente el perfil del cliente (ver `services.facturacion.emisores.emisor_para`)."""
     require_admin(request)
 
     try:
         from services.facturacion.engine import previsualizar_factura
         with get_db() as conn:
-            return previsualizar_factura(pedido_id, conn)
+            return previsualizar_factura(pedido_id, conn, emisor_id=emisor_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except ArcaError as e:
@@ -428,17 +431,25 @@ def preview_factura(pedido_id: int, request: Request):
 
 
 @router.get("/alquileres/{pedido_id}/facturar/preview-html")
-def preview_factura_html(pedido_id: int, request: Request, layout: str = "simplificada"):
+def preview_factura_html(
+    pedido_id: int,
+    request: Request,
+    layout: str = "simplificada",
+    emisor_id: Optional[int] = None,
+):
     """Renderiza la factura COMPLETA (mismo layout/plantilla real) ANTES de emitir — pedido del
     dueño para ver el documento entero, no solo el resumen de chequeos. CAE/QR son placeholder
     ("(pendiente)"): esto es el mismo nivel "preview rápido" que ya expone `arca_fe` (HTML crudo,
-    informal), NUNCA el documento certificado — no pide ningún CAE real."""
+    informal), NUNCA el documento certificado — no pide ningún CAE real.
+
+    `emisor_id`: mismo override que `preview_factura` — tiene que viajar igual en los dos
+    endpoints para que el HTML y el resumen de chequeos muestren el mismo emisor."""
     require_admin(request)
 
     try:
         from services.facturacion.engine import previsualizar_factura_html
         with get_db() as conn:
-            html = previsualizar_factura_html(pedido_id, conn, layout=layout)
+            html = previsualizar_factura_html(pedido_id, conn, layout=layout, emisor_id=emisor_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except ArcaError as e:
@@ -459,19 +470,33 @@ def preview_factura_html(pedido_id: int, request: Request, layout: str = "simpli
 @router.post("/alquileres/{pedido_id}/facturar")
 @limiter.limit(ADMIN_WRITE_LIMIT)
 @map_pg_errors
-def facturar_pedido(pedido_id: int, request: Request):
+def facturar_pedido(pedido_id: int, request: Request, body: Optional[dict] = None):
     """Emite (o devuelve la vigente) la factura electrónica para el pedido.
 
     Idempotente: si ya existe una factura 'emitida' o 'pendiente' para el pedido,
     la devuelve sin volver a llamar a ARCA.
+
+    `body.emisor_id` (opcional): override excepcional — factura con un emisor puntual
+    distinto al que resolvería automáticamente el perfil del cliente. El front solo lo
+    manda cuando el admin lo elige a mano en el preview (default: automático, sin mandar
+    el campo). Queda auditado igual que cualquier factura: `facturas.emisor` guarda el
+    `nombre` del emisor que realmente facturó. `body` default `None` (no solo `{}`) para
+    que un POST sin Content-Type/body (ej. un test que llama la función directo) no
+    rompa antes de llegar acá — se normaliza abajo.
     """
     require_admin(request)
+
+    emisor_id = (body or {}).get("emisor_id")
+    try:
+        emisor_id = int(emisor_id) if emisor_id is not None else None
+    except (TypeError, ValueError):
+        raise HTTPException(400, "emisor_id debe ser un número entero")
 
     try:
         from services.facturacion.engine import emitir_factura
         session = getattr(request.state, "session", None)
         emitido_por = (session or {}).get("email") if session else None
-        factura = emitir_factura(pedido_id, emitido_por=emitido_por)
+        factura = emitir_factura(pedido_id, emitido_por=emitido_por, emisor_id=emisor_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
     except ArcaError as e:

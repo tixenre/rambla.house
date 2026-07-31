@@ -8,6 +8,7 @@ Verifica:
 """
 
 import json
+import re
 from unittest.mock import MagicMock
 
 import pytest
@@ -78,6 +79,9 @@ class TestBuildResponse:
             "pack_nombre": "Pack Todo Incluido",
             "pack_descripcion": "Todo incluido.",
             "pack_precio": 10000,
+            "promo_combo_id": None,
+            "precio_pintura_reciente": 0,
+            "anticipacion_pintura_horas": 0,
             "features_json": json.dumps([{"label": "Superficie", "value": "50 m²"}]),
             "faq_json": json.dumps([{"q": "¿Mínimo?", "a": "2 h"}]),
             "direccion": "",
@@ -116,12 +120,6 @@ class TestBuildResponse:
         fotos = [{"id": 1, "url": "https://cdn.r2/foto.webp", "orden": 0, "es_principal": True}]
         result = _build_response(row, fotos)
         assert result["fotos"] == fotos
-
-    def test_pack_activo_bool(self):
-        from routes.estudio import _build_response
-        row = self._make_row(pack_activo=1)  # simulando valor DB integer
-        result = _build_response(row, [])
-        assert result["pack_activo"] is True
 
 
 # ── Guards de admin ───────────────────────────────────────────────────────────
@@ -181,33 +179,6 @@ class TestEstudioAdminGuards:
             upload_foto_from_url(UploadFromUrlBody(url="https://example.com/img.jpg"), FakeRequest())
         assert exc.value.status_code == 401
 
-    def test_listar_pack_requiere_admin(self, monkeypatch):
-        monkeypatch.delenv("ADMIN_BYPASS_AUTH", raising=False)
-        monkeypatch.setattr("auth.guards.get_session", lambda req: None)
-        from routes.estudio import listar_pack
-
-        with pytest.raises(HTTPException) as exc:
-            listar_pack(FakeRequest())
-        assert exc.value.status_code == 401
-
-    def test_agregar_pack_requiere_admin(self, monkeypatch):
-        monkeypatch.delenv("ADMIN_BYPASS_AUTH", raising=False)
-        monkeypatch.setattr("auth.guards.get_session", lambda req: None)
-        from routes.estudio import agregar_pack_equipo, PackEquipoCreate
-
-        with pytest.raises(HTTPException) as exc:
-            agregar_pack_equipo(PackEquipoCreate(equipo_id=1), FakeRequest())
-        assert exc.value.status_code == 401
-
-    def test_quitar_pack_requiere_admin(self, monkeypatch):
-        monkeypatch.delenv("ADMIN_BYPASS_AUTH", raising=False)
-        monkeypatch.setattr("auth.guards.get_session", lambda req: None)
-        from routes.estudio import quitar_pack_equipo
-
-        with pytest.raises(HTTPException) as exc:
-            quitar_pack_equipo(1, FakeRequest())
-        assert exc.value.status_code == 401
-
 
 # ── E2 / E2.1: reserva por horas ──────────────────────────────────────────────
 #
@@ -227,6 +198,9 @@ def _estudio_row(**overrides):
         "anticipacion_min_horas": 0,
         "precio_hora": 10000,
         "equipo_id": 99,  # id del centinela
+        "promo_combo_id": None,
+        "precio_pintura_reciente": 0,
+        "anticipacion_pintura_horas": 0,
     }
     defaults.update(overrides)
     return defaults
@@ -325,13 +299,13 @@ class EstudioConflictoFakeConn:
 
 class TestFranjaEstudio:
     def test_minimo_de_horas_falla(self):
-        from routes.estudio import _franja_estudio
+        from services.estudio.queries.disponibilidad import _franja_estudio
         with pytest.raises(HTTPException) as exc:
             _franja_estudio(_estudio_row(min_horas=2), "2026-06-01", "14:00", 1)
         assert exc.value.status_code == 400
 
     def test_fuera_de_horario_falla(self):
-        from routes.estudio import _franja_estudio
+        from services.estudio.queries.disponibilidad import _franja_estudio
         # close_hour=22 → terminar a las 23 cae afuera.
         with pytest.raises(HTTPException) as exc:
             _franja_estudio(_estudio_row(), "2026-06-01", "21:00", 2)
@@ -341,7 +315,7 @@ class TestFranjaEstudio:
             _franja_estudio(_estudio_row(), "2026-06-01", "07:00", 2)
 
     def test_franja_valida_devuelve_datetimes(self):
-        from routes.estudio import _franja_estudio
+        from services.estudio.queries.disponibilidad import _franja_estudio
         fd, fh = _franja_estudio(_estudio_row(), "2026-06-01", "14:00", 2)
         assert (fd.hour, fd.minute) == (14, 0)
         assert (fh.hour, fh.minute) == (16, 0)
@@ -380,7 +354,7 @@ class CentinelaFakeConn:
 
         # Query dedicada de overlap del centinela.
         if "SELECT COUNT(*) AS CNT FROM ALQUILER_ITEMS PI JOIN ALQUILERES P" in s:
-            _eq, _excl, _excl2, hi, lo = params
+            _eq, _excl, _excl2, _excl_slot, _excl_slot2, hi, lo = params
             hi_d, lo_d = self._parse(hi), self._parse(lo)
             cnt = sum(
                 1 for (fd, fh) in self.reservas
@@ -396,7 +370,7 @@ class TestEstudioOverlap:
 
     def _libre(self, conn, fd, fh, buffer_horas):
         from datetime import datetime
-        from routes.estudio import _centinela_libre
+        from services.estudio.queries.disponibilidad import _centinela_libre
         return _centinela_libre(
             conn, 99, datetime.fromisoformat(fd), datetime.fromisoformat(fh), buffer_horas
         )
@@ -418,7 +392,7 @@ class TestEstudioBufferPropio:
 
     def _libre(self, conn, fd, fh, buffer_horas):
         from datetime import datetime
-        from routes.estudio import _centinela_libre
+        from services.estudio.queries.disponibilidad import _centinela_libre
         return _centinela_libre(
             conn, 99, datetime.fromisoformat(fd), datetime.fromisoformat(fh), buffer_horas
         )
@@ -453,7 +427,7 @@ class TestAnticipacionMinima:
     def _viola(self, horas_anticipacion, horas_hasta_franja):
         from datetime import timedelta
         from database import now_ar
-        from routes.estudio import _viola_anticipacion
+        from services.estudio.queries.disponibilidad import _viola_anticipacion
         fecha_desde = now_ar() + timedelta(hours=horas_hasta_franja)
         return _viola_anticipacion(
             _estudio_row(anticipacion_min_horas=horas_anticipacion), fecha_desde
@@ -469,6 +443,47 @@ class TestAnticipacionMinima:
 
     def test_anticipacion_cero_nunca_viola(self):
         assert self._viola(0, 0) is False
+
+
+class TestAnticipacionPintura:
+    """anticipacion_pintura_horas (#1300 seguimiento) — anticipación PROPIA del
+    add-on "recién pintado", independiente de `anticipacion_min_horas` (se exige
+    ADEMÁS, no en su lugar)."""
+
+    def _viola(self, horas_anticipacion, horas_hasta_franja):
+        from datetime import timedelta
+        from database import now_ar
+        from services.estudio.queries.disponibilidad import _viola_anticipacion_pintura
+        fecha_desde = now_ar() + timedelta(hours=horas_hasta_franja)
+        return _viola_anticipacion_pintura(
+            _estudio_row(anticipacion_pintura_horas=horas_anticipacion), fecha_desde
+        )
+
+    def test_rechaza_antes_de_la_anticipacion(self):
+        # Anticipación de pintura 24h, franja dentro de 6h → viola.
+        assert self._viola(24, 6) is True
+
+    def test_permite_a_partir_de_la_anticipacion(self):
+        # Anticipación de pintura 24h, franja dentro de 48h → OK.
+        assert self._viola(24, 48) is False
+
+    def test_anticipacion_cero_nunca_viola(self):
+        assert self._viola(0, 0) is False
+
+    def test_es_independiente_de_la_anticipacion_minima(self):
+        # anticipacion_min_horas=0 (sin tope general) pero
+        # anticipacion_pintura_horas=24 (con tope propio) — la franja de
+        # pintura sigue violando aunque la general no lo haría.
+        from datetime import timedelta
+        from database import now_ar
+        from services.estudio.queries.disponibilidad import (
+            _viola_anticipacion,
+            _viola_anticipacion_pintura,
+        )
+        estudio = _estudio_row(anticipacion_min_horas=0, anticipacion_pintura_horas=24)
+        fecha_desde = now_ar() + timedelta(hours=6)
+        assert _viola_anticipacion(estudio, fecha_desde) is False
+        assert _viola_anticipacion_pintura(estudio, fecha_desde) is True
 
 
 class TestNoRegresionTipo:
@@ -510,13 +525,11 @@ class TestCentinelaNoLeak:
         assert "es_recurso_interno = FALSE" in self._src(admin_equipos_sin_serie)
 
 
-# ── E3: pack dinámico (Grip / Iluminación / Modificadores) ────────────────────
-#
-# El espacio (centinela) sigue con _centinela_libre (buffer propio). Los equipos
-# del pack son reales → motor sagrado (get_disponibilidad / _check_stock, buffer
-# global). Estos tests patchean el motor para aislar la orquestación del pack.
+# ── E3: pack curado ⏰ (Fase 8, #1283: retirado — solo sobrevive
+# `_pack_equipo_ids`, que `crear_promo_desde_pack` sigue leyendo) ──────────────
 
 import routes.estudio as estudio_mod
+import services.estudio.commands.reserva as estudio_reserva_cmd
 
 
 class _CurLastrowid:
@@ -533,63 +546,6 @@ class _CurLastrowid:
     @property
     def lastrowid(self):
         return self._lastrowid
-
-
-class _NamesConn(_ConnCM):
-    """Responde solo la query de nombres de _pack_disponible."""
-
-    def __init__(self, names):
-        self.names = names  # {id: (nombre, marca)}
-
-    def execute(self, sql, params=()):
-        su = " ".join(sql.split()).upper()
-        if "FROM EQUIPOS E WHERE E.ID = ANY(" in su:
-            ids = params[0]
-            return _Cur(
-                [{"id": i, "nombre": self.names[i][0], "marca": self.names[i][1],
-                  "foto_url": self.names[i][2] if len(self.names[i]) > 2 else None}
-                 for i in ids if i in self.names]
-            )
-        return _Cur([])
-
-
-class TestPackDisponible:
-    """_pack_disponible: solo equipos con >= 1 disponible; lo reservado no entra."""
-
-    def test_filtra_por_disponibilidad(self, monkeypatch):
-        from datetime import datetime
-        # Pack candidatos: 10, 11, 12. El 11 está ocupado (disp 0) → no entra.
-        monkeypatch.setattr(estudio_mod, "_pack_equipo_ids", lambda conn: [10, 11, 12])
-        monkeypatch.setattr(
-            estudio_mod, "get_disponibilidad",
-            lambda fd, fh, excl=None: {"10": 2, "11": 0, "12": 1},
-        )
-        conn = _NamesConn({10: ("Trípode", "Manfrotto"), 12: ("HMI", "Arri")})
-        out = estudio_mod._pack_disponible(
-            conn, datetime(2026, 6, 1, 14), datetime(2026, 6, 1, 16)
-        )
-        ids = {e["id"]: e["cantidad"] for e in out}
-        assert ids == {10: 2, 12: 1}  # el 11 (reservado) quedó afuera
-
-    def test_sin_candidatos_lista_vacia(self, monkeypatch):
-        from datetime import datetime
-        monkeypatch.setattr(estudio_mod, "_pack_equipo_ids", lambda conn: [])
-        out = estudio_mod._pack_disponible(
-            _NamesConn({}), datetime(2026, 6, 1, 14), datetime(2026, 6, 1, 16)
-        )
-        assert out == []
-
-    def test_incluye_foto_url(self, monkeypatch):
-        from datetime import datetime
-        monkeypatch.setattr(estudio_mod, "_pack_equipo_ids", lambda conn: [10])
-        monkeypatch.setattr(
-            estudio_mod, "get_disponibilidad", lambda fd, fh, excl=None: {"10": 1}
-        )
-        conn = _NamesConn({10: ("HMI", "Arri", "https://cdn/hmi.webp")})
-        out = estudio_mod._pack_disponible(
-            conn, datetime(2026, 6, 1, 14), datetime(2026, 6, 1, 16)
-        )
-        assert out[0]["foto_url"] == "https://cdn/hmi.webp"
 
 
 class _PackTablaConn(_ConnCM):
@@ -609,93 +565,42 @@ class TestPackEquipoIds:
     """_pack_equipo_ids lee de la tabla curada estudio_pack_equipos (v2-C)."""
 
     def test_lee_de_tabla_curada(self):
+        from services.estudio.queries.promo import _pack_equipo_ids
         conn = _PackTablaConn([7, 3, 9])
-        assert estudio_mod._pack_equipo_ids(conn) == [7, 3, 9]
+        assert _pack_equipo_ids(conn) == [7, 3, 9]
 
     def test_pack_vacio(self):
-        assert estudio_mod._pack_equipo_ids(_PackTablaConn([])) == []
+        from services.estudio.queries.promo import _pack_equipo_ids
+        assert _pack_equipo_ids(_PackTablaConn([])) == []
 
 
-class _PackCrudConn(_ConnCM):
-    """Fake conn para el CRUD del pack: graba INSERT/DELETE y responde el equipo."""
-
-    def __init__(self, equipo=None):
-        self.equipo = equipo  # dict o None
-        self.inserted = None
-        self.deleted = None
-        self.committed = False
-
-    def execute(self, sql, params=()):
-        su = " ".join(sql.split()).upper()
-        if su.startswith("SELECT ID, ES_RECURSO_INTERNO, ELIMINADO_AT FROM EQUIPOS"):
-            return _Cur([self.equipo] if self.equipo else [])
-        if "MAX(ORDEN)" in su:
-            return _Cur([{"next": 0}])
-        if su.startswith("INSERT INTO ESTUDIO_PACK_EQUIPOS"):
-            self.inserted = params
-            return _Cur([])
-        if su.startswith("DELETE FROM ESTUDIO_PACK_EQUIPOS"):
-            self.deleted = params
-            return _Cur([])
-        return _Cur([])
-
-    def commit(self):
-        self.committed = True
-
-    def rollback(self):
-        pass
-
-    def close(self):
-        pass
+_INSERT_COLS_RE = re.compile(r"\(([^()]+)\)\s*VALUES\s*\(([^()]+)\)", re.IGNORECASE)
 
 
-class TestPackCrud:
-    """CRUD del pack curado (con ADMIN_BYPASS_AUTH)."""
-
-    def test_agregar_inserta(self, monkeypatch):
-        monkeypatch.setenv("ADMIN_BYPASS_AUTH", "1")
-        conn = _PackCrudConn(equipo={"id": 5, "es_recurso_interno": False, "eliminado_at": None})
-        monkeypatch.setattr(estudio_mod, "get_db", lambda: conn)
-        monkeypatch.setattr(estudio_mod, "_pack_curado", lambda c: [{"id": 5}])
-        from routes.estudio import agregar_pack_equipo, PackEquipoCreate
-
-        out = agregar_pack_equipo(PackEquipoCreate(equipo_id=5), FakeRequest())
-        assert conn.inserted is not None and conn.inserted[0] == 5
-        assert conn.committed
-        assert out == {"pack": [{"id": 5}]}
-
-    def test_agregar_recurso_interno_falla(self, monkeypatch):
-        monkeypatch.setenv("ADMIN_BYPASS_AUTH", "1")
-        conn = _PackCrudConn(equipo={"id": 9, "es_recurso_interno": True, "eliminado_at": None})
-        monkeypatch.setattr(estudio_mod, "get_db", lambda: conn)
-        from routes.estudio import agregar_pack_equipo, PackEquipoCreate
-
-        with pytest.raises(HTTPException) as exc:
-            agregar_pack_equipo(PackEquipoCreate(equipo_id=9), FakeRequest())
-        assert exc.value.status_code == 400
-        assert conn.inserted is None
-
-    def test_agregar_inexistente_404(self, monkeypatch):
-        monkeypatch.setenv("ADMIN_BYPASS_AUTH", "1")
-        conn = _PackCrudConn(equipo=None)
-        monkeypatch.setattr(estudio_mod, "get_db", lambda: conn)
-        from routes.estudio import agregar_pack_equipo, PackEquipoCreate
-
-        with pytest.raises(HTTPException) as exc:
-            agregar_pack_equipo(PackEquipoCreate(equipo_id=123), FakeRequest())
-        assert exc.value.status_code == 404
-
-    def test_quitar_borra(self, monkeypatch):
-        monkeypatch.setenv("ADMIN_BYPASS_AUTH", "1")
-        conn = _PackCrudConn()
-        monkeypatch.setattr(estudio_mod, "get_db", lambda: conn)
-        monkeypatch.setattr(estudio_mod, "_pack_curado", lambda c: [])
-        from routes.estudio import quitar_pack_equipo
-
-        out = quitar_pack_equipo(5, FakeRequest())
-        assert conn.deleted == (5,)
-        assert conn.committed
-        assert out == {"pack": []}
+def _parse_insert(sql: str, params: tuple) -> dict:
+    """Parsea un `INSERT INTO t (col1, col2, ...) VALUES (v1, v2, ...)` a
+    {columna: valor} — resolviendo tanto placeholders (`%s`, consumidos en
+    orden desde `params`) como literales escritos directo en el SQL (`NULL`,
+    `1`, `'fijo'`). Los distintos INSERT de `alquiler_items` (pack a $0, línea
+    fija del pack, centinela con el monto real) mandan subconjuntos de
+    columnas DISTINTOS — parsear por NOMBRE evita que el fake dependa de la
+    posición exacta de cada `%s`, que cambia según qué campos son literales
+    en cada variante."""
+    m = _INSERT_COLS_RE.search(" ".join(sql.split()))
+    cols = [c.strip() for c in m.group(1).split(",")]
+    vals = [v.strip() for v in m.group(2).split(",")]
+    it = iter(params)
+    out = {}
+    for col, raw in zip(cols, vals):
+        if raw == "%s":
+            out[col] = next(it)
+        elif raw.upper() == "NULL":
+            out[col] = None
+        elif raw.startswith("'"):
+            out[col] = raw.strip("'")
+        else:
+            out[col] = int(raw)
+    return out
 
 
 class _RecordingConn(_ConnCM):
@@ -704,7 +609,7 @@ class _RecordingConn(_ConnCM):
     def __init__(self, pedido_id=555):
         self.pedido_id = pedido_id
         self.alquiler_params = None
-        self.items = []  # {equipo_id, cantidad, precio}
+        self.items = []  # [{columna: valor}] — uno por INSERT INTO alquiler_items
         self.committed = False
 
     def execute(self, sql, params=()):
@@ -724,9 +629,7 @@ class _RecordingConn(_ConnCM):
             self.alquiler_params = params
             return _CurLastrowid([], lastrowid=self.pedido_id)
         if su.startswith("INSERT INTO ALQUILER_ITEMS"):
-            self.items.append(
-                {"equipo_id": params[1], "cantidad": params[2], "precio": params[3]}
-            )
+            self.items.append(_parse_insert(sql, params))
             return _Cur([])
         if su.startswith("DELETE FROM ALQUILER_ITEMS"):
             return _Cur([])
@@ -746,16 +649,20 @@ class _RecordingConn(_ConnCM):
         pass
 
 
-def _patch_post_collaborators(monkeypatch, conn, estudio_row, disp, pack_ids):
-    """Patchea los colaboradores pesados del POST para aislar la orquestación."""
+def _patch_post_collaborators(monkeypatch, conn, estudio_row):
+    """Patchea los colaboradores pesados del POST para aislar la orquestación.
+
+    `_centinela_libre` se patchea sobre `services.estudio.commands.reserva`
+    (no sobre `routes.estudio`): `_crear_pedido_estudio` la resuelve desde su
+    propio import (`from services.estudio.queries.disponibilidad import
+    _centinela_libre`), así que patchear el módulo de origen no interceptaría
+    la referencia ya vinculada en `commands.reserva` — "patch where it's
+    used", no donde se define."""
     monkeypatch.setattr(estudio_mod, "get_db", lambda: conn)
     monkeypatch.setattr(estudio_mod, "_get_estudio_row", lambda c: estudio_row)
     monkeypatch.setattr(estudio_mod, "_next_numero_pedido", lambda c: 999)
-    monkeypatch.setattr(estudio_mod, "_pack_equipo_ids", lambda c: pack_ids)
-    monkeypatch.setattr(estudio_mod, "get_disponibilidad", lambda fd, fh, excl=None: disp)
-    monkeypatch.setattr(estudio_mod, "_check_stock", lambda c, pid, fd, fh: [])
     monkeypatch.setattr(
-        estudio_mod, "_centinela_libre",
+        estudio_reserva_cmd, "_centinela_libre",
         lambda c, eid, fd, fh, buf, exclude_pedido_id=None: True,
     )
     monkeypatch.setattr(estudio_mod, "_get_alquiler_detail", lambda c, pid: {"id": pid})
@@ -764,69 +671,31 @@ def _patch_post_collaborators(monkeypatch, conn, estudio_row, disp, pack_ids):
     monkeypatch.setattr(estudio_mod, "_require_cliente", lambda req: {"cliente_id": 7, "role": "cliente"})
 
 
-def _estudio_row_full(**overrides):
-    row = _estudio_row()
-    row.update({"pack_activo": True, "pack_precio": 30000})
-    row.update(overrides)
-    return row
+class TestCrearReservaSinPack:
+    """POST /estudio/reservas — orquestación y monto (el pack ⏰ se retiró en
+    la Fase 8, #1283: ya no hay un camino "con pack" que probar acá)."""
 
-
-class TestCrearReservaPack:
-    """POST /estudio/reservas con/ sin pack — orquestación y monto."""
-
-    def _post(self, monkeypatch, con_pack, disp, pack_ids, estudio_row=None):
+    def test_crea_solo_el_centinela(self, monkeypatch):
         from datetime import timedelta
         from fastapi import BackgroundTasks
         from database import now_ar
         from routes.estudio import crear_reserva_estudio, EstudioReservaCreate
 
         conn = _RecordingConn()
-        est = estudio_row or _estudio_row_full()
-        _patch_post_collaborators(monkeypatch, conn, est, disp, pack_ids)
+        _patch_post_collaborators(monkeypatch, conn, _estudio_row())
 
-        # Fecha futura válida dentro del horario [open, close].
         manana = (now_ar() + timedelta(days=2)).strftime("%Y-%m-%d")
-        body = EstudioReservaCreate(fecha=manana, start="14:00", horas=2, con_pack=con_pack)
+        body = EstudioReservaCreate(fecha=manana, start="14:00", horas=2)
         crear_reserva_estudio(body, FakeRequest(), BackgroundTasks())
-        return conn
 
-    def test_con_pack_suma_precio_y_crea_items(self, monkeypatch):
-        conn = self._post(
-            monkeypatch, con_pack=True,
-            disp={"10": 2, "11": 1}, pack_ids=[10, 11],
-        )
-        # monto_total = precio_hora(10000)*2 + pack_precio(30000) = 50000
-        # INSERT alquileres params: (... , monto_total, estado, fuente, tipo, estudio_con_pack, numero)
-        params = conn.alquiler_params
-        assert 50000 in params           # monto_total
-        assert True in params            # estudio_con_pack = TRUE
-        # Items: centinela (equipo_id=99, cant 1) + pack 10 (×2) + 11 (×1)
-        by_eq = {it["equipo_id"]: it["cantidad"] for it in conn.items}
-        assert by_eq == {99: 1, 10: 2, 11: 1}
-        assert conn.committed is True
-
-    def test_sin_pack_no_crea_items_de_equipos(self, monkeypatch):
-        conn = self._post(
-            monkeypatch, con_pack=False,
-            disp={"10": 2, "11": 1}, pack_ids=[10, 11],
-        )
-        # monto_total = 10000*2 = 20000 (sin pack_precio)
+        # monto_total = precio_hora(10000) * 2 horas = 20000, sin nada más.
         assert 20000 in conn.alquiler_params
-        assert False in conn.alquiler_params  # estudio_con_pack = FALSE
-        # Solo el centinela; ningún equipo del pack.
-        by_eq = {it["equipo_id"]: it["cantidad"] for it in conn.items}
-        assert by_eq == {99: 1}
-
-    def test_pack_inactivo_ignora_con_pack(self, monkeypatch):
-        # pack_activo=False → aunque el cliente mande con_pack, no se cobra ni agrega.
-        est = _estudio_row_full(pack_activo=False)
-        conn = self._post(
-            monkeypatch, con_pack=True,
-            disp={"10": 2}, pack_ids=[10], estudio_row=est,
-        )
-        assert 20000 in conn.alquiler_params
-        by_eq = {it["equipo_id"]: it["cantidad"] for it in conn.items}
-        assert by_eq == {99: 1}
+        assert False in conn.alquiler_params  # estudio_con_pack = FALSE, siempre
+        assert len(conn.items) == 1
+        assert conn.items[0]["equipo_id"] == 99
+        assert conn.items[0]["precio_jornada"] == 20000
+        assert conn.items[0]["subtotal"] == 20000
+        assert conn.items[0]["cobro_modo"] == "fijo"
 
 
 # ── E4: slots fijos recurrentes mensuales ──────────────────────────────────────
@@ -834,8 +703,8 @@ class TestCrearReservaPack:
 
 class TestIterMesesYPrimerDia:
     def test_iter_meses_inclusive_cruza_anio(self):
-        from routes.estudio import _iter_meses
-        out = list(_iter_meses("2026-11", "2027-02"))
+        from services.fechas import iter_meses
+        out = list(iter_meses("2026-11", "2027-02"))
         assert out == [(2026, 11), (2026, 12), (2027, 1), (2027, 2)]
 
     def test_primer_dia_semana(self):
@@ -880,31 +749,31 @@ class TestSlotBloqueante:
         return (rep.replace(hour=h_desde), rep.replace(hour=h_hasta))
 
     def test_bloquea_su_dia_y_horario_en_rango(self):
-        from routes.estudio import _slot_bloqueante
+        from services.estudio.queries.disponibilidad import _slot_bloqueante
         conn = _SlotBloqueoConn([self.SLOT])
         fd, fh = self._franja(2026, 6, 2, 10, 12)  # miércoles de junio 10-12
         assert _slot_bloqueante(conn, fd, fh) == "Filmar"
 
     def test_no_bloquea_otro_dia(self):
-        from routes.estudio import _slot_bloqueante
+        from services.estudio.queries.disponibilidad import _slot_bloqueante
         conn = _SlotBloqueoConn([self.SLOT])
         fd, fh = self._franja(2026, 6, 1, 10, 12)  # martes
         assert _slot_bloqueante(conn, fd, fh) is None
 
     def test_no_bloquea_fuera_del_rango_de_meses(self):
-        from routes.estudio import _slot_bloqueante
+        from services.estudio.queries.disponibilidad import _slot_bloqueante
         conn = _SlotBloqueoConn([self.SLOT])
         fd, fh = self._franja(2027, 1, 2, 10, 12)  # miércoles de enero 2027 (> mes_hasta)
         assert _slot_bloqueante(conn, fd, fh) is None
 
     def test_no_bloquea_horario_disjunto(self):
-        from routes.estudio import _slot_bloqueante
+        from services.estudio.queries.disponibilidad import _slot_bloqueante
         conn = _SlotBloqueoConn([self.SLOT])
         fd, fh = self._franja(2026, 6, 2, 20, 22)  # arranca cuando el slot termina (half-open)
         assert _slot_bloqueante(conn, fd, fh) is None
 
     def test_slot_inactivo_no_bloquea(self):
-        from routes.estudio import _slot_bloqueante
+        from services.estudio.queries.disponibilidad import _slot_bloqueante
         conn = _SlotBloqueoConn([{**self.SLOT, "activo": False}])
         fd, fh = self._franja(2026, 6, 2, 10, 12)
         assert _slot_bloqueante(conn, fd, fh) is None
@@ -913,7 +782,8 @@ class TestSlotBloqueante:
         # Reserva 22-24: fecha_hasta = 00:00 del día siguiente. Con `.hour` daría
         # fin=0 y no detectaría el solape; con minutos relativos al día da 1440.
         from datetime import timedelta
-        from routes.estudio import _primer_dia_semana, _slot_bloqueante
+        from routes.estudio import _primer_dia_semana
+        from services.estudio.queries.disponibilidad import _slot_bloqueante
         conn = _SlotBloqueoConn([{**self.SLOT, "hora_hasta": 24}])  # slot 8-24
         rep = _primer_dia_semana(2026, 6, 2)  # miércoles (dia_semana=2)
         fd = rep.replace(hour=22)
@@ -922,13 +792,14 @@ class TestSlotBloqueante:
 
 
 class _SlotRegenConn(_ConnCM):
-    """Fake conn para _regenerar_pedidos_slot: graba INSERT/DELETE de alquileres."""
+    """Fake conn para _regenerar_pedidos_slot: graba INSERT/DELETE de alquileres
+    + el ítem centinela que cada pedido nuevo debe llevar (Fase 2, ítems veraces)."""
 
     def __init__(self, existing=None):
         self.existing = existing or []  # [{id, fecha_desde, monto_pagado}]
         self.inserted = []              # params de cada INSERT alquileres
         self.deleted = []               # ids borrados
-        self.item_inserts = 0           # NO debe haber items (no doble-bloqueo)
+        self.item_inserts = []          # [{columna: valor}] — uno por pedido creado
         self._num = 1000
 
     def execute(self, sql, params=()):
@@ -940,21 +811,26 @@ class _SlotRegenConn(_ConnCM):
             return _Cur([{0: self._num}])
         if su.startswith("INSERT INTO ALQUILERES"):
             self.inserted.append(params)
-            return _CurLastrowid([], lastrowid=self._num)
+            self._num += 1
+            return _Cur([{"id": self._num}])
         if su.startswith("INSERT INTO ALQUILER_ITEMS"):
-            self.item_inserts += 1
+            self.item_inserts.append(_parse_insert(sql, params))
             return _Cur([])
         if su.startswith("DELETE FROM ALQUILERES WHERE ID = "):
             self.deleted.append(params[0])
             return _Cur([])
         return _Cur([])
 
+    def insert_returning(self, sql, params=(), *, column="id"):
+        row = self.execute(sql, params).fetchone()
+        return row[column] if row else None
+
 
 def _mes_offset_ym(n: int) -> tuple[int, int]:
     """(year, month) del mes actual + n meses — relativo a `hoy`, no hardcodeado
     (un `mes_desde`/`mes_hasta` fijo se pudre apenas el reloj cruza ese mes)."""
-    from routes.estudio import _mes_actual_ar
-    y, m = (int(x) for x in _mes_actual_ar().split("-"))
+    from services.fechas import mes_actual_ar
+    y, m = (int(x) for x in mes_actual_ar().split("-"))
     total = (y * 12 + (m - 1)) + n
     return total // 12, total % 12 + 1
 
@@ -978,7 +854,7 @@ class TestRegenerarPedidosSlot:
     def test_genera_un_pedido_por_mes_con_el_valor(self):
         from routes.estudio import _regenerar_pedidos_slot
         conn = _SlotRegenConn(existing=[])
-        _regenerar_pedidos_slot(conn, _slot_full())  # mes actual + los 2 siguientes (todos futuros)
+        _regenerar_pedidos_slot(conn, _estudio_row(), _slot_full())  # mes actual + los 2 siguientes (todos futuros)
         assert len(conn.inserted) == 3
         for p in conn.inserted:
             # (cliente, fd, fh, monto, estado, fuente, tipo, num, slot_id)
@@ -988,8 +864,15 @@ class TestRegenerarPedidosSlot:
             assert p[5] == "estudio"
             assert p[6] == "estudio_fijo"
             assert p[8] == 1
-        # NO se crean items → el slot no doble-bloquea el centinela.
-        assert conn.item_inserts == 0
+        # Cada pedido lleva su ítem centinela con el monto REAL (Fase 2, ítems
+        # veraces) — antes NO llevaba ítem (el bloqueo lo hacía _slot_bloqueante
+        # solamente), y quedaba invisible para la liquidación.
+        assert len(conn.item_inserts) == 3
+        for it in conn.item_inserts:
+            assert it["equipo_id"] == 99  # equipo_id del centinela (_estudio_row)
+            assert it["precio_jornada"] == 50000
+            assert it["subtotal"] == 50000
+            assert it["cobro_modo"] == "fijo"
 
     def test_editar_regenera_futuros_sin_tocar_pagados(self):
         from datetime import datetime
@@ -1001,24 +884,26 @@ class TestRegenerarPedidosSlot:
             {"id": 91, "fecha_desde": datetime(y0, m0, 3, 8), "monto_pagado": 0},       # futuro impago → borrar+recrear
         ]
         conn = _SlotRegenConn(existing=existing)
-        _regenerar_pedidos_slot(conn, _slot_full())  # rango: mes actual .. mes actual + 2
+        _regenerar_pedidos_slot(conn, _estudio_row(), _slot_full())  # rango: mes actual .. mes actual + 2
         assert 91 in conn.deleted       # impago borrado
         assert 90 not in conn.deleted   # pagado intocable
         # Recrea el primer mes (borrado) + el tercero (nuevo); el del medio queda conservado.
         assert len(conn.inserted) == 2
+        assert len(conn.item_inserts) == 2  # un centinela por pedido recreado
 
     def test_slot_inactivo_no_genera(self):
         from routes.estudio import _regenerar_pedidos_slot
         conn = _SlotRegenConn(existing=[])
-        _regenerar_pedidos_slot(conn, _slot_full(activo=False))
+        _regenerar_pedidos_slot(conn, _estudio_row(), _slot_full(activo=False))
         assert conn.inserted == []
+        assert conn.item_inserts == []
 
     def test_slot_que_cierra_a_medianoche_no_crashea(self):
         # hora_hasta=24 (cierre a medianoche, válido) rompía con
         # rep.replace(hour=24); ahora se arma con timedelta → 00:00 del día sig.
         from routes.estudio import _regenerar_pedidos_slot
         conn = _SlotRegenConn(existing=[])
-        _regenerar_pedidos_slot(conn, _slot_full(hora_desde=20, hora_hasta=24))
+        _regenerar_pedidos_slot(conn, _estudio_row(), _slot_full(hora_desde=20, hora_hasta=24))
         assert len(conn.inserted) == 3  # mes actual + los 2 siguientes
         for p in conn.inserted:
             fd, fh = p[1], p[2]
@@ -1050,7 +935,7 @@ class TestReservaLoginObligatorio:
         from routes.estudio import crear_reserva_estudio, EstudioReservaCreate
 
         conn = _RecordingConn()
-        _patch_post_collaborators(monkeypatch, conn, _estudio_row_full(), {}, [])
+        _patch_post_collaborators(monkeypatch, conn, _estudio_row())
         manana = (now_ar() + timedelta(days=2)).strftime("%Y-%m-%d")
         crear_reserva_estudio(
             EstudioReservaCreate(fecha=manana, start="14:00", horas=2),
@@ -1067,3 +952,73 @@ class TestReservaLoginObligatorio:
         from routes.estudio import EstudioReservaCreate
         assert "cliente_nombre" not in EstudioReservaCreate.model_fields
         assert "cliente_email" not in EstudioReservaCreate.model_fields
+
+
+class _OcupacionRangoConn(_ConnCM):
+    """Fake conn para _ocupacion_estudio_rango: devuelve slots/clases fijos
+    sin filtrar (el filtro por rango lo hace la función bajo test)."""
+
+    def __init__(self, slots=None, clases=None):
+        self.slots = slots or []
+        self.clases = clases or []
+
+    def execute(self, sql, params=()):
+        su = " ".join(sql.split()).upper()
+        if "FROM ESTUDIO_SLOTS_FIJOS" in su:
+            return _Cur(self.slots)
+        if "FROM CLASES_TALLER" in su:
+            return _Cur(self.clases)
+        return _Cur([])
+
+
+class TestOcupacionEstudioRango:
+    def test_slot_fijo_dentro_del_rango(self):
+        from routes.estudio import _ocupacion_estudio_rango, _primer_dia_semana
+
+        slot = _slot_full(cliente="Filmar")  # mes_desde/mes_hasta relativos a hoy
+        conn = _OcupacionRangoConn(slots=[slot])
+        y, m = _mes_offset_ym(0)
+        primera = _primer_dia_semana(y, m, slot["dia_semana"]).date()
+        out = _ocupacion_estudio_rango(conn, primera, primera)
+        assert len(out) == 1
+        assert out[0]["tipo"] == "slot_fijo"
+        assert "Filmar" in out[0]["label"]
+
+    def test_slot_fuera_del_rango_pedido_no_aparece(self):
+        from datetime import date
+        from routes.estudio import _ocupacion_estudio_rango
+
+        slot = _slot_full(cliente="Filmar", mes_desde="2026-06", mes_hasta="2026-12")
+        conn = _OcupacionRangoConn(slots=[slot])
+        out = _ocupacion_estudio_rango(conn, date(2030, 1, 1), date(2030, 1, 31))
+        assert out == []
+
+    def test_clase_de_taller_en_rango(self):
+        from datetime import date, datetime
+        from routes.estudio import _ocupacion_estudio_rango
+
+        clase = {
+            "nombre": "Taller de Rodaje", "fecha": date(2026, 9, 5),
+            "hora_inicio_min": 510, "hora_fin_min": 750,
+        }
+        conn = _OcupacionRangoConn(clases=[clase])
+        out = _ocupacion_estudio_rango(conn, date(2026, 9, 1), date(2026, 9, 30))
+        assert len(out) == 1
+        assert out[0]["tipo"] == "taller"
+        assert "Taller de Rodaje" in out[0]["label"]
+        assert out[0]["fecha_desde"] == datetime(2026, 9, 5, 8, 30)
+        assert out[0]["fecha_hasta"] == datetime(2026, 9, 5, 12, 30)
+
+    def test_combina_slots_y_talleres(self):
+        from datetime import date
+        from routes.estudio import _ocupacion_estudio_rango
+
+        slot = _slot_full(cliente="Filmar", mes_desde="2026-09", mes_hasta="2026-09")
+        clase = {
+            "nombre": "Jime", "fecha": date(2026, 9, 12),
+            "hora_inicio_min": 600, "hora_fin_min": 720,
+        }
+        conn = _OcupacionRangoConn(slots=[slot], clases=[clase])
+        out = _ocupacion_estudio_rango(conn, date(2026, 9, 1), date(2026, 9, 30))
+        tipos = {o["tipo"] for o in out}
+        assert tipos == {"slot_fijo", "taller"}

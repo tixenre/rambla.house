@@ -150,6 +150,17 @@ def inicio_desde_fecha_hora(fecha, hora) -> datetime.datetime | None:
     return datetime.datetime.combine(d.date(), t)
 
 
+# ── Formato de horario en minutos-desde-medianoche ─────────────────────────────
+
+
+def fmt_hhmm(minutos: int) -> str:
+    """510 → \"08:30\", 780 → \"13:00\", 1440 → \"24:00\". Formato único de display
+    para horarios guardados en minutos desde medianoche (clases de talleres,
+    Escuela v2 F1). El backend resuelve el string — el front no formatea horarios
+    a mano (mismo criterio que la plata)."""
+    return f"{minutos // 60:02d}:{minutos % 60:02d}"
+
+
 # ── Mes actual (wall-clock AR) ──────────────────────────────────────────────────
 
 
@@ -158,6 +169,38 @@ def mes_actual_ar() -> str:
     en vez de `date.today()` (que en CI/servidor corre en UTC y desfasa entre
     00:00–03:00 → puede devolver el mes equivocado a fin de mes)."""
     return now_ar().strftime("%Y-%m")
+
+
+def iter_meses(mes_desde: str, mes_hasta: str):
+    """Itera (year, month) inclusive entre dos 'YYYY-MM' — promovido desde
+    `routes/estudio.py` (usado también por la economía de talleres,
+    `_regenerar_pedidos_taller`: ambos recorren el rango de meses de una
+    edición/slot para decidir qué pedido mensual conservar/recrear)."""
+    y0, m0 = int(mes_desde[:4]), int(mes_desde[5:7])
+    y1, m1 = int(mes_hasta[:4]), int(mes_hasta[5:7])
+    cur = (y0, m0)
+    while cur <= (y1, m1):
+        yield cur
+        y, m = cur
+        cur = (y + 1, 1) if m == 12 else (y, m + 1)
+
+
+# ── Nombres de días/meses en español (display) ──────────────────────────────
+
+DIAS_ES = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+MESES_ES = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre",
+]
+
+
+def fmt_fecha_es(d) -> str:
+    """datetime.date → 'sábado 11 de julio' — promovido desde `routes/talleres.py`
+    (lo necesita también `services.talleres.commands.economia`, que evitaba así
+    importar de `routes.*`)."""
+    if isinstance(d, str):
+        d = datetime.date.fromisoformat(d)
+    return f"{DIAS_ES[d.weekday()]} {d.day} de {MESES_ES[d.month - 1]}"
 
 
 # ── Horarios habilitados de retiro/devolución (setting `horarios_retiro`) ────────

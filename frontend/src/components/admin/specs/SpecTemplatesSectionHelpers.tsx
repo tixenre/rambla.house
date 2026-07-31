@@ -142,7 +142,13 @@ export function SortableSpecRow({
     <div
       ref={setNodeRef}
       style={style}
-      className="grid grid-cols-[24px_1fr_140px_minmax(0,1fr)_64px] items-center gap-2 px-3 py-2 text-sm hover:bg-muted/20"
+      // Columnas 1 y 5 anchas en mobile (48px/96px): a 44×44 el gate táctil,
+      // el drag-handle solo (columna 1) y los DOS icon-buttons de acción
+      // (columna 5, `size="xs"` = 44px c/u + gap) ya no entraban en los
+      // 24px/64px fijos de antes — se recortaban contra el borde o se
+      // solapaban con la columna vecina. `md:` vuelve al layout denso
+      // original (los icon-buttons bajan a 28px en desktop).
+      className="grid grid-cols-[48px_1fr_90px_minmax(0,1fr)_96px] items-center gap-2 px-3 py-2 text-sm hover:bg-muted/20 md:grid-cols-[24px_1fr_140px_minmax(0,1fr)_64px]"
     >
       <IconButton
         aria-label={`Reordenar ${template.label}`}

@@ -6,17 +6,33 @@ import { Button } from "@/design-system/ui/button";
 import { Input } from "@/design-system/ui/input";
 
 import { adminApi } from "@/lib/admin/api";
-import { DUENOS } from "@/lib/admin/duenos";
 
+/** Espeja `backend/reportes/comisiones.py::DEFAULT_MODELO` — solo se usa si
+ *  todavía no hay setting persistido (instalación nueva). Padded a matriz
+ *  cuadrada (con 0 explícitos) para que se vean todas las columnas editables,
+ *  igual que hace el propio backend con el modelo real. */
 const DEFAULT_COMISIONES: Record<string, Record<string, number>> = {
-  Rambla: { Rambla: 100, Pablo: 0, Tincho: 0 },
-  Pablo: { Pablo: 50, Rambla: 45, Tincho: 5 },
-  Tincho: { Tincho: 50, Rambla: 45, Pablo: 5 },
+  Rental: { Rental: 100, Pablo: 0, Tincho: 0, Estudio: 0 },
+  Pablo: { Pablo: 50, Rental: 45, Tincho: 5, Estudio: 0 },
+  Tincho: { Tincho: 50, Rental: 45, Pablo: 5, Estudio: 0 },
+  Estudio: { Estudio: 100, Rental: 0, Pablo: 0, Tincho: 0 },
 };
+
+/** Todos los dueños/beneficiarios que aparecen en el modelo (unión de claves de
+ *  primer y segundo nivel) — el set de filas/columnas sale de LOS DATOS, no de
+ *  una lista fija en el front (bug real: un beneficiario nuevo agregado del
+ *  lado backend, como "Estudio", quedaba invisible acá y un "Guardar" lo
+ *  borraba en silencio del setting persistido). */
+function keysOf(m: Record<string, Record<string, number>>): string[] {
+  const set = new Set<string>(Object.keys(m));
+  for (const d of Object.keys(m)) for (const b of Object.keys(m[d] ?? {})) set.add(b);
+  return Array.from(set);
+}
 
 export function ComisionesSection() {
   const qc = useQueryClient();
   const [model, setModel] = useState<Record<string, Record<string, number>> | null>(null);
+  const keys = model ? Object.keys(model) : [];
 
   const settingQ = useQuery({
     queryKey: ["settings", "comisiones_modelo"],
@@ -35,10 +51,11 @@ export function ComisionesSection() {
       parsed = null;
     }
     const base = parsed ?? DEFAULT_COMISIONES;
+    const baseKeys = keysOf(base);
     const next: Record<string, Record<string, number>> = {};
-    for (const d of DUENOS) {
+    for (const d of baseKeys) {
       next[d] = {};
-      for (const b of DUENOS) next[d][b] = Number(base[d]?.[b] ?? 0);
+      for (const b of baseKeys) next[d][b] = Number(base[d]?.[b] ?? 0);
     }
     setModel(next);
   }, [settingQ.data, settingQ.isFetched, model]);
@@ -57,11 +74,11 @@ export function ComisionesSection() {
     setModel((prev) => (prev ? { ...prev, [dueno]: { ...prev[dueno], [benef]: v } } : prev));
 
   const sumOf = (dueno: string) =>
-    model ? DUENOS.reduce((s, b) => s + (model[dueno][b] || 0), 0) : 0;
+    model ? keys.reduce((s, b) => s + (model[dueno][b] || 0), 0) : 0;
 
   const save = () => {
     if (!model) return;
-    for (const d of DUENOS) {
+    for (const d of keys) {
       if (Math.abs(sumOf(d) - 100) > 0.01) {
         toast.error(`${d}: los porcentajes deben sumar 100 (suman ${sumOf(d)}).`);
         return;
@@ -82,7 +99,7 @@ export function ComisionesSection() {
       </div>
       <div className="border-t hairline pt-3 space-y-4">
         {model &&
-          DUENOS.map((dueno) => {
+          keys.map((dueno) => {
             const suma = sumOf(dueno);
             const ok = Math.abs(suma - 100) <= 0.01;
             return (
@@ -95,8 +112,8 @@ export function ComisionesSection() {
                     suma {suma}%
                   </span>
                 </div>
-                <div className="grid grid-cols-3 gap-2">
-                  {DUENOS.map((benef) => (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {keys.map((benef) => (
                     <label key={benef} className="text-xs text-muted-foreground">
                       {benef}
                       <Input

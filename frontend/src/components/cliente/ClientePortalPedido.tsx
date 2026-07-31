@@ -62,6 +62,8 @@ import { rearmarCarrito } from "@/lib/rearmar-carrito";
 import { GuardarComoListaButton } from "@/components/rental/GuardarComoListaButton";
 import { CompartirComposicionButton } from "@/components/rental/CompartirComposicionButton";
 import { cn } from "@/lib/utils";
+import { ESTADO_SOLID, ESTADO_RING } from "@/design-system/ui/estado-color";
+import type { EstadoPedido } from "@/lib/pedido-estados";
 import {
   fmt,
   fmtDate,
@@ -1265,22 +1267,31 @@ export function PedidoTimeline({ pedido }: { pedido: Pedido }) {
     <div className="flex flex-row items-start gap-0 pt-1">
       {steps.map((s, i) => {
         const isLast = i === steps.length - 1;
+        // El color sale de la fuente única `estado-color.ts` cuando el paso es un
+        // ESTADO del pedido (su `key` es el estado: solicitado/confirmado/…). Los
+        // pasos de "modificación" (no son estados) mantienen el neutro del portal.
+        const solid = ESTADO_SOLID[s.key as EstadoPedido];
         const dotCls =
-          s.state === "done"
-            ? "border-ink bg-ink text-amber"
-            : s.state === "current"
-              ? "border-amber bg-amber text-ink shadow-[0_0_0_4px_var(--amber-soft)]"
-              : s.state === "rejected"
-                ? "border-destructive bg-destructive text-white"
-                : "border-[var(--hairline)] bg-background text-muted-foreground border-dashed";
+          s.state === "rejected"
+            ? "border-destructive bg-destructive text-white"
+            : s.state === "pending"
+              ? "border-[var(--hairline)] bg-background text-muted-foreground border-dashed"
+              : solid
+                ? cn(
+                    "text-white",
+                    solid,
+                    s.state === "current" &&
+                      cn("ring-4 ring-offset-0", ESTADO_RING[s.key as EstadoPedido]),
+                  )
+                : s.state === "current"
+                  ? "border-amber bg-amber text-ink shadow-[0_0_0_4px_var(--amber-soft)]"
+                  : "border-ink bg-ink text-amber";
         const connectorCls =
-          s.state === "done"
-            ? "after:bg-ink/25"
-            : s.state === "current"
-              ? "after:bg-[image:linear-gradient(to_right,var(--amber)_0%,var(--amber)_50%,var(--hairline)_50%)]"
-              : s.state === "rejected"
-                ? "after:bg-destructive/30"
-                : "after:bg-[var(--hairline)]";
+          s.state === "rejected"
+            ? "after:bg-destructive/30"
+            : s.state === "pending"
+              ? "after:bg-[var(--hairline)]"
+              : "after:bg-ink/20";
         const Icon =
           s.state === "rejected"
             ? XCircle

@@ -33,6 +33,7 @@ from services.email import Attachment, send_email
 from services.email.service import get_admin_to
 from services.ical import build_vcalendar, google_calendar_url, reserva_to_vevent
 from services.precios import jornadas_periodo
+from tipos_pedido import TIPOS_ESTUDIO
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,19 @@ def pedido_email_context(pedido: dict) -> dict:
         d1 = to_datetime(pedido["fecha_hasta"]) if pedido.get("fecha_hasta") else None
         jornadas = jornadas_periodo(d0, d1)
 
+    # Período legible ("4 horas" en un pedido del Estudio, "N jornada(s)" en
+    # un alquiler normal) — mismo criterio que `pdf_templates._periodo_label`
+    # (display en horas del Estudio, 2026-07-23): un turno de 4hs mostrando
+    # "Jornadas: 1" en el mail confundía igual que en el presupuesto/PDF.
+    periodo_label = ""
+    if pedido.get("tipo") in TIPOS_ESTUDIO and pedido.get("fecha_desde") and pedido.get("fecha_hasta"):
+        _d0 = to_datetime(pedido["fecha_desde"])
+        _d1 = to_datetime(pedido["fecha_hasta"])
+        horas = max(1, round((_d1 - _d0).total_seconds() / 3600))
+        periodo_label = f'{horas} hora{"s" if horas != 1 else ""}'
+    elif jornadas:
+        periodo_label = f'{jornadas} jornada{"s" if jornadas != 1 else ""}'
+
     def _num(v) -> float:
         try:
             return float(v or 0)
@@ -136,6 +150,7 @@ def pedido_email_context(pedido: dict) -> dict:
         "fecha_desde": _fmt_fecha_amable(pedido.get("fecha_desde")),
         "fecha_hasta": _fmt_fecha_amable(pedido.get("fecha_hasta")),
         "cantidad_jornadas": jornadas,
+        "periodo_label": periodo_label,
         "total": _fmt_ars(pedido.get("monto_total")),
         "total_pagado": total_pagado,
         "saldo_pendiente": saldo_pendiente,

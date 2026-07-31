@@ -21,6 +21,7 @@ Create Date: 2026-06-27
 from typing import Sequence, Union
 
 from alembic import op
+from sqlalchemy import text
 
 revision: str = "e1d2c3i4o5n6"
 down_revision: Union[str, Sequence[str], None] = "t4ll3rs3s01"
@@ -131,56 +132,92 @@ def upgrade() -> None:
     )
 
     # ── F2: backfill de datos ─────────────────────────────────────────────────
+    # Guard post-Escuela-v2-F6 (esc7l8i9m0p1): en una DB fresca, init_db() ya
+    # crea `talleres` en su forma FINAL — sin fecha_inicio/proxima_edicion_slug/
+    # el resto de columnas de edición "plana" que este backfill lee (retiradas
+    # en F6) — así que no hay ninguna fila legacy de la que migrar. Mismo
+    # criterio que el guard de clases_taller un poco más abajo.
+    conn = op.get_bind()
+    tiene_fecha_inicio = conn.execute(text(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'talleres' AND column_name = 'fecha_inicio'"
+    )).fetchone() is not None
 
-    # Marcar raíces de cadena (slug no referenciado como proxima_edicion_slug)
-    op.execute("""
-        UPDATE talleres
-        SET slug_base = slug
-        WHERE slug NOT IN (
-            SELECT proxima_edicion_slug FROM talleres WHERE proxima_edicion_slug != ''
-        )
-        AND slug_base IS NULL
-    """)
+    if tiene_fecha_inicio:
+        # Marcar raíces de cadena (slug no referenciado como proxima_edicion_slug)
+        op.execute("""
+            UPDATE talleres
+            SET slug_base = slug
+            WHERE slug NOT IN (
+                SELECT proxima_edicion_slug FROM talleres WHERE proxima_edicion_slug != ''
+            )
+            AND slug_base IS NULL
+        """)
 
-    # Crear ediciones_taller a partir de cada fila de talleres.
-    # Para cadenas de profundidad 2 (root → hijo): el taller_id de la edición
-    # es la raíz del concepto (el que tiene slug_base seteado).
-    op.execute("""
-        INSERT INTO ediciones_taller (
-            taller_id, numero_edicion, slug, tipo_taller,
-            fecha_inicio, fecha_fin, horario,
-            cupos_total, cupos_confirmados, precio_total, precio_sena,
-            pago_alias, pago_cbu, pago_banco, direccion, activo
-        )
-        SELECT
-            (
-                SELECT r.id FROM talleres r
-                WHERE r.slug_base IS NOT NULL
-                  AND (r.slug = t.slug OR r.proxima_edicion_slug = t.slug)
-                LIMIT 1
-            ) AS taller_id,
-            t.numero_edicion, t.slug, t.tipo_taller,
-            t.fecha_inicio, t.fecha_fin, t.horario,
-            t.cupos_total, t.cupos_confirmados, t.precio_total, t.precio_sena,
-            t.pago_alias, t.pago_cbu, t.pago_banco, t.direccion, t.activo
-        FROM talleres t
-        WHERE NOT EXISTS (
-            SELECT 1 FROM ediciones_taller e WHERE e.slug = t.slug
-        )
-    """)
+        # Crear ediciones_taller a partir de cada fila de talleres.
+        # Para cadenas de profundidad 2 (root → hijo): el taller_id de la edición
+        # es la raíz del concepto (el que tiene slug_base seteado).
+        op.execute("""
+            INSERT INTO ediciones_taller (
+                taller_id, numero_edicion, slug, tipo_taller,
+                fecha_inicio, fecha_fin, horario,
+                cupos_total, cupos_confirmados, precio_total, precio_sena,
+                pago_alias, pago_cbu, pago_banco, direccion, activo
+            )
+            SELECT
+                (
+                    SELECT r.id FROM talleres r
+                    WHERE r.slug_base IS NOT NULL
+                      AND (r.slug = t.slug OR r.proxima_edicion_slug = t.slug)
+                    LIMIT 1
+                ) AS taller_id,
+                t.numero_edicion, t.slug, t.tipo_taller,
+                t.fecha_inicio, t.fecha_fin, t.horario,
+                t.cupos_total, t.cupos_confirmados, t.precio_total, t.precio_sena,
+                t.pago_alias, t.pago_cbu, t.pago_banco, t.direccion, t.activo
+            FROM talleres t
+            WHERE NOT EXISTS (
+                SELECT 1 FROM ediciones_taller e WHERE e.slug = t.slug
+            )
+        """)
 
-    # Migrar clases desde taller_sesiones (si existen)
-    op.execute("""
-        INSERT INTO clases_taller (edicion_id, fecha, hora_inicio, hora_fin)
-        SELECT e.id, s.fecha, s.hora_inicio, s.hora_fin
-        FROM taller_sesiones s
-        JOIN talleres t ON t.id = s.taller_id
-        JOIN ediciones_taller e ON e.slug = t.slug
-        WHERE NOT EXISTS (
-            SELECT 1 FROM clases_taller c
-            WHERE c.edicion_id = e.id AND c.fecha = s.fecha
-        )
-    """)
+    # Migrar clases desde taller_sesiones (si existen).
+    # Guard post-Escuela-v2-F1 (esc1m2i3n4t5): en una DB fresca, init_db() ya
+    # crea clases_taller con `hora_inicio_min`/`hora_fin_min` (minutos) — el
+    # CREATE IF NOT EXISTS de arriba es no-op y este backfill debe escribir a
+    # las columnas que EXISTAN (regla del bootstrap dual init_db+upgrade, ver
+    # test_alembic_upgrade_db). En DBs históricas (columnas viejas en horas) el
+    # INSERT original sigue tal cual; esc1m2i3n4t5 las convierte después.
+    conn = op.get_bind()
+    tiene_viejas = conn.execute(text(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'clases_taller' AND column_name = 'hora_inicio'"
+    )).fetchone() is not None
+    if tiene_viejas:
+        op.execute("""
+            INSERT INTO clases_taller (edicion_id, fecha, hora_inicio, hora_fin)
+            SELECT e.id, s.fecha, s.hora_inicio, s.hora_fin
+            FROM taller_sesiones s
+            JOIN talleres t ON t.id = s.taller_id
+            JOIN ediciones_taller e ON e.slug = t.slug
+            WHERE NOT EXISTS (
+                SELECT 1 FROM clases_taller c
+                WHERE c.edicion_id = e.id AND c.fecha = s.fecha
+            )
+        """)
+    else:
+        # taller_sesiones guarda HORAS enteras → ×60 al escribir en minutos.
+        op.execute("""
+            INSERT INTO clases_taller (edicion_id, fecha, hora_inicio_min, hora_fin_min)
+            SELECT e.id, s.fecha, s.hora_inicio * 60, s.hora_fin * 60
+            FROM taller_sesiones s
+            JOIN talleres t ON t.id = s.taller_id
+            JOIN ediciones_taller e ON e.slug = t.slug
+            WHERE NOT EXISTS (
+                SELECT 1 FROM clases_taller c
+                WHERE c.edicion_id = e.id AND c.fecha = s.fecha
+            )
+        """)
 
     # Linkear inscripciones existentes a su edición correspondiente
     op.execute("""

@@ -19,6 +19,10 @@ EXPECTED_KEYS = {
     "taller_inscripcion_admin",
     "taller_inscripcion_cliente",
     "taller_cambio_datos",
+    # F4b: seña (verificar) + ofrecer cupo al siguiente + interesados.
+    "taller_sena_confirmada",
+    "taller_cupo_ofrecido",
+    "taller_interesado_nueva_edicion",
 }
 
 

@@ -25,7 +25,7 @@ export type {
 const API_BASE = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 export const pedidoPdfUrl = (
   id: number,
-  kind: "pdf" | "albaran" | "contrato" | "packing-list" = "pdf",
+  kind: "remito" | "detalle-seguro" | "contrato" | "checklist-retiro" = "remito",
 ) => `${API_BASE}/api/alquileres/${id}/${kind}`;
 
 import type { EstadoPedido } from "@/lib/pedido-estados";

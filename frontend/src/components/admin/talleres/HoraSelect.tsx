@@ -5,12 +5,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/design-system/ui/select";
+import { fmtHhmm } from "@/lib/talleres/formato";
 
+/**
+ * Selector de horario en MINUTOS desde medianoche (Escuela v2 F1), paso 30 min:
+ * "08:00, 08:30, …, 24:00". `min`/`max` también en minutos (0..1440).
+ */
 export function HoraSelect({
   value,
   onChange,
   min = 0,
-  max = 24,
+  max = 1440,
   className,
 }: {
   value: number;
@@ -19,16 +24,17 @@ export function HoraSelect({
   max?: number;
   className?: string;
 }) {
-  const hours = Array.from({ length: max - min + 1 }, (_, i) => min + i);
+  const opciones: number[] = [];
+  for (let m = min; m <= max; m += 30) opciones.push(m);
   return (
     <Select value={String(value)} onValueChange={(v) => onChange(Number(v))}>
-      <SelectTrigger className={className ?? "w-[90px]"}>
+      <SelectTrigger className={className ?? "w-[100px]"}>
         <SelectValue />
       </SelectTrigger>
       <SelectContent>
-        {hours.map((h) => (
-          <SelectItem key={h} value={String(h)}>
-            {String(h).padStart(2, "0")}:00
+        {opciones.map((m) => (
+          <SelectItem key={m} value={String(m)}>
+            {fmtHhmm(m)}
           </SelectItem>
         ))}
       </SelectContent>

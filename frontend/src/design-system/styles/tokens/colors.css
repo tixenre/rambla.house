@@ -112,7 +112,7 @@
 
 /* ── Accent de área (token de rol — fuera de @theme para que la cascada
    [data-area] lo sobreescriba. Los componentes consumen --area-accent*
-   sin conocer el área; el default = amber → cero cambio en rental (workshops sobreescribe a rosa).
+   sin conocer el área; el default = amber → cero cambio en rental (escuela sobreescribe a rosa).
    REGLA: --area-accent gobierna SOLO el accent de marketing de área pública.
    Focus rings, estados cross-app, --accent/--ring, badges del kit, back-office
    y la paleta de status → siguen amber/status FIJOS. ─────────────────────── */
@@ -128,7 +128,7 @@
   --area-accent-hot: var(--color-estudio-hot);
 }
 
-[data-area="workshops"] {
+[data-area="escuela"] {
   --area-accent: var(--color-rosa);
   --area-accent-soft: color-mix(in oklch, var(--color-rosa) 18%, transparent);
   --area-accent-hot: color-mix(in oklch, var(--color-rosa) 85%, white);

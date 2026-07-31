@@ -1272,6 +1272,23 @@ cancel-in-progress` ya cancela corridas viejas.
   son paralelos como `--color-amber` (marca) vs `--amber` (token de Tailwind en `@theme`).
 - **Límites del theming (fijos, no se tematizan por área):** focus rings (`border-amber/60`), estados de
   UI cross-app, badges del kit (`EstadoBadge`/`PagoBadge`), back-office, paleta de status.
+- **Excepción acotada (2026-07-24) — Calendario general del Dashboard.** Al cerrar la iniciativa del
+  Estudio (#1283), el supervisor marcó una tensión real: `CalendarioWidget.tsx` (la vista "Semana"/"Mes"
+  del Dashboard, que mezcla pedidos de TODAS las líneas de negocio) usa `estadoClaseEstudio` para pintar
+  los turnos del Estudio con `--color-estudio` en vez del color de estado genérico — contradice la letra
+  de "back-office → amber/status fijos, nunca por área". Confirmado con el dueño: se mantiene, porque el
+  caso de uso es distinto al que la regla original protegía (evitar re-themear pantallas de back-office
+  "porque sí") — acá el color es la señal más barata para distinguir de un vistazo qué turno es del
+  Estudio en una vista que por diseño mezcla todo. **Es la ÚNICA excepción**: no habilita re-themear
+  ninguna otra pantalla de back-office por área. Dentro de la agenda propia del Estudio
+  (`AgendaSemanal.tsx`, ya 100% Estudio) el mismo color no tiene tensión — ahí no es "por área en una
+  vista mixta", es simplemente la identidad de la única cosa que se muestra.
+- **Why de la excepción.** Alternativas consideradas: (a) un ícono/etiqueta en vez de color — pierde la
+  lectura instantánea que el color da en una grilla densa; (b) revertir a status genérico — vuelve a
+  mezclar visualmente el Estudio con el rental normal, que fue exactamente el problema que motivó
+  `estadoClaseEstudio` en primer lugar (_2026-07-24 — turnos del Estudio con color propio en el
+  calendario general_, más abajo). El color gana porque el costo (una excepción puntual, documentada) es
+  menor que el beneficio (reconocimiento inmediato en la única vista que mezcla las 3 líneas de negocio).
 - **WCAG sobre `#E9552F`:** `text-ink` puro (4.88:1) es el único opaco viable para texto normal sobre
   el fondo naranja — ink/90 = 3.80:1 (falla AA), ink/65 = 3.00:1 (falla). Naranja sobre ink: ≥ 80%
   de opacidad para pasar AA normal (80% → 4.60:1, 70% → 4.15:1 falla). La sección "Reservar" de
@@ -3424,3 +3441,616 @@ ciegas); una comunicación formal (contrato/documento) despachada por WhatsApp e
 (conteo por canal + doble `NOT EXISTS`); tests `test_comunicacion.py` reescritos (fallback/ambos/solo_mail/
 solo_whatsapp, admin siempre, una sola tarea en background); manuales `SISTEMA_COMUNICACION.md` +
 `SISTEMA_WHATSAPP.md`. Refina —no reemplaza— _2026-07-11 (facade + registro)_. Historia: PR #1268 (parte de #65).
+### 2026-07-24 — `_regenerar_pedidos_taller` = nuevo miembro de la familia motor-único (espejo de `_regenerar_pedidos_slot`)
+
+- **Contexto.** El dueño pidió "traer un poco de orden" a Talleres: que cada edición genere un pedido
+  mensual de resumen (no uno por alumno/clase), visible en liquidación/Estadísticas como cualquier otro
+  pedido — hoy esa plata es 100% invisible para el sistema financiero. Ya existía un mecanismo idéntico
+  para el Estudio (`estudio_slots_fijos` + `_regenerar_pedidos_slot`, slots recurrentes mensuales) — la
+  decisión fue reusarlo al pie de la letra, no inventar un mecanismo nuevo.
+- **Decisión.** Cada edición gana 2 pares de campos (`usa_estudio`/`valor_estudio`/`valor_estudio_modo`,
+  `usa_equipos`/`valor_equipos`/`valor_equipos_modo`; `modo` = `'mensual'` o `'total'`, este último
+  reparte en partes iguales con el remanente de redondeo pinneado al ÚLTIMO mes del rango completo —
+  estable ante re-cálculos). `_regenerar_pedidos_taller` (`backend/routes/talleres.py`) corre síncrono
+  en los 3 puntos donde una edición se crea/edita (`admin_create_taller`, `admin_create_edicion`,
+  `admin_update_edicion` — el primero inserta la edición INLINE, no pasa por el segundo, fácil de
+  perderse), dentro de `pg_advisory_xact_lock(_ADVISORY_NS_TALLER=5390423, edicion_id)` — namespace
+  propio, keyed por edición (no un singleton `1` como el del Estudio, acá hay muchas ediciones
+  independientes). Conserva/borra/recrea: pasado o pagado se conserva; futuro impago se borra y
+  recrea contra la config actual.
+- **Fix propio (el slot NO lo necesita).** También se conserva un mes cuyo pedido tiene MÁS ítems que
+  los que el generador crearía (`max(1, int(usa_estudio)+int(usa_equipos))`) — sin esto, la línea de
+  matrícula que el admin tipeó a mano (línea personalizada dentro del pedido ya generado) se borraría en
+  silencio la próxima vez que se editara `valor_estudio`/`valor_equipos`/las clases. Heurística por
+  CANTIDAD de ítems, no un flag `es_manual` dedicado — un toggle de `usa_estudio`/`usa_equipos` que
+  reduzca el conteo auto en un mes ya generado (sin edición manual real) también queda conservado
+  ("sticky" pero no destructivo; el admin edita el pedido a mano si hace falta corregirlo).
+- **Atribución 100% genérica.** `filas_atribucion` (`backend/reportes/liquidacion.py`) ya hace
+  `LEFT JOIN equipos ... COALESCE(dueno,'Rambla')` — el ítem del Estudio usa `equipo_id` del centinela
+  real (`dueno='Estudio'`); el de equipos usa `equipo_id=NULL` (línea personalizada, atribuye a
+  'Rambla' por default). Cero código de atribución nuevo — mismo mecanismo que ya resolvía esto para el
+  Estudio.
+- **Bug real encontrado verificando en browser (no en los tests).** Un ítem de CATÁLOGO con
+  `cobro_modo='fijo'` (el centinela del Estudio en un pedido de taller, que SÍ queda editable normal a
+  diferencia de un pedido del Estudio) no sobrevivía ningún guardado del editor genérico de pedidos:
+  `_apply_pedido_items` (`routes/alquileres/core.py`) hardcodeaba `cobro_modo='jornada'` para todo ítem
+  de catálogo (inflaba el subtotal ×jornadas del pedido, ~30 en un mes) y el validador Pydantic
+  (`PedidoItem.validate_linea_libre`, `routes/alquileres/modelos.py`) directamente rechazaba la
+  combinación con 422 antes de llegar ahí. Se relajó la validación (un ítem de catálogo SÍ puede ser
+  'fijo' — el front no expone el control para elegirlo a mano, así que no reabre ningún footgun de UI) y
+  se corrigió `_apply_pedido_items` para preservar el `cobro_modo` entrante en vez de pisarlo. Sin efecto
+  en pedidos normales (sus ítems de catálogo siempre traen 'jornada' desde que se cargaron).
+- **Otros arreglos de paso.** La línea personalizada nueva del editor de pedidos defaultea a `cobro_modo:
+  'fijo'` cuando `pedido.tipo === 'taller'` (evita el mismo ×jornadas si el admin agrega la matrícula a
+  mano). `routes/estadisticas.py` extiende sus 7 exclusiones existentes de `('estudio','estudio_fijo')`
+  a también `'taller'` (mismo criterio ya usado para separar la economía del Estudio de las tarjetas de
+  rental).
+- **Tests.** `test_talleres.py` (unit, espejo de `test_estudio.py::TestRegenerarPedidosSlot`): N pedidos
+  por N meses, mensual vs. total, remanente estable en el mes calendario real (no en "el último mes que
+  se regenera" — test discriminante: conserva el ÚLTIMO mes por pago y confirma que los que SÍ se
+  regeneran no heredan el remanente), conserva-si-pagado, conserva-si-más-ítems, edición inactiva no
+  genera nada, ambos flags apagados → ítem placeholder (nunca un pedido sin ítems).
+  `test_talleres_liquidacion_db.py` (integración, Postgres real): confirma la atribución Estudio/Rambla
+  y la exclusión de Estadísticas. `test_pedido_apply_items_regresion_500.py` +
+  `test_pedido_validations.py`: regresión del fix de `cobro_modo`.
+- **Why.** Reusar `_regenerar_pedidos_slot` byte-a-byte en vez de una tabla/mecanismo nuevo mantiene
+  "una sola forma de cada cosa" (fuente única de "reservar mensual recurrente → pedido"). La atribución
+  vía `equipos.dueno` ya era genérica — extenderla a un tercer consumidor (Talleres, después de rental y
+  Estudio) confirma que el diseño escala sin tocar el motor de liquidación.
+
+### 2026-07-24 — La promo del Estudio es best-effort; solo los sueltos son stock duro
+
+- **Contexto.** El pack legacy del Estudio (retirado en la Fase 8, #1283) fue reemplazado por una promo
+  combo (Fase 5) que en su primera versión era stock DURO: si cualquier componente no tenía stock, la
+  reserva se rechazaba con 409 y no se creaba nada. El dueño pidió volver al comportamiento del pack
+  viejo: _"si una luz no está disponible, que no me bloquee, que diga que esa no está disponible, pero
+  deja igual"_.
+- **Decisión.** Confirmado por `AskUserQuestion` que la semántica es a nivel PROMO completa (no
+  per-componente "esencial"): TODOS los componentes de la promo son best-effort. `_crear_pedido_estudio`
+  (`backend/routes/estudio.py`) separa la validación en dos bloques — la promo llama a
+  `validar_stock_hipotetico` pero solo arma un string informativo `promo_advertencia` (nunca levanta
+  excepción); los equipos SUELTOS (elegidos a mano, fuera de la promo) siguen validando con el mismo gate
+  y SÍ levantan `HTTPException(409, ...)` si falta stock — la reserva completa no se crea. Los 3 puntos
+  de creación/edición (`crear_reserva_estudio`, `crear_reserva_estudio_admin`,
+  `editar_reserva_estudio_admin`) devuelven `promo_advertencia` en la respuesta; el frontend
+  (`ReservaDialog.tsx`, `StudioBookingForm.tsx`) muestra un toast de advertencia cuando viene seteado.
+  Cuando la promo se reserva incompleta, se cobra el precio COMPLETO igual (no se descuenta el
+  componente faltante) — es una decisión de negocio explícita, no un bug.
+- **Por qué no tocar el gate.** El motor de reservas sigue siendo estricto (`solo_esenciales=False`
+  siempre) — "best-effort" es una decisión del CALLER sobre qué hacer con el resultado del gate, no una
+  semántica nueva del gate mismo. Esto preserva "el core de reservas es sagrado" sin necesitar tocar
+  `backend/reservas/`.
+- **Tests.** `test_promo_combo_estudio_db.py` (renombrado
+  `test_reserva_con_promo_sin_stock_es_best_effort_no_bloquea`): la promo sin stock da 201 (no 409),
+  `promo_advertencia` menciona el componente faltante, `monto_total` cobra el precio completo.
+  `test_estudio_admin_reservas_db.py`: mismo comportamiento en creación/edición admin, más el caso
+  contrario (`promo_advertencia is None` cuando hay stock completo).
+- **Why.** Ya cambió de criterio una vez en esta misma iniciativa (de duro heredado del pack legacy, a
+  best-effort explícito) — se fija por escrito acá para que una futura sesión no lo "corrija" de vuelta a
+  duro pensando que es un bug. El supervisor lo hace cumplir: un 409 nuevo en la validación de la promo
+  es la señal de que alguien reintrodujo el comportamiento viejo.
+
+### 2026-07-25 — `backend/services/estudio/` = motor de disponibilidad/reserva del Estudio (split de `routes/estudio.py`, CQRS-lite)
+
+- **Contexto.** `backend/routes/estudio.py` (2577 líneas) mezclaba 5 responsabilidades en un solo route
+  file: perfil/fotos, trabajos/portfolio, disponibilidad+reservas (con promo combo), slots fijos, y las
+  vistas de agenda/ocupación del dashboard. A diferencia de los otros motores del repo
+  (`backend/reservas/`, `backend/contabilidad/`, `backend/services/carrito/`), la lógica de negocio de
+  disponibilidad/reserva vivía directo en el route. Disparador: al chequear overbooking talleres↔reservas
+  de estudio se encontró que `GET /estudio/disponibilidad` y `POST /estudio/reservas` reimplementaban la
+  secuencia slot→taller→centinela por separado.
+- **Qué se movió.** Las 8 primitivas de disponibilidad (`_get_estudio_row`, `_franja_estudio`,
+  `_viola_anticipacion`, `_slot_bloqueante`, `_taller_bloqueante`, `_estudio_disponible`,
+  `verificar_sesiones_disponibles`, `_ADVISORY_NS_ESTUDIO`) + `revalidar_disponibilidad_estudio`
+  (consumida por `routes/alquileres/transiciones.py`); el núcleo compartido `_crear_pedido_estudio`
+  (cliente+admin); el flujo de alta/edición/cotización admin (#1283 F6); promo combo (#1283 F5). Quedaron
+  afuera: perfil/fotos, trabajos/portfolio, slots fijos (CRUD), agenda/ocupación del dashboard (lectura
+  agregada de display, sin decisión de negocio).
+- **El paquete no importa de `routes.*`.** `queries/promo.py::get_disponibilidad` es un wrapper LOCAL de
+  3 líneas sobre `reservas.calcular_disponibilidad`, con conexión PROPIA (deliberado: es un snapshot
+  committed-only, nunca la conn del caller); `commands/`/`queries/` reciben `estudio`,
+  `cliente_id`/`cliente_nombre`/etc. ya resueltos como parámetros — la resolución de sesión/cliente/Didit
+  queda en el route.
+- **Deliberadamente NO resuelto en el split** (documentado en `services/estudio/CLAUDE.md`): 2
+  duplicaciones preexistentes (predicado de taller copiado 3×; cálculo de precio promo+sueltos copiado 3×
+  — este último se resolvió después, en una pasada separada dentro del mismo PR) y la inconsistencia de
+  locking conocida (advisory lock vs. `FOR UPDATE`).
+- **Verificación.** Suite completa corrida contra Postgres 16 real (unit + integración) — 0 regresiones;
+  2 fallos preexistentes y no relacionados (`test_auth_purge_expired_db.py`, `test_catalogo_motor_shape.py`)
+  confirmados independientes del diff. El agente `supervisor` corrió su propia verificación completa y
+  devolvió APROBADO CON OBSERVACIONES (resueltas en el mismo PR). Gap colateral cerrado de paso: ninguno
+  de los 9 archivos `test_*_db.py` de Estudio/Talleres que trajo #1283 estaba conectado al CI — se
+  conectaron los que ejercitan directo el paquete nuevo.
+- **Why.** Mismo criterio que ya motivó `contabilidad`/`descuentos`: cuando la lógica de decisión de un
+  dominio vive enterrada en un archivo de transporte, el riesgo de reimplementaciones divergentes (como
+  el overbooking que disparó esta pasada) crece con cada endpoint nuevo. Tracking: #1296. PR: #1297.
+
+### 2026-07-26 — `backend/services/talleres/` = dedup del gate de Estudio + economía de talleres (split de `routes/talleres.py`, CQRS-lite)
+
+- **Contexto.** `backend/routes/talleres.py` (2856 líneas) pasó a ser, tras el split de estudio, el
+  archivo de route más grande del repo. Se encontraron (y verificaron línea por línea) dos duplicaciones
+  reales: el gate de conflicto con Estudio (`_get_estudio_row` + `pg_advisory_xact_lock` +
+  `verificar_sesiones_disponibles`) copiado inline 3 veces (`admin_create_taller`, `admin_create_edicion`,
+  `admin_update_edicion`); y el INSERT de `ediciones_taller` (20 columnas, mismo orden de parámetros)
+  copiado byte a byte entre `admin_create_taller` y `admin_create_edicion`. Además,
+  `_regenerar_pedidos_taller` (la economía del taller) importaba de `routes.estudio`/`routes.alquileres`
+  dentro de la función — un movimiento tal cual a `services/` hubiera violado el invariante "el paquete no
+  importa de `routes.*`".
+- **Qué se movió.** El gate deduplicado en `_gate_conflicto_estudio` (encapsula el CÓMO; cada caller sigue
+  decidiendo su propio CUÁNDO — el trigger difiere entre "nace publicada" y "transición a publicada"); el
+  INSERT deduplicado en `crear_edicion` (también hace `_insert_clases` + regenerar-pedidos); validación de
+  clases/modalidades (`_validar_clases`/`_validar_modalidades`, puras) + sus commands
+  (`_insert_clases`/`_upsert_clases`/`_upsert_modalidades`); la economía (`_regenerar_pedidos_taller` +
+  `_ADVISORY_NS_TALLER`). Prerrequisito: se promovió `iter_meses` a `services/fechas.py` y se retiró un
+  duplicado muerto de `mes_actual_ar` en `routes/estudio.py`. Los endpoints HTTP en sí, la lectura/
+  serialización, instructores/instituciones/trabajos/portada, y la inscripción/seña (Fase 2 diferida)
+  quedaron sin tocar; `_regenerar_pedidos_taller` recibe `numero_pedido_fn` inyectado en vez de importar
+  `routes.alquileres._next_numero_pedido` (mismo patrón "valor ya resuelto como parámetro" de
+  `services/estudio/CLAUDE.md`, extendido acá a una función).
+- **Desviación documentada respecto a `services/estudio/`.** Acá SÍ hay imports `commands/`→`commands/`
+  (`ediciones.py` importa de `commands/clases.py` y `commands/economia.py`) — no viola la única regla dura
+  (`queries/` nunca importa de `commands/`), pero es distinto del molde de estudio; documentado en el
+  `CLAUDE.md` del paquete para que no se marque por comparación automática.
+- **No se extrajo** un `_borrar_pedidos_futuros_impagos_taller` (a diferencia de estudio) — no existe un
+  segundo call-site real que lo justifique (`admin_delete_edicion` no limpia pedidos futuros, confía en
+  `ON DELETE SET NULL`). Asimetría preexistente, documentada, no resuelta.
+- **2 bugs reales encontrados y arreglados en el camino** (ninguno por ruff/compileall — ambos corriendo
+  la suite de integración contra Postgres real): (1) un call-site de `_regenerar_pedidos_taller` que el
+  plan original no había identificado (`admin_update_edicion` también la llama, no solo los 2 endpoints de
+  creación) — lo cazó `ruff` (F821) al remover la función vieja del route; (2) un monkeypatch stale en
+  `test_talleres_f2_db.py` — `_gate_conflicto_estudio` importa `_get_estudio_row`/
+  `verificar_sesiones_disponibles` a nivel de módulo (mismo estilo que
+  `services/estudio/commands/reserva.py`), así que 2 tests que parcheaban los módulos de ORIGEN
+  (`services.estudio.queries.*`) dejaron de interceptar — "patch where it's used", mismo criterio ya
+  documentado en `test_estudio.py::_patch_post_collaborators`.
+- **Verificación.** Suite unit completa (2680 tests) verde; 201 tests unit+integración del dominio
+  taller/estudio corridos juntos contra Postgres 16 real (47s) sin regresiones; `ruff`+`compileall`
+  limpios. Gap de CI cerrado de paso: `test_talleres_liquidacion_db.py` (integración real, ya existía,
+  nunca corría en CI) conectado al job `db-migrations`. El agente `supervisor` devolvió APROBADO CON
+  OBSERVACIONES — confirmó de forma independiente los 2 bugs arreglados, que no hay ningún `import
+  routes.*` en `services/talleres/`, y que el YAML del CI nuevo corre bien.
+- **Rama apilada.** La rama de este split salió de la rama del PR de estudio (#1297), no de `dev`, porque
+  el paquete nuevo consume `services/estudio/queries/*` (el gate), que solo existía ahí hasta que #1297
+  mergeó. El PR (#1299) apuntó a esa rama hasta que #1297 mergeó a `dev`, momento en el que se retargeteó
+  a `dev` — mismo patrón "PR como hoja de ruta" (2026-06-27) aplicado a una dependencia entre dos splits
+  consecutivos del mismo dominio.
+- **Why.** Mismo motivo que motivó el split de estudio: lógica de decisión duplicada en un archivo de
+  transporte es una fuente de drift silencioso. Tracking: #1298. PR: #1299.
+
+### 2026-07-27 — `/api/cotizar` para un pedido existente ignoraba el perfil fiscal/productora elegido para ESE pedido
+
+- **Contexto.** Al revisar el override de emisor (Factura C para un cliente RI, PR #1301), el dueño
+  notó que el preview de una factura mostraba $358.899 (neto + 21% de IVA) mientras la propia página
+  del pedido mostraba "Desglose: IVA — sin IVA, Total $296.611" para el MISMO pedido — dos totales
+  incompatibles del mismo pedido.
+- **Root cause.** `services.finanzas_flujo.pedido.desglose_de_pedido` (usado por la facturación real,
+  el PDF y el mail) resuelve el perfil fiscal vía `_resolver_datos_fiscales_pedido(conn, cliente_id,
+  pedido["perfil_fiscal_id"], pedido["productora_id"])` — el target que el cliente eligió para ESE
+  pedido puntual en el checkout ("Facturar a nombre de", #1240), con prioridad sobre el default de la
+  cuenta. `routes/alquileres/cotizacion.py::cotizar` (el endpoint que arma el "Desglose"/"Cobranza" en
+  vivo del editor admin) nunca daba ese segundo paso: su `SELECT` sobre `alquileres` para el pedido
+  congelado ni siquiera traía las columnas `perfil_fiscal_id`/`productora_id`, y la única resolución de
+  target fiscal alternativo que sí tenía (`data.perfil_fiscal_id`/`data.productora_id`, del body)
+  estaba gateada a `es_sesion_cliente` — nunca corría para un admin mirando el pedido de otro cliente.
+  Por diseño, `alquileres.monto_total` siempre persiste el NETO puro (`_recalcular_total_pedido` llama
+  `calcular_total(..., perfil_impuestos=None)` — "IVA es derivado al mostrar") — cualquier vista que no
+  resuelva el target fiscal correcto simplemente no muestra el IVA que corresponde, sin que nada la
+  marque como inconsistente con la que sí lo resuelve bien.
+- **Fix.** El `SELECT` de `pedido_congelado` en `cotizar()` suma `perfil_fiscal_id, productora_id`.
+  Cuando el pedido tiene alguno seteado, se llama a `_resolver_datos_fiscales_pedido` con esos valores
+  — los del PEDIDO, ya persistidos y ya validados al guardarse (no hace falta re-chequear membership de
+  productora, a diferencia del bloque de `data.productora_id`, que viene de un body no confiable).
+  Mismo helper que ya usan `desglose_de_pedido`/`_enriquecer_pedido_con_cliente_fiscal` — no una copia.
+- **Tests.** `test_cotizar_endpoint.py::TestPedidoCongeladoUsaTargetFiscalDelPedido` (3 casos): perfil
+  fiscal personal RI del pedido gana sobre el default `consumidor_final` de la cuenta; productora RI
+  del pedido ídem; sin target en el pedido (ambos `None`, el caso común) sigue el comportamiento de
+  siempre. `FakeConnConPedido` pasa a defaultear `perfil_fiscal_id`/`productora_id` a `None` para no
+  romper los 6 tests preexistentes de `TestPedidoCongeladoRespetaSnapshot` que no los declaraban.
+- **Why.** No se tocó `_recalcular_total_pedido`/`monto_total` (la plata persistida sigue siendo neto
+  puro, por diseño — "el front no calcula plata" tampoco aplica acá, el backend sigue siendo quien
+  decide) — el fix es puramente de qué target fiscal se usa para DERIVAR el IVA al mostrar, para que el
+  editor admin y la facturación real de un mismo pedido no puedan volver a divergir.
+
+### 2026-07-27 — Factura C (emisor Monotributo) nunca suma IVA, sea RI o no el receptor
+
+- **Contexto.** Tras el fix de arriba (`/api/cotizar` resolviendo el target fiscal del pedido), el
+  dueño vio en staging que el "Desglose" del pedido 439 pasó a mostrar "IVA 21% $62.288, Total
+  $358.899" — coincidiendo con el preview de la Factura C real (override de emisor, PR #1301). Al
+  revisarlo, el dueño aclaró: el cliente ES Responsable Inscripto, pero si se le factura con una
+  Factura C (emisor Monotributo), **no debería llevar IVA** — ni siquiera para un receptor RI.
+- **Root cause.** `comprobante_pedido.construir_comprobante` tenía, para el emisor Monotributo:
+  `importe_neto = Decimal(neto_int + iva_int)` — plegaba el `iva_monto` del RECEPTOR adentro del
+  importe facturado. Esa lógica nunca había hecho nada distinto en la práctica: antes del override de
+  emisor (PR #1301), el emisor Monotributo SOLO se resolvía automáticamente para receptores no-RI, y
+  para esos `iva_monto` siempre es 0 (`con_iva = es_responsable_inscripto(perfil_impuestos)` en
+  `services/precios.py`) — así que `neto_int + 0 == neto_int` de cualquier forma. El override expuso el
+  primer caso real donde `iva_monto > 0` mientras el emisor es Monotributo, y ahí el pliegue empezó a
+  inflar la Factura C con un 21% que un monotributista LEGALMENTE no puede cobrar (no está en el
+  régimen de IVA, cobre lo que cobre y a quien sea).
+- **Fix.** `importe_neto` pasa a ser siempre `Decimal(neto_int)` (nunca más `+ iva_int`); `alicuota` se
+  resuelve `None` incondicionalmente para emisor Monotributo, y solo se calcula `IVA_21 if iva_int > 0`
+  para emisor RESPONSABLE_INSCRIPTO. Cero cambio de comportamiento para el camino default (emisor
+  Monotributo automático + receptor no-RI, donde `iva_int` ya era 0) — el fix solo cambia el caso nuevo
+  (override + receptor RI).
+- **Tests.** `test_facturacion_engine.py::test_emisor_monotributo_nunca_suma_iva_aunque_el_receptor_sea_ri`
+  (el caso real: RI + Monotributo → `importe_neto` = solo neto, `alicuota is None`) +
+  `test_emisor_ri_sigue_sumando_iva_del_receptor_ri` (control: el emisor RI no se tocó, sigue sumando
+  el 21%). Gap real: `construir_comprobante` no tenía NINGÚN test sobre `importe_neto`/`alicuota` antes
+  de esta pasada — el bug original tampoco lo hubiera cazado un test viejo.
+- **Why.** Refina el override de emisor (PR #1301) el mismo día que se activó: la letra del comprobante
+  ya dependía solo del emisor (`tipo_comprobante` en `arca_fe`, correcto desde el día uno); esto extiende
+  el mismo criterio al IMPORTE — depende solo de si el EMISOR discrimina IVA, nunca de si el receptor
+  es RI. El supervisor marca cualquier cálculo de importe de Factura C que sume IVA del receptor.
+
+### 2026-07-27 — El Desglose/Cobranza del pedido apaga el IVA si ya hay una Factura C emitida
+
+- **Contexto.** El dueño probó en staging el fix anterior (Factura C sin IVA): la factura real quedó
+  bien ($296.611, CAE real emitido), pero al volver a la página del pedido, el "Desglose" seguía
+  mostrando "IVA 21% $75.600, Total $435.600" y "Cobranza: resta $435.600" — el pedido seguía
+  reclamando el 21% que la factura real, deliberadamente, ya no cobra. Pedido explícito: "deberíamos
+  actualizar el pedido, porque va a ser pago sin el IVA".
+- **Decisión de alcance.** Solo se corrige la vista del editor admin (`/api/cotizar`, consumida por
+  `pedidos.$id.lazy.tsx` para "Desglose" Y "Cobranza" — ambas leen `totales.total`/`totales.conIva`
+  del mismo response, así que un solo fix del lado backend arregla las dos secciones a la vez). NO se
+  tocó `services/finanzas_flujo/pedido.py::desglose_de_pedido` (PDF/mail/facturación) ni `monto_total`
+  persistido — el Presupuesto/PDF normalmente se genera ANTES de que exista una factura, así que el
+  caso "ya hay Factura C" casi no aplica ahí; si aparece, es un refinamiento aparte, no pedido todavía.
+- **Fix.** `services/facturacion/repo.py::factura_c_vigente(pedido_id, conn) -> bool` — nueva función
+  puerta: llama a `get_factura_principal_emitida` (ya existía, usada por el portal cliente) y chequea
+  `cbte_tipo == int(CbteTipo.FACTURA_C)`. `routes/alquileres/cotizacion.py::cotizar`, después de calcular
+  el `desglose` normal, si hay `pedido_congelado` (pedido no-presupuesto) y `factura_c_vigente` da
+  `True`, fuerza `con_iva=False`/`iva_monto=0`/`total_final=neto` — pisando lo que el perfil fiscal del
+  cliente hubiera sugerido. `pedido_congelado` pasó a inicializarse SIEMPRE (no solo dentro de
+  `if tiene_fechas:`) para que este chequeo no reviente con `UnboundLocalError` en el modo estimado
+  (sin fechas) — bug real encontrado por la suite existente al agregar el chequeo, no en producción.
+- **Por qué no reventar la NC.** Si más adelante se anula la Factura C con una Nota de Crédito, la
+  original pasa a `estado='anulada'` (motor de facturación, sin cambios) — `get_factura_principal_emitida`
+  ya filtra `estado='emitida'`, así que `factura_c_vigente` vuelve a dar `False` sola: el Desglose
+  vuelve a mostrar el IVA del perfil fiscal sin necesitar lógica extra acá.
+- **Tests.** `test_facturacion_engine.py`: 3 tests directos de `factura_c_vigente` (true con Factura C,
+  false con Factura A, false sin factura). `test_cotizar_endpoint.py::TestPedidoConFacturaCVigente`
+  (monkeypatchea `factura_c_vigente` en vez de fabricar una fila completa de `facturas` en el FakeConn —
+  su propia lógica de query ya está cubierta en `test_facturacion_engine.py`): Factura C vigente apaga
+  el IVA aunque el cliente sea RI; sin ella sigue sumando; un presupuesto ni siquiera llama a la
+  función (se verifica con un monkeypatch que explota si se invoca).
+- **Why.** Cierra el círculo de la iniciativa del día: letra del comprobante (solo el emisor decide) →
+  importe facturado (solo el emisor decide, PR anterior) → lo que el PEDIDO muestra que falta cobrar
+  (tiene que reflejar lo que la factura real ya resolvió, no re-litigar el perfil fiscal del cliente
+  una vez que ya hay un documento fiscal emitido). El supervisor marca un consumidor nuevo del total de
+  un pedido que no chequee `factura_c_vigente` antes de asumir el IVA del perfil fiscal.
+
+### 2026-07-28 — Fase 0 de "integrar rental/Estudio/Talleres en el pedido sin que mienta": 5 bugs funcionales donde un pedido derivado se mostraba/contaba como un evento real
+
+- **Contexto.** El dueño, mirando el pedido #445 (taller "Workshop Dirección de Arte"), reportó: el
+  pedido muestra "sáb 15 ago → sáb 22 ago · 7 jornadas" cuando el taller real son 2 clases (2 sábados,
+  franja horaria); el ítem "Estudio (espacio) 1× $1.200.000" aparece bajo "PRECIO / JORNADA"; y en
+  general "estudio y rental están separados pero a la vez mezclados… no se entiende". Pidió analizar
+  a fondo (workflow de 6 lectores read-only, ~974k tokens) y decidir si separar completamente el
+  Estudio/Talleres del rental o integrarlos mejor. Veredicto (pase crítico del skill `consejo`,
+  confirmado por el dueño): **seguir integrando** — separar duplicaría lo más caro (cobranza/
+  facturación/liquidación/estados) y contradice la decisión fundacional _2026-05-27 — El Estudio:
+  producto aparte que reusa el motor de reservas_. Condición del consejo para avanzar: los bugs
+  funcionales (esta Fase 0) van primero, antes de tocar semántica/UI (Fase 1) o agregar la sección
+  "Reserva del Estudio" en la página del pedido (Fase 2, pedido explícito del dueño) — ambas
+  quedan para tandas siguientes de la misma iniciativa, plan completo en el issue de tracking #1308.
+- **Root cause compartida.** `fecha_desde`/`fecha_hasta` de un pedido significan 4 cosas distintas
+  según `tipo`: rango de jornadas real (`diaria`), franja intradía real (`estudio`), muestra de una
+  recurrencia semanal (`estudio_fijo`) o mes calendario contable de la edición (`taller`,
+  `_regenerar_pedidos_taller`). El único predicado de familia que existía, `TIPOS_ESTUDIO`
+  (`backend/tipos_pedido.py`), cubre 2 de los 4 — **`taller` había quedado afuera de todos los
+  blindajes**, y ni siquiera `estudio_fijo` estaba excluido en varios de los 5 puntos de abajo pese a
+  estar cubierto por la constante.
+- **Los 5 bugs (todos con test que discrimina contra el código viejo):**
+  1. `_centinela_libre` (`services/estudio/queries/disponibilidad.py`) contaba el ítem del centinela
+     de CUALQUIER pedido reservado sin filtrar tipo → un pedido de taller confirmado con rango
+     mensual bloqueaba el Estudio los 7 días corridos del mes, aunque el bloqueo real de las clases
+     puntuales ya lo hiciera `_taller_bloqueante` (y el de un slot, `_slot_bloqueante`). Fix:
+     `p.tipo NOT IN ('taller', 'estudio_fijo')` en la query.
+  2. "Equipos afuera" del dashboard (`routes/dashboard.py`) listaba "Estudio (espacio) ×1" como si
+     fuera un equipo físico retirado — no filtraba `es_recurso_interno` (a diferencia de
+     `routes/equipos/dashboard.py`, que sí lo hacía). Fix: sumar `AND e.es_recurso_interno = FALSE`.
+  3. El calendario general (`get_calendario`) dibujaba el pedido de taller/estudio_fijo como una
+     barra más — duplicado con el overlay de ocupación real que ya lo representa. El comentario en
+     `routes/estudio.py` que decía que el INNER JOIN ya los excluía (por "no tener ítems") estaba
+     obsoleto desde que el pedido tiene ítem real (items veraces, Fase 2 de #1283) — corregido.
+  4. `salen_hoy`/`devuelven_hoy`/`devuelven_manana` (`routes/dashboard.py`) y el job de recordatorio
+     de retiro (`jobs/recordatorios.py::_pedidos_para_retiro`) podían mostrar/notificar un pedido de
+     taller/estudio_fijo "saliendo"/"volviendo" un día puntual. En la práctica ninguno de los dos
+     setea `cliente_email` al generarse, así que el recordatorio ya estaba excluido por esa
+     coincidencia — el filtro explícito no depende de ella.
+  5. La tarifa negociada del espacio se perdía al editar un turno: `ReservaDialog.tsx` siempre
+     hidrataba el campo de override en blanco al abrir la edición, así que cualquier guardado que no
+     tocara ese campo mandaba `espacio_monto: null` y `editar_reserva`
+     (`services/estudio/commands/reserva.py`) lo recalculaba a precio de lista, perdiendo en silencio
+     cualquier monto acordado con el cliente — el origen exacto del "$1.200.000" del pedido #445.
+- **Fix de (5), en detalle.** Nueva función pura `espacioOverrideInicial`
+  (`frontend/src/lib/estudio-slots.ts`, junto al resto de lógica compartida del Estudio): hidrata el
+  campo con el precio persistido del centinela SOLO si difiere del automático (`precio_hora × horas`).
+  Si coincide, el campo queda vacío (no había override en juego) — y ahora limpiar un campo que SÍ
+  tenía un valor mostrado resetea de verdad a precio de lista, en vez de mentir con un blanco que no
+  reflejaba si había o no una tarifa custom. `editar_reserva` no se tocó en comportamiento — solo gana
+  un comentario documentando el contrato de `espacio_monto=None` ("siempre recalcula, no conserva")
+  para que un futuro caller no reintroduzca el mismo bug; hoy el único caller es este mismo diálogo.
+- **Tests.** Candado unitario nuevo en `test_taller_bloqueo.py` (asserts sobre el SQL de
+  `_centinela_libre`) + `test_estudio_centinela_ignora_derivados_db.py` (4 tests, Postgres real) para
+  (1); `test_dashboard_excluye_derivados_db.py` (3 tests, Postgres real) para (2)+(3)+la mitad de (4);
+  candado unitario nuevo en `test_recordatorios.py` para la otra mitad de (4); 4 tests unitarios de
+  `espacioOverrideInicial` (`estudio-slots.test.ts`, `node:test`, mismo estilo que `lib/utils.test.ts`,
+  sumado a `test:unit`) para (5). Los 2 archivos `_db.py` nuevos quedaron conectados al CI. Suite
+  completa (2708 unit + 56 integration de estudio), ruff, tsc, eslint y prettier en verde.
+- **Alcance y qué NO se tocó.** Solo Fase 0 (bugs funcionales) — no se tocó `backend/reservas/`
+  (sagrado), el buffer del espacio (sigue fuera del motor), la promo (best-effort)/sueltos (duro), ni
+  la granularidad mensual del pedido de taller. La UI del pedido sigue mostrando "7 jornadas" para un
+  taller hasta la Fase 1 (semántica por tipo) — eso es intencional, esta tanda es solo los 5 bugs de
+  arriba. El supervisor marca: un query nuevo de "pedidos reales" (salen/vuelven/ocupan/bloquean) que
+  no excluya `('taller','estudio_fijo')`, o un caller nuevo de `editar_reserva`/`_crear_pedido_estudio`
+  que pase `espacio_monto=None` sin haber resuelto explícitamente si hay una tarifa que preservar.
+
+### 2026-07-28 — Fase 1 de "integrar rental/Estudio/Talleres en el pedido sin que mienta": fuente única de familias, blindaje del taller, UI honesta y puente a Talleres
+
+- **Contexto.** Segunda tanda de la iniciativa #1308 (la primera fue la Fase 0 de arriba). El
+  veredicto del `consejo` había puesto como condición para avanzar a semántica/UI que la Fase 1
+  empezara por la **fuente única de familias de pedido** — sin eso, el riesgo señalado era que cada
+  branch nuevo por tipo se desincronizara igual que ya le había pasado a `TIPOS_ESTUDIO` (cubría 2 de
+  4 tipos, dejando a `taller` afuera de todos los blindajes — la raíz de la Fase 0).
+- **F1.1 — Fuente única de tipos.** `backend/tipos_pedido.py` gana `TIPOS_DERIVADOS = TIPOS_ESTUDIO +
+  ("taller",)`, `TIPOS_SIN_RETIRO = ("taller", "estudio_fijo")` (`estudio` se queda afuera: puede
+  tener un retiro real de equipos sueltos), sus versiones `_SQL` pre-formateadas para interpolar, y
+  los predicados `es_pedido_derivado(p)`/`es_pedido_taller(p)` — chequean `p.keys()` antes de indexar
+  (seguros contra un dict/FakeConn parcial sin columna `tipo`, a diferencia de un `p["tipo"] == "x"`
+  crudo, que rompía un test existente con `KeyError`). Reemplazaron los literales `NOT IN (...)`/
+  `IN (...)` dispersos: 9 sitios en `routes/estadisticas.py` (7 queries con `TIPOS_DERIVADOS_SQL` +
+  2 con `TIPOS_ESTUDIO_SQL`), el `_TIPOS_NO_RETIRO` local de `routes/dashboard.py`, uno en
+  `jobs/recordatorios.py`, y uno en `services/estudio/queries/disponibilidad.py::_centinela_libre`.
+  Guard nuevo `test_tipos_pedido_source_scan.py` (18 tests, molde
+  `test_finanzas_flujo_source_scan.py`): prohíbe un literal de tipos nuevo en esos módulos y asegura
+  que las funciones puntuales usen el predicado compartido. Espejo TS en
+  `frontend/src/lib/tipos-pedido.ts` (`TIPOS_DERIVADOS`, `esPedidoDerivado`/`esPedidoTaller`).
+- **F1.2 — Blindar el pedido de taller (backend).** Extendido el guard de fechas (409) de
+  `_apply_pedido_datos` de `es_pedido_estudio` a `es_pedido_derivado` (cubre taller también), con el
+  mensaje brancheado por tipo. Ítems: `_apply_pedido_items` gana `_validar_reemplazo_items_taller` —
+  compara el set de ítems auto (centinela del Estudio / líneas "Uso de equipos — …") ANTES vs.
+  DESPUÉS del PATCH propuesto; si el reemplazo pierde alguno, 409 ("se administra desde Talleres, no
+  acá"). Agregar una línea nueva (matrícula) SIGUE permitido — el guard solo protege lo
+  auto-generado, no bloquea el PATCH entero como hace `estudio`. `transiciones.py::_revalidar_stock`
+  gana un tercer branch: taller no revalida contra el motor genérico (su disponibilidad la garantiza
+  el gate de la edición en `services/talleres/`, no `backend/reservas/`). **2 bugs de plata reales
+  encontrados en el camino:** (a) `_recalcular_total_pedido` solo saltaba el recálculo para
+  `es_pedido_estudio` — un pedido de taller SÍ pasaba por el resolutor de descuentos por
+  jornadas/cliente, aplicando un porcentaje sobre un total sin jornadas reales; (b)
+  `_apply_pedido_items` tenía su PROPIO cálculo de descuento inline (no pasaba por
+  `_recalcular_total_pedido`) con el mismo problema — un PATCH de ítems sobre un pedido de taller
+  también podía aplicar descuento indebido. Ambos branchean ahora con `es_pedido_taller(p)`: si es
+  taller, `monto_total = sum(subtotales)` sin descuento; sino, el camino de siempre.
+- **F1.3 — UI honesta por tipo.** Backend: el detalle de un pedido (`_get_alquiler_detail`) enriquece
+  con `clases_taller` (lista de clases reales de la edición, vía `taller_edicion_id` →
+  `services/talleres/queries/clases.py::clases_de_edicion`, extraída move-verbatim de
+  `routes/talleres.py` para evitar un ciclo de imports: `routes/talleres.py` ya importa de
+  `routes.alquileres`, así que el sentido inverso necesitaba un módulo compartido sin depender de
+  ningún route). **Bug de plata serio encontrado en vivo** (verificación real en navegador — no
+  estaba en el plan): `routes/alquileres/cotizacion.py::cotizar` hardcodeaba
+  `"cobro_modo": "jornada"` para todo ítem de catálogo — el Desglose/Cobranza de un pedido de taller
+  con precio fijo (`cobro_modo='fijo'`) se multiplicaba igual por los "31 días" del rango contable:
+  los $1.200.000 reales del pedido #445 se mostraban como $37.200.000. Fix de una línea:
+  `it.cobro_modo or "jornada"` (mismo patrón que ya usaba la rama de líneas libres, un `if` más
+  arriba — confirmado con `git stash` que el código viejo reproduce exactamente 37200000). Frontend:
+  la card de Fechas de `pedidos.$id.lazy.tsx` renderiza la lista de `clases_taller` (día + franja) en
+  vez del selector de fechas para taller/derivados (`fechaNoEditable`); el sufijo de precio en
+  `PedidoPageHelpers.tsx`/`PedidoPageCards.tsx` muestra "fijo" en vez de "/día" cuando
+  `cobro_modo === 'fijo'`; el label "Bruto" del Desglose omite "· N jornadas" para taller.
+- **F1.4 — Puente Talleres → Pedidos.** Nuevo endpoint `GET /admin/ediciones/{id}/pedidos` (lee
+  `alquileres WHERE taller_edicion_id = %s ORDER BY fecha_desde`, proyección mínima: número, estado,
+  fechas, montos). La pestaña "Precios y pago" de `EdicionSubRow.tsx` gana una sección "Pedidos
+  generados" (`PedidosGeneradosSection` en `EdicionTabs.tsx`) — lista cada pedido mensual con su mes
+  (`fmtMesAno`, helper nuevo en `lib/format.ts`), badge de estado y `cobrado / total`, cada fila
+  linkeando a `/admin/pedidos/$id`.
+- **Tests.** `test_tipos_pedido_source_scan.py` (18), `test_taller_pedidos_blindaje_db.py` (6,
+  Postgres real — incluye `PEDIDO_TURNO_REAL_ID`, una reserva de estudio real conflictiva en el rango,
+  para que el test del skip de `_revalidar_stock` discrimine de verdad: sin ella, no había ninguna
+  reserva conflictiva en el rango para que el chequeo genérico rechazara, así que el test pasaba
+  incluso contra el código viejo), `test_pedido_taller_clases_enriquecido_db.py` (2),
+  `test_cotizar_endpoint.py::TestRespetarPrecioItemCobroModo` (3, con control positivo
+  `cobro_modo='jornada'` que sí multiplica), `test_talleres_pedidos_generados_db.py` (3).
+  Verificación visual real (backend+frontend+Postgres local, Playwright headless): banner de taller,
+  lista de clases reales, tag "fijo", Desglose correcto, sección "Pedidos generados" con
+  orden/badges/montos/link correctos. Suite completa, ruff, tsc, eslint y prettier en verde antes de
+  cada push; CI en verde en `dev` para las 5 tandas de esta fase.
+- **Alcance y qué NO se tocó.** `backend/reservas/` (sagrado) intacto; la granularidad mensual del
+  pedido de taller no cambió (sigue siendo Fase 3 diferida); no se agregaron tablas de tiempo a
+  `alquileres`; la atribución de plata vía `equipos.dueno` no se tocó. Docs actualizados en el mismo
+  cambio: `FLUJO_PEDIDOS.md` gana §5 "Familias de pedido" (nueva); `MANIFIESTO.md` suma "líneas de
+  negocio" en §1 (gap real — Estudio/Talleres no estaban mencionados como líneas de negocio en
+  ningún lado) y 3 filas nuevas en el mapa de código de §5. Fase 2 (sección "Reserva del Estudio" en
+  la página del pedido, pedido explícito del dueño) queda para la próxima tanda de la misma
+  iniciativa (issue de tracking #1308).
+
+### 2026-07-28 — Fase 2 de "integrar rental/Estudio/Talleres en el pedido sin que mienta": sección "Reserva del Estudio" en la página del pedido
+
+- **Contexto.** Último tramo de la iniciativa #1308. En la Fase 0 el dueño había pedido
+  explícitamente una sección propia para el Estudio en la página del pedido (en vez de un banner que
+  manda a otra pantalla) — condición del `consejo` para el alcance completo (Fases 0+1+2).
+- **`ReservaEstudioSection` (nuevo componente).** Extraído del modo edición de `ReservaDialog.tsx`:
+  franja horaria (fecha/hora/horas), tarifa del espacio con override, promo on/off, equipos sueltos,
+  cotización en vivo y guardado — todo autocontenido (state + `useQuery`/`useMutation` propios).
+  Reusa `GET /admin/estudio/reservas/cotizar` + `PATCH /admin/estudio/reservas/{id}` tal cual, sin
+  agregar superficie nueva. El modo ALTA de `ReservaDialog` (cliente + estado inicial, exclusivo de
+  crear un turno nuevo) NO se tocó — sigue con su propio state/mutation, cero riesgo al camino de
+  creación ya probado.
+- **La página del pedido.** Para `tipo='estudio'` (no `estudio_fijo`): desaparecen el banner "andá a
+  Estudio → Reservas" y las Sections genéricas de "Fechas del alquiler"/"Equipos" (redundantes con la
+  nueva sección) — se reemplazan por `ReservaEstudioSection` directo. El label "Bruto" del Desglose
+  también deja de decir "· N jornadas" para un turno real (mismo criterio que ya tenía taller,
+  Fase 1) — un turno de pocas horas no son "N jornadas".
+- **`estudio_fijo` — bug de link encontrado en el camino.** El banner de un slot fijo linkeaba a
+  `/admin/estudio/reservas`, pero esa lista filtra `WHERE tipo='estudio'` — un slot fijo JAMÁS
+  aparece ahí. Corregido a `/admin/estudio` (donde vive el CRUD de slots, `SlotsSection`).
+- **Tests + verificación.** `ReservaEstudioSection` verificada en navegador real
+  (backend+frontend+Postgres local): editar desde la página del pedido Y desde `ReservaDialog` (modo
+  edición) reflejan el MISMO estado persistido (mismo componente, dos entradas); el alta de un turno
+  nuevo sigue funcionando end-to-end (verificado con una creación real vía API); el banner de
+  `estudio_fijo` linkea correctamente. Suite completa, tsc, eslint, prettier, build en verde. CI
+  verde en `dev`.
+- **Alcance.** Solo UI + reutilización — cero cambios de backend, cero endpoints nuevos. El
+  supervisor marca un editor de turno del Estudio que reimplemente sus campos en vez de reusar
+  `ReservaEstudioSection`, o un banner de `estudio_fijo` que vuelva a linkear a la lista de reservas.
+
+### 2026-07-28 — Turnos del Estudio vinculados a un pedido de alquiler normal (`pedido_principal_id`, #1308)
+
+- **Contexto.** El dueño, probando el pedido #415 (un alquiler en blanco), intentó cargar "horas de
+  Estudio" buscando "estud" en el buscador de equipos del pedido — encontró el equipo centinela
+  ("Estudio (espacio)", `es_recurso_interno`) ya cargado como ítem, con "0 restante" y $0 (un
+  artefacto viejo, no reproducible hoy: `GET /equipos` ya excluye `es_recurso_interno` en el
+  buscador — confirmado leyendo `routes/equipos/core.py:307`). Pidió "un solo modal, el de los
+  pedidos" para cargar horas de Estudio; tras explicar la restricción de fechas (un pedido no puede
+  ser rango-de-días Y franja-horaria a la vez), aceptó la alternativa: dos registros, una sola
+  pantalla, "mientras que no se desincronicen".
+- **Diseño.** `alquileres.pedido_principal_id` — self-FK nullable, `ON DELETE SET NULL` (mismo
+  patrón que `taller_edicion_id`/`estudio_slot_id`). Vive en el TURNO (hijo), apunta al pedido de
+  alquiler (padre) — soporta 1 pedido ↔ N turnos. Migración `pv1nc2l3a4d5` + espejo en
+  `init_db()` (esquema en dos capas).
+- **La garantía real: el cliente nunca puede desincronizar.** `_crear_pedido_estudio` gana el
+  parámetro `pedido_principal_id`; cuando viene, `routes/estudio.py::_resolver_pedido_principal`
+  resuelve `cliente_id`/`cliente_nombre`/`cliente_email`/`cliente_telefono` DIRECTO del pedido
+  principal — el `cliente_id`/`cliente_nombre` que mande el body del request se IGNORAN por
+  completo (ni siquiera pasan por `_resolver_cliente_admin`). Valida además que el pedido a vincular
+  exista (404) y sea `tipo='diaria'` (400 — no se puede vincular un turno a otro turno/taller).
+  Candado: test que manda un `cliente_id` DISTINTO al del pedido principal en el body y verifica que
+  el turno persistido queda con el del pedido principal, no el del body — discrimina de verdad
+  (confirmado con `git stash`: sin el fix, el turno quedaba con el cliente del body).
+- **Enriquecimiento bidireccional.** `_get_alquiler_detail` (`routes/alquileres/detalle.py`) suma:
+  el pedido principal trae `turnos_estudio_vinculados` (mismo shape liviano que
+  `PedidoGeneradoEdicion`, el bridge de Talleres); el turno trae `pedido_principal` (breadcrumb: id,
+  numero_pedido, cliente_nombre).
+- **Frontend.** Nueva sección `TurnosEstudioSection` (pedido, `tipo='diaria'` — nunca en un
+  derivado): lista los turnos vinculados reusando `ReservaEstudioSection` inline (Fase 2, cada card
+  hace su propio fetch del detalle completo del turno) + botón "Agregar turno del Estudio" que abre
+  `ReservaDialog` en modo alta con el prop nuevo `pedidoVinculado={id, clienteNombre}` — oculta el
+  picker de cliente (muestra el heredado, solo lectura) y manda `pedido_principal_id` en vez de
+  `cliente_id`/`cliente_nombre`. El turno vinculado muestra un banner "Turno vinculado al pedido #N"
+  con link de vuelta.
+- **Tests + verificación.** `test_pedido_estudio_vinculado_db.py` (5 tests, Postgres real,
+  discriminados con `git stash`): hereda cliente del principal ignorando el body; rechaza vincular a
+  un turno ajeno (400); rechaza un principal inexistente (404); el detalle enriquece en ambas
+  direcciones; borrar el principal desvincula sin borrar el turno. Verificación en navegador real:
+  crear el turno vinculado desde la sección nueva, editarlo inline (cambia horas + agrega un
+  suelto), confirmar que el Desglose del pedido principal NO se mueve (son pedidos independientes),
+  navegar al turno por su cuenta y ver el banner + mismo cliente, borrar el pedido principal y
+  confirmar que el turno sobrevive con el banner ya no visible. Suite completa (2731 unit),
+  migración (`test_alembic_upgrade_db.py`), ruff, tsc, eslint, prettier, build en verde. CI verde en
+  `dev`.
+- **Alcance y qué NO se tocó (al momento de esta entrada, 2026-07-28 — ver Corrección abajo).** No se
+  combinó plata ni estado entre el pedido y el turno (cada uno factura/cobra/transiciona
+  independiente, mismo criterio que talleres↔pedidos). No se sincroniza el cliente RETROACTIVAMENTE si
+  el principal cambia de cliente después de crear el turno (cada uno guarda su propio `cliente_id` al
+  momento de vincular) — la garantía es "nunca desincronizado AL CREAR", no "sincronizado para
+  siempre" (documentado, no pedido por el dueño; esto SIGUE vigente). `backend/reservas/` intacto. El
+  supervisor marca un turno vinculado que use el cliente del request en vez de resolverlo del pedido
+  principal, o un vínculo nuevo a un pedido que no sea `tipo='diaria'`.
+- **Corrección (2026-07-29) — la misma iniciativa siguió y cambió dos de las afirmaciones de arriba.**
+  (1) Borrado: commit `e3b1502` ("me sigue generando dos, uno con número y otro no") cambió el
+  borrado de "desvincula sin borrar" (bullet "Tests + verificación" arriba) a "se lleva el turno con
+  él" — un turno vinculado no es una venta aparte, es contenido del pedido, como un ítem. Único freno:
+  si el turno ya tiene plata cobrada, se frena TODO el borrado (409) — misma línea roja que sacar un
+  turno con la ✕. (2) Plata y estado: contra lo que decía el bullet "Alcance" de arriba ("no se
+  combinó plata ni estado"), fases posteriores de #1308 SÍ lo hicieron — `_agregar_pago_combinado`
+  (un "Registrar pago" en el principal reparte entre el principal y sus turnos) y
+  `_cascada_turnos_vinculados` (mover el estado del principal empuja a cada turno al mismo paso de
+  `FLOW`, sin retroceder). Esta corrección queda anotada acá porque esa parte de la iniciativa nunca
+  tuvo su propia entrada de memoria — pendiente si hace falta una entrada dedicada más adelante.
+
+### 2026-07-30 — `backend/services/alquileres/` = motor de pedidos (split de `routes/alquileres/`, CQRS-lite, 4 fases)
+
+- **Por qué ahora.** `routes/alquileres/` había crecido con TODA la lógica de negocio de pedidos —
+  crear, editar ítems/datos, cotizar, pagar, transicionar de estado, armar documentos — mezclada con
+  transporte HTTP (auth, conn/commit, decoradores). Mismo síntoma que motivó los splits previos de
+  `contabilidad/`/`services/estudio/`/`services/talleres/`, pero en el módulo más grande de todos.
+- **Roadmap de 4 fases (issue de tracking #1312), todas move-verbatim (cero cambio de lógica/SQL):**
+  - Fase 0 (`40bec21`) — andamiaje: `services/alquileres/__init__.py` + estructura `queries/`/
+    `commands/` vacía, docstring explicando el molde.
+  - Fase 1 (`8ae950c`) — lecturas a `queries/`: `disponibilidad.py`, `documentos.py`,
+    `cotizacion.py` (`cotizar_carrito`), `detalle.py` (`_get_alquiler_detail` y todo lo que arma).
+  - Fase 2 (`97d6b33`) — pagos + `_delete_pedido` a `commands/pagos.py`/`commands/pedido.py`.
+  - Fase 3 (`7c92b30`) — núcleo de ítems/total a `commands/items.py`
+    (`_apply_pedido_items`/`_apply_pedido_datos`/`_recalcular_total_pedido`).
+  - Fase 4 (`aeb0703`) — la última: máquina de estados (`cambiar_estado`, `TRANSICIONES`/`FLOW`) +
+    creación (`create_pedido`/`create_pedido_retry`) a `commands/transiciones.py`/`commands/creacion.py`.
+- **Invariante CQRS-lite (igual que los 3 splits previos):** `commands/` puede importar de `queries/`;
+  `queries/` NUNCA de `commands/`. Caso real de tensión resuelto: `_resolver_descuentos_snapshot_o_vivo`
+  es lectura pura pero su consumidor histórico es un command (`_apply_pedido_items`) — como TAMBIÉN la
+  necesita `cotizar_carrito` (lectura), vive en `queries/cotizacion.py` y `commands/items.py` la
+  importa de vuelta. Precedente: un helper de lectura pura con un consumidor en `commands/` va a
+  `queries/`, nunca al revés, aunque el consumidor "más importante" sea un command.
+- **`modelos.py` (los Pydantic) se queda en `routes/alquileres/`** — es el contrato HTTP, no lógica de
+  negocio; ningún split previo movió sus modelos Pydantic fuera de las rutas tampoco.
+- **Excepción documentada al invariante "no importa de `routes.*`":** hay un ciclo real
+  `routes.alquileres ↔ routes.cliente_portal` sostenido por imports DIFERIDOS (dentro del cuerpo de
+  función, nunca a nivel de módulo) en ambas direcciones —
+  `services.alquileres.commands.transiciones::cambiar_estado` necesita
+  `routes.cliente_portal.ESTADOS_MODIFICABLES`/`_cancelar_solicitudes_pendientes` de vuelta;
+  `routes/cliente_portal/pedidos.py::cliente_cancelar_pedido` importa `cambiar_estado`. Preservado TAL
+  CUAL — no se rediseñó el ciclo en esta iniciativa; un import a nivel de MÓDULO nuevo ahí rompería el
+  ciclo en tiempo de import.
+- **~57 call-sites externos preservados sin tocar un import:** 8 archivos de producción
+  (`routes/estudio.py`, `routes/talleres.py`, `jobs/recordatorios.py`, `clientes/commands/cliente.py`,
+  todo `routes/cliente_portal/`) + ~33 tests dependían del re-export plano de `routes/alquileres/` —
+  `routes/alquileres/{core,detalle,disponibilidad,documentos,cotizacion,pagos,transiciones,pedidos}.py`
+  quedan como puro re-export/transporte, mismos nombres públicos en los mismos módulos de siempre.
+- **Lo que NO se tocó:** `_delete_pedido` se extrajo SIN agregarle ningún gate nuevo — la decisión de
+  si "Eliminar pedido" necesita bloquear contra `monto_pagado`/stock real sigue abierta (issue #1311,
+  charla aparte). El `FOR UPDATE`/`pg_advisory_xact_lock`/el retry-loop de `create_pedido_retry` se
+  movieron BYTE-IDÉNTICOS — ninguna fase cambió el orden de lock-antes-de-insertar ni el manejo de
+  `DeadlockDetected`.
+- **Verificación.** Cada fase: suite unitaria completa + ruff + tests de integración (Postgres real)
+  de los módulos tocados, en verde antes de pasar a la siguiente. CI verde en `dev` en las 5 fases.
+- El supervisor marca: lógica de pedidos reimplementada fuera del paquete; un `queries/` importando de
+  `commands/`; el import diferido del ciclo `cliente_portal` vuelto un import de módulo; el `FOR
+  UPDATE`/`pg_advisory_xact_lock`/el retry-loop de `create_pedido_retry` tocado o reordenado; un gate
+  nuevo agregado a `_delete_pedido` sin que la decisión de #1311 se haya tomado. Estructura completa →
+  `backend/services/alquileres/CLAUDE.md`.
+
+### 2026-07-29 — Rename de valor "Rambla"→"Rental" en 3 columnas acopladas de contabilidad (#1314)
+
+- **Contexto.** Pedido del dueño: "Rambla" (la marca/empresa) generaba confusión con "Rambla" como
+  VALOR interno del cobrador de un pago / dueño de un equipo / parte de la rendición — sobre todo
+  porque el rental y el Estudio son 2 negocios conjuntos con cuentas reales separadas (rental =
+  MercadoPago de Tincho, Estudio = MercadoPago de Pablo). Se renombra el valor (no la marca "Rambla
+  Rental", que no cambia en ningún lado) a "Rental" — simétrico con "Estudio" — en 3 columnas
+  acopladas por el mismo string: `equipos.dueno`, `cuentas.socio` (+ el nombre real de la cuenta,
+  "Fondo Rambla"→"Fondo Rental"), `alquiler_pagos.destinatario`.
+- **Por qué las 3 juntas, en la misma migración.** `comisiones.repartir(dueno, monto, modelo)` busca
+  `modelo[dueno]` — si se migran solo 2 de las 3, un equipo/cobrador que quedó con el string viejo cae
+  al fallback de reparto ("sin regla, cobra 100% él mismo"), creando una parte fantasma "Rambla"
+  separada de "Rental" en los reportes. Los 3 `UPDATE` van en la misma migración
+  (`23aa6949d4df_rambla_a_rental_rename.py`), todos idempotentes. Si `app_settings.comisiones_modelo`
+  tiene una fila customizada, se le renombra la clave "Rambla"→"Rental" (top-level y anidada en
+  beneficiarios) sin pisar el resto de la configuración del dueño — mismo criterio que el backfill de
+  comisiones de "Estudio" (`t8u9v0w1x2y3`).
+- **Gotcha real encontrado en staging.** `cuentas` es la ÚNICA de las 3 columnas con identidad
+  protegida por UNIQUE (activa) — por `socio` (`idx_cuentas_socio`) Y por `nombre`
+  (`cuentas_nombre_activa_uq`). `init_db()` (esquema en dos capas) corre ANTES que Alembic en cada
+  boot (`main.py::init_db_bg`) y, desde que el código pasó a nombrar "Rental", siembra
+  `('Fondo Rental', 'fondo', 'Rental', ...) ON CONFLICT DO NOTHING` — en una BD que TODAVÍA tenía la
+  fila vieja ("Fondo Rambla"/`socio='Rambla'`, con plata real), ese seed NO choca (nombre/socio
+  distintos todavía) y crea una fila NUEVA vacía en paralelo. Un rename ciego (`UPDATE cuentas SET
+  socio='Rental' WHERE socio='Rambla'`) choca contra esa fila nueva → `UniqueViolation` sobre
+  `idx_cuentas_socio`, la migración ENTERA hace rollback (incluido el rename de `equipos.dueno`, mismo
+  `upgrade()`) — exactamente el síntoma reportado (equipos con dueño "Rambla" no migrado).
+- **Fix: merge, no rename ciego.** Por cada cuenta vieja encontrada (por `socio='Rambla'` O
+  `nombre='Fondo Rambla'` — pueden desincronizarse si el dueño renombró la cuenta a mano sin tocar el
+  cobrador, o viceversa): si YA existe una cuenta activa `socio='Rental'` (sembrada por `init_db()` —
+  nace SIEMPRE vacía, sin movimientos), se mergea la vieja en esa — reasigna `movimientos` (origen y
+  destino), suma `saldo_inicial`, borra la vieja. Si no existe, rename en el lugar como antes. Seguro
+  porque la fila nueva sembrada por `init_db()` nunca tiene movimientos propios que perder.
+- **`init_db()` ya siembra "Rental"/"Fondo Rental" para instalaciones nuevas** — esta migración es
+  específicamente la que arregla una BD que YA tenía los valores viejos. `downgrade()` es no-op
+  (mismo criterio que los rebautizos previos de valor, `t8u9v0w1x2y3`/`c47b6b4e2851`): revertir
+  perdería datos nuevos creados con el valor "Rental".
+- **Verificación.** `test_rambla_a_rental_cuentas_merge_migration_db.py` (Postgres real, opt-in
+  `ALEMBIC_DB_TEST=1`): reproduce el escenario exacto de staging (cuenta vieja con movimientos +
+  saldo real + fila nueva ya sembrada por `init_db()`) y confirma que mergea en vez de chocar, que el
+  resto de la migración (`equipos.dueno`) sí se aplica, y que correr la migración dos veces es
+  idempotente.
+- El supervisor marca: una migración futura que toque `cuentas`/`dueno`/`destinatario` con un
+  `UPDATE` ciego sin chequear si ya existe una fila con el valor destino — el mismo patrón de
+  colisión se repite en cualquier columna con UNIQUE + un valor sembrado por `init_db()` antes de que
+  Alembic corra.

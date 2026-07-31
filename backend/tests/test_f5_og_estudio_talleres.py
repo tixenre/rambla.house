@@ -96,13 +96,19 @@ def test_workshop_og_inyecta_nombre_e_instructor(tmp_path):
     fake_taller = {
         "nombre": "Dirección de Arte",
         "descripcion": "El taller más copado del mundo",
-        "instructor_nombre": "Juana García",
-        "instructor_foto_url": "https://cdn.example/instructor.jpg",
-        "instructor_media_id": None,
+        "taller_id": 1,
+        "fecha_inicio": None,
+        "fecha_fin": None,
+        "precio_total": None,
+    }
+    fake_instructor = {
+        "nombre": "Juana García",
+        "foto_url": "https://cdn.example/instructor.jpg",
+        "foto_media_id": None,
     }
 
     conn = MagicMock()
-    conn.execute.return_value.fetchone.return_value = fake_taller
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor]
     conn.close = MagicMock()
 
     with (
@@ -148,14 +154,20 @@ def test_workshop_og_usa_media_variant_si_tiene_media_id(tmp_path):
     fake_taller = {
         "nombre": "Taller de Foto",
         "descripcion": "Aprende fotografía",
-        "instructor_nombre": "Pedro López",
-        "instructor_foto_url": "https://cdn.example/fallback.jpg",
-        "instructor_media_id": 99,
+        "taller_id": 2,
+        "fecha_inicio": None,
+        "fecha_fin": None,
+        "precio_total": None,
+    }
+    fake_instructor = {
+        "nombre": "Pedro López",
+        "foto_url": "https://cdn.example/fallback.jpg",
+        "foto_media_id": 99,
     }
     fake_mv = {"url": "https://cdn.example/og-variant.jpg"}
 
     conn = MagicMock()
-    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_mv]
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor, fake_mv]
     conn.close = MagicMock()
 
     with (

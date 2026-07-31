@@ -1,30 +1,12 @@
 [
   {
-    "id": 1,
+    "id": 2,
+    "taller_id": 1,
     "slug": "direccion-de-arte-jime-troncoso",
     "nombre": "Workshop Dirección de Arte",
-    "subtitulo": "x Jime Troncoso",
-    "instructor_nombre": "Jime Troncoso",
-    "instructor_bio": "26 años, marplatense viviendo en CABA. Desde 2020 colabora con marcas, agencias y equipos creativos en proyectos artísticos, audiovisuales y fotográficos, pensados para entornos digitales y físicos.",
-    "instructor_foto_url": "",
-    "numero_edicion": 1,
-    "proxima_edicion_slug": "direccion-de-arte-jime-troncoso-2",
-    "proxima_edicion": null,
-    "edicion_anterior": null,
-    "instructor_proyectos": "Universal LATAM, CheNetflix, Shorta, Spotify, Gancia, Skyy, Dr Lemon, Luigi Bosca, Las Pastillas del Abuelo, Kevin Johansen, Los Pericos & El Plan de la Mariposa, Agapornis, Guolis, Lucciano's, La Fonte D'Oro, Billabong, Atomik, Kappa x Huracán, Bruto, Turboblender, Shell, Hops",
+    "subtitulo": "rambla × jime troncoso",
     "descripcion": "Si llegaste hasta acá: gracias, estoy muy emocionada por hacer realidad este proyecto. El workshop incluye 2 clases en Rambla Estudio y son 12 cupos, porque quiero que sea un espacio donde podamos tener un intercambio de aprendizajes y conocimientos.",
     "publico_objetivo": "Directores/as, asistentes y ayudantes de arte · Creadores de contenido, fotógrafos/as, filmmakers · Estudiantes de comunicación audiovisual, cine o fotografía · Personas que les interese trabajar sobre lo artístico y estético a la hora de crear proyectos",
-    "programa_teorica": [
-      "Qué es la dirección de arte y cuál es su función dentro de un proyecto",
-      "Cómo se compone y se coordina un equipo",
-      "Análisis de proyectos reales: videoclip, publicidad, ambientación en evento y foto producto",
-      "Armado de presupuesto (sí, vamos a hablar de números)",
-      "Cómo mostrar tus proyectos y crecer dentro de la industria"
-    ],
-    "programa_practica": [
-      "Llegamos a la mejor parte (o la que a mí más me divierte): crear el set.",
-      "En esta instancia se suman el director de fotografía (Pablo Isa) y el gaffer (Tincho Santini), que se encargarán del equipo técnico, junto con Rambla Rental, para que la práctica sea aún más real y podamos ver el resultado final."
-    ],
     "fecha_inicio": "2026-07-11",
     "fecha_fin": "2026-07-18",
     "horario": "9 a 13 hs",
@@ -36,6 +18,65 @@
     "pago_alias": "rambla.estudio",
     "pago_cbu": "0170239440000032889112",
     "pago_banco": "BBVA",
-    "direccion": "Chaco 1392 — Rambla Estudio"
+    "direccion": "Chaco 1392 — Rambla Estudio",
+    "activo": true,
+    "tipo_taller": "intensivo",
+    "numero_edicion": 1,
+    "frozen_at": null,
+    "terminos": "",
+    "beneficios": "",
+    "pregunta_experiencia": "",
+    "mensaje_confirmacion": "",
+    "borrador": false,
+    "instructores": [
+      {
+        "id": 1,
+        "nombre": "Jime Troncoso",
+        "rol": "",
+        "descripcion": "26 años, marplatense viviendo en CABA. Desde 2020 colabora con marcas, agencias y equipos creativos en proyectos artísticos, audiovisuales y fotográficos, pensados para entornos digitales y físicos.",
+        "instagram": "",
+        "web": "",
+        "foto_url": "",
+        "foto_media_id": null,
+        "proyectos": "Universal LATAM, CheNetflix, Shorta, Spotify, Gancia, Skyy, Dr Lemon, Luigi Bosca, Las Pastillas del Abuelo, Kevin Johansen, Los Pericos & El Plan de la Mariposa, Agapornis, Guolis, Lucciano's, La Fonte D'Oro, Billabong, Atomik, Kappa x Huracán, Bruto, Turboblender, Shell, Hops"
+      }
+    ],
+    "sesiones": [
+      {
+        "fecha": "2026-07-11",
+        "hora_inicio_min": 540,
+        "hora_fin_min": 780,
+        "hora_inicio_str": "09:00",
+        "hora_fin_str": "13:00",
+        "titulo": "Teórica",
+        "descripcion": "Qué es la dirección de arte y cuál es su función dentro de un proyecto\nCómo se compone y se coordina un equipo\nAnálisis de proyectos reales: videoclip, publicidad, ambientación en evento y foto producto\nArmado de presupuesto (sí, vamos a hablar de números)\nCómo mostrar tus proyectos y crecer dentro de la industria",
+        "nota": "",
+        "portada_url": ""
+      },
+      {
+        "fecha": "2026-07-18",
+        "hora_inicio_min": 540,
+        "hora_fin_min": 780,
+        "hora_inicio_str": "09:00",
+        "hora_fin_str": "13:00",
+        "titulo": "Práctica",
+        "descripcion": "Llegamos a la mejor parte (o la que a mí más me divierte): crear el set.\nEn esta instancia se suman el director de fotografía (Pablo Isa) y el gaffer (Tincho Santini), que se encargarán del equipo técnico, junto con Rambla Rental, para que la práctica sea aún más real y podamos ver el resultado final.",
+        "nota": "",
+        "portada_url": ""
+      }
+    ],
+    "video": null,
+    "modalidades": [
+      {
+        "codigo": "total",
+        "label": "Pago total",
+        "nota": "",
+        "monto_total": 200000,
+        "monto_total_str": "$200.000"
+      }
+    ],
+    "faqs": [],
+    "trabajos": [],
+    "fecha_cierre_inscripcion": null
   }
 ]

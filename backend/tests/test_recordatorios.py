@@ -84,6 +84,28 @@ def capture_send(monkeypatch):
     return calls
 
 
+class _CapturingConn:
+    """Conn mínima que solo registra el SQL ejecutado — para el candado de abajo,
+    no ejercita ninguna lógica de negocio."""
+
+    def __init__(self):
+        self.sql = None
+
+    def execute(self, sql, params=()):
+        self.sql = sql
+        return FakeCursor([])
+
+
+def test_pedidos_para_retiro_excluye_taller_y_estudio_fijo():
+    """Candado: ninguno de los dos es un evento real de un día puntual (taller =
+    mes contable completo; estudio_fijo = muestra de una recurrencia) — hoy además
+    ninguno lleva `cliente_email`, así que el filtro de abajo ya los excluiría en
+    la práctica, pero el filtro explícito no depende de esa coincidencia."""
+    conn = _CapturingConn()
+    rec._pedidos_para_retiro(conn, HOY, dias_antes=1)
+    assert "a.tipo NOT IN ('taller', 'estudio_fijo')" in conn.sql
+
+
 # ── Job: envío real ──────────────────────────────────────────────────────────
 
 class TestEnviar:

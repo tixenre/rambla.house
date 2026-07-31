@@ -34,6 +34,7 @@ class FakeConn:
         self._pedido_data = pedido_data
         self._descuento_jornadas_puntos = descuento_jornadas_puntos
         self.updates_alquileres: list[tuple[str, tuple]] = []
+        self.item_rows: list[tuple] = []  # filas de la última executemany a alquiler_items
         self._last_sql = ""
         self._last_params: tuple = ()
 
@@ -45,6 +46,8 @@ class FakeConn:
         return self
 
     def executemany(self, sql, seq):
+        if "INSERT INTO alquiler_items" in sql:
+            self.item_rows = list(seq)
         return self
 
     def fetchone(self):
@@ -62,6 +65,12 @@ class FakeConn:
                 {"jornadas": j, "pct": p}
                 for j, p in self._descuento_jornadas_puntos
             ]
+        if "FROM equipos" in sql:
+            # tipos_equipo_batch (#1313/#1314, reemplazó la query por-ítem):
+            # SELECT id, tipo FROM equipos WHERE id = ANY(%s) — mismo criterio
+            # que `fetchone()` arriba, todo equipo "existe" y es simple.
+            ids = self._last_params[0] if self._last_params else []
+            return [{"id": eid, "tipo": "simple"} for eid in ids]
         return []
 
     def commit(self):
@@ -99,9 +108,13 @@ def test_apply_items_preserva_descuento_jornadas(monkeypatch):
     puntos = [(1, 0.0), (7, 10.0)]
     conn = FakeConn(pedido, puntos)
 
-    # Evitamos resolver _get_alquiler_detail (depende de muchos JOINs).
+    # Evitamos resolver _get_alquiler_detail (depende de muchos JOINs). Patch
+    # sobre `commands.items` (donde `_apply_pedido_items` lo resuelve de
+    # verdad tras el split CQRS-lite) — `routes.alquileres` es un re-export,
+    # parchearlo ahí no interceptaba la llamada real (gap latente: ninguna
+    # de las dos assertions de este test lee el valor de retorno).
     monkeypatch.setattr(
-        "routes.alquileres._get_alquiler_detail",
+        "services.alquileres.commands.items._get_alquiler_detail",
         lambda conn, id: {"id": id, "monto_total": conn.updates_alquileres[-1][1][0]},
     )
 
@@ -136,3 +149,41 @@ def test_apply_items_preserva_descuento_jornadas(monkeypatch):
     # El descuento_jornadas_pct persistido debe ser 10.0.
     descuento_persistido = params_final[1]
     assert descuento_persistido == 10.0
+
+
+def test_apply_items_preserva_cobro_modo_fijo_en_item_de_catalogo(monkeypatch):
+    """Encontrado verificando Talleres en browser: un pedido `tipo='taller'`
+    (`_regenerar_pedidos_taller`) tiene un ítem de CATÁLOGO (el centinela del
+    Estudio) con `cobro_modo='fijo'`. Antes, `_apply_pedido_items` hardcodeaba
+    'jornada' para todo ítem de catálogo → el primer guardado de CUALQUIER
+    cosa en ese pedido (ej. agregar la línea de matrícula) pisaba el monto
+    fijo por jornadas × precio (acá 30 jornadas), inflando el subtotal."""
+    pedido = {
+        "id": 1,
+        "cliente_id": None,
+        "estado": "confirmado",
+        "fecha_desde": "2026-08-01T00:00:00",
+        "fecha_hasta": "2026-08-31T00:00:00",  # 30 jornadas
+        "descuento_pct": 0,
+        "descuento_jornadas_pct": 0.0,
+        "descuento_cliente_pct": 0.0,
+        "descuento_manual_tipo": "pct",
+        "descuento_manual_monto": 0,
+    }
+    conn = FakeConn(pedido, descuento_jornadas_puntos=[])
+    monkeypatch.setattr(
+        "services.alquileres.commands.items._get_alquiler_detail",
+        lambda conn, id: {"id": id},
+    )
+
+    items = [PedidoItem(equipo_id=1, cantidad=1, precio_jornada=35000, cobro_modo="fijo")]
+    _apply_pedido_items(conn, id=1, items=items)
+
+    assert len(conn.item_rows) == 1
+    # (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, orden, nombre_libre, cobro_modo)
+    row = conn.item_rows[0]
+    assert row[7] == "fijo", "cobro_modo no debe pisarse a 'jornada' para un ítem de catálogo"
+    assert row[4] == 35000, (
+        f"'fijo' no debe multiplicar por las 30 jornadas del pedido — "
+        f"esperaba subtotal=35000, dio {row[4]}"
+    )

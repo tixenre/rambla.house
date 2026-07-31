@@ -117,6 +117,34 @@ def _precio_combo_calc(componentes) -> int:
     return int(round(total))
 
 
+def resolver_descuento_uniforme(componentes, precio_objetivo: int) -> float:
+    """Dado un precio objetivo para un combo, resuelve el % de descuento UNIFORME
+    (el mismo en cada línea) que hace que `_precio_combo_calc` devuelva ese precio
+    exacto. PURA (testeable sin DB) — usada por el endpoint "precio objetivo" del
+    combo (#1283, Fase 5), atajo para no tantear el % línea por línea a mano.
+
+    Despejando de la fórmula de `_precio_combo_calc` (factor común `(1-d/100)`):
+        precio_objetivo = bruto × (1 − d/100)  →  d = 100 × (1 − precio_objetivo/bruto)
+    donde `bruto = Σ(precio_jornada × cantidad)` (el mismo total sin descontar).
+
+    Lanza ValueError si no se puede resolver: sin componentes con precio (bruto
+    <= 0, nada sobre lo que descontar) o si el objetivo supera el bruto (haría
+    falta un descuento NEGATIVO — el mecanismo es un descuento, no un recargo).
+    """
+    bruto = sum((c["precio_jornada"] or 0) * (c["cantidad"] or 0) for c in componentes)
+    if bruto <= 0:
+        raise ValueError("Los componentes no tienen precio base sobre el que aplicar un descuento.")
+    if precio_objetivo < 0:
+        raise ValueError("El precio objetivo no puede ser negativo.")
+    if precio_objetivo > bruto:
+        raise ValueError(
+            f"El precio objetivo (${precio_objetivo:,}) no puede superar la suma de "
+            f"los componentes sin descuento (${bruto:,}) — el mecanismo es un descuento, "
+            "no un recargo."
+        )
+    return 100.0 * (1.0 - precio_objetivo / bruto)
+
+
 def precio_combo(conn, equipo_id: int) -> int:
     """C3 #635 — precio por jornada derivado de un COMBO: DINÁMICO (sigue el
     precio actual de cada componente) con el descuento por línea de cada uno.

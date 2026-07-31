@@ -59,8 +59,8 @@ function FooterMobile() {
             Estudio
           </Link>
           <span className="text-muted-foreground/40">·</span>
-          <Link to="/workshops" className="text-ink hover:text-[var(--area-accent)] transition">
-            Talleres
+          <Link to="/escuelas" className="text-ink hover:text-[var(--area-accent)] transition">
+            Escuelas
           </Link>
           <span className="text-muted-foreground/40">·</span>
           <Link
@@ -212,10 +212,10 @@ function FooterDesktop() {
               </li>
               <li>
                 <Link
-                  to="/workshops"
+                  to="/escuelas"
                   className="text-ink hover:text-[var(--area-accent)] transition"
                 >
-                  Workshops & Talleres
+                  Escuelas
                 </Link>
               </li>
               <li>

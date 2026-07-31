@@ -368,18 +368,28 @@ def export_clientes(conn) -> list[dict]:
 def export_alquileres(conn) -> list[dict]:
     """Exporta alquileres con items y pagos embebidos.
 
-    Filtra los que no tienen numero_pedido (legacy sin nro) — no son
-    re-importables sin clave natural. Si los necesitás, generales un
-    numero_pedido antes vía un script de mantenimiento.
+    Filtra los que no tienen numero_pedido — no son re-importables sin clave
+    natural. Eso deja afuera dos grupos, los dos a propósito:
+
+    - **Legacy sin número** (importados viejos). Si los necesitás, generales un
+      numero_pedido antes vía un script de mantenimiento.
+    - **Borradores.** Un borrador nace SIN número por diseño (es un presupuesto
+      rápido, no una venta — ver `create_pedido`), así que no entra al backup.
+      **CONFIRMADO POR EL DUEÑO** ("no pasa nada si el borrador no entra en el
+      back up"): es efímero y se borra de verdad (hard delete), no algo que
+      haya que preservar. NO "arreglar" este filtro para incluirlos.
     """
     rows = conn.execute("""
         SELECT a.numero_pedido, a.cliente_nombre, a.cliente_telefono,
                a.estado, a.fecha_desde, a.fecha_hasta, a.monto_total,
                a.monto_pagado, a.descuento_pct, a.notas, a.fuente,
+               a.tipo,
+               pp.numero_pedido AS pedido_principal_numero,
                a.id AS alquiler_id,
                c.email AS cliente_email
         FROM alquileres a
         LEFT JOIN clientes c ON c.id = a.cliente_id
+        LEFT JOIN alquileres pp ON pp.id = a.pedido_principal_id
         WHERE a.numero_pedido IS NOT NULL
         ORDER BY a.numero_pedido
     """).fetchall()
@@ -445,6 +455,12 @@ def export_alquileres(conn) -> list[dict]:
                 estado=r["estado"] or "solicitado",
                 fecha_desde=_to_iso(r["fecha_desde"]) or "",
                 fecha_hasta=_to_iso(r["fecha_hasta"]) or "",
+                tipo=r["tipo"] or "diaria",
+                pedido_principal_numero=(
+                    int(r["pedido_principal_numero"])
+                    if r["pedido_principal_numero"] is not None
+                    else None
+                ),
                 monto_total=int(r["monto_total"] or 0),
                 monto_pagado=int(r["monto_pagado"] or 0),
                 descuento_pct=float(r["descuento_pct"] or 0.0),

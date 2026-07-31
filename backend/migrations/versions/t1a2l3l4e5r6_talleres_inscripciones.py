@@ -5,6 +5,15 @@ Agrega los templates de email para notif al admin y confirmación al inscripto.
 
 Espeja init_db() (esquema en dos capas, MEMORIA 2026-06-03).
 
+Guard post-Escuela-v2-F6 (esc7l8i9m0p1): en una DB fresca, init_db() ya crea
+`talleres` en su forma FINAL (sin instructor_nombre/programa_*/fecha_inicio/...,
+retirados en F6) — el CREATE TABLE IF NOT EXISTS de acá es no-op, pero el INSERT
+de abajo escribía a esas columnas incondicionalmente. Se saltea el seed entero
+cuando `instructor_nombre` no existe (mismo criterio que el guard de
+`e1d2c3i4o5n6` para `clases_taller`): un bootstrap post-F6 ya no modela un
+taller como fila plana, y sembrar ese shape ahí no tiene sentido. En una DB que
+SÍ tiene la columna (pre-F6, replay histórico) el seed corre igual que siempre.
+
 Revision ID: t1a2l3l4e5r6
 Revises: z0a1b2c3d4e5
 Create Date: 2026-06-20
@@ -14,6 +23,7 @@ import json
 from typing import Sequence, Union
 
 from alembic import op
+from sqlalchemy import text
 
 revision: str = "t1a2l3l4e5r6"
 down_revision: Union[str, Sequence[str], None] = "z0a1b2c3d4e5"
@@ -75,71 +85,81 @@ def upgrade() -> None:
     )
 
     # ── Seed: Workshop Dirección de Arte × Jime Troncoso ─────────────────────
-    programa_teorica = _q(json.dumps([
-        "Qué es la dirección de arte y cuál es su función dentro de un proyecto",
-        "Cómo se compone y se coordina un equipo",
-        "Análisis de proyectos reales: videoclip, publicidad, ambientación en evento y foto producto",
-        "Armado de presupuesto (sí, vamos a hablar de números)",
-        "Cómo mostrar tus proyectos y crecer dentro de la industria",
-    ]))
-    programa_practica = _q(json.dumps([
-        "Crear el set: la clase práctica se construye sobre el proyecto elegido en la clase teórica",
-        "Nos dividimos en equipos con 1 semana de preproducción previa",
-        "Se suman el director de fotografía Pablo Isa y el gaffer Tincho Santini",
-        "Rambla Rental provee el equipo técnico para que la práctica sea lo más real posible",
-        "Vemos el resultado final juntos",
-    ]))
-    descripcion = _q(
-        "Si llegaste hasta acá: gracias, estoy muy emocionada por hacer realidad este proyecto. "
-        "El workshop incluye 2 clases en Rambla Estudio y son 12 cupos, porque quiero que sea "
-        "un espacio donde podamos tener un intercambio de aprendizajes y conocimientos."
-    )
-    publico_objetivo = _q(
-        "Directores/as, asistentes y ayudantes de arte · "
-        "Creadores de contenido, fotógrafxs, filmmakers · "
-        "Estudiantes de comunicación audiovisual, cine o fotografía · "
-        "Personas que les interese trabajar sobre lo artístico y estético a la hora de crear proyectos"
-    )
-    instructor_bio = _q(
-        "26 años, marplatense viviendo en CABA. Desde 2020 colabora con marcas, agencias y equipos "
-        "creativos en proyectos artísticos, audiovisuales y fotográficos, pensados para entornos "
-        "digitales y físicos."
-    )
-    instructor_proyectos = _q(
-        "Universal LATAM, CheNetflix, Shorta, Spotify, Gancia, Skyy, Lucciano's, Atomik, Luigi Bosca, "
-        "Shell, Las Pastillas del Abuelo, Los Pericos & El Plan de la Mariposa, Kevin Johansen, Bruto, "
-        "Hops, entre otros."
-    )
-    op.execute(f"""
-        INSERT INTO talleres (
-            slug, nombre, subtitulo,
-            instructor_nombre, instructor_bio, instructor_proyectos,
-            descripcion, publico_objetivo,
-            programa_teorica, programa_practica,
-            fecha_inicio, fecha_fin, horario,
-            cupos_total, precio_total, precio_sena,
-            pago_alias, pago_cbu, pago_banco,
-            direccion, activo
+    # Guard post-F6: bootstrap fresco vía init_db() → `talleres` ya nace sin
+    # esta columna (ver docstring del módulo) → el seed en shape legacy se
+    # saltea entero (no tiene equivalente razonable a insertar acá).
+    conn = op.get_bind()
+    tiene_instructor_nombre = conn.execute(text(
+        "SELECT 1 FROM information_schema.columns "
+        "WHERE table_name = 'talleres' AND column_name = 'instructor_nombre'"
+    )).fetchone() is not None
+
+    if tiene_instructor_nombre:
+        programa_teorica = _q(json.dumps([
+            "Qué es la dirección de arte y cuál es su función dentro de un proyecto",
+            "Cómo se compone y se coordina un equipo",
+            "Análisis de proyectos reales: videoclip, publicidad, ambientación en evento y foto producto",
+            "Armado de presupuesto (sí, vamos a hablar de números)",
+            "Cómo mostrar tus proyectos y crecer dentro de la industria",
+        ]))
+        programa_practica = _q(json.dumps([
+            "Crear el set: la clase práctica se construye sobre el proyecto elegido en la clase teórica",
+            "Nos dividimos en equipos con 1 semana de preproducción previa",
+            "Se suman el director de fotografía Pablo Isa y el gaffer Tincho Santini",
+            "Rambla Rental provee el equipo técnico para que la práctica sea lo más real posible",
+            "Vemos el resultado final juntos",
+        ]))
+        descripcion = _q(
+            "Si llegaste hasta acá: gracias, estoy muy emocionada por hacer realidad este proyecto. "
+            "El workshop incluye 2 clases en Rambla Estudio y son 12 cupos, porque quiero que sea "
+            "un espacio donde podamos tener un intercambio de aprendizajes y conocimientos."
         )
-        VALUES (
-            'direccion-de-arte-jime-troncoso',
-            'Workshop Dirección de Arte',
-            'rambla × jime troncoso',
-            'Jime Troncoso',
-            {instructor_bio},
-            {instructor_proyectos},
-            {descripcion},
-            {publico_objetivo},
-            {programa_teorica}::jsonb,
-            {programa_practica}::jsonb,
-            '2026-07-11', '2026-07-18', '9 a 13 hs',
-            12, 200000, 100000,
-            'rambla.estudio', '0170239440000032889112', 'BBVA',
-            'Chaco 1392 — Rambla Estudio',
-            TRUE
+        publico_objetivo = _q(
+            "Directores/as, asistentes y ayudantes de arte · "
+            "Creadores de contenido, fotógrafxs, filmmakers · "
+            "Estudiantes de comunicación audiovisual, cine o fotografía · "
+            "Personas que les interese trabajar sobre lo artístico y estético a la hora de crear proyectos"
         )
-        ON CONFLICT (slug) DO NOTHING
-    """)
+        instructor_bio = _q(
+            "26 años, marplatense viviendo en CABA. Desde 2020 colabora con marcas, agencias y equipos "
+            "creativos en proyectos artísticos, audiovisuales y fotográficos, pensados para entornos "
+            "digitales y físicos."
+        )
+        instructor_proyectos = _q(
+            "Universal LATAM, CheNetflix, Shorta, Spotify, Gancia, Skyy, Lucciano's, Atomik, Luigi Bosca, "
+            "Shell, Las Pastillas del Abuelo, Los Pericos & El Plan de la Mariposa, Kevin Johansen, Bruto, "
+            "Hops, entre otros."
+        )
+        op.execute(f"""
+            INSERT INTO talleres (
+                slug, nombre, subtitulo,
+                instructor_nombre, instructor_bio, instructor_proyectos,
+                descripcion, publico_objetivo,
+                programa_teorica, programa_practica,
+                fecha_inicio, fecha_fin, horario,
+                cupos_total, precio_total, precio_sena,
+                pago_alias, pago_cbu, pago_banco,
+                direccion, activo
+            )
+            VALUES (
+                'direccion-de-arte-jime-troncoso',
+                'Workshop Dirección de Arte',
+                'rambla × jime troncoso',
+                'Jime Troncoso',
+                {instructor_bio},
+                {instructor_proyectos},
+                {descripcion},
+                {publico_objetivo},
+                {programa_teorica}::jsonb,
+                {programa_practica}::jsonb,
+                '2026-07-11', '2026-07-18', '9 a 13 hs',
+                12, 200000, 100000,
+                'rambla.estudio', '0170239440000032889112', 'BBVA',
+                'Chaco 1392 — Rambla Estudio',
+                TRUE
+            )
+            ON CONFLICT (slug) DO NOTHING
+        """)
 
     # ── Email templates ───────────────────────────────────────────────────────
     admin_html = (

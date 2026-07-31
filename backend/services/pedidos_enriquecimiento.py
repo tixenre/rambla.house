@@ -58,6 +58,54 @@ def _batch_get_alquiler_items(conn, pedido_ids: list[int]) -> dict[int, list[dic
     return result
 
 
+def _batch_count_turnos_vinculados(conn, pedido_ids: list[int]) -> dict[int, int]:
+    """Cuenta, por pedido principal, cuántos turnos del Estudio tiene
+    vinculados (`pedido_principal_id`) — para el badge de la lista de
+    pedidos, en 1 query en vez de N+1. Un turno cancelado no cuenta (mismo
+    criterio que la cascada de estado y el reparto de pago combinado, que
+    también lo excluyen)."""
+    if not pedido_ids:
+        return {}
+
+    ph = ",".join(["%s"] * len(pedido_ids))
+    rows = conn.execute(f"""
+        SELECT pedido_principal_id, COUNT(*) AS cnt
+        FROM alquileres
+        WHERE pedido_principal_id IN ({ph}) AND estado <> 'cancelado'
+        GROUP BY pedido_principal_id
+    """, pedido_ids).fetchall()
+    return {r["pedido_principal_id"]: r["cnt"] for r in rows}
+
+
+def _batch_plata_turnos_vinculados(conn, pedido_ids: list[int]) -> dict[int, tuple[int, int]]:
+    """Plata de los turnos del Estudio de cada pedido principal → `(total,
+    pagado)`, en 1 query.
+
+    La LISTA de pedidos mostraba solo el `monto_total` de la fila del
+    principal: un pedido de $90.000 en equipos + $120.000 de estudio se leía
+    "$90.000" aunque su detalle (y la factura, y Cuentas por cobrar) dijeran
+    $210.000. Media verdad de plata, la misma clase de bug que el rail que
+    mentía al editar la tarifa.
+
+    Suma montos YA persistidos — no recalcula nada (el IVA/descuento de cada
+    fila es responsabilidad de su propio motor, ver `services/finanzas_flujo`).
+    Mismo filtro de cancelados que el conteo de arriba, el pago combinado y la
+    factura combinada."""
+    if not pedido_ids:
+        return {}
+
+    ph = ",".join(["%s"] * len(pedido_ids))
+    rows = conn.execute(f"""
+        SELECT pedido_principal_id,
+               COALESCE(SUM(monto_total), 0)  AS total,
+               COALESCE(SUM(monto_pagado), 0) AS pagado
+        FROM alquileres
+        WHERE pedido_principal_id IN ({ph}) AND estado <> 'cancelado'
+        GROUP BY pedido_principal_id
+    """, pedido_ids).fetchall()
+    return {r["pedido_principal_id"]: (int(r["total"]), int(r["pagado"])) for r in rows}
+
+
 _CAMPOS_FISCALES = "perfil_impuestos, razon_social, domicilio_fiscal, email_facturacion, cuit"
 
 

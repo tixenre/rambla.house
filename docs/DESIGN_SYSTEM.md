@@ -764,14 +764,14 @@ visual. La ruta vieja `/kit-preview` quedó como **redirect** a esa pestaña.
 
 ### TopBar — navegación modular por área (`frontend/src/components/rental/TopBar.tsx`)
 
-La web tiene áreas con identidad propia (rental · estudio · workshops · portal cliente)
+La web tiene áreas con identidad propia (rental · estudio · escuela · portal cliente)
 + el hub (`/`). **Todas las barras salen de un único shell**, no de topbars ad-hoc por
 pantalla. Es la aplicación de la Filosofía a la navegación: una sola forma de hacerlo,
 reusar no recrear.
 
 - **`TopBarShell`** — el shell único: `<header>` sticky con **mismo alto, padding y logo**
   para todas las variantes. Recibe `section`, slots (`center`, `right`), y opcionales
-  (`headerRef`, `labelOverride`). De acá salen rental / estudio / workshops / cliente.
+  (`headerRef`, `labelOverride`). De acá salen rental / estudio / escuela / cliente.
 - **Color de marca por área** — el topbar usa el `bg`/`accent` declarado en **`frontend/src/data/areas.ts`**
   (`label/desc/href/color`), consumida por el topbar **y** el menú. El resto de la página recibe
   el accent via `--area-accent` (cascade `[data-area]`, ver §Accent por área). No duplicar la

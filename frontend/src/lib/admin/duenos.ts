@@ -10,7 +10,7 @@
  * estos. Una migración Alembic normaliza los valores existentes.
  */
 
-export const DUENOS = ["Rambla", "Pablo", "Tincho"] as const;
+export const DUENOS = ["Rental", "Pablo", "Tincho"] as const;
 export type Dueno = (typeof DUENOS)[number];
 
 /** Devuelve true si el string ya es un dueño canónico. */

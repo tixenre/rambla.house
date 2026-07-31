@@ -999,10 +999,18 @@ def estudio_page():
         return _serve_frontend("index.html")
 
 
-@app.get("/workshops/{slug}", include_in_schema=False)
+@app.get("/escuelas/{slug}", include_in_schema=False)
+@app.get("/escuela/{slug}", include_in_schema=False)  # alias viejo (singular): el front lo redirige a /escuelas, acá sirve OG para scrapers
+@app.get("/workshops/{slug}", include_in_schema=False)  # alias más viejo: el front lo redirige a /escuelas, acá sirve OG para scrapers
 def workshop_page(slug: str):
     """Sirve el SPA del taller con OG tags dinámicos (foto del instructor).
-    Ante cualquier error sirve el index.html plano — nunca rompe la página."""
+    Ante cualquier error sirve el index.html plano — nunca rompe la página.
+
+    `slug` es el de la EDICIÓN (mismo que resuelve `GET /talleres/{slug}` vía
+    `ediciones_taller.slug` — no `talleres.slug`, el del CONCEPTO, que solo
+    coincide por convención para la 1ª edición). Escuela v2 F6: fechas/precio
+    salen de `ediciones_taller`, instructor de `instructores` (las columnas
+    legacy que antes vivían en `talleres` ya no existen)."""
     try:
         index_file = FRONT_NEW / "index.html"
         if not index_file.exists():
@@ -1010,21 +1018,23 @@ def workshop_page(slug: str):
         conn = get_db()
         try:
             taller = conn.execute(
-                "SELECT nombre, descripcion, instructor_nombre, "
-                "instructor_foto_url, instructor_media_id, "
-                "fecha_inicio, fecha_fin, precio_total "
-                "FROM talleres WHERE slug = %s AND activo = TRUE",
+                "SELECT t.nombre, t.descripcion, t.id AS taller_id, "
+                "e.fecha_inicio, e.fecha_fin, e.precio_total "
+                "FROM ediciones_taller e JOIN talleres t ON t.id = e.taller_id "
+                "WHERE e.slug = %s AND e.activo = TRUE",
                 (slug,),
             ).fetchone()
             if not taller:
                 return _serve_frontend("index.html")
+            instructor_row = conn.execute(
+                "SELECT i.nombre, i.foto_url, i.foto_media_id "
+                "FROM taller_instructores ti JOIN instructores i ON i.id = ti.instructor_id "
+                "WHERE ti.taller_id = %s ORDER BY ti.orden, i.id LIMIT 1",
+                (taller["taller_id"],),
+            ).fetchone()
             # Foto OG: preferir variante 'og' del media; fallback a 'display'
-            # o instructor_foto_url (foto subida antes del motor).
-            media_id = None
-            try:
-                media_id = taller["instructor_media_id"]
-            except (KeyError, IndexError):
-                pass
+            # o foto_url (foto subida antes del motor).
+            media_id = instructor_row["foto_media_id"] if instructor_row else None
             og_img = ""
             if media_id:
                 mv = conn.execute(
@@ -1034,24 +1044,21 @@ def workshop_page(slug: str):
                     (media_id,),
                 ).fetchone()
                 og_img = (mv["url"] if mv else "") or ""
-            if not og_img:
-                try:
-                    og_img = taller["instructor_foto_url"] or ""
-                except (KeyError, IndexError):
-                    og_img = ""
+            if not og_img and instructor_row:
+                og_img = instructor_row["foto_url"] or ""
         finally:
             conn.close()
         nombre = (taller["nombre"] or "").strip()
-        instructor = (taller["instructor_nombre"] or "").strip()
+        instructor = (instructor_row["nombre"] or "").strip() if instructor_row else ""
         desc_raw = (taller["descripcion"] or "").strip()
         if len(desc_raw) > 200:
             desc_raw = desc_raw[:197].rstrip() + "…"
         if not desc_raw:
-            desc_raw = f"Workshop con {instructor} en Rambla, Mar del Plata." if instructor else "Workshops audiovisuales en Mar del Plata."
+            desc_raw = f"Taller con {instructor} en Rambla, Mar del Plata." if instructor else "Talleres audiovisuales en Mar del Plata."
         title = f"{nombre} con {instructor} — Rambla" if instructor else f"{nombre} — Rambla"
         if not og_img.startswith("http"):
             og_img = f"{SITE_URL}/icon-512.png"
-        taller_url = f"{SITE_URL}/workshops/{slug}"
+        taller_url = f"{SITE_URL}/escuelas/{slug}"
         html_text = _inject_og_meta(
             index_file.read_text(encoding="utf-8"),
             title=title, description=desc_raw, image=og_img, url=taller_url,
@@ -1078,31 +1085,22 @@ def workshop_page(slug: str):
         }
         if instructor:
             event_schema["performer"] = {"@type": "Person", "name": instructor}
-        try:
-            fecha_inicio = taller["fecha_inicio"]
-            fecha_fin = taller["fecha_fin"]
-            if fecha_inicio:
-                event_schema["startDate"] = str(fecha_inicio)[:10]
-            if fecha_fin:
-                event_schema["endDate"] = str(fecha_fin)[:10]
-        except (KeyError, IndexError, TypeError):
-            pass
-        try:
-            precio = taller["precio_total"]
-            if precio is not None:
-                event_schema["offers"] = {
-                    "@type": "Offer",
-                    "price": precio,
-                    "priceCurrency": "ARS",
-                    "availability": "https://schema.org/InStock",
-                    "url": taller_url,
-                }
-        except (KeyError, IndexError, TypeError):
-            pass
+        if taller["fecha_inicio"]:
+            event_schema["startDate"] = str(taller["fecha_inicio"])[:10]
+        if taller["fecha_fin"]:
+            event_schema["endDate"] = str(taller["fecha_fin"])[:10]
+        if taller["precio_total"] is not None:
+            event_schema["offers"] = {
+                "@type": "Offer",
+                "price": taller["precio_total"],
+                "priceCurrency": "ARS",
+                "availability": "https://schema.org/InStock",
+                "url": taller_url,
+            }
         html_text = _inject_json_ld(html_text, event_schema)
         return HTMLResponse(content=html_text)
     except Exception:
-        logger.warning("OG injection falló para /workshops/%s — sirvo index plano", slug, exc_info=True)
+        logger.warning("OG injection falló para el taller %s — sirvo index plano", slug, exc_info=True)
         return _serve_frontend("index.html")
 
 

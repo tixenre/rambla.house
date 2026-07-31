@@ -1,8 +1,13 @@
-import { createLazyFileRoute, useNavigate, useParams, Link } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import {
+  createLazyFileRoute,
+  Navigate,
+  useNavigate,
+  useParams,
+  Link,
+} from "@tanstack/react-router";
+import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
-  ChevronLeft,
   User,
   Calendar,
   Box,
@@ -11,15 +16,12 @@ import {
   AlertTriangle,
   Coins,
   Plus,
-  Minus,
   X,
   Mail,
   Eye,
   Download,
   Info,
   Trash2,
-  GripVertical,
-  Tag,
   ShieldAlert,
   ShieldCheck,
   Copy,
@@ -46,7 +48,6 @@ import { cn } from "@/lib/utils";
 
 import { Button } from "@/design-system/ui/button";
 import { Input } from "@/design-system/ui/input";
-import { MoneyInput } from "@/design-system/ui/money-input";
 import { Textarea } from "@/design-system/ui/textarea";
 import { Skeleton } from "@/design-system/ui/skeleton";
 import {
@@ -60,14 +61,17 @@ import {
   AlertDialogTitle,
 } from "@/design-system/ui/alert-dialog";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
+import { estadoClase, ESTADO_TEXT } from "@/design-system/ui/estado-color";
 import { WhatsAppButton } from "@/components/admin/WhatsAppButton";
 import {
   adminApi,
+  estudioAdminApi,
   ESTADO_LABEL,
   pedidoPdfUrl,
   type Pedido,
   type PedidoEstado,
   type Equipo,
+  type EstudioConfig,
 } from "@/lib/admin/api";
 import {
   usePedidoDraft,
@@ -83,14 +87,14 @@ import { computeJornadas, parseDateTimeParts, toLocalISO } from "@/lib/rental-da
 import { format } from "date-fns";
 import { es } from "date-fns/locale";
 import { useCotizacion, descuentoLabel } from "@/lib/cotizacion";
-import { SegmentedControl } from "@/design-system/ui/segmented-control";
+import { combinarTotales } from "@/lib/pedido-combinado";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { fmtArs } from "@/lib/format";
 import { nombreCliente } from "@/lib/cliente-nombre";
 import { EquipoComboSearch } from "@/components/admin/pedido/EquipoComboSearch";
 import { EnviarDocsDialog, DOCS_PEDIDO } from "@/components/admin/pedido/EnviarDocsDialog";
 import { RegistrarPagoModal } from "@/components/admin/pedido/RegistrarPagoModal";
-import { FLOW, transiciones, nextStep, otrosDestinos } from "@/lib/pedido-estados";
+import { FLOW, transiciones, nextStep, otrosDestinos, etiquetaPedido } from "@/lib/pedido-estados";
 import {
   PagoRow,
   ItemRow,
@@ -104,6 +108,11 @@ import {
 } from "@/components/admin/pedido/PedidoPageHelpers";
 import { Section } from "@/design-system/composites/Section";
 import { FieldLabel } from "@/design-system/ui/Field";
+import { esPedidoEstudio, esPedidoDerivado, esPedidoTaller } from "@/lib/tipos-pedido";
+import { ReservaEstudioSection } from "@/components/admin/estudio/ReservaEstudioSection";
+import { TurnosEstudioSection } from "@/components/admin/pedido/TurnosEstudioSection";
+import { DescuentoControl } from "@/components/admin/pedido/DescuentoControl";
+import { TotalSeccion } from "@/components/admin/pedido/TotalSeccion";
 
 export const Route = createLazyFileRoute("/admin/pedidos/$id")({
   component: PedidoEditorRoute,
@@ -181,15 +190,31 @@ function PedidoEditorPage() {
     // mismo bloque en la Fase C de descuentos (#1219) — el editor volvió a
     // mostrar el precio de catálogo en vivo en vez del congelado.
     respetarPrecioItem: true,
-    // Pedido con plata congelada (no-presupuesto): el descuento del preview sale
-    // del snapshot del pedido, no del cliente en vivo → el total del editor
-    // coincide con `monto_total` y con la lista. En presupuesto sigue en vivo
-    // (para que el descuento siga al cliente que el admin elija en el builder).
-    pedidoId: p && p.estado !== "solicitado" ? pedidoId : null,
+    // SIEMPRE el id del pedido — quién decide qué hacer con él es el backend.
+    // Para el descuento su criterio no cambió: con plata congelada
+    // (no-presupuesto) lo saca del snapshot del pedido; en `solicitado` lo
+    // ignora y sigue al cliente en vivo (`pedido_congelado = None`), que es
+    // exactamente lo mismo que pasaba cuando el front mandaba `null`.
+    // Lo que sí necesita el id siempre es el TOTAL COMBINADO con los turnos
+    // del Estudio: un pedido en `solicitado` también puede tener turnos, y
+    // ocultándole el id el rail se quedaba sin `combinado` → mostraba
+    // "Neto $0 / IVA $0" y un total que no incluía el IVA del turno (bug real,
+    // visto en el navegador con el pedido #424).
+    pedidoId,
     // Defensa en profundidad (sumado a `key={id}` en `PedidoEditorRoute`,
     // arriba): aunque este panel ya se remonta al cambiar de pedido, el hook
     // en sí queda protegido para cualquier otro consumidor que no lo haga.
     resetKey: pedidoId,
+  });
+
+  // Config del Estudio — solo hace falta para un turno real (tipo='estudio');
+  // la sección de reserva inline (Fase 2, #1308) la necesita para franja/
+  // tarifa/promo. Mismo queryKey que /admin/estudio y /admin/estudio/reservas
+  // — comparte caché con esas pantallas.
+  const estudioQ = useQuery({
+    queryKey: ["admin", "estudio"],
+    queryFn: () => estudioAdminApi.get(),
+    enabled: p?.tipo === "estudio",
   });
 
   // Modales
@@ -228,7 +253,10 @@ function PedidoEditorPage() {
     return (
       <div className="p-6 space-y-4 max-w-5xl mx-auto">
         <Skeleton className="h-7 w-64" />
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-5">
+        {/* `340px`, no `320px`: tiene que matchear el grid real de abajo (línea
+            ~479) — un ancho de columna distinto entre el skeleton y el
+            contenido real hace que todo salte al terminar de cargar. */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-5">
           <Skeleton className="h-96 w-full rounded-xl" />
           <Skeleton className="h-96 w-full rounded-xl" />
         </div>
@@ -236,9 +264,35 @@ function PedidoEditorPage() {
     );
   }
 
-  const { datos, setDatos, items, setItems, saveStatus, estadoMut } = draft;
+  // Un turno del Estudio vinculado NO tiene página propia (#1308, "no quiero
+  // dobles pedidos fantasmas"): es la misma venta que su pedido principal y se
+  // administra desde ahí, en la sección "Turnos del Estudio". Los links viejos
+  // (feed iCal, historiales, un tab guardado) aterrizan igual — en el pedido
+  // real. Sin loop posible: un principal nunca es turno de otro
+  // (`_resolver_pedido_principal` exige `tipo='diaria'`).
+  if (p.pedido_principal) {
+    return (
+      <Navigate to="/admin/pedidos/$id" params={{ id: String(p.pedido_principal.id) }} replace />
+    );
+  }
+
+  const { datos, setDatos, items, setItems, saveStatus, estadoMut, datosMut } = draft;
   const ns = nextStep(p);
   const otrosDestinosPedido = otrosDestinos(p);
+  // Ítems/fechas de un turno o slot fijo del Estudio están blindados
+  // server-side (409, Fase 1 #1283) — `esEstudio` cubre ambos tipos (sigue
+  // usándose para eso + el destinatario default de cobranza).
+  const esEstudio = esPedidoEstudio(p);
+  // Un turno REAL (no un slot fijo) se administra inline con su propia
+  // sección `ReservaEstudioSection` (Fase 2, #1308) — reemplaza el banner +
+  // controles neutralizados de antes. `estudio_fijo` sigue sin editor
+  // inline: su verdad es el slot recurrente, no este pedido.
+  const esEstudioReal = p.tipo === "estudio";
+  // Un pedido de taller (Fase 1, #1308) también tiene la fecha blindada server-
+  // side (409) — pero, a diferencia de estudio, SÍ permite agregar/editar
+  // ítems (matrícula), así que solo el control de fecha se neutraliza acá.
+  const esTaller = esPedidoTaller(p);
+  const fechaNoEditable = esPedidoDerivado(p);
 
   const clienteSinVerificar = !!p.cliente_id && !p.cliente_dni_validado_at;
   const ESTADOS_CON_AVISO: PedidoEstado[] = ["confirmado", "retirado"];
@@ -300,13 +354,43 @@ function PedidoEditorPage() {
 
   // Totales vivos desde useCotizacion
   const totales = cotizacionQ.data;
+  // `isError` NO se descarta: el hook lo expone justo para esto. Al fallar el
+  // recálculo (el endpoint está limitado a 30/min y esta pantalla recotiza en
+  // cada tecleo, así que un 429 es el camino esperado) `data` cae a
+  // COTIZACION_VACIA y TODA la plata de la pantalla se muestra en $0 — igual
+  // que un pedido que realmente vale $0. Se avisa en vez de mentir.
+  const cotizacionFallo = cotizacionQ.isError;
   const total = totales.total;
   const pagadoMonto = p.monto_pagado ?? 0;
-  const restante = Math.max(0, total - pagadoMonto);
+
+  // Combinado con los turnos del Estudio vinculados (#1308). Lo COBRADO se
+  // suma acá (son montos ya cobrados, no una regla de plata); el TOTAL viene
+  // resuelto del backend (`totales.combinado`), que aplica el IVA sobre el neto
+  // de las dos partes — sumar el total del principal (con IVA) a los turnos
+  // (netos) daba menos de lo que factura el comprobante. Sin turnos vinculados,
+  // `combinado` es `null` y todo esto es un pass-through exacto de
+  // total/pagadoMonto/restante (mismos números, cero cambio visual).
+  const turnosVinculados = p.turnos_estudio_vinculados ?? [];
+  const combinado = combinarTotales(total, pagadoMonto, turnosVinculados, totales.combinado?.total);
+  /** ¿El resumen se lee en dos partes? Sale de la lista de turnos del pedido
+   *  (estable, viene con el payload) y no de `totales.combinado` (que llega
+   *  con la cotización) — si no, el rail arrancaría en una parte y saltaría a
+   *  dos en cuanto contestara el backend. */
+  const hayTurnos = turnosVinculados.length > 0;
+  /** Neto e IVA del RESUMEN: los del combinado cuando hay turnos, los del
+   *  pedido solo cuando no. Los dos salen del backend — el front nunca aplica
+   *  el 21% (MEMORIA 2026-06-29). */
+  const netoResumen = hayTurnos ? (totales.combinado?.totalNeto ?? 0) : totales.totalNeto;
+  const ivaResumen = hayTurnos ? (totales.combinado?.iva ?? 0) : totales.iva;
 
   // stockMap: { equipo_id → libres tras TODO el draft } (con signo; negativo =
   // faltan unidades). hasOverstock lo deriva el hook con la misma regla.
   const { stockMap, hasOverstock } = dispo;
+  // Idem stock: si la consulta falla, `stockMap` queda vacío y `hasOverstock`
+  // en false — o sea, "el servicio se cayó" se veía EXACTAMENTE igual que
+  // "hay stock de todo", con el badge verde, en la pantalla cuyo trabajo es
+  // evitar el doble booking.
+  const stockFallo = dispo.query.isError;
 
   // Las líneas se identifican por `uid` (las personalizadas no tienen equipo_id).
   const updateItem = (uid: string, patch: Partial<DraftItem>) =>
@@ -343,6 +427,8 @@ function PedidoEditorPage() {
   };
 
   // Agregar línea personalizada (#805): ítem de texto libre, fuera del catálogo.
+  // Un pedido de taller cubre ~1 mes: defaultear a "jornada" multiplicaría el
+  // valor tipeado por ~30 (silencioso y caro) — "fijo" es el default correcto acá.
   const addLineaLibre = () =>
     setItems((its) => [
       ...(its ?? []),
@@ -354,7 +440,7 @@ function PedidoEditorPage() {
         nombre: "",
         marca: null,
         nombre_libre: "",
-        cobro_modo: "jornada",
+        cobro_modo: p.tipo === "taller" ? "fijo" : "jornada",
       },
     ]);
 
@@ -377,19 +463,28 @@ function PedidoEditorPage() {
 
   return (
     <div className="flex flex-col min-h-0">
-      {/* Topbar del editor */}
+      {/* Topbar del editor. A 375px, "Pedidos" + nombre + #N + badge + guardado
+          + WhatsApp no entraban sin recortarse contra `overflow-x: clip`
+          global (el botón de WhatsApp quedaba inalcanzable al tacto) — el
+          texto de `BackLink` ya se oculta bajo `sm`; acá se hace lo mismo con
+          el #N (menos esencial que el nombre/estado) y se fija qué SÍ puede
+          encogerse (el nombre, con `truncate`) vs qué no (badge/guardado/
+          WhatsApp, `shrink-0` explícito — antes dependían del comportamiento
+          default del flex, que los encogía de forma impredecible). */}
       <header className="flex items-center gap-3 px-4 md:px-6 py-3 border-b hairline bg-surface-elevated">
         <BackLink onClick={goList} />
-        <div className="min-w-0 flex items-center gap-2">
-          <span className="font-display text-lg text-ink truncate">
+        <div className="min-w-0 flex flex-1 items-center gap-2">
+          <span className="min-w-0 truncate font-display text-lg text-ink">
             {p.cliente_nombre || "Sin cliente"}
           </span>
-          <span className="font-mono text-xs text-muted-foreground">
-            #{p.numero_pedido ?? p.id}
+          <span className="hidden shrink-0 font-mono text-xs text-muted-foreground sm:inline">
+            {etiquetaPedido(p)}
           </span>
-          <EstadoBadge estado={p.estado} label={ESTADO_LABEL[p.estado]} />
+          <span className="shrink-0">
+            <EstadoBadge estado={p.estado} label={ESTADO_LABEL[p.estado]} />
+          </span>
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex shrink-0 items-center gap-2">
           <SaveIndicator status={saveStatus} />
           <WhatsAppButton pedido={p} phone={p.cliente_telefono} variant="icon" />
         </div>
@@ -408,6 +503,79 @@ function PedidoEditorPage() {
                   Revisarla en Solicitudes
                 </Link>
                 .
+              </div>
+            </div>
+          )}
+
+          {/* (El breadcrumb "Turno vinculado al pedido #N" se retiró: un turno
+              vinculado ya no llega hasta acá — redirige a su principal, arriba.) */}
+
+          {/* Banner slot fijo del Estudio — su verdad es el slot recurrente,
+              no este pedido (que es solo una muestra mensual). A diferencia
+              de un turno real, NO tiene editor inline acá. */}
+          {esEstudio && !esEstudioReal && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber/40 bg-amber/5 px-3 py-2.5 text-sm">
+              <Info className="h-4 w-4 text-ink shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <span className="font-medium text-ink">
+                  Este pedido es un slot fijo del Estudio.
+                </span>{" "}
+                El horario, la promo y los equipos sueltos los gobierna el slot recurrente en{" "}
+                <Link to="/admin/estudio" className="underline text-muted-foreground">
+                  Estudio → Slots fijos
+                </Link>
+                . Acá se maneja el pago, la facturación y el estado.
+              </div>
+            </div>
+          )}
+
+          {/* Reserva del Estudio — franja, tarifa, promo y sueltos de un
+              turno real, administrados inline (Fase 2, #1308). Reemplaza el
+              viejo banner "andá a Estudio → Reservas": ahora se edita acá. */}
+          {esEstudioReal &&
+            (estudioQ.data ? (
+              <ReservaEstudioSection
+                pedido={p}
+                estudio={estudioQ.data}
+                onSaved={() => qc.invalidateQueries({ queryKey: ["admin", "pedido", pedidoId] })}
+              />
+            ) : estudioQ.isError ? (
+              // Sin esta rama, un fallo de `estudioQ` dejaba el skeleton para
+              // SIEMPRE: toda la superficie editable de un pedido del Estudio
+              // no aparecía nunca, sin decir por qué.
+              <div className="flex flex-wrap items-center gap-2 rounded-xl border border-destructive/30 bg-destructive/5 p-4 text-sm">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" />
+                <span className="text-destructive">
+                  No se pudo cargar la configuración del Estudio.
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={() => void estudioQ.refetch()}
+                >
+                  Reintentar
+                </Button>
+              </div>
+            ) : (
+              <Skeleton className="h-64 w-full rounded-xl" />
+            ))}
+
+          {/* Banner pedido de taller — resumen contable mensual generado por
+              la edición (Fase 1, #1308): fechas bloqueadas server-side, pero
+              SÍ se puede agregar una línea de matrícula acá. */}
+          {esTaller && (
+            <div className="flex items-start gap-2 rounded-lg border border-amber/40 bg-amber/5 px-3 py-2.5 text-sm">
+              <Info className="h-4 w-4 text-ink shrink-0 mt-0.5" />
+              <div className="min-w-0">
+                <span className="font-medium text-ink">
+                  Este pedido es el resumen mensual de un taller.
+                </span>{" "}
+                Las fechas y los ítems automáticos (espacio/equipos) los gobierna la edición en{" "}
+                <Link to="/admin/talleres" className="underline text-muted-foreground">
+                  Talleres
+                </Link>
+                . Podés agregar una línea nueva acá (ej. matrícula) sin problema.
               </div>
             </div>
           )}
@@ -450,12 +618,63 @@ function PedidoEditorPage() {
                 <button
                   type="button"
                   onClick={() => setDatos((d) => d && { ...d, cliente_id: null })}
-                  className="shrink-0 rounded-md border hairline px-2.5 py-1 text-xs text-muted-foreground hover:border-ink hover:text-ink"
+                  className="inline-flex h-11 shrink-0 items-center rounded-md border hairline px-2.5 text-xs text-muted-foreground hover:border-ink hover:text-ink md:h-7"
                 >
                   Desvincular
                 </button>
               </div>
-            ) : (
+            ) : null}
+
+            {/* Verificación de identidad: la ACCIÓN, pegada al badge "Sin
+                verificar" de la tarjeta de arriba. Vivía en su propio bloque
+                del rail ("Identidad del cliente") que repetía ese mismo estado
+                a dos columnas de distancia (el dueño: "esto me parece
+                redundante, le sacaría lo de la identidad a la columna de la
+                derecha"). El estado se lee UNA vez, en la tarjeta; acá queda
+                solo lo que la tarjeta no tenía: generar/copiar el link. */}
+            {clienteSinVerificar &&
+              (linkVerif ? (
+                <div className="mb-3 space-y-1.5">
+                  <p className="text-xs text-muted-foreground">Mandá este link al cliente:</p>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      readOnly
+                      value={linkVerif}
+                      aria-label="Link de verificación de identidad"
+                      className="flex-1 truncate font-mono text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(linkVerif);
+                        setCopiadoLink(true);
+                        setTimeout(() => setCopiadoLink(false), 2000);
+                      }}
+                      className="flex h-9 shrink-0 items-center gap-1 rounded-md border hairline bg-surface px-2.5 text-xs text-ink transition-colors hover:bg-accent/30"
+                    >
+                      {copiadoLink ? (
+                        <Check className="h-3.5 w-3.5 text-verde-ink" />
+                      ) : (
+                        <Copy className="h-3.5 w-3.5" />
+                      )}
+                      {copiadoLink ? "Copiado" : "Copiar"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mb-3"
+                  disabled={generandoLink}
+                  onClick={() => void handleGenerarLink()}
+                >
+                  <ShieldCheck className="mr-1 h-4 w-4" />
+                  {generandoLink ? "Generando…" : "Generar link de verificación"}
+                </Button>
+              ))}
+
+            {!datos.cliente_id && (
               // Sin ficha: buscar una, o cargar el contacto a mano abajo. Estos
               // 3 inputs son SOLO para este caso — con ficha vinculada, editarlos
               // acá no servía de nada: el contacto es en vivo (2026-06-06) y la
@@ -489,6 +708,7 @@ function PedidoEditorPage() {
                   <div className="space-y-1">
                     <FieldLabel>Nombre</FieldLabel>
                     <Input
+                      aria-label="Nombre del cliente"
                       value={datos.cliente_nombre}
                       onChange={(e) =>
                         setDatos((d) => d && { ...d, cliente_nombre: e.target.value })
@@ -498,6 +718,7 @@ function PedidoEditorPage() {
                   <div className="space-y-1">
                     <FieldLabel>Teléfono</FieldLabel>
                     <Input
+                      aria-label="Teléfono del cliente"
                       value={datos.cliente_telefono}
                       onChange={(e) =>
                         setDatos((d) => d && { ...d, cliente_telefono: e.target.value })
@@ -507,6 +728,7 @@ function PedidoEditorPage() {
                   <div className="space-y-1 sm:col-span-2">
                     <FieldLabel>Email</FieldLabel>
                     <Input
+                      aria-label="Email del cliente"
                       value={datos.cliente_email}
                       placeholder="—"
                       onChange={(e) =>
@@ -532,128 +754,276 @@ function PedidoEditorPage() {
             }
           />
 
-          {/* Fechas — editables con re-validación de stock */}
-          <Section
-            variant="card"
-            tone="elevated"
-            icon={Calendar}
-            title="Fechas del alquiler"
-            actions={
-              !datos.fecha_desde || !datos.fecha_hasta ? (
-                <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-destructive">
-                  <AlertTriangle className="h-3 w-3" /> sin fechas
-                </span>
-              ) : hasOverstock ? (
-                <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-destructive">
-                  <AlertTriangle className="h-3 w-3" /> revisar stock
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-verde-ink">
-                  <Check className="h-3 w-3" /> stock OK
-                </span>
-              )
-            }
-          >
-            {/* Píldora retiro→devolución — abre el selector de fechas+horas */}
-            <button
-              type="button"
-              onClick={() => setOpenDateModal(true)}
-              className="@container flex w-full items-center gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5 text-left transition hover:border-ink min-h-[44px]"
+          {/* Alquiler = fechas + equipos en UNA sola sección (#1308, pedido del
+              dueño: "¿podemos unir lo del rango de fechas y los equipos? que
+              esté la sección del rental y la sección del Estudio"). Las dos
+              eran cards separadas aunque describen lo mismo: qué se alquila y
+              cuándo. Queda hermanada con "Turnos del Estudio", que tiene la
+              misma forma — banda de tiempo arriba, lista de qué incluye abajo.
+              Taller (#1308): `fecha_desde`/`fecha_hasta` son el mes contable de
+              la edición, no un evento real — se muestran las clases reales en
+              su lugar. Un turno real del Estudio no repite esta Section: su
+              franja y sus ítems ya se editan en `ReservaEstudioSection`. */}
+          {!esEstudioReal && (
+            <Section
+              variant="card"
+              tone="elevated"
+              icon={Box}
+              // "Alquiler de equipos" y no "Alquiler" a secas: es el nombre del
+              // área (el mismo que usa el menú público) y hace pareja con
+              // "Turnos del Estudio" — las dos secciones dicen QUÉ son, no una
+              // el qué y la otra el cuándo.
+              title={esTaller ? "Taller" : "Alquiler de equipos"}
+              contentClassName="space-y-3"
+              actions={
+                esTaller ? undefined : !datos.fecha_desde || !datos.fecha_hasta ? (
+                  <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-destructive">
+                    <AlertTriangle className="h-3 w-3" /> sin fechas
+                  </span>
+                ) : stockFallo ? (
+                  // "No pude consultar" ≠ "hay de todo". Antes este caso caía
+                  // al verde de abajo (mapa vacío → hasOverstock false) y el
+                  // badge afirmaba stock OK sin haber podido chequear nada.
+                  <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-muted-foreground">
+                    <AlertTriangle className="h-3 w-3" /> stock sin verificar
+                  </span>
+                ) : hasOverstock ? (
+                  <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-destructive">
+                    <AlertTriangle className="h-3 w-3" /> revisar stock
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 font-mono text-2xs uppercase tracking-[0.2em] text-verde-ink">
+                    <Check className="h-3 w-3" /> stock OK
+                  </span>
+                )
+              }
             >
-              {startDate && endDate ? (
-                <>
-                  <Calendar className="h-4 w-4 text-muted-foreground shrink-0 self-start mt-0.5" />
-                  <div className="min-w-0 flex-1 grid grid-cols-1 gap-x-6 gap-y-2 @2xl:grid-cols-2">
-                    <div className="min-w-0">
-                      <div className="t-eyebrow">Retiro</div>
-                      <div className="font-mono text-sm tabular-nums text-ink mt-0.5">
-                        {format(startDate, "EEEE d 'de' MMMM", { locale: es })} · {startTime}
-                      </div>
-                    </div>
-                    <div className="min-w-0">
-                      <div className="t-eyebrow">Devolución</div>
-                      <div className="font-mono text-sm tabular-nums text-ink mt-0.5">
-                        {format(endDate, "EEEE d 'de' MMMM", { locale: es })} · {endTime}
-                      </div>
-                    </div>
-                  </div>
-                  <span className="ml-auto card px-2.5 py-1 text-center shrink-0">
-                    <span className="font-mono text-base font-semibold leading-none">
-                      {jornadas}
-                    </span>
-                    <span className="t-eyebrow ml-1">
-                      {jornadas === 1 ? "jornada" : "jornadas"}
-                    </span>
-                  </span>
-                </>
-              ) : (
-                <>
-                  <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <span className="text-sm text-muted-foreground">
-                    Elegí las fechas de retiro y devolución…
-                  </span>
-                </>
-              )}
-            </button>
-          </Section>
-
-          {/* Equipos */}
-          <Section variant="card" tone="elevated" icon={Box} title={`Equipos · ${items.length}`}>
-            {/* Buscador inline: resultados en dropdown debajo (no tapa el form) */}
-            <EquipoComboSearch
-              existing={items}
-              stockMap={stockMap}
-              onAdd={handleAddEquipo}
-              className="mb-2"
-            />
-
-            {items.length === 0 ? (
-              <ul className="divide-y hairline">
-                <li className="py-4 text-sm text-muted-foreground">
-                  Sin equipos. Agregá al menos uno para confirmar.
-                </li>
-              </ul>
-            ) : (
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={handleItemsDragEnd}
-              >
-                <SortableContext
-                  items={items.map((it) => it.uid)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  <ul className="divide-y hairline">
-                    {items.map((it) => (
-                      <ItemRow
-                        key={it.uid}
-                        it={it}
-                        stock={it.equipo_id != null ? stockMap[String(it.equipo_id)] : undefined}
-                        jornadas={jornadas}
-                        updateItem={updateItem}
-                        removeItem={removeItem}
-                      />
+              {esTaller ? (
+                (p.clases_taller ?? []).length > 0 ? (
+                  <ul className="space-y-2">
+                    {(p.clases_taller ?? []).map((c) => (
+                      <li
+                        key={c.id}
+                        className="flex items-center gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5 min-h-[44px]"
+                      >
+                        <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+                        <div className="min-w-0 flex-1">
+                          <div className="font-mono text-sm tabular-nums text-ink">
+                            {format(new Date(c.fecha + "T12:00:00"), "EEEE d 'de' MMMM", {
+                              locale: es,
+                            })}
+                          </div>
+                          <div className="mt-0.5 text-xs text-muted-foreground">
+                            {c.hora_inicio_str}–{c.hora_fin_str}
+                            {c.titulo ? ` · ${c.titulo}` : ""}
+                          </div>
+                        </div>
+                      </li>
                     ))}
                   </ul>
-                </SortableContext>
-              </DndContext>
-            )}
+                ) : (
+                  <p className="text-sm text-muted-foreground">
+                    Sin clases cargadas en la edición todavía —{" "}
+                    <Link to="/admin/talleres" className="underline">
+                      cargalas en Talleres
+                    </Link>
+                    .
+                  </p>
+                )
+              ) : (
+                /* Píldora retiro→devolución — abre el selector de fechas+horas.
+                  Turno del Estudio: se reprograma desde Estudio → Reservas. */
+                <button
+                  type="button"
+                  disabled={fechaNoEditable}
+                  onClick={() => setOpenDateModal(true)}
+                  className={cn(
+                    "@container flex w-full items-center gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5 text-left transition min-h-[44px]",
+                    fechaNoEditable ? "cursor-not-allowed opacity-60" : "hover:border-ink",
+                  )}
+                >
+                  {startDate && endDate ? (
+                    <>
+                      <Calendar className="h-4 w-4 text-muted-foreground shrink-0 self-start mt-0.5" />
+                      <div className="min-w-0 flex-1 grid grid-cols-1 gap-x-6 gap-y-2 @2xl:grid-cols-2">
+                        <div className="min-w-0">
+                          <div className="t-eyebrow">Retiro</div>
+                          <div className="font-mono text-sm tabular-nums text-ink mt-0.5">
+                            {format(startDate, "EEEE d 'de' MMMM", { locale: es })} · {startTime}
+                          </div>
+                        </div>
+                        <div className="min-w-0">
+                          <div className="t-eyebrow">Devolución</div>
+                          <div className="font-mono text-sm tabular-nums text-ink mt-0.5">
+                            {format(endDate, "EEEE d 'de' MMMM", { locale: es })} · {endTime}
+                          </div>
+                        </div>
+                      </div>
+                      <span className="ml-auto card px-2.5 py-1 text-center shrink-0">
+                        <span className="font-mono text-base font-semibold leading-none">
+                          {jornadas}
+                        </span>
+                        <span className="t-eyebrow ml-1">
+                          {jornadas === 1 ? "jornada" : "jornadas"}
+                        </span>
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="text-sm text-muted-foreground">
+                        Elegí las fechas de retiro y devolución…
+                      </span>
+                    </>
+                  )}
+                </button>
+              )}
 
-            {/* Agregar línea personalizada (#805): ítem libre fuera del catálogo */}
-            <button
-              type="button"
-              onClick={addLineaLibre}
-              className="mt-2 flex w-full items-center gap-2.5 px-3 py-2.5 rounded-md border border-dashed hairline text-sm text-muted-foreground hover:bg-muted/30 transition"
-            >
-              <Plus className="h-4 w-4 shrink-0" />
-              <span>Agregar línea personalizada (flete, servicio, etc.)</span>
-            </button>
-          </Section>
+              {/* Equipos — turno del Estudio: el centinela/promo/sueltos se
+                  cargan desde Estudio → Reservas (el buscador y la edición por
+                  línea se neutralizan acá, el backend los rechaza con 409). El
+                  rótulo espeja al "Qué incluye este turno" del Estudio: banda de
+                  tiempo arriba, qué incluye abajo. */}
+              <div className="t-eyebrow pt-1">Equipos · {items.length}</div>
+
+              {/* Buscador inline: resultados en dropdown debajo (no tapa el form) */}
+              {!esEstudio && (
+                <EquipoComboSearch
+                  existing={items}
+                  stockMap={stockMap}
+                  onAdd={handleAddEquipo}
+                  className="mb-2"
+                />
+              )}
+
+              {items.length === 0 ? (
+                <ul className="divide-y hairline">
+                  <li className="py-4 text-sm text-muted-foreground">
+                    Sin equipos. Agregá al menos uno para confirmar.
+                  </li>
+                </ul>
+              ) : (
+                <DndContext
+                  sensors={sensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={esEstudio ? undefined : handleItemsDragEnd}
+                >
+                  <SortableContext
+                    items={items.map((it) => it.uid)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <ul className="divide-y hairline">
+                      {items.map((it) => (
+                        <ItemRow
+                          key={it.uid}
+                          it={it}
+                          stock={it.equipo_id != null ? stockMap[String(it.equipo_id)] : undefined}
+                          jornadas={jornadas}
+                          updateItem={esEstudio ? () => {} : updateItem}
+                          removeItem={esEstudio ? () => {} : removeItem}
+                          // `estudio_fijo`: esta lista es de solo lectura real
+                          // (su verdad es el slot recurrente, no este pedido)
+                          // — sin esto, el stepper/precio/quitar se veían
+                          // interactivos y no hacían nada al tocarlos.
+                          disabled={esEstudio}
+                        />
+                      ))}
+                    </ul>
+                  </SortableContext>
+                </DndContext>
+              )}
+
+              {/* Agregar línea personalizada (#805): ítem libre fuera del catálogo */}
+              {!esEstudio && (
+                <button
+                  type="button"
+                  onClick={addLineaLibre}
+                  className="mt-2 flex w-full items-center gap-2.5 px-3 py-2.5 rounded-md border border-dashed hairline text-sm text-muted-foreground hover:bg-muted/30 transition"
+                >
+                  <Plus className="h-4 w-4 shrink-0" />
+                  <span>Agregar línea personalizada (flete, servicio, etc.)</span>
+                </button>
+              )}
+
+              {/* Descuento DEL ALQUILER, acá adentro y no en el rail (pedido del
+                  dueño: "los descuentos creo que deberían ser por sección
+                  también, ¿podemos hacer que los descuentos estén en la
+                  sección?"). Es el descuento de los equipos: el turno del
+                  Estudio tiene el suyo, en su propia sección. Taller: no lleva
+                  descuento (2026-07-28 — el de jornadas/cliente no le aplica),
+                  así que ni se ofrece. */}
+              {!esTaller && !esEstudio && (
+                // `border-t-2 border-ink/15`, no `border-t hairline`: separa
+                // "qué se alquila" (equipos, línea personalizada) de "la
+                // parte contable" (descuento + total) — el dueño la vio muy
+                // fina ("¿podemos hacer una línea horizontal más ancha para
+                // separar los equipos de la parte contable?"). Mismo patrón
+                // ya usado para el mismo tipo de corte en
+                // `contabilidad.reporte.lazy.tsx`, no uno nuevo.
+                <div className="border-t-2 border-ink/35 pt-4">
+                  {/* Total del ÁREA, acá y no solo en el rail (pedido del
+                      dueño: "¿podemos poner un total por área, con los
+                      descuentos y demás?"). El desglose de cómo se llega al
+                      número vive en la sección que lo genera; el rail resume
+                      las dos áreas. Misma pieza que usa el turno del Estudio
+                      → las dos secciones cierran igual. La primera fila dice
+                      "Subtotal" a secas: el sufijo "· N jornadas" que tenía
+                      repetía la píldora "N JORNADAS" de la banda
+                      Retiro/Devolución de arriba (el dueño: "el 1 jornada me
+                      parece redundante").
+                      El `DescuentoControl` va COMO PROP, dentro de la fila
+                      "Descuento" — antes era un bloque suelto arriba del
+                      ledger, o sea el control y su resultado separados
+                      diciendo lo mismo ("¿podemos unificar esos dos campos?
+                      ... y el modificador de descuento, in place"). */}
+                  <TotalSeccion
+                    bruto={totales.subtotal}
+                    descuentoLabel={
+                      descuentoLabel(totales.descuentoOrigen, jornadas, datos.cliente_nombre) ||
+                      "Descuento"
+                    }
+                    descuentoPct={totales.descuentoPct}
+                    descuentoMonto={totales.descuentoMonto}
+                    total={totales.totalNeto}
+                    descuentoControl={
+                      <DescuentoControl
+                        value={{
+                          tipo: datos.descuento_manual_tipo,
+                          pct: datos.descuento_pct,
+                          monto: datos.descuento_manual_monto,
+                        }}
+                        onChange={(next) =>
+                          setDatos(
+                            (d) =>
+                              d && {
+                                ...d,
+                                descuento_manual_tipo: next.tipo,
+                                descuento_pct: next.pct,
+                                descuento_manual_monto: next.monto,
+                              },
+                          )
+                        }
+                        maxMonto={totales.subtotalDescontable}
+                        efectivoPct={totales.descuentoPct}
+                        efectivoMonto={totales.descuentoMonto}
+                        disabled={datosMut.isPending}
+                      />
+                    }
+                  />
+                </div>
+              )}
+            </Section>
+          )}
+
+          {/* Turnos del Estudio vinculados (#1308) — solo para un pedido de
+              alquiler normal (un turno/slot/taller no anida otro turno). */}
+          {!esPedidoDerivado(p) && <TurnosEstudioSection pedido={p} />}
 
           {/* Notas */}
           <Section variant="card" tone="elevated" icon={FileText} title="Notas internas">
             <Textarea
               value={datos.notas}
+              aria-label="Notas internas del pedido"
               placeholder="Notas para el equipo de Rambla…"
               onChange={(e) => setDatos((d) => d && { ...d, notas: e.target.value })}
               className="min-h-[88px] resize-y"
@@ -674,196 +1044,192 @@ function PedidoEditorPage() {
             />
           </RailSection>
 
-          {/* Identidad del cliente (solo cuando tiene ficha vinculada sin verificar) */}
-          {clienteSinVerificar && (
-            <RailSection label="Identidad del cliente">
-              <div className="flex items-center gap-1.5 text-ink text-sm mb-2">
-                <ShieldAlert className="h-4 w-4 shrink-0" />
-                <span>Sin verificar</span>
+          {/* Desglose — vivo via useCotizacion. Con turnos del Estudio
+              vinculados se lee en DOS PARTES (pedido del dueño: "ordenaría
+              mejor este resumen, con dos partes como el alquiler de equipos y
+              turnos, y un solo total con IVA"): cada parte con su propio neto,
+              y abajo un único Neto → IVA → Total de las dos juntas. El IVA
+              combinado lo resuelve el backend (`totales.combinado`), nunca el
+              front. Sin turnos, `combinado` es null y el bloque queda como
+              siempre: bruto → descuento → neto → IVA → total. */}
+          {/* UN SOLO BLOQUE de plata: desglose → cobranza → factura (pedido
+              del dueño: "¿podemos unir visualmente estas dos cosas? Que esté
+              el desglose, registrar pago y facturar como un bloque más
+              coherente entre sí"). Antes eran 3 `RailSection` de primer nivel,
+              cada una con su línea dura arriba, así que la plata del pedido se
+              leía como tres temas distintos. Ahora es una sola sección con
+              sub-partes separadas por un borde suave. */}
+          <RailSection label="Plata del pedido">
+            {/* Si el recálculo falló, TODOS los números de abajo son $0 por
+                COTIZACION_VACIA — indistinguibles de un pedido que vale $0.
+                El aviso va arriba de todo, antes que los importes. */}
+            {cotizacionFallo && (
+              <div className="mb-2 flex items-start gap-1.5 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive">
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                <span>
+                  No se pudo recalcular la plata. Los importes de abajo no son confiables — recargá
+                  la página antes de cobrar o facturar.
+                </span>
               </div>
-              {linkVerif ? (
-                <div className="space-y-1.5">
-                  <p className="text-xs text-muted-foreground">Mandá este link al cliente:</p>
-                  <div className="flex items-center gap-2">
-                    <Input
-                      readOnly
-                      value={linkVerif}
-                      className="flex-1 font-mono text-xs truncate"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => {
-                        void navigator.clipboard.writeText(linkVerif);
-                        setCopiadoLink(true);
-                        setTimeout(() => setCopiadoLink(false), 2000);
-                      }}
-                      className="flex items-center gap-1 rounded-md border hairline bg-surface px-2.5 py-1.5 text-xs text-ink hover:bg-accent/30 transition-colors shrink-0 h-[30px]"
-                    >
-                      {copiadoLink ? (
-                        <Check className="h-3.5 w-3.5 text-verde-ink" />
-                      ) : (
-                        <Copy className="h-3.5 w-3.5" />
-                      )}
-                      {copiadoLink ? "Copiado" : "Copiar"}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="w-full"
-                  disabled={generandoLink}
-                  onClick={() => void handleGenerarLink()}
-                >
-                  <ShieldCheck className="h-4 w-4 mr-1" />
-                  {generandoLink ? "Generando…" : "Generar link de verificación"}
-                </Button>
-              )}
-            </RailSection>
-          )}
-
-          {/* Desglose — vivo via useCotizacion */}
-          <RailSection label="Desglose">
-            <div className="space-y-1 text-sm">
-              <BdRow
-                l={`Bruto · ${jornadas} jornada${jornadas !== 1 ? "s" : ""}`}
-                v={fmtArs(totales.subtotal)}
-              />
-              {totales.descuentoPct > 0 && (
-                <BdRow
-                  l={`${
-                    descuentoLabel(totales.descuentoOrigen, jornadas, datos.cliente_nombre) ||
-                    "Descuento"
-                  } · ${totales.descuentoPct}%`}
-                  v={`– ${fmtArs(totales.descuentoMonto)}`}
-                  neg
-                />
-              )}
-              <BdRow l="Neto" v={fmtArs(totales.totalNeto)} />
-              <BdRow
-                l={`IVA ${totales.conIva ? "21%" : ""}`}
-                v={totales.conIva ? fmtArs(totales.iva) : "— sin IVA"}
-              />
-              <div className="border-t hairline my-1" />
-              <BdRow l="Total" v={fmtArs(total)} strong />
-            </div>
-            {/* Div plano, NO <FieldLabel> (que renderiza un <label> nativo):
-                un <label> reenvía cualquier click dentro de su área al PRIMER
-                control enfocable de adentro (acá, el botón "%") — clickear
-                "cerca" del input $ pero todavía dentro del label revertía el
-                selector a "%" solo. Con 2+ controles adentro, un <label> no
-                es seguro; FieldLabel sigue bien para los campos de un solo input. */}
-            <div className="block mt-3">
-              <span className="block t-eyebrow mb-1">Descuento manual (0 = automático)</span>
-              <div className="flex items-center gap-2">
-                <SegmentedControl
-                  value={datos.descuento_manual_tipo}
-                  onChange={(v) =>
-                    setDatos(
-                      (d) =>
-                        d && {
-                          ...d,
-                          descuento_manual_tipo: v as "pct" | "monto",
-                          // Convertir al equivalente del OTRO campo (el % y el
-                          // $ efectivos que ya muestra el desglose, calculados
-                          // por el backend) en vez de resetear a 0 — cambiar
-                          // de unidad no debería perder el descuento actual.
-                          // El campo que se deja de usar se resetea (sin esto
-                          // queda un valor "fantasma" que podía reaparecer si
-                          // el admin volvía a tocar el selector).
-                          ...(v === "monto"
-                            ? { descuento_manual_monto: totales.descuentoMonto, descuento_pct: 0 }
-                            : { descuento_pct: totales.descuentoPct, descuento_manual_monto: 0 }),
-                        },
-                    )
-                  }
-                  options={[
-                    { value: "pct", label: "%" },
-                    { value: "monto", label: "$" },
-                  ]}
-                  className="w-20 shrink-0"
-                />
-                {datos.descuento_manual_tipo === "monto" ? (
-                  <MoneyInput
-                    min={0}
-                    max={totales.subtotalDescontable}
-                    step={100}
-                    value={datos.descuento_manual_monto}
-                    className="max-w-[140px]"
-                    ariaLabel="Descuento $ manual"
-                    onChange={(v) => setDatos((d) => d && { ...d, descuento_manual_monto: v })}
-                  />
-                ) : (
-                  <div className="relative max-w-[140px]">
-                    <Input
-                      type="number"
-                      min={0}
-                      max={100}
-                      step={0.1}
-                      value={datos.descuento_pct}
-                      className="pr-7"
-                      onChange={(e) =>
-                        setDatos(
-                          (d) =>
-                            d && {
-                              ...d,
-                              descuento_pct: Math.max(
-                                0,
-                                Math.min(100, Number(e.target.value) || 0),
-                              ),
-                            },
-                        )
-                      }
-                    />
-                    <span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">
-                      %
-                    </span>
-                  </div>
-                )}
-              </div>
-            </div>
-          </RailSection>
-
-          {/* Cobranza */}
-          <RailSection label="Cobranza">
-            <div className="flex items-center justify-between">
-              <span className="font-mono text-xs text-muted-foreground">
-                {fmtArs(pagadoMonto)} de {fmtArs(total)}
-                {pagadoMonto === 0 ? " · sin seña" : ""}
-              </span>
-              <span
-                className={cn(
-                  "font-mono text-xs font-semibold",
-                  pagadoMonto >= total && total > 0 ? "text-verde-ink" : "text-destructive",
-                )}
-              >
-                {pagadoMonto >= total && total > 0 ? "pagado" : `resta ${fmtArs(restante)}`}
-              </span>
-            </div>
-            <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
-              <div
-                className={cn(
-                  "h-full transition-colors",
-                  pagadoMonto >= total && total > 0 ? "bg-verde" : "bg-amber",
-                )}
-                style={{ width: `${total ? Math.min(100, (pagadoMonto / total) * 100) : 0}%` }}
-              />
-            </div>
-            {(p.pagos ?? []).map((pago) => (
-              <PagoRow key={pago.id} pago={pago} pedidoId={p.id} />
-            ))}
-            {!(pagadoMonto >= total && total > 0) && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="w-full mt-2"
-                disabled={p.estado === "cancelado"}
-                onClick={() => setOpenPagoModal(true)}
-              >
-                <Coins className="h-4 w-4 mr-1" /> Registrar pago
-              </Button>
             )}
+            {/* La factura YA EMITIDA (CAE fijo, inmutable) declaró un neto
+                distinto al que el pedido suma HOY — típico: se agregó/pagó un
+                turno del Estudio DESPUÉS de facturar. Sin este aviso, el rail
+                seguía mostrando "Total combinado" en vivo sin decir que ya no
+                coincide con lo que ARCA autorizó — un gap real que se
+                descubría recién en la reconciliación mensual. */}
+            {totales.facturaDesactualizada && (
+              <div className="mb-2 flex items-start gap-1.5 rounded-md border border-amber/40 bg-amber/5 px-2.5 py-2 text-xs text-ink">
+                {/* eslint-disable-next-line no-restricted-syntax -- amber: paleta categórica de advertencia (Tier 3) */}
+                <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-700" />
+                <span>
+                  La factura emitida declara{" "}
+                  {fmtArs(totales.facturaDesactualizada.impNetoFacturado)}, pero el pedido hoy suma{" "}
+                  {fmtArs(totales.facturaDesactualizada.netoActual)}
+                  {totales.facturaDesactualizada.diferencia > 0
+                    ? " (se agregó plata después de facturar)"
+                    : " (se sacó plata después de facturar)"}
+                  . Para cobrar la diferencia hacé una Nota de Crédito y refacturá.
+                </span>
+              </div>
+            )}
+            <div className="space-y-1 text-sm">
+              {/* RESUMEN, no desglose: los dos montos por área, el total, y el
+                  IVA solo si aplica (pedido del dueño: "en el resumen de la
+                  derecha, los dos montos discriminados, un total, y el + IVA
+                  si es necesario"). El bruto/descuento de cada área ya se ven
+                  dentro de SU sección (`TotalSeccion`) — repetirlos acá era
+                  escribir el mismo desglose dos veces, y además obligaba a
+                  inventar un label de jornadas para un taller o un turno, cuyo
+                  rango de fechas no son jornadas reales. */}
+              <BdRow
+                l={esTaller ? "Taller" : "Alquiler de equipos"}
+                v={fmtArs(totales.totalNeto)}
+              />
+              {/* "Estudio" a secas, sin fecha/hora: la franja exacta YA se ve
+                  en la sección "Turnos del Estudio" de arriba — repetirla acá
+                  era el mismo dato dos veces (el dueño: "ese detalle de fecha
+                  y hora me parece redundante"). Con más de un turno vinculado
+                  se numeran (no hay otro identificador liviano y comparable al
+                  de "Alquiler de equipos" de la fila de arriba). */}
+              {hayTurnos &&
+                combinado.turnos.map((t, i) => (
+                  <BdRow
+                    key={t.id}
+                    l={combinado.turnos.length > 1 ? `Estudio ${i + 1}` : "Estudio"}
+                    v={fmtArs(t.monto_total)}
+                  />
+                ))}
+
+              <div className="border-t hairline my-1" />
+              {/* Con IVA se muestra el neto para que el total se explique
+                  (neto + IVA = total); sin IVA, neto y total son el mismo
+                  número y va una sola línea. */}
+              {totales.conIva && (
+                <>
+                  <BdRow l="Neto" v={fmtArs(netoResumen)} />
+                  <BdRow l="IVA 21%" v={fmtArs(ivaResumen)} />
+                </>
+              )}
+              <BdRow l="Total" v={fmtArs(combinado.totalCombinado)} strong />
+            </div>
+
+            {/* Cobranza — combinada con los turnos del Estudio vinculados
+                (#1308): sin turnos, `combinado.*` es un pass-through exacto de
+                pagadoMonto/total/restante (cero cambio visual). */}
+            <div className="border-t hairline pt-3">
+              <RailSection label="Cobranza" anidada>
+                <div className="flex items-center justify-between">
+                  <span className="font-mono text-xs text-muted-foreground">
+                    {fmtArs(combinado.pagadoCombinado)} de {fmtArs(combinado.totalCombinado)}
+                    {combinado.pagadoCombinado === 0 ? " · sin seña" : ""}
+                  </span>
+                  <span
+                    className={cn(
+                      "font-mono text-xs font-semibold",
+                      combinado.pagadoCombinado >= combinado.totalCombinado &&
+                        combinado.totalCombinado > 0
+                        ? "text-verde-ink"
+                        : "text-destructive",
+                    )}
+                  >
+                    {combinado.pagadoCombinado >= combinado.totalCombinado &&
+                    combinado.totalCombinado > 0
+                      ? "pagado"
+                      : `resta ${fmtArs(combinado.restaCombinado)}`}
+                  </span>
+                </div>
+                <div className="mt-1.5 h-1.5 rounded-full bg-muted overflow-hidden">
+                  <div
+                    className={cn(
+                      "h-full transition-colors",
+                      combinado.pagadoCombinado >= combinado.totalCombinado &&
+                        combinado.totalCombinado > 0
+                        ? "bg-verde"
+                        : "bg-amber",
+                    )}
+                    style={{
+                      width: `${
+                        combinado.totalCombinado
+                          ? Math.min(
+                              100,
+                              (combinado.pagadoCombinado / combinado.totalCombinado) * 100,
+                            )
+                          : 0
+                      }%`,
+                    }}
+                  />
+                </div>
+                {(p.pagos ?? []).map((pago) => (
+                  <PagoRow key={pago.id} pago={pago} pedidoId={p.id} />
+                ))}
+                {/* Pagos de los turnos del Estudio vinculados (#1308): el pago
+                    combinado reparte filas reales de `alquiler_pagos` contra
+                    CADA turno — sin esto, esa plata quedaba invisible e
+                    irreversible desde la única página que el admin abre (el
+                    turno no tiene página propia). */}
+                {turnosVinculados.flatMap((t, i) =>
+                  (t.pagos ?? []).map((pago) => (
+                    <PagoRow
+                      key={pago.id}
+                      pago={pago}
+                      pedidoId={t.id}
+                      invalidatePedidoId={p.id}
+                      origenLabel={turnosVinculados.length > 1 ? `Estudio ${i + 1}` : "Estudio"}
+                    />
+                  )),
+                )}
+                {!(
+                  combinado.pagadoCombinado >= combinado.totalCombinado &&
+                  combinado.totalCombinado > 0
+                ) && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="w-full mt-2"
+                    // También con la cotización caída: el modal se abre
+                    // prellenado con el saldo, y con COTIZACION_VACIA ese
+                    // saldo es 0 — cobrar desde ahí registraría un pago mal.
+                    // `borrador`: sin compromiso de ningún tipo (ni siquiera
+                    // plata) hasta que el pedido pasa a solicitud.
+                    disabled={
+                      p.estado === "cancelado" || p.estado === "borrador" || cotizacionFallo
+                    }
+                    onClick={() => setOpenPagoModal(true)}
+                  >
+                    <Coins className="h-4 w-4 mr-1" /> Registrar pago
+                  </Button>
+                )}
+              </RailSection>
+            </div>
+
+            <div className="border-t hairline pt-3">
+              <FacturacionRailSection
+                pedidoId={p.id}
+                estadoPedido={p.estado}
+                plataConfiable={!cotizacionFallo && !stockFallo}
+              />
+            </div>
           </RailSection>
 
           {/* Documentos */}
@@ -875,7 +1241,7 @@ function PedidoEditorPage() {
                     href={`${pedidoPdfUrl(p.id, doc.kind)}?format=html`}
                     target="_blank"
                     rel="noreferrer"
-                    className="inline-flex items-center gap-1 rounded-md border hairline px-2 py-1 font-mono text-xs text-muted-foreground hover:text-ink hover:border-ink"
+                    className="inline-flex h-11 items-center gap-1 rounded-md border hairline px-2 font-mono text-xs text-muted-foreground hover:border-ink hover:text-ink md:h-7"
                     title={`Ver ${doc.label}`}
                   >
                     <Eye className="h-3 w-3" />
@@ -883,7 +1249,12 @@ function PedidoEditorPage() {
                   </a>
                   <a
                     href={pedidoPdfUrl(p.id, doc.kind)}
-                    className="inline-flex items-center justify-center h-7 w-7 rounded-md border hairline text-muted-foreground hover:text-ink hover:border-ink"
+                    // `aria-label` además del `title`: es un link SOLO con
+                    // ícono (el hermano "Ver" sí tiene texto), y `title` no es
+                    // un nombre accesible confiable. h-11 en mobile (gate de
+                    // 44px), denso en desktop como el resto del rail.
+                    aria-label={`Descargar ${doc.label} PDF`}
+                    className="inline-flex h-11 w-11 items-center justify-center rounded-md border hairline text-muted-foreground hover:border-ink hover:text-ink md:h-7 md:w-7"
                     title={`Descargar ${doc.label} PDF`}
                   >
                     <Download className="h-3 w-3" />
@@ -895,14 +1266,14 @@ function PedidoEditorPage() {
               variant="outline"
               size="sm"
               className="w-full mt-2"
+              // `borrador`: sin compromiso de comunicación hasta que el
+              // pedido pasa a solicitud (docs/FLUJO_PEDIDOS.md).
+              disabled={p.estado === "borrador"}
               onClick={() => setOpenMailDialog(true)}
             >
               <Mail className="h-4 w-4 mr-1" /> Enviar por mail
             </Button>
           </RailSection>
-
-          {/* Factura ARCA */}
-          <FacturacionRailSection pedidoId={p.id} estadoPedido={p.estado} />
 
           {/* Eliminar pedido */}
           <RailSection label="Zona peligrosa">
@@ -933,7 +1304,15 @@ function PedidoEditorPage() {
       <div className="lg:hidden fixed bottom-0 inset-x-0 z-40 flex items-center gap-2 px-4 py-2.5 border-t hairline bg-surface-elevated safe-b">
         <div>
           <div className="t-eyebrow">Total</div>
-          <div className="font-mono text-base font-semibold tabular-nums">{fmtArs(total)}</div>
+          {/* `combinado.totalCombinado`, no `total`: en mobile esta barra ES el
+              total del pedido (el rail no se ve), así que tiene que incluir los
+              turnos del Estudio igual que él. Con `total` mostraba solo la
+              parte de equipos — un pedido de $337.590 se anunciaba como
+              $185.130 justo arriba del botón de confirmar. Sin turnos los dos
+              valores son idénticos. */}
+          <div className="font-mono text-base font-semibold tabular-nums">
+            {fmtArs(combinado.totalCombinado)}
+          </div>
         </div>
         <SaveIndicator status={saveStatus} />
         <div className="ml-auto flex items-center gap-2">
@@ -970,6 +1349,8 @@ function PedidoEditorPage() {
         pagado={pagadoMonto}
         open={openPagoModal}
         onOpenChange={setOpenPagoModal}
+        esEstudio={esEstudio}
+        turnosVinculados={turnosVinculados}
       />
       <EnviarDocsDialog
         pedidoId={p.id}
@@ -1008,7 +1389,7 @@ function PedidoEditorPage() {
       <AlertDialog open={askCancel} onOpenChange={setAskCancel}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Cancelar pedido #{p.numero_pedido ?? p.id}</AlertDialogTitle>
+            <AlertDialogTitle>Cancelar {etiquetaPedido(p)}</AlertDialogTitle>
             <AlertDialogDescription>
               El pedido pasa a estado <strong>Cancelado</strong> y libera el stock reservado. Queda
               en el historial (no se borra). Podés volver a eliminarlo definitivamente si hace
@@ -1056,29 +1437,37 @@ function FlowStrip({ estado }: { estado: PedidoEstado }) {
   if (estado === "cancelado") {
     return (
       <div className="flex items-center">
-        <span className="inline-flex items-center gap-1 rounded-md border border-destructive/40 bg-destructive/5 px-2 py-1 font-mono text-2xs text-destructive">
+        <span className="inline-flex items-center rounded-full border border-destructive/30 bg-destructive/10 px-2 py-0.5 text-2xs font-semibold text-destructive">
           Cancelado
         </span>
       </div>
     );
   }
   const idx = FLOW.indexOf(estado);
+  // Breadcrumb del ciclo de vida: colorea el camino recorrido con la paleta de
+  // marca (cada etapa su color), destaca la actual en pill, deja tenues las que
+  // faltan. El color sale de la fuente única `estado-color.ts`.
   return (
-    <div className="flex items-center gap-1 flex-wrap">
+    <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs">
       {FLOW.map((e, i) => (
-        <span key={e} className="inline-flex items-center gap-1">
-          <span
-            className={cn(
-              "font-mono text-2xs",
-              i < idx && "text-verde-ink",
-              i === idx && "text-ink font-semibold",
-              i > idx && "text-muted-foreground/60",
-            )}
-            title={ESTADO_LABEL[e]}
-          >
-            {ESTADO_LABEL[e].slice(0, 5)}
-          </span>
-          {i < FLOW.length - 1 && <span className="text-muted-foreground/40 text-2xs">›</span>}
+        <span key={e} className="inline-flex items-center gap-x-1.5">
+          {i === idx ? (
+            <span
+              className={cn(
+                "inline-flex items-center rounded-full border px-2 py-0.5 text-2xs font-semibold",
+                estadoClase(e),
+              )}
+            >
+              {ESTADO_LABEL[e]}
+            </span>
+          ) : (
+            <span
+              className={cn("font-medium", i < idx ? ESTADO_TEXT[e] : "text-muted-foreground/50")}
+            >
+              {ESTADO_LABEL[e]}
+            </span>
+          )}
+          {i < FLOW.length - 1 && <span className="text-muted-foreground/40">›</span>}
         </span>
       ))}
     </div>

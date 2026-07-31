@@ -67,6 +67,16 @@ def _advisory_hash(pto_vta: int, cbte_tipo: int) -> int:
     return (_LOCK_NS | (h & 0xFFFF)) & 0x7FFFFFFF
 
 
+def _nombre_emisor(perfil_receptor: str, conn, emisor_id: Optional[int]) -> str:
+    """Resuelve el nombre del emisor — sin override, llama a `emisor_para` con el
+    mismo call shape (2 posicionales) de siempre, para no exigirle el kwarg nuevo
+    a ningún mock existente de `emisor_para` en los tests. El override solo se
+    pasa cuando de verdad hay uno (caso excepcional, ver `emisores.emisor_para`)."""
+    if emisor_id is not None:
+        return emisor_para(perfil_receptor, conn, override_emisor_id=emisor_id)
+    return emisor_para(perfil_receptor, conn)
+
+
 def _get_pedido(conn, pedido_id: int) -> dict:
     from database import row_to_dict
     from services.pedidos_enriquecimiento import (
@@ -74,7 +84,7 @@ def _get_pedido(conn, pedido_id: int) -> dict:
         _enriquecer_pedido_con_cliente,
         _batch_get_alquiler_items,
     )
-    from services.finanzas_flujo.pedido import desglose_de_pedido
+    from services.finanzas_flujo.pedido import combinar_turnos_vinculados, desglose_de_pedido
 
     row = conn.execute(
         "SELECT * FROM alquileres WHERE id = %s",
@@ -92,9 +102,35 @@ def _get_pedido(conn, pedido_id: int) -> dict:
     # por módulos de services/, nunca por routes.alquileres — un service no debería depender de un
     # route (auditoría cruzada de plata, 2026-07-02).
     desglose_de_pedido(conn, pedido)
+    # Un pedido de alquiler y sus turnos del Estudio vinculados son UNA sola venta
+    # → UNA sola factura (#1308, "facturar en el mismo pedido"). Va acá, en el punto
+    # único de carga, para que los 4 consumidores de `_get_pedido` (chequeos previos,
+    # preview HTML, emisión, y re-render/mail de una factura ya emitida) vean SIEMPRE
+    # el mismo número — si viviera solo en `emitir_factura`, el preview y la
+    # reimpresión mostrarían un total distinto al del CAE.
+    combinar_turnos_vinculados(conn, pedido, expandir_periodo=True)
     _enriquecer_pedido_con_cliente_fiscal(conn, pedido)
     _enriquecer_pedido_con_cliente(conn, pedido)
     return pedido
+
+
+def _rechazar_si_es_turno_vinculado(pedido: dict) -> None:
+    """Un turno del Estudio vinculado NO se factura por su cuenta: su plata ya
+    entra en la factura de su pedido principal (`combinar_turnos_vinculados`).
+    Sin este gate se podía emitir dos veces la misma plata — el endpoint de
+    facturar nunca miró `pedido_principal_id`.
+
+    Va en los dos puntos de ENTRADA de facturación (preview y emisión), NO
+    dentro de `_get_pedido`: la nota de crédito y el re-render/mail de una
+    factura de turno **preexistente** (emitida antes de que existiera este
+    gate) también pasan por `_get_pedido`, y tienen que seguir funcionando —
+    la NC es justamente la vía para deshacer una de esas."""
+    principal_id = pedido.get("pedido_principal_id")
+    if principal_id:
+        raise ValueError(
+            f"Este turno del Estudio se factura desde su pedido principal "
+            f"(#{principal_id}), que ya incluye su importe."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -256,7 +292,9 @@ def _chequeos_previos(
     return chequeos, domicilio_afip, razon_social_afip
 
 
-def previsualizar_factura(pedido_id: int, conn, *, _incluir_raw: bool = False) -> dict:
+def previsualizar_factura(
+    pedido_id: int, conn, *, _incluir_raw: bool = False, emisor_id: Optional[int] = None
+) -> dict:
     """Arma el `ComprobanteRequest`, calcula sus importes, y consulta a ARCA
     el próximo número de comprobante — SIN pedir CAE.
 
@@ -268,8 +306,13 @@ def previsualizar_factura(pedido_id: int, conn, *, _incluir_raw: bool = False) -
     validar que el certificado/las credenciales funcionan ANTES de
     comprometerse a pedir un CAE real (irreversible salvo Nota de Crédito).
     Nada de advisory lock, nada de INSERT — eso sigue siendo exclusivo de
-    `emitir_factura`."""
+    `emitir_factura`.
+
+    `emisor_id`: override excepcional de `emisor_para` (ver ese docstring) —
+    el admin elige facturar este pedido puntual con un emisor distinto al
+    que resolvería automáticamente el perfil del receptor."""
     pedido = _get_pedido(conn, pedido_id)
+    _rechazar_si_es_turno_vinculado(pedido)
 
     estado = (pedido.get("estado") or "").lower()
     if estado not in ("confirmado", "retirado", "devuelto", "finalizado"):
@@ -306,7 +349,7 @@ def previsualizar_factura(pedido_id: int, conn, *, _incluir_raw: bool = False) -
                 perfil_receptor = persona_afip.condicion_iva
                 pedido = {**pedido, "cliente_perfil_impuestos": persona_afip.condicion_iva}
 
-    nombre_emisor = emisor_para(perfil_receptor, conn)
+    nombre_emisor = _nombre_emisor(perfil_receptor, conn, emisor_id)
     cred = credenciales(nombre_emisor, conn)
 
     emisor_obj = Emisor(
@@ -498,7 +541,9 @@ def previsualizar_factura(pedido_id: int, conn, *, _incluir_raw: bool = False) -
     return resultado
 
 
-def previsualizar_factura_html(pedido_id: int, conn, layout: str = "simplificada") -> str:
+def previsualizar_factura_html(
+    pedido_id: int, conn, layout: str = "simplificada", *, emisor_id: Optional[int] = None
+) -> str:
     """Renderiza el HTML del comprobante ANTES de emitir — mismo layout/plantilla que la factura
     real (`arca_fe.renderizar_comprobante_html`), para que el admin vea el documento completo
     (no solo el resumen de chequeos) antes de comprometerse a pedir un CAE real.
@@ -511,6 +556,10 @@ def previsualizar_factura_html(pedido_id: int, conn, layout: str = "simplificada
     la firma PAdES real). Además del banner y la marca de agua diagonal (ver más abajo), esto es
     a propósito: un preview de factura NUNCA puede parecer válido.
 
+    `emisor_id`: mismo override excepcional que `previsualizar_factura` — el HTML tiene que
+    reflejar el mismo emisor que el resumen de chequeos, o el admin vería una letra/CUIT en el
+    documento distinta de la que confirmó en el panel de al lado.
+
     Raises:
         ValueError: pedido en estado inválido, o el comprobante no se pudo armar.
         arca_fe.ArcaError / RuntimeError: igual que `previsualizar_factura`.
@@ -518,7 +567,7 @@ def previsualizar_factura_html(pedido_id: int, conn, layout: str = "simplificada
     import arca_fe
     from services.facturacion.comprobante_render import _conceptos, _emisor_row, _fonts_css
 
-    preview = previsualizar_factura(pedido_id, conn, _incluir_raw=True)
+    preview = previsualizar_factura(pedido_id, conn, _incluir_raw=True, emisor_id=emisor_id)
     raw = preview["_raw"]
     pedido, req, importes = raw["pedido"], raw["req"], raw["importes"]
 
@@ -587,7 +636,9 @@ def previsualizar_factura_html(pedido_id: int, conn, layout: str = "simplificada
 # ---------------------------------------------------------------------------
 
 
-def emitir_factura(pedido_id: int, *, emitido_por: Optional[str] = None) -> Factura:
+def emitir_factura(
+    pedido_id: int, *, emitido_por: Optional[str] = None, emisor_id: Optional[int] = None
+) -> Factura:
     """Emite o devuelve la factura vigente para el pedido.
 
     Secuencia (orden OBLIGATORIO):
@@ -604,9 +655,14 @@ def emitir_factura(pedido_id: int, *, emitido_por: Optional[str] = None) -> Fact
     9. FECAESolicitar; persistir CAE+número en TX ATÓMICA
     10. Error ARCA → estado='error', nunca 500
     11. PDF en best-effort fuera de la TX fiscal
+
+    `emisor_id`: override excepcional de `emisor_para` — factura este pedido con ESE emisor
+    puntual en vez del que resolvería automáticamente el perfil del receptor (ver el docstring
+    de `emisores.emisor_para` para el caso de uso real: un cliente RI que pide igual Factura C).
     """
     with get_db() as conn:
         pedido = _get_pedido(conn, pedido_id)
+        _rechazar_si_es_turno_vinculado(pedido)
 
         estado = (pedido.get("estado") or "").lower()
         if estado not in ("confirmado", "retirado", "devuelto", "finalizado"):
@@ -662,7 +718,7 @@ def emitir_factura(pedido_id: int, *, emitido_por: Optional[str] = None) -> Fact
             )
 
         perfil_receptor = (pedido.get("cliente_perfil_impuestos") or "").strip().lower()
-        nombre_emisor = emisor_para(perfil_receptor, conn)
+        nombre_emisor = _nombre_emisor(perfil_receptor, conn, emisor_id)
         cred = credenciales(nombre_emisor, conn)
 
         emisor_obj = Emisor(

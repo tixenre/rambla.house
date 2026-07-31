@@ -239,7 +239,7 @@ export const pagesSection: CatalogSection = {
           <ul className="ml-4 list-disc space-y-1">
             <li>
               <code className="t-mono text-xs text-ink">TopBar</code> — shell único de navegación
-              por área (rental/estudio/workshops/cliente), color de marca y logo themeable.
+              por área (rental/estudio/escuela/cliente), color de marca y logo themeable.
             </li>
             <li>
               <code className="t-mono text-xs text-ink">QueryState</code> montado sobre un{" "}

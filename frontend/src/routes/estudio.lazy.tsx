@@ -3,13 +3,14 @@ import { createLazyFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, MessageCircle, MapPin } from "lucide-react";
 import { StudioBookingForm } from "@/components/studio/StudioBookingForm";
-import { StudioPackKit } from "@/components/studio/StudioPackKit";
 import { STUDIO, STUDIO_PHONE } from "@/data/studio";
 import { apiGetEstudio, type EstudioTrabajo, type EstudioMedia } from "@/lib/api";
 import { formatARS } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { PublicLayout } from "@/components/rental/shell/PublicLayout";
 import { Button } from "@/design-system/ui/button";
+import { Grain } from "@/components/common/Grain";
+import { BoxItemsSection } from "@/components/rental/KitSection";
 
 export const Route = createLazyFileRoute("/estudio")({
   component: EstudioPage,
@@ -17,18 +18,6 @@ export const Route = createLazyFileRoute("/estudio")({
 
 const MAPA_EMBED_DEFAULT =
   "https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d5418.432520284455!2d-57.56597107511356!3d-37.98649647543215!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x9584db0050a8b0bf%3A0x3860608ed96f47f1!2sRambla%20Estudio%20y%20Rental!5e0!3m2!1ses-419!2sar!4v1782432663360!5m2!1ses-419!2sar";
-
-// ── Grain overlay (reutilizado en secciones ink/amber) ─────────────────────
-const Grain = ({ opacity = 12 }: { opacity?: number }) => (
-  <div
-    className="pointer-events-none absolute inset-0"
-    style={{
-      backgroundImage: "radial-gradient(circle, oklch(0.85 0 0 / 12%) 1px, transparent 1px)",
-      backgroundSize: "5px 5px",
-      opacity: opacity / 100,
-    }}
-  />
-);
 
 type Photo = { src: string; alt: string; hero?: boolean; ciclorama?: boolean };
 
@@ -865,8 +854,7 @@ function EstudioPage() {
 
   const precioHora = data?.precio_hora ?? STUDIO.pricePerHour;
   const minHours = data?.min_horas ?? STUDIO.minHours;
-  const packActivo = data?.pack_activo ?? true;
-  const packEquipos = useMemo(() => data?.pack_equipos ?? [], [data?.pack_equipos]);
+  const promo = data?.promo ?? null;
   const trabajos = useMemo(() => data?.trabajos ?? [], [data?.trabajos]);
   const faq = data?.faq ?? STUDIO.faq;
   const features = data?.features ?? STUDIO.features;
@@ -881,8 +869,10 @@ function EstudioPage() {
         minHours: data.min_horas,
         openHour: data.open_hour,
         closeHour: data.close_hour,
-        packActivo: data.pack_activo,
-        packPrecio: data.pack_precio,
+        promo: data.promo,
+        precioPinturaReciente: data.precio_pintura_reciente,
+        anticipacionMinHoras: data.anticipacion_min_horas,
+        anticipacionPinturaHoras: data.anticipacion_pintura_horas,
       }
     : undefined;
 
@@ -900,7 +890,7 @@ function EstudioPage() {
   );
   const heroPhoto = photos.find((p) => p.hero) ?? photos[0];
 
-  const [withPack, setWithPack] = useState(false);
+  const [withPromo, setWithPromo] = useState(false);
 
   // Skeleton de carga inicial (solo cuando no hay data de cache)
   if (isLoading && !data) {
@@ -1092,31 +1082,46 @@ function EstudioPage() {
             <div className="grid gap-5 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)] lg:items-start">
               <StudioBookingForm
                 config={bookingConfig}
-                withPack={withPack}
-                onPackChange={setWithPack}
+                withPromo={withPromo}
+                onPromoChange={setWithPromo}
               />
-              {packActivo && (
+              {promo && (
                 <aside className="rounded-2xl border border-ink/20 bg-ink/8 p-5 lg:sticky lg:top-20 lg:self-start">
                   <div className="font-mono text-2xs uppercase tracking-[0.2em] text-ink mb-3.5">
                     Estudio + equipos · qué incluye
                   </div>
-                  {withPack ? (
-                    packEquipos.length > 0 ? (
-                      <StudioPackKit equipos={packEquipos} title="Equipos incluidos" />
-                    ) : (
-                      <div className="flex flex-col gap-2.5">
-                        {STUDIO.addon.includes.map((item) => (
-                          <div key={item} className="flex gap-2.5 text-sm leading-relaxed">
-                            <div className="mt-1.5 h-1.5 w-1.5 rounded-full bg-ink shrink-0" />
-                            <span>{item}</span>
-                          </div>
-                        ))}
+                  {withPromo ? (
+                    <div className="flex flex-col gap-3">
+                      {promo.foto_url && (
+                        <img
+                          src={promo.foto_url}
+                          alt={promo.nombre}
+                          loading="lazy"
+                          className="aspect-video w-full rounded-lg object-cover"
+                        />
+                      )}
+                      <div>
+                        <p className="font-semibold text-ink">{promo.nombre}</p>
+                        {promo.descripcion && (
+                          <p className="mt-1 text-sm text-ink/80 leading-relaxed">
+                            {promo.descripcion}
+                          </p>
+                        )}
                       </div>
-                    )
+                      {promo.componentes.length > 0 && (
+                        <BoxItemsSection
+                          title="Incluye"
+                          items={promo.componentes.map((c) => ({
+                            name: c.nombre,
+                            qty: c.cantidad,
+                            fotoUrl: c.foto_url,
+                          }))}
+                        />
+                      )}
+                    </div>
                   ) : (
                     <p className="text-sm text-ink leading-relaxed">
-                      Seleccioná "Estudio + equipos" para ver qué incluye el pack de luces y
-                      griperías.
+                      Seleccioná "Estudio + {promo.nombre}" para ver el detalle.
                     </p>
                   )}
                 </aside>

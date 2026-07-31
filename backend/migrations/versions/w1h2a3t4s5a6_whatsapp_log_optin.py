@@ -7,7 +7,7 @@ parcial de `whatsapp_log` da idempotencia por pedido (un envío 'sent' por
 demostrable que exige Meta (default FALSE).
 
 Revision ID: w1h2a3t4s5a6
-Revises: s0l1c1t4d0e5
+Revises: 23aa6949d4df
 Create Date: 2026-07-11
 """
 
@@ -16,10 +16,12 @@ from typing import Sequence, Union
 from alembic import op
 
 revision: str = "w1h2a3t4s5a6"
-# Re-encadenada tras `s0l1c1t4d0e5` (dev, rename estado→solicitado) al mergear dev:
-# ambas colgaban de `t3l3f0n0bkfl` → cabezas divergentes. El upgrade es idempotente
-# e independiente del rename, así que correr después es seguro.
-down_revision: Union[str, Sequence[str], None] = "s0l1c1t4d0e5"
+# Se re-encadena sobre la punta de `dev` en cada merge (antes `t3l3f0n0bkfl`, luego
+# `s0l1c1t4d0e5`, hoy `23aa6949d4df`): la rama de WhatsApp vive fuera de `dev` y su
+# migración tiene que quedar ÚLTIMA, si no quedan cabezas divergentes. El upgrade es
+# idempotente (`IF NOT EXISTS`) e independiente de lo que traiga dev → correr al
+# final es seguro.
+down_revision: Union[str, Sequence[str], None] = "23aa6949d4df"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

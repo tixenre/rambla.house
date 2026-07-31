@@ -58,7 +58,7 @@ No todo se renderiza en mobile. El criterio de triage:
 Todos los issues relacionados con la experiencia mobile llevan la label
 `mobile` en GitHub. Alcance:
 
-- ✅ Incluye: rutas y componentes del cliente (`/`, `/equipo/*`, `/cliente/*`, `/estudio`)
+- ✅ Incluye: rutas y componentes del cliente (`/`, `/equipo/*`, `/cliente/*`, `/estudio`, `/escuelas/*`)
 - ✅ Incluye: `/admin/pedidos`, `/admin/dashboard` (el dueño los usa desde el celu)
 - ❌ Excluye: el resto del admin por ahora
 
@@ -112,13 +112,14 @@ Para cada página, verificar **todos** estos puntos antes de marcar como OK:
 
 | Página | URL | Status | Notas |
 |---|---|---|---|
-| Landing hub | `/` | 🟡 Nuevo | Hub de tres áreas (rental / estudio / workshops). TopBar default. Verificar cards y spacing mobile. |
+| Landing hub | `/` | 🟡 Nuevo | Hub de tres áreas (rental / estudio / escuela). TopBar default. Verificar cards y spacing mobile. |
 | Catálogo (grid) | `/rental` | 🟢 OK | Movido de `/` a `/rental` (antes /catalogo). Hero escala (text-5xl→7xl→[7rem]). MobileStickyBar + CartMiniBar. |
 | Catálogo (list mode) | `/rental` con toggle list | 🟢 OK | Row simplificado post-PR #111. Sin expand inline. |
 | Ficha de equipo | `/equipo/{id}` | 🟢 OK | Precio sticky bottom `md:hidden` + galería responsive. Code audit post-#249 confirma 🟢. |
-| El Estudio | `/estudio` | 🟡 Verificar | Galería 2 cols mobile, grids responsive. **Validar hero `text-[14vw]` en 375px** — ~52px multilínea, riesgo de desborde. Resto del código OK. |
-| Talleres (listado) | `/workshops` | 🟡 Nuevo | TopBar rosa + SectionBanner + cards horizontales que se apilan en mobile. Verificar sin scroll horizontal. |
-| Taller (detalle) | `/workshops/{slug}` | 🟡 Nuevo | TopBar rosa con CTA "Inscribirme". Hero dark + formulario de inscripción con file upload. Verificar inputs ≥ 16px y form usable en mobile. |
+| El Estudio | `/estudio` | 🟡 Verificar | Galería 2 cols mobile, grids responsive. **Validar hero `text-[14vw]` en 375px** — ~52px multilínea, riesgo de desborde (sin resolver, fuera del alcance de la grilla semanal de abajo). Grilla semanal del selector de fechas (`EstudioWeekGrid`, paso "¿Cuándo?") validada en vivo en 375px con datos reales: carrusel de 7 chips de día + lista vertical de franjas sin scroll horizontal accidental (`scrollWidth === innerWidth`), tap targets de los chips confirmados en 44×44 (`::before` de `hit-area-44`), franjas de la lista `min-h-11`. Resto del código OK. |
+| Escuela (listado) | `/escuelas` | 🟢 OK | TopBar rosa + SectionBanner + cards horizontales que se apilan en mobile. Validado 390px sin scroll horizontal (F5, #1278). Ruta pluralizada 2026-07-30 (`/escuela` queda como redirect); layout sin cambios. |
+| Taller (detalle) | `/escuelas/{slug}` | 🟢 OK | TopBar rosa con CTA "Inscribirme" + `TallerCTABar` sticky bottom mobile (mismo patrón que `MobileBookBar` de `/estudio`, `pb-24 lg:pb-0` en el contenido). Programa colapsable, form con T&C + drag&drop. Validado 390px: sin scroll horizontal (`scrollWidth===innerWidth`, 0 elementos overflow), tap targets medidos en vivo (encontrado y corregido un CTA en 40px, ahora 44px). F5, #1278. |
+| Completar seña | `/escuelas/sena/{token}` | 🟢 OK | Página nueva (F5, #1278) — consume el link tokenizado que manda el mail de "se liberó un cupo" (F4b). Card centrada `max-w-md`, mismo patrón de dropzone drag&drop que el form principal. Maneja 404 (link inválido) y 410 (oferta no vigente) con `EmptyState`, sin pantalla en blanco. |
 | Preguntas frecuentes | `/preguntas-frecuentes` | 🟢 OK | Accordion + layout `max-w-3xl`. Code audit post-#249 confirma 🟢. |
 | Términos | `/terminos` | 🟢 OK | Página legal trivial (lectura centrada). `px-4 md:px-6`, `max-w-3xl`. |
 | Privacidad | `/privacidad` | 🟢 OK | Página legal trivial. Mismo patrón que `/terminos`. |

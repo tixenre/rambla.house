@@ -129,7 +129,6 @@ _BODY_ESTUDIO = {
     "fecha": "2030-01-01",
     "start": "09:00",
     "horas": 2,
-    "con_pack": False,
 }
 
 

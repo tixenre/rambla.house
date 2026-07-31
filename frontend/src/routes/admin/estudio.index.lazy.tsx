@@ -8,7 +8,7 @@ import { ListSkeleton } from "@/components/admin/skeletons";
 import { ErrorState } from "@/components/admin/ErrorState";
 import { ConfigForm } from "@/components/admin/estudio/ConfigForm";
 import { GaleriaSection } from "@/components/admin/estudio/GaleriaSection";
-import { PackSection } from "@/components/admin/estudio/PackSection";
+import { PromoSection } from "@/components/admin/estudio/PromoSection";
 import { SlotsSection } from "@/components/admin/estudio/SlotsSection";
 import { TrabajosSection } from "@/components/admin/estudio/TrabajosSection";
 
@@ -51,7 +51,7 @@ function EstudioAdminPage() {
           onSaved={() => qc.invalidateQueries({ queryKey: ["admin", "estudio"] })}
         />
 
-        <PackSection />
+        <PromoSection config={data} />
 
         <GaleriaSection
           fotos={data.fotos}

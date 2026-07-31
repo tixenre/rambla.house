@@ -26,8 +26,17 @@ import {
 import { Input } from "@/design-system/ui/input";
 import { Label } from "@/design-system/ui/label";
 import { Button } from "@/design-system/ui/button";
+import { Switch } from "@/design-system/ui/switch";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/design-system/ui/select";
 
 import { adminApi, type Equipo, type CategoriaAdmin } from "@/lib/admin/api";
+import { DUENOS } from "@/lib/admin/duenos";
 import { uploadFileToBucket } from "@/lib/equipment/photos";
 import { ComboEditor } from "./equipo-form/ComboEditor";
 
@@ -57,6 +66,8 @@ export function ComboBuilderDialog({
 
   const [step, setStep] = useState<"form" | "componentes">("form");
   const [nombre, setNombre] = useState("");
+  const [dueno, setDueno] = useState<string>("Rental");
+  const [visibleCatalogo, setVisibleCatalogo] = useState(true);
   const [saving, setSaving] = useState(false);
   const [equipo, setEquipo] = useState<Equipo | null>(null);
 
@@ -76,6 +87,8 @@ export function ComboBuilderDialog({
       // Reset para la próxima apertura
       setStep("form");
       setNombre("");
+      setDueno("Rental");
+      setVisibleCatalogo(true);
       setSaving(false);
       setEquipo(null);
       setFile(null);
@@ -106,13 +119,13 @@ export function ComboBuilderDialog({
         nombre: nombre.trim(),
         tipo: "combo",
         cantidad: COMBO_SENTINEL_STOCK,
-        visible_catalogo: 1,
+        visible_catalogo: visibleCatalogo ? 1 : 0,
         estado: "operativo",
         precio_jornada: null,
         marca: null,
         modelo: null,
         serie: null,
-        dueno: null,
+        dueno,
         bh_url: null,
         foto_url: null,
         fecha_compra: null,
@@ -215,6 +228,33 @@ export function ComboBuilderDialog({
                   />
                 </label>
               )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label>Dueño</Label>
+                <Select value={dueno} onValueChange={setDueno}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Seleccionar…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DUENOS.map((d) => (
+                      <SelectItem key={d} value={d}>
+                        {d}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label>Visibilidad</Label>
+                <div className="flex h-9 items-center gap-2">
+                  <Switch checked={visibleCatalogo} onCheckedChange={setVisibleCatalogo} />
+                  <span className="text-sm text-muted-foreground">
+                    {visibleCatalogo ? "Visible en catálogo" : "Oculto del catálogo"}
+                  </span>
+                </div>
+              </div>
             </div>
 
             <p className="text-xs text-muted-foreground">

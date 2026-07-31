@@ -12,24 +12,29 @@ from reportes.liquidacion import agregar, combinar_meses
 
 
 class TestRepartir:
-    def test_rambla_se_lleva_todo(self):
-        assert repartir("Rambla", 100000, DEFAULT_MODELO) == {"Rambla": 100000}
+    def test_rental_se_lleva_todo(self):
+        assert repartir("Rental", 100000, DEFAULT_MODELO) == {"Rental": 100000}
 
     def test_pablo_50_45_5(self):
         r = repartir("Pablo", 100000, DEFAULT_MODELO)
-        assert r == {"Pablo": 50000, "Rambla": 45000, "Tincho": 5000}
+        assert r == {"Pablo": 50000, "Rental": 45000, "Tincho": 5000}
 
     def test_tincho_50_45_5(self):
         r = repartir("Tincho", 100000, DEFAULT_MODELO)
-        assert r == {"Tincho": 50000, "Rambla": 45000, "Pablo": 5000}
+        assert r == {"Tincho": 50000, "Rental": 45000, "Pablo": 5000}
 
     def test_dueno_desconocido_cobra_todo(self):
         # Un valor legacy fuera del modelo no pierde plata: 100% a sí mismo.
         assert repartir("Legacy SA", 100000, DEFAULT_MODELO) == {"Legacy SA": 100000}
 
     def test_reparto_suma_el_monto(self):
-        for dueno in ("Rambla", "Pablo", "Tincho"):
+        for dueno in ("Rental", "Pablo", "Tincho"):
             assert sum(repartir(dueno, 123456, DEFAULT_MODELO).values()) == pytest.approx(123456)
+
+    def test_estudio_se_lleva_todo(self):
+        # Economía separada (#1283): el Estudio no reparte con nadie más — es
+        # otra unidad de negocio, no una comisión sobre un equipo de Rental.
+        assert repartir("Estudio", 90000, DEFAULT_MODELO) == {"Estudio": 90000}
 
 
 class TestValidarModelo:
@@ -38,11 +43,11 @@ class TestValidarModelo:
 
     def test_rechaza_no_suma_100(self):
         with pytest.raises(ValueError):
-            validar_modelo({"Pablo": {"Pablo": 50, "Rambla": 40}})  # suma 90
+            validar_modelo({"Pablo": {"Pablo": 50, "Rental": 40}})  # suma 90
 
     def test_rechaza_pct_fuera_de_rango(self):
         with pytest.raises(ValueError):
-            validar_modelo({"Rambla": {"Rambla": 150}})
+            validar_modelo({"Rental": {"Rental": 150}})
 
     def test_rechaza_vacio(self):
         with pytest.raises(ValueError):
@@ -50,16 +55,16 @@ class TestValidarModelo:
 
     def test_rechaza_pct_no_numerico(self):
         with pytest.raises(ValueError):
-            validar_modelo({"Rambla": {"Rambla": "100"}})
+            validar_modelo({"Rental": {"Rental": "100"}})
 
 
 class TestAgregar:
     def _filas(self):
-        # Un pedido de Pablo saldado en mayo, uno de Rambla saldado en junio.
+        # Un pedido de Pablo saldado en mayo, uno de Rental saldado en junio.
         return [
             {"fecha": "2026-05-10", "pedido_id": 1, "dueno": "Pablo",
              "equipo": "Sony FX3", "monto": 100000},
-            {"fecha": "2026-06-03", "pedido_id": 2, "dueno": "Rambla",
+            {"fecha": "2026-06-03", "pedido_id": 2, "dueno": "Rental",
              "equipo": "Canon R5", "monto": 40000},
         ]
 
@@ -67,9 +72,9 @@ class TestAgregar:
         d = agregar(self._filas(), DEFAULT_MODELO)
         assert d["resumen"]["total"] == 140000
         pb = d["resumen"]["por_beneficiario"]
-        # Pablo: 50k; Rambla: 45k (de Pablo) + 40k (suyo) = 85k; Tincho: 5k.
+        # Pablo: 50k; Rental: 45k (de Pablo) + 40k (suyo) = 85k; Tincho: 5k.
         assert pb["Pablo"] == 50000
-        assert pb["Rambla"] == 85000
+        assert pb["Rental"] == 85000
         assert pb["Tincho"] == 5000
 
     def test_buckets_por_mes_atribuyen_al_mes_de_saldado(self):
@@ -85,7 +90,7 @@ class TestAgregar:
         assert dias == {"2026-05-10", "2026-06-03"}
         duenos = {x["dueno"]: x for x in d["por_dueno"]}
         assert duenos["Pablo"]["monto_generado"] == 100000
-        assert duenos["Pablo"]["reparto"]["Rambla"] == 45000
+        assert duenos["Pablo"]["reparto"]["Rental"] == 45000
         assert duenos["Pablo"]["equipos"][0]["equipo"] == "Sony FX3"
 
     def test_cuenta_veces_alquilado(self):
@@ -95,7 +100,7 @@ class TestAgregar:
              "equipo": "Sony FX3", "monto": 100000},
             {"fecha": "2026-06-10", "pedido_id": 2, "dueno": "Pablo",
              "equipo": "Sony FX3", "monto": 60000},
-            {"fecha": "2026-06-15", "pedido_id": 3, "dueno": "Rambla",
+            {"fecha": "2026-06-15", "pedido_id": 3, "dueno": "Rental",
              "equipo": "Canon R5", "monto": 40000},
         ]
         d = agregar(filas, DEFAULT_MODELO)
@@ -117,17 +122,17 @@ class TestAgregar:
             {"fecha": "2026-06-03", "pedido_id": 1, "numero_pedido": 501,
              "cliente": "Juan Pérez", "dueno": "Pablo", "equipo": "Sony FX3", "monto": 60000},
             {"fecha": "2026-06-03", "pedido_id": 1, "numero_pedido": 501,
-             "cliente": "Juan Pérez", "dueno": "Rambla", "equipo": "Canon R5", "monto": 40000},
+             "cliente": "Juan Pérez", "dueno": "Rental", "equipo": "Canon R5", "monto": 40000},
         ]
         d = agregar(filas, DEFAULT_MODELO)
         duenos = {x["dueno"]: x for x in d["por_dueno"]}
         pablo_pedidos = duenos["Pablo"]["pedidos_detalle"]
-        rambla_pedidos = duenos["Rambla"]["pedidos_detalle"]
+        rental_pedidos = duenos["Rental"]["pedidos_detalle"]
         assert pablo_pedidos == [
             {"pedido_id": 1, "numero_pedido": 501, "cliente": "Juan Pérez",
              "fecha": "2026-06-03", "monto": 60000},
         ]
-        assert rambla_pedidos[0]["monto"] == 40000
+        assert rental_pedidos[0]["monto"] == 40000
 
     def test_pedidos_detalle_fallback_sin_numero_ni_cliente(self):
         # Filas sin numero_pedido/cliente (compat con filas viejas/otros tests)
@@ -192,30 +197,30 @@ class TestCombinarMeses:
     vivo, le da igual) en un solo reporte multi-mes. Sumar es seguro porque un
     pedido pertenece a un único mes de saldado — nunca se solapan."""
 
-    def _mes(self, mes: str, pablo_total: int, pablo_benef: int, rambla_benef: int):
+    def _mes(self, mes: str, pablo_total: int, pablo_benef: int, rental_benef: int):
         """Un reporte de un solo mes con la forma de `liquidar`, con un único
         pedido de Pablo repartido según se indique."""
         return {
             "resumen": {
                 "total": pablo_total,
                 "pedidos": 1,
-                "por_beneficiario": {"Pablo": pablo_benef, "Rambla": rambla_benef},
+                "por_beneficiario": {"Pablo": pablo_benef, "Rental": rental_benef},
             },
             "por_mes": [
                 {
                     "mes": mes,
                     "total": pablo_total,
-                    "por_beneficiario": {"Pablo": pablo_benef, "Rambla": rambla_benef},
+                    "por_beneficiario": {"Pablo": pablo_benef, "Rental": rental_benef},
                 }
             ],
             "por_dia": [{"dia": f"{mes}-10", "total": pablo_total,
-                         "por_beneficiario": {"Pablo": pablo_benef, "Rambla": rambla_benef}}],
+                         "por_beneficiario": {"Pablo": pablo_benef, "Rental": rental_benef}}],
             "por_dueno": [
                 {
                     "dueno": "Pablo",
                     "monto_generado": pablo_total,
                     "pedidos": 1,
-                    "reparto": {"Pablo": pablo_benef, "Rambla": rambla_benef},
+                    "reparto": {"Pablo": pablo_benef, "Rental": rental_benef},
                     "equipos": [{"equipo": "Sony FX3", "monto": pablo_total, "veces": 1}],
                     "pedidos_detalle": [
                         {"pedido_id": int(mes.replace("-", "")), "numero_pedido": 900,
@@ -225,7 +230,7 @@ class TestCombinarMeses:
                 }
             ],
             "modelo": {"Pablo": {"Pablo": 100}},
-            "beneficiarios": ["Pablo", "Rambla"],
+            "beneficiarios": ["Pablo", "Rental"],
         }
 
     def test_suma_resumen_sin_duplicar(self):
@@ -234,7 +239,7 @@ class TestCombinarMeses:
         d = combinar_meses([junio, julio])
         assert d["resumen"]["total"] == 140000
         assert d["resumen"]["pedidos"] == 2
-        assert d["resumen"]["por_beneficiario"] == {"Pablo": 90000, "Rambla": 50000}
+        assert d["resumen"]["por_beneficiario"] == {"Pablo": 90000, "Rental": 50000}
 
     def test_por_mes_conserva_cada_fuente_por_separado(self):
         junio = self._mes("2026-06", 100000, 50000, 50000)
@@ -269,11 +274,11 @@ class TestCombinarMeses:
 
     def test_beneficiarios_es_la_union_en_orden_de_aparicion(self):
         junio = self._mes("2026-06", 100000, 50000, 50000)
-        junio["beneficiarios"] = ["Pablo", "Rambla"]
+        junio["beneficiarios"] = ["Pablo", "Rental"]
         julio = self._mes("2026-07", 40000, 40000, 0)
-        julio["beneficiarios"] = ["Pablo", "Rambla", "Tincho"]
+        julio["beneficiarios"] = ["Pablo", "Rental", "Tincho"]
         d = combinar_meses([junio, julio])
-        assert d["beneficiarios"] == ["Pablo", "Rambla", "Tincho"]
+        assert d["beneficiarios"] == ["Pablo", "Rental", "Tincho"]
 
     def test_lista_vacia(self):
         d = combinar_meses([])

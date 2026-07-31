@@ -28,31 +28,31 @@ pytestmark = [
 def test_init_db_idempotente_con_cuenta_socio_renombrada():
     from database import init_db, get_db
 
-    init_db()  # 1ª vez: crea la tabla + siembra las cuentas (incl. socio='Rambla')
+    init_db()  # 1ª vez: crea la tabla + siembra las cuentas (incl. socio='Rental')
 
-    # Estado de prod: el usuario renombró la cuenta del socio Rambla. Su nombre
-    # sale del índice parcial activo, pero socio='Rambla' sigue en idx_cuentas_socio.
+    # Estado de prod: el usuario renombró la cuenta del socio Rental. Su nombre
+    # sale del índice parcial activo, pero socio='Rental' sigue en idx_cuentas_socio.
     conn = get_db()
-    conn.execute("UPDATE cuentas SET nombre = 'Caja Rambla (renombrada)' WHERE socio = 'Rambla'")
+    conn.execute("UPDATE cuentas SET nombre = 'Caja Rental (renombrada)' WHERE socio = 'Rental'")
     conn.commit()
     conn.close()
 
     try:
-        # 2ª vez: el seed re-inserta ('Fondo Rambla', socio='Rambla'). SIN el fix,
-        # no hay choque por nombre-activo (ya no existe 'Fondo Rambla' activo) pero
+        # 2ª vez: el seed re-inserta ('Fondo Rental', socio='Rental'). SIN el fix,
+        # no hay choque por nombre-activo (ya no existe 'Fondo Rental' activo) pero
         # SÍ por idx_cuentas_socio → UniqueViolation e init_db revienta. CON el fix
         # (`ON CONFLICT DO NOTHING`) salta y no rompe.
         init_db()  # no debe lanzar
 
         conn = get_db()
         n = conn.execute(
-            "SELECT COUNT(*) AS c FROM cuentas WHERE socio = 'Rambla'"
+            "SELECT COUNT(*) AS c FROM cuentas WHERE socio = 'Rental'"
         ).fetchone()["c"]
         conn.close()
-        assert n == 1, f"se duplicó la cuenta del socio Rambla ({n})"
+        assert n == 1, f"se duplicó la cuenta del socio Rental ({n})"
     finally:
         # Restaurar el nombre para no contaminar otros tests de la base compartida.
         conn = get_db()
-        conn.execute("UPDATE cuentas SET nombre = 'Fondo Rambla' WHERE socio = 'Rambla'")
+        conn.execute("UPDATE cuentas SET nombre = 'Fondo Rental' WHERE socio = 'Rental'")
         conn.commit()
         conn.close()

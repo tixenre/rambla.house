@@ -36,7 +36,7 @@ find backend/ -name "*.py" | xargs grep -l "@router\|APIRouter" | grep -v __pyca
 ```
 
 Leer `frontend/src/App.tsx` o el archivo de rutas principal para listar páginas activas:
-- **Público:** `/`, `/equipo/$slug`, `/categoria/$slug`, `/estudio`, `/talleres/$slug`, `/preguntas-frecuentes`
+- **Público:** `/`, `/equipo/$slug`, `/categoria/$slug`, `/estudio`, `/escuela/$slug`, `/preguntas-frecuentes`
 - **Portal cliente:** `/cliente/portal`, `/cliente/pedidos/$id`, `/cliente/perfil`
 - **Rental flow:** `/rental`
 

@@ -1,6 +1,15 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bell, CheckCircle2, Clock, Download, ExternalLink, Trash2, Users } from "lucide-react";
+import {
+  Bell,
+  CheckCircle2,
+  Clock,
+  Download,
+  ExternalLink,
+  Send,
+  Trash2,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 
 import { talleresAdminApi } from "@/lib/admin/api/talleres";
@@ -20,6 +29,7 @@ import { useConfirm } from "@/components/admin/useConfirm";
 import { AdminTable, type Column } from "@/components/admin/AdminTable";
 import { ListSkeleton } from "@/components/admin/skeletons";
 import { EmptyState } from "@/design-system/composites/EmptyState";
+import { KpisStrip } from "./KpisStrip";
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
@@ -66,6 +76,25 @@ export function InscripcionesSection({
       toast.success("Inscripción confirmada");
       qc.invalidateQueries({ queryKey: ["admin", "ediciones", edicion.id, "inscripciones"] });
       qc.invalidateQueries({ queryKey: ["admin", "talleres"] });
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+
+  // F4b: seña + ofrecer cupo al siguiente.
+  const verificarSenaMut = useMutation({
+    mutationFn: (insId: number) => talleresAdminApi.verificarSena(concepto.id, insId),
+    onSuccess: () => {
+      toast.success("Seña verificada — mail de confirmación enviado");
+      qc.invalidateQueries({ queryKey: ["admin", "ediciones", edicion.id, "inscripciones"] });
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+
+  const ofrecerCupoMut = useMutation({
+    mutationFn: (insId: number) => talleresAdminApi.ofrecerCupo(concepto.id, insId),
+    onSuccess: () => {
+      toast.success("Cupo ofrecido — mail con el link enviado");
+      qc.invalidateQueries({ queryKey: ["admin", "ediciones", edicion.id, "inscripciones"] });
     },
     onError: (e) => toast.error((e as Error).message),
   });
@@ -175,16 +204,45 @@ export function InscripcionesSection({
         header: "",
         cell: (ins) => (
           <div className="flex items-center gap-1">
-            {showConfirmar && (
+            {!showConfirmar && ins.estado === "pendiente_sena" && (
               <Button
                 variant="outline"
                 size="sm"
                 className="h-7 px-2 text-xs"
-                disabled={confirmarMut.isPending}
-                onClick={() => confirmarMut.mutate(ins.id)}
+                disabled={verificarSenaMut.isPending}
+                onClick={() => verificarSenaMut.mutate(ins.id)}
               >
-                Confirmar
+                Verificar seña
               </Button>
+            )}
+            {showConfirmar && ins.estado === "cupo_ofrecido" ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-muted/50 px-2 py-1 text-2xs text-muted-foreground">
+                <Send className="h-3 w-3" />
+                Oferta enviada
+              </span>
+            ) : (
+              showConfirmar && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    disabled={confirmarMut.isPending}
+                    onClick={() => confirmarMut.mutate(ins.id)}
+                  >
+                    Confirmar
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs"
+                    disabled={ofrecerCupoMut.isPending}
+                    onClick={() => ofrecerCupoMut.mutate(ins.id)}
+                  >
+                    Ofrecer cupo
+                  </Button>
+                </>
+              )
             )}
             <Button
               variant="ghost"
@@ -204,6 +262,10 @@ export function InscripcionesSection({
 
   return (
     <>
+      <div className="mb-5">
+        <KpisStrip edicionId={edicion.id} />
+      </div>
+
       {confirmadas.length > 0 && (
         <div className="flex flex-col gap-3">
           <div className="flex items-center justify-between gap-3">

@@ -18,6 +18,7 @@ import {
 } from "@/design-system/ui/dialog";
 import { TallerCalendario } from "@/components/talleres/TallerCalendario";
 import { ClasesAsistente } from "./ClasesAsistente";
+import { nextDraftId } from "@/lib/talleres/draftId";
 
 export function NuevaEdicionDialog({
   concepto,
@@ -35,7 +36,6 @@ export function NuevaEdicionDialog({
       ? Math.max(...concepto.ediciones.map((e) => e.numero_edicion)) + 1
       : 1;
 
-  const [tipo, setTipo] = useState("intensivo");
   const [clases, setClases] = useState<ClaseBody[]>([]);
   const [cupos, setCupos] = useState("12");
   const [precioTotal, setPrecioTotal] = useState("0");
@@ -43,7 +43,6 @@ export function NuevaEdicionDialog({
 
   useEffect(() => {
     if (open) {
-      setTipo("intensivo");
       setClases([]);
       setCupos("12");
       setPrecioTotal("0");
@@ -54,11 +53,41 @@ export function NuevaEdicionDialog({
   const mut = useMutation({
     mutationFn: (body: object) => talleresAdminApi.createEdicion(concepto!.id, body),
     onSuccess: (created) => {
-      toast.success(`Edición #${created.numero_edicion} creada`);
+      toast.success(`Edición #${created.numero_edicion} creada (en borrador)`);
       onSuccess(created);
     },
     onError: (e) => toast.error((e as Error).message),
   });
+
+  // F2: precarga las clases de la última edición (contenido + portada
+  // incluidos — viajan como clases NUEVAS, sin id, con su portada_media_id).
+  // El admin ajusta las fechas y listo: no re-carga el temario.
+  function copiarClasesAnterior() {
+    const ultima = concepto?.ediciones[concepto.ediciones.length - 1];
+    if (!ultima || ultima.clases.length === 0) {
+      toast.error("La edición anterior no tiene clases");
+      return;
+    }
+    setClases(
+      ultima.clases.map((c) => ({
+        id: nextDraftId(),
+        fecha: c.fecha,
+        hora_inicio_min: c.hora_inicio_min,
+        hora_fin_min: c.hora_fin_min,
+        titulo: c.titulo ?? "",
+        descripcion: c.descripcion ?? "",
+        nota: c.nota ?? "",
+        portada_media_id: c.portada_media_id ?? null,
+        portada_url: c.portada_url ?? "",
+      })),
+    );
+    setCupos(String(ultima.cupos_total));
+    setPrecioTotal(String(ultima.precio_total));
+    setPrecioSena(String(ultima.precio_sena));
+    toast.success(
+      `${ultima.clases.length} clases copiadas de la edición #${ultima.numero_edicion} — ajustá las fechas`,
+    );
+  }
 
   function handleSubmit() {
     if (clases.length === 0) {
@@ -77,7 +106,9 @@ export function NuevaEdicionDialog({
       return;
     }
     mut.mutate({
-      tipo_taller: tipo,
+      // `tipo_taller` no tiene UI propia (Escuela v2) — el backend igual lo
+      // exige (NOT NULL), así que viaja fijo.
+      tipo_taller: "intensivo",
       clases,
       cupos_total: c,
       precio_total: pt,
@@ -98,15 +129,17 @@ export function NuevaEdicionDialog({
 
         <div className="flex flex-col gap-5 py-2">
           <div className="border-b border-border/50 pb-4">
-            <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3">
-              Clases *
-            </p>
-            <ClasesAsistente
-              tipo={tipo}
-              onTipoChange={setTipo}
-              clases={clases}
-              onChange={setClases}
-            />
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Clases *
+              </p>
+              {concepto && concepto.ediciones.length > 0 && (
+                <Button variant="outline" size="sm" onClick={copiarClasesAnterior}>
+                  Copiar clases de la edición anterior
+                </Button>
+              )}
+            </div>
+            <ClasesAsistente clases={clases} onChange={setClases} />
             {clases.length > 0 && (
               <div className="mt-4 pointer-events-none select-none">
                 <TallerCalendario sesiones={clases} />

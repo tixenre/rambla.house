@@ -5,7 +5,7 @@ import { Footer } from "./Footer";
 const VARIANT_TO_AREA: Partial<Record<NonNullable<TopBarProps["variant"]>, string>> = {
   rental: "rental",
   estudio: "estudio",
-  workshops: "workshops",
+  escuela: "escuela",
 };
 
 export function PublicLayout({ children, topBar }: { children: ReactNode; topBar?: TopBarProps }) {

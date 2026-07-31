@@ -6,6 +6,7 @@ Lee directo de pedidos + alquiler_items + equipos. Sin tablas intermedias.
 from fastapi import APIRouter, Request
 from database import get_db, row_to_dict
 from auth.guards import require_admin
+from tipos_pedido import TIPOS_DERIVADOS_SQL, TIPOS_ESTUDIO_SQL
 
 router = APIRouter()
 
@@ -54,7 +55,17 @@ def compute_estadisticas(conn) -> dict:
     # ítem lo multiplicaría por cada línea del pedido. Todo pedido `finalizado`
     # tiene ≥1 ítem (invariante de creación, `routes/alquileres/core.py`), así
     # que no hace falta el join para filtrar "tiene ítems".
-    totales = conn.execute("""
+    #
+    # `tipo NOT IN TIPOS_DERIVADOS_SQL` (`tipos_pedido.py`, fuente única — antes
+    # 7 literales `('estudio','estudio_fijo','taller')` repetidos acá) en TODAS
+    # las agregaciones de esta función (#1283 Fase 7 + Talleres): Estudio y
+    # Talleres son economías separadas (Estudio tiene su propia sección más
+    # abajo) — mezclarlas acá inflaba "Top equipos"/"por dueño" con el
+    # centinela y con "clientes" falsos (`"Taller X — Julio 2026"`),
+    # confundiendo el negocio de rental con el de esas líneas. Los números
+    # históricos de estas tarjetas cambian (bajan) respecto de antes de cada
+    # fase — es la separación intencional, no una regresión.
+    totales = conn.execute(f"""
         SELECT
             COUNT(*)                       AS total_pedidos,
             COUNT(DISTINCT p.cliente_id)   AS total_clientes,
@@ -62,17 +73,17 @@ def compute_estadisticas(conn) -> dict:
             MIN(p.fecha_desde)             AS desde,
             MAX(p.fecha_desde)             AS hasta
         FROM alquileres p
-        WHERE p.estado = 'finalizado'
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
     """).fetchone()
 
     # ── Por mes ───────────────────────────────────────────────────────────────
-    por_mes = conn.execute("""
+    por_mes = conn.execute(f"""
         SELECT
             to_char(p.fecha_desde, 'YYYY-MM')    AS mes,
             COUNT(*)                       AS pedidos,
             SUM(p.monto_total)             AS total_ars
         FROM alquileres p
-        WHERE p.estado = 'finalizado'
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
         GROUP BY to_char(p.fecha_desde, 'YYYY-MM')
         ORDER BY to_char(p.fecha_desde, 'YYYY-MM') DESC
         LIMIT 24
@@ -91,21 +102,21 @@ def compute_estadisticas(conn) -> dict:
         JOIN alquileres p  ON p.id  = pi.pedido_id
         JOIN equipos e  ON e.id  = pi.equipo_id
         JOIN tot t ON t.pedido_id = p.id
-        WHERE p.estado = 'finalizado'
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
         GROUP BY pi.equipo_id, e.nombre
         ORDER BY total_ars DESC
         LIMIT 15
     """).fetchall()
 
     # ── Top clientes ──────────────────────────────────────────────────────────
-    top_clientes = conn.execute("""
+    top_clientes = conn.execute(f"""
         SELECT
             MAX(COALESCE(c.nombre || ' ' || c.apellido, p.cliente_nombre)) AS cliente,
             SUM(p.monto_total)             AS total_ars,
             COUNT(DISTINCT p.id)           AS pedidos
         FROM alquileres p
         LEFT JOIN clientes c ON c.id = p.cliente_id
-        WHERE p.estado = 'finalizado'
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
         GROUP BY COALESCE(CAST(p.cliente_id AS TEXT), 'txt:' || p.cliente_nombre)
         ORDER BY total_ars DESC
         LIMIT 10
@@ -116,15 +127,15 @@ def compute_estadisticas(conn) -> dict:
     por_dueno = conn.execute(f"""
         WITH {_PRORRATEO_CTE}
         SELECT
-            COALESCE(e.dueno, 'Rambla')    AS dueno,
+            COALESCE(e.dueno, 'Rental')    AS dueno,
             SUM(p.monto_total * pi.subtotal::numeric / NULLIF(t.suma_items, 0)) AS total_ars,
             COUNT(*)                       AS items
         FROM alquiler_items pi
         JOIN alquileres p ON p.id = pi.pedido_id
         JOIN equipos e ON e.id = pi.equipo_id
         JOIN tot t ON t.pedido_id = p.id
-        WHERE p.estado = 'finalizado'
-        GROUP BY COALESCE(e.dueno, 'Rambla')
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
+        GROUP BY COALESCE(e.dueno, 'Rental')
         ORDER BY total_ars DESC
     """).fetchall()
 
@@ -151,14 +162,14 @@ def compute_estadisticas(conn) -> dict:
     crecimiento.sort(key=lambda x: x['mes'], reverse=True)
 
     # ── Clientes más recurrentes ───────────────────────────────────────────────
-    clientes_recurrentes = conn.execute("""
+    clientes_recurrentes = conn.execute(f"""
         SELECT
             MAX(COALESCE(c.nombre || ' ' || c.apellido, p.cliente_nombre)) AS cliente,
             COUNT(DISTINCT p.id)           AS veces_alquiladas,
             SUM(p.monto_total)             AS total_ars
         FROM alquileres p
         LEFT JOIN clientes c ON c.id = p.cliente_id
-        WHERE p.estado = 'finalizado'
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
         GROUP BY COALESCE(CAST(p.cliente_id AS TEXT), 'txt:' || p.cliente_nombre)
         HAVING COUNT(DISTINCT p.id) > 1
         ORDER BY veces_alquiladas DESC
@@ -169,12 +180,13 @@ def compute_estadisticas(conn) -> dict:
     # A nivel PEDIDO, igual que `totales`/`por_mes`: una sola CTE con `monto_total`
     # (sin join a ítems), reusada 4 veces en vez de repetir la fórmula del ingreso
     # en cada subquery. Sobre TODO el histórico (sin el LIMIT 24 de `por_mes`) —
-    # mismo universo que antes.
-    mejor_peor = conn.execute("""
+    # mismo universo que antes. `tipo NOT IN (...)` también acá (Fase 7): un mes
+    # con mucho volumen de estudio no debe aparecer como "mejor mes" del rental.
+    mejor_peor = conn.execute(f"""
         WITH por_mes_full AS (
             SELECT to_char(p.fecha_desde, 'YYYY-MM') AS mes, SUM(p.monto_total) AS total
             FROM alquileres p
-            WHERE p.estado = 'finalizado'
+            WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
             GROUP BY to_char(p.fecha_desde, 'YYYY-MM')
         )
         SELECT
@@ -216,6 +228,42 @@ def compute_estadisticas(conn) -> dict:
     else:
         favoritos_equipo = []
 
+    # ── Estudio (economía separada, #1283 Fase 7) ─────────────────────────────
+    # Mismo universo DEVENGADO (`estado='finalizado'`) que el resto de esta
+    # función. `horas_vendidas` se computa SOLO de `tipo='estudio'` (turnos
+    # reales) vía FILTER: un `estudio_fijo` guarda en `fecha_desde/fecha_hasta`
+    # únicamente la PRIMERA ocurrencia semanal del mes (`_primer_dia_semana`),
+    # no el total de horas de todas las recurrencias — sumarlo ahí subestimaría
+    # feo las horas. La plata y el conteo de pedidos SÍ combinan ambos tipos
+    # (ambos son ingreso real del Estudio), solo separados en columnas propias
+    # (`turnos` vs `meses_slot_fijo`) para no mezclar la unidad de negocio.
+    estudio_por_mes = conn.execute(f"""
+        SELECT
+            to_char(p.fecha_desde, 'YYYY-MM')                  AS mes,
+            COUNT(*) FILTER (WHERE p.tipo = 'estudio')         AS turnos,
+            COUNT(*) FILTER (WHERE p.tipo = 'estudio_fijo')    AS meses_slot_fijo,
+            SUM(p.monto_total)                                 AS total_ars,
+            COALESCE(SUM(EXTRACT(EPOCH FROM (p.fecha_hasta - p.fecha_desde)) / 3600)
+                     FILTER (WHERE p.tipo = 'estudio'), 0)      AS horas_vendidas
+        FROM alquileres p
+        WHERE p.estado = 'finalizado' AND p.tipo IN {TIPOS_ESTUDIO_SQL}
+        GROUP BY to_char(p.fecha_desde, 'YYYY-MM')
+        ORDER BY to_char(p.fecha_desde, 'YYYY-MM') DESC
+        LIMIT 24
+    """).fetchall()
+
+    estudio_totales = conn.execute(f"""
+        SELECT
+            COUNT(*) FILTER (WHERE p.tipo = 'estudio')         AS total_turnos,
+            COUNT(*) FILTER (WHERE p.tipo = 'estudio_fijo')    AS total_meses_slot_fijo,
+            COUNT(DISTINCT p.cliente_id)                       AS total_clientes,
+            SUM(p.monto_total)                                 AS total_ars,
+            COALESCE(SUM(EXTRACT(EPOCH FROM (p.fecha_hasta - p.fecha_desde)) / 3600)
+                     FILTER (WHERE p.tipo = 'estudio'), 0)      AS horas_vendidas
+        FROM alquileres p
+        WHERE p.estado = 'finalizado' AND p.tipo IN {TIPOS_ESTUDIO_SQL}
+    """).fetchone()
+
     return {
         "totales":              row_to_dict(totales),
         "por_mes":              [row_to_dict(r) for r in por_mes],
@@ -226,4 +274,8 @@ def compute_estadisticas(conn) -> dict:
         "mejor_peor_mes":       mejor_peor_mes,
         "por_dueno":            [row_to_dict(r) for r in por_dueno],
         "favoritos_equipo":     [row_to_dict(r) for r in favoritos_equipo],
+        "estudio": {
+            "totales": row_to_dict(estudio_totales),
+            "por_mes": [row_to_dict(r) for r in estudio_por_mes],
+        },
     }

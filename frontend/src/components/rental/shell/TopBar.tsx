@@ -24,7 +24,7 @@ const TOPBAR_PX = "px-4 md:px-8";
 const SECTION_CONFIG = {
   rental: { ...AREAS.rental, ctaColor: "bg-ink text-amber hover:opacity-90" },
   estudio: { ...AREAS.estudio, ctaColor: "bg-white text-ink hover:bg-white/90" },
-  workshops: { ...AREAS.workshops, ctaColor: "bg-white text-ink hover:bg-white/90" },
+  escuela: { ...AREAS.escuela, ctaColor: "bg-white text-ink hover:bg-white/90" },
   cliente: {
     label: "portal.",
     href: "/cliente/portal",
@@ -38,17 +38,17 @@ export type Section = keyof typeof SECTION_CONFIG;
 const SECTION_DEFAULT_CTA: Record<Section, { label: string; href: string } | null> = {
   rental: null,
   estudio: { label: "Reservar el estudio", href: "/estudio#reserva" },
-  workshops: null,
+  escuela: null,
   cliente: null,
 };
 
 export type TopBarProps = {
   /**
    * - "default" / "rental": catálogo (dates pill + carrito).
-   * - "estudio" / "workshops": topbar de sección + CTA.
+   * - "estudio" / "escuela": topbar de sección + CTA.
    * - "cliente": portal post-login (logo + menú; perfil/salir van en el menú).
    */
-  variant?: "default" | "rental" | "estudio" | "workshops" | "cliente";
+  variant?: "default" | "rental" | "estudio" | "escuela" | "cliente";
   /** CTA override para section bars. Si no se pasa se usa el default de la sección. */
   cta?: { label: string; href: string };
 };
@@ -56,7 +56,7 @@ export type TopBarProps = {
 export function TopBar({ variant = "default", cta }: TopBarProps = {}) {
   if (variant === "cliente") return <ClienteTopBar />;
   if (variant === "estudio") return <SectionTopBar section="estudio" ctaOverride={cta} />;
-  if (variant === "workshops") return <SectionTopBar section="workshops" ctaOverride={cta} />;
+  if (variant === "escuela") return <SectionTopBar section="escuela" ctaOverride={cta} />;
   // "default" | "rental"
   return <RentalTopBar />;
 }
@@ -141,7 +141,7 @@ export function SectionLogo({
   );
 }
 
-// ── TopBar de secciones (estudio / workshops): logo + CTA ─────────────────────────
+// ── TopBar de secciones (estudio / escuela): logo + CTA ─────────────────────────
 function SectionTopBar({
   section,
   ctaOverride,

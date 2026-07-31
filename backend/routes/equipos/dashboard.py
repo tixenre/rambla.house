@@ -9,6 +9,7 @@ from fastapi import Request
 
 from auth.guards import require_admin
 from database import MARCA_SUBQUERY, get_db, row_to_dict
+from pedidos_vinculados import SIN_PRINCIPAL_SQL, TURNO_VINCULADO_SQL
 from routes.equipos.core import router
 
 
@@ -101,7 +102,12 @@ def admin_dashboard_uso(request: Request, dias_sin_uso: int = 90):
         #
         # Excluye estados borrador / presupuesto (todavía no son ventas) y
         # cancelado (ventas que no van).
-        por_cobrar_rows = conn.execute("""
+        #
+        # Un turno del Estudio vinculado (`pedido_principal_id`) no tiene fila
+        # propia acá (`SIN_PRINCIPAL_SQL`) — su saldo pendiente se suma al de
+        # su pedido principal (subquery `t`, excluye turnos cancelados) para
+        # no subestimar lo cobrable con una fila oculta.
+        por_cobrar_rows = conn.execute(f"""
             SELECT
                 p.id,
                 p.numero_pedido,
@@ -110,12 +116,26 @@ def admin_dashboard_uso(request: Request, dias_sin_uso: int = 90):
                 p.fecha_desde, p.fecha_hasta,
                 p.monto_total,
                 p.monto_pagado,
-                (COALESCE(p.monto_total, 0) - COALESCE(p.monto_pagado, 0)) AS pendiente
+                (
+                    COALESCE(p.monto_total, 0) - COALESCE(p.monto_pagado, 0)
+                    + COALESCE(t.pendiente_turnos, 0)
+                ) AS pendiente
             FROM alquileres p
             LEFT JOIN clientes c ON c.id = p.cliente_id
+            LEFT JOIN (
+                SELECT pedido_principal_id AS principal_id,
+                       SUM(COALESCE(monto_total, 0) - COALESCE(monto_pagado, 0)) AS pendiente_turnos
+                FROM alquileres
+                WHERE {TURNO_VINCULADO_SQL} AND estado <> 'cancelado'
+                GROUP BY pedido_principal_id
+            ) t ON t.principal_id = p.id
             WHERE p.estado IN ('confirmado', 'retirado', 'devuelto', 'finalizado')
-              AND COALESCE(p.monto_total, 0) > COALESCE(p.monto_pagado, 0)
-            ORDER BY (COALESCE(p.monto_total, 0) - COALESCE(p.monto_pagado, 0)) DESC
+              AND {SIN_PRINCIPAL_SQL}
+              AND (
+                    COALESCE(p.monto_total, 0) - COALESCE(p.monto_pagado, 0)
+                    + COALESCE(t.pendiente_turnos, 0)
+                  ) > 0
+            ORDER BY pendiente DESC
             LIMIT 50
         """).fetchall()
 

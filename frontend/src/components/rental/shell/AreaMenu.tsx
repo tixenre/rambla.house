@@ -46,7 +46,15 @@ const PORTAL_TABS = [
  * las 3 áreas como ítems de color, el área actual marcada. Incluye Inicio, acceso
  * al portal cliente y links secundarios.
  */
-export function AreaMenu({ current }: { current?: AreaKey | "cliente" }) {
+export function AreaMenu({
+  current,
+  tone = "onColor",
+}: {
+  current?: AreaKey | "cliente";
+  /** Estilo del botón según el fondo: "onColor" (topbar de marca, botón blanco
+   *  translúcido) o "onLight" (fondo hueso como la landing, botón ink sólido). */
+  tone?: "onColor" | "onLight";
+}) {
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
   const { data: clienteSession } = useClienteSession();
@@ -65,7 +73,12 @@ export function AreaMenu({ current }: { current?: AreaKey | "cliente" }) {
         <button
           type="button"
           aria-label="Menú de navegación"
-          className="grid h-11 w-11 shrink-0 place-items-center rounded-full bg-white/25 text-white transition hover:bg-white/40"
+          className={cn(
+            "grid h-11 w-11 shrink-0 place-items-center rounded-full transition",
+            tone === "onLight"
+              ? "bg-ink text-background hover:bg-ink/90"
+              : "bg-white/25 text-white hover:bg-white/40",
+          )}
         >
           <Menu className="h-5 w-5" />
         </button>
