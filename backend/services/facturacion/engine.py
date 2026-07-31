@@ -84,7 +84,11 @@ def _get_pedido(conn, pedido_id: int) -> dict:
         _enriquecer_pedido_con_cliente,
         _batch_get_alquiler_items,
     )
-    from services.finanzas_flujo.pedido import combinar_turnos_vinculados, desglose_de_pedido
+    from services.finanzas_flujo.pedido import (
+        combinar_turnos_vinculados,
+        desglose_de_pedido,
+        expandir_periodo_turnos_embebidos,
+    )
 
     row = conn.execute(
         "SELECT * FROM alquileres WHERE id = %s",
@@ -109,6 +113,11 @@ def _get_pedido(conn, pedido_id: int) -> dict:
     # el mismo número — si viviera solo en `emitir_factura`, el preview y la
     # reimpresión mostrarían un total distinto al del CAE.
     combinar_turnos_vinculados(conn, pedido, expandir_periodo=True)
+    # Mismo propósito que la línea de arriba, para el mecanismo NUEVO (#1308
+    # Fase 3.2): un turno del Estudio EMBEBIDO (`alquiler_turnos_estudio`) no
+    # suma plata acá (ya está en `pedido["items"]`, ver `desglose_de_pedido`)
+    # — solo puede estirar el período declarado del comprobante.
+    expandir_periodo_turnos_embebidos(conn, pedido)
     _enriquecer_pedido_con_cliente_fiscal(conn, pedido)
     _enriquecer_pedido_con_cliente(conn, pedido)
     return pedido

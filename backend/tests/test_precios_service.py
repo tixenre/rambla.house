@@ -314,3 +314,81 @@ class TestCombosNoAcumulables:
         )
         assert r["descuento_monto"] == 10000  # capeado, no 30.000
         assert r["neto"] == 20000  # el combo queda intacto
+
+
+class TestTurnoEmbebidoNoAcumulable:
+    """#1308 rediseño "turno como ítem", Fase 3.1 — una línea con
+    `turno_estudio_id` recibe el MISMO aislamiento que un combo (mismo bloque
+    `bruto_descontable`, ver el docstring de `calcular_total`). Mismos 4 casos
+    que `TestCombosNoAcumulables`, sustituyendo `es_combo` por
+    `turno_estudio_id` (un id real de `alquiler_turnos_estudio`, no un bool)."""
+
+    def test_turno_no_recibe_el_descuento_global(self):
+        # Equipo simple: 10.000 × 1 jornada = 10.000 (descontable).
+        # Turno embebido: 20.000 (ya resolvió su propio precio al insertarse
+        # — no se le vuelve a aplicar el 10% de cliente encima).
+        # bruto = 30.000; descuento = 10% de 10.000 (solo el simple) = 1.000.
+        r = calcular_total(
+            items=[
+                {"equipo_id": 1, "cantidad": 1, "precio_jornada": 10000, "turno_estudio_id": None},
+                {"equipo_id": 2, "cantidad": 1, "precio_jornada": 20000, "turno_estudio_id": 501},
+            ],
+            jornadas=1,
+            descuento_cliente_pct=10.0,
+        )
+        assert r["bruto"] == 30000
+        assert r["descuento_monto"] == 1000
+        assert r["neto"] == 29000
+
+    def test_turno_estudio_id_ausente_se_trata_como_no_turno(self):
+        # Sin `turno_estudio_id` en el dict: comportamiento IDÉNTICO a antes
+        # de la Fase 3 — participa del descuento (el 100% de los callers
+        # existentes antes de #1308).
+        r = calcular_total(
+            items=[{"equipo_id": 1, "cantidad": 1, "precio_jornada": 10000}],
+            jornadas=1,
+            descuento_cliente_pct=10.0,
+        )
+        assert r["neto"] == 9000
+
+    def test_todo_turnos_no_hay_descuento_aunque_haya_pct(self):
+        r = calcular_total(
+            items=[{"equipo_id": 2, "cantidad": 1, "precio_jornada": 20000, "turno_estudio_id": 501}],
+            jornadas=1,
+            descuento_cliente_pct=50.0,
+        )
+        assert r["descuento_monto"] == 0
+        assert r["neto"] == 20000
+
+    def test_override_manual_monto_se_capea_al_bruto_descontable_sin_turno(self):
+        # Bruto descontable (solo el simple) = 10.000; turno = 20.000, exento.
+        # Un override manual de $50.000 no puede comerse el turno — se capea
+        # a los 10.000 descontables.
+        r = calcular_total(
+            items=[
+                {"equipo_id": 1, "cantidad": 1, "precio_jornada": 10000, "turno_estudio_id": None},
+                {"equipo_id": 2, "cantidad": 1, "precio_jornada": 20000, "turno_estudio_id": 501},
+            ],
+            jornadas=1,
+            descuento_manual_tipo="monto",
+            descuento_manual_monto=50000,
+        )
+        assert r["descuento_monto"] == 10000  # capeado, no 30.000
+        assert r["neto"] == 20000  # el turno queda intacto
+
+    def test_combo_y_turno_embebido_conviven_sin_pisarse(self):
+        """Un pedido puede tener a la vez un combo Y un turno embebido (ej.
+        equipos + una sesión del Estudio) — ambos exentos del descuento
+        global, cada uno por su propia razón, sin interferir entre sí."""
+        r = calcular_total(
+            items=[
+                {"equipo_id": 1, "cantidad": 1, "precio_jornada": 10000, "es_combo": False},
+                {"equipo_id": 2, "cantidad": 1, "precio_jornada": 15000, "es_combo": True},
+                {"equipo_id": 3, "cantidad": 1, "precio_jornada": 20000, "turno_estudio_id": 501},
+            ],
+            jornadas=1,
+            descuento_cliente_pct=10.0,
+        )
+        assert r["bruto"] == 45000
+        assert r["descuento_monto"] == 1000  # 10% de 10.000, solo el simple
+        assert r["neto"] == 44000
