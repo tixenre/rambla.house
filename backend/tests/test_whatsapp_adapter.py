@@ -43,6 +43,19 @@ def test_copy_ejemplo_tiene_tantos_placeholders_como_campos():
         )
 
 
+def test_copy_ejemplo_placeholders_en_orden_ascendente():
+    """Meta RECHAZA un template cuyos {{n}} no aparezcan en orden ascendente en el
+    cuerpo. El copy sugerido es lo que el dueño copia-pega en el WhatsApp Manager, así
+    que tiene que salir aprobado tal cual: {{1}} antes que {{2}}, {{2}} antes que {{3}}.
+    (Cazado en la práctica: `recordatorio_devolucion_d1`/`_d0` decían el número de
+    pedido DESPUÉS de la fecha → aparecían como 1,3,2 y Meta los habría rechazado.)"""
+    for p in plmod.REGISTRO.values():
+        orden = [int(n) for n in re.findall(r"\{\{(\d+)\}\}", p.copy_ejemplo)]
+        assert orden == sorted(orden), (
+            f"{p.key}: los placeholders aparecen {orden}; Meta exige orden ascendente"
+        )
+
+
 def test_key_igual_a_meta_name_y_template_key():
     for k, p in plmod.REGISTRO.items():
         assert p.key == k

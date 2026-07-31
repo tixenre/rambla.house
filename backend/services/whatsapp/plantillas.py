@@ -86,8 +86,8 @@ REGISTRO: dict[str, PlantillaWA] = {
         idempotente_por_pedido=True,
         descripcion="Recordatorio la víspera de la devolución (D-1).",
         copy_ejemplo=(
-            "Hola {{1}} ⏰ Te recordamos que mañana ({{3}}) devolvés el equipo de tu "
-            "reserva Nº {{2}}. ¡Gracias!"
+            "Hola {{1}} ⏰ Te recordamos que tu reserva Nº {{2}} vence mañana ({{3}}): "
+            "pasá a devolver el equipo. ¡Gracias!"
         ),
         campos_ctx=("cliente_nombre", "numero_pedido", "fecha_hasta"),
     ),
@@ -98,7 +98,7 @@ REGISTRO: dict[str, PlantillaWA] = {
         idempotente_por_pedido=True,
         descripcion="Aviso el día de la devolución (D-0).",
         copy_ejemplo=(
-            "Hola {{1}} 📅 Hoy ({{3}}) vence tu reserva Nº {{2}}. Coordiná con nosotros "
+            "Hola {{1}} 📅 Tu reserva Nº {{2}} vence hoy ({{3}}). Coordiná con nosotros "
             "la devolución del equipo. ¡Gracias!"
         ),
         campos_ctx=("cliente_nombre", "numero_pedido", "fecha_hasta"),
