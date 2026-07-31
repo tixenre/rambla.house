@@ -55,6 +55,12 @@ def test_init_db_siembra_y_el_preview_anda():
     from database import init_db, get_db
     from services.email import render_template
 
+    # Asegura que el esquema exista: este archivo puede ser el PRIMERO en tocar
+    # la BD descartable del job de CI (test_alembic_upgrade_db.py no deja el
+    # suyo instalado para los pasos siguientes — cada `*_db.py` es responsable
+    # de su propio init_db(), mismo criterio que test_login_identities_db.py).
+    init_db()
+
     # Punto de partida: tabla VACÍA (reproduce el estado roto).
     conn = get_db()
     try:
@@ -84,6 +90,8 @@ def test_init_db_siembra_y_el_preview_anda():
 
 def test_seed_no_pisa_ediciones_del_admin():
     from database import init_db, get_db
+
+    init_db()  # asegura el esquema, por si este test corre primero
 
     # Simular una plantilla editada por un admin.
     conn = get_db()
@@ -129,7 +137,10 @@ def test_pedido_creado_cliente_no_escapa_la_tabla_de_items():
     se veía como texto crudo (`<table role="presentation" ...>` visible) en vez
     de una tabla real. Verifica el contenido HOY vigente en la BD — si alguna
     vez alguien vuelve a congelar esta fila sin `|safe`, esto lo caza."""
+    from database import init_db
     from services.email import render_template
+
+    init_db()  # asegura el esquema + el seed canónico, por si corre solo
 
     ctx = dict(_CTX, items_html="<table><tr><td>Sony FX3</td></tr></table>")
     out = render_template("pedido_creado_cliente", ctx)
