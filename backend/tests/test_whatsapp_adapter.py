@@ -237,6 +237,55 @@ def test_envio_falla_provider_se_loguea_failed(monkeypatch):
 
 
 # ── helpers de teléfono ─────────────────────────────────────────────────
+def test_envio_agrega_whatsapp_contacto_solo_si_el_template_lo_pide(monkeypatch):
+    """`recordatorio_retiro` invita a escribir → necesita el WhatsApp real del
+    negocio. `pedido_creado` no lo pide → no se gasta esa query de más."""
+    import whatsapp_cloud
+
+    _con_creds(monkeypatch)
+    monkeypatch.setattr(env, "canal_habilitado", lambda conn: True)
+    monkeypatch.setattr(env, "_resolver_telefono", lambda conn, pedido: "+5492235550000")
+    monkeypatch.setattr(env, "destinatario_permitido", lambda to: True)
+
+    capturado = {}
+
+    class _FakeClient:
+        def __init__(self, **kw):
+            pass
+
+        def enviar_template(self, **kw):
+            capturado["body_params"] = kw["body_params"]
+            return whatsapp_cloud.EnvioResult(message_id="wamid.OK", to=kw["to"])
+
+    monkeypatch.setattr(whatsapp_cloud, "WhatsAppClient", _FakeClient)
+
+    class _FakeConnConContacto(_FakeConn):
+        def execute(self, sql, params=()):
+            if params and params[0] in ("business_phone_display", "whatsapp_phone"):
+                return _FakeCursor({"value": "+54 9 223 585-2510"})
+            return super().execute(sql, params)
+
+    monkeypatch.setattr(env, "get_db", lambda: _FakeConnConContacto(opt_in=True, existing_log=None))
+    r = env.enviar_evento_pedido(
+        "recordatorio_retiro", {"id": 9, "cliente_id": 5},
+        {"cliente_nombre": "Ana", "numero_pedido": "42", "fecha_desde": "hoy"},
+    )
+    assert r["ok"] and capturado["body_params"][-1] == "+54 9 223 585-2510"
+
+    # pedido_creado NO lo pide: ni siquiera se llama a `telefono_negocio`.
+    monkeypatch.setattr(env, "get_db", lambda: _FakeConn(opt_in=True, existing_log=None))
+    import services.comunicacion.contacto as contacto_mod
+
+    def _explota(conn=None):
+        raise AssertionError("no debería resolverse: pedido_creado no usa whatsapp_contacto")
+
+    monkeypatch.setattr(contacto_mod, "telefono_negocio", _explota)
+    r2 = env.enviar_evento_pedido(
+        "pedido_creado", {"id": 10, "cliente_id": 5}, {"cliente_nombre": "Ana", "numero_pedido": "43"}
+    )
+    assert r2["ok"]
+
+
 def test_resolver_telefono_pasa_por_el_embudo():
     # El embudo (services/telefono) valida + normaliza: inválido → None, local
     # válido → E.164, E.164 → se mantiene.

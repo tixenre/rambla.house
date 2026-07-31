@@ -68,7 +68,12 @@ def _fmt_fecha_amable(v) -> str:
 def pedido_email_context(pedido: dict) -> dict:
     """Arma el dict de variables disponibles a todos los templates de pedido.
     Mantener en sincronía con la lista de variables que se muestra en el editor del
-    frontend (`/admin/email-templates`)."""
+    frontend (`/admin/email-templates`).
+
+    A propósito NO abre conexión a la BD (función pura, testeada sin Postgres):
+    `whatsapp_contacto` (el WhatsApp real del negocio, para los templates que
+    invitan a escribir) lo agrega `services/whatsapp/envio.py` sobre una COPIA
+    de este dict, usando la conexión que esa boca ya tiene abierta — no acá."""
     from markupsafe import escape
 
     items = pedido.get("items") or []

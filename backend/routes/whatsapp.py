@@ -8,13 +8,17 @@ acá: vive en ENV (WHATSAPP_ACCESS_TOKEN), no en la BD.
 """
 from __future__ import annotations
 
+import logging
 import re
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import PlainTextResponse
 
 from auth.guards import require_admin
 from database import get_db
 from rate_limit import ADMIN_WRITE_LIMIT, limiter
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -107,12 +111,15 @@ def test_whatsapp(request: Request, body: dict):
     if plantilla is None:
         raise HTTPException(400, f"Template '{plantilla_key}' no existe en el registro")
 
+    from services.comunicacion.contacto import telefono_negocio
+
     # Contexto de ejemplo (los mismos nombres que arma _pedido_email_context).
     ctx_demo = {
         "cliente_nombre": "Test",
         "numero_pedido": "0000",
         "fecha_desde": "hoy",
         "fecha_hasta": "hoy",
+        "whatsapp_contacto": telefono_negocio() or "+54 9 223 585-2510",
     }
     client = WhatsAppClient(
         phone_number_id=creds.phone_number_id,
@@ -148,6 +155,52 @@ def run_recordatorios_devolucion(request: Request, body: dict | None = None):
     if ventanas is None:
         ventanas = resolve_dev()["ventanas"]
     return enviar_recordatorios_devolucion(ventanas=set(ventanas), dry_run=dry_run)
+
+
+@router.get("/webhooks/whatsapp")
+def verificar_webhook_whatsapp(request: Request):
+    """Handshake GET que Meta hace UNA vez al guardar el Callback URL en
+    Configuration → Webhooks. Sin sesión (lo llama Meta): exento del middleware
+    de auth por el prefijo `/api/webhooks/` (mismo criterio que Didit)."""
+    from services.whatsapp import WhatsAppWebhookError, verify_challenge
+
+    q = request.query_params
+    try:
+        challenge = verify_challenge(
+            q.get("hub.mode", ""), q.get("hub.verify_token", ""), q.get("hub.challenge", "")
+        )
+    except WhatsAppWebhookError as exc:
+        logger.warning("whatsapp webhook: handshake rechazado — %s", exc)
+        raise HTTPException(403, str(exc))
+    return PlainTextResponse(challenge)
+
+
+@router.post("/webhooks/whatsapp", status_code=200)
+async def recibir_webhook_whatsapp(request: Request):
+    """Recibe estados de entrega y mensajes entrantes. Autenticado SOLO por
+    firma HMAC (`X-Hub-Signature-256`) — sin sesión, lo llama Meta server-to-
+    server. Siempre devuelve 200 con firma válida (Meta reintenta si no)."""
+    from services.whatsapp import WhatsAppWebhookError, procesar_evento, verify_signature
+
+    body = await request.body()
+    signature = request.headers.get("X-Hub-Signature-256", "")
+    try:
+        verify_signature(body, signature)
+    except WhatsAppWebhookError as exc:
+        logger.warning("whatsapp webhook: firma rechazada — %s", exc)
+        raise HTTPException(401, "Firma inválida")
+
+    try:
+        payload = await request.json()
+    except Exception:
+        logger.error("whatsapp webhook: body no es JSON válido")
+        return {"ok": True}
+
+    with get_db() as conn:
+        resultado = procesar_evento(payload, conn)
+        conn.commit()
+    logger.info("whatsapp webhook: %s", resultado)
+    return {"ok": True}
 
 
 def _status_for_wa_error(exc) -> int:

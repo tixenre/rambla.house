@@ -13,11 +13,12 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class EnvioResult:
     """Resultado de un envío exitoso. `message_id` es el `wamid` que devuelve Meta
-    (para cruzar con el estado de entrega / webhooks). `to` es el destino en E.164."""
+    (para cruzar con el estado de entrega / webhooks). `to` es el destino en E.164.
+    `template_name` vacío = fue un mensaje de texto libre, no un template."""
 
     message_id: str
     to: str
-    template_name: str
+    template_name: str = ""
 
 
 def body_components(body_params: list[str]) -> list[dict]:

@@ -20,6 +20,12 @@ from services.whatsapp.envio import enviar_evento_admin, enviar_evento_pedido
 from services.whatsapp.estado import diagnosticar
 from services.whatsapp.plantillas import REGISTRO, PlantillaWA
 from services.whatsapp.sincronizacion import estado_plantillas, sincronizar
+from services.whatsapp.webhook import (
+    WhatsAppWebhookError,
+    procesar_evento,
+    verify_challenge,
+    verify_signature,
+)
 
 __all__ = [
     "enviar_evento_pedido",
@@ -33,4 +39,8 @@ __all__ = [
     "canal_habilitado",
     "destinatario_permitido",
     "WhatsAppCreds",
+    "WhatsAppWebhookError",
+    "verify_signature",
+    "verify_challenge",
+    "procesar_evento",
 ]

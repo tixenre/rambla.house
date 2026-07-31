@@ -78,6 +78,37 @@ class WhatsAppClient:
         if comps:
             payload["template"]["components"] = comps
 
+        return self._post(payload, to=str(to), template_name=template_name, timeout=timeout)
+
+    def enviar_texto(
+        self, *, to: str, body: str, timeout: Optional[float] = None
+    ) -> EnvioResult:
+        """Envía un mensaje de TEXTO LIBRE (no template). Meta solo lo entrega si `to`
+        abrió una ventana de servicio de 24h con un mensaje entrante propio — no sirve
+        para iniciar contacto (para eso están los templates). Lo usa el webhook para
+        auto-responder a quien escribe al número de avisos.
+
+        Raises: ValueError (input vacío) o la taxonomía de `errores.py`.
+        """
+        if not to or not str(to).strip():
+            raise ValueError("enviar_texto: 'to' vacío")
+        if not body or not str(body).strip():
+            raise ValueError("enviar_texto: 'body' vacío")
+
+        payload: dict = {
+            "messaging_product": "whatsapp",
+            "recipient_type": "individual",
+            "to": str(to),
+            "type": "text",
+            "text": {"body": str(body)},
+        }
+        return self._post(payload, to=str(to), template_name="", timeout=timeout)
+
+    def _post(
+        self, payload: dict, *, to: str, template_name: str, timeout: Optional[float]
+    ) -> EnvioResult:
+        """POST común a `enviar_template`/`enviar_texto`: arma la URL/headers, hace
+        la request y delega la interpretación de la respuesta."""
         url = f"{self.base_url}/{self.phone_number_id}/messages"
         headers = {
             "Authorization": f"Bearer {self.access_token}",
@@ -92,7 +123,7 @@ class WhatsAppClient:
             # timeout, conexión caída, DNS, TLS → transporte
             raise WhatsAppNetworkError(f"No se pudo conectar con Meta: {exc}") from exc
 
-        return self._interpretar(resp, to=str(to), template_name=template_name)
+        return self._interpretar(resp, to=to, template_name=template_name)
 
     # ── interpretación de la respuesta → resultado o error tipado ──────────
     @staticmethod

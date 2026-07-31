@@ -14,6 +14,12 @@ se dan de alta y se aprueban en el WhatsApp Manager); acá vive:
 El contexto del pedido lo arma `services/comunicacion.pedido_email_context`
 (la misma fuente que los mails), así el WhatsApp ve exactamente las mismas variables
 ya formateadas (fechas amables, número de pedido, nombre).
+
+Este número de avisos NO tiene bandeja (sin coexistencia, una respuesta del
+cliente no la ve nadie salvo el auto-reply del webhook — ver
+`services/whatsapp/webhook.py`): los templates que invitan a "escribinos"
+usan `whatsapp_contacto` (el WhatsApp real del negocio, `comunicacion.contacto`)
+en vez de "respondé este mensaje".
 """
 from __future__ import annotations
 
@@ -90,9 +96,10 @@ REGISTRO: dict[str, PlantillaWA] = {
         descripcion="Recordatorio D-1 del retiro del equipo (reserva confirmada).",
         copy_ejemplo=(
             "Hola {{1}} 📸 Te recordamos que tu reserva Nº {{2}} se retira el {{3}}. "
-            "Te esperamos. Cualquier duda, respondé este mensaje."
+            "Te esperamos. Por cualquier consulta, escribinos a tu WhatsApp de "
+            "siempre: {{4}}."
         ),
-        campos_ctx=("cliente_nombre", "numero_pedido", "fecha_desde"),
+        campos_ctx=("cliente_nombre", "numero_pedido", "fecha_desde", "whatsapp_contacto"),
     ),
     "recordatorio_devolucion_d1": PlantillaWA(
         key="recordatorio_devolucion_d1",
@@ -113,10 +120,10 @@ REGISTRO: dict[str, PlantillaWA] = {
         idempotente_por_pedido=True,
         descripcion="Aviso el día de la devolución (D-0).",
         copy_ejemplo=(
-            "Hola {{1}} 📅 Tu reserva Nº {{2}} vence hoy ({{3}}). Coordiná con nosotros "
-            "la devolución del equipo. ¡Gracias!"
+            "Hola {{1}} 📅 Tu reserva Nº {{2}} vence hoy ({{3}}). Coordiná la "
+            "devolución escribiéndonos a {{4}}. ¡Gracias!"
         ),
-        campos_ctx=("cliente_nombre", "numero_pedido", "fecha_hasta"),
+        campos_ctx=("cliente_nombre", "numero_pedido", "fecha_hasta", "whatsapp_contacto"),
     ),
     "recordatorio_devolucion_vencido": PlantillaWA(
         key="recordatorio_devolucion_vencido",
@@ -126,8 +133,8 @@ REGISTRO: dict[str, PlantillaWA] = {
         descripcion="Aviso al día siguiente si el equipo figura sin devolver (D+1).",
         copy_ejemplo=(
             "Hola {{1}} ⚠️ Tu reserva Nº {{2}} venció el {{3}} y el equipo figura sin "
-            "devolver. Por favor comunicate para coordinar la devolución."
+            "devolver. Escribinos a {{4}} para coordinar la devolución."
         ),
-        campos_ctx=("cliente_nombre", "numero_pedido", "fecha_hasta"),
+        campos_ctx=("cliente_nombre", "numero_pedido", "fecha_hasta", "whatsapp_contacto"),
     ),
 }

@@ -101,6 +101,15 @@ class Settings(BaseSettings):
     # de prod solo se le manda a estos números (red anti-spam; el número de test
     # de Meta igual restringe server-side, esto es defensa en profundidad).
     WHATSAPP_TEST_RECIPIENTS: str = ""
+    # Webhook entrante (estados de entrega + mensajes que responde el cliente):
+    # DISTINTO del access token — es el "App Secret" del Meta App Dashboard
+    # (Settings → Basic), firma `X-Hub-Signature-256`. Sin esto, el webhook
+    # rechaza todo (fail-closed, mismo criterio que DIDIT_WEBHOOK_SECRET).
+    WHATSAPP_APP_SECRET: str = ""
+    # String que vos elegís (cualquier valor) y pegás TAMBIÉN en el WhatsApp
+    # Manager al configurar el webhook ("Verify token") — confirma que la URL
+    # de callback es tuya durante el handshake GET inicial.
+    WHATSAPP_WEBHOOK_VERIFY_TOKEN: str = ""
 
     # ── Integraciones ────────────────────────────────────────────────────
     GOOGLE_MAPS_API_KEY: str = ""

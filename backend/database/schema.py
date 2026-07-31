@@ -1476,6 +1476,14 @@ def _init_db_schema(conn):
         ON whatsapp_log(alquiler_id, template_key, to_phone)
         WHERE status = 'sent'
     """)
+    # Estado de entrega REAL, que llega por webhook (delivered/read/failed) —
+    # `status` NO se toca (sostiene el índice único de arriba); son columnas
+    # aparte, siempre nullable, que el webhook completa best-effort (migración
+    # w3bh00k1nb0x). `wamid` (ya existe) es la clave para cruzar el evento con
+    # la fila.
+    conn.execute("ALTER TABLE whatsapp_log ADD COLUMN IF NOT EXISTS delivery_status TEXT")
+    conn.execute("ALTER TABLE whatsapp_log ADD COLUMN IF NOT EXISTS delivery_error TEXT")
+    conn.execute("ALTER TABLE whatsapp_log ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ")
     # Opt-in de WhatsApp por cliente (Meta exige consentimiento demostrable para
     # utility templates). Default FALSE: no se le manda a nadie hasta que acepta.
     conn.execute("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS whatsapp_opt_in BOOLEAN NOT NULL DEFAULT FALSE")

@@ -4,9 +4,8 @@
 > _porqué_ viven en `MEMORIA.md`/`DECISIONES.md` y se **linkean**, no se copian.
 > Índice maestro en `MANIFIESTO.md` §8.
 >
-> **Estado:** describe el scaffold inicial del canal (rama
-> `claude/whatsapp-business-integration-nv589d`). Lo que quedó **fuera a propósito**
-> —la captura de opt-in en el front— está marcado al final como **pendiente**.
+> **Estado:** canal completo (saliente + entrante) construido; falta la
+> configuración de Meta del dueño (token real, número, plantillas aprobadas).
 
 ## Qué resuelve
 
@@ -23,10 +22,10 @@ Mismo patrón lib-agnóstica + adapter que la facturación ARCA (`SISTEMA_FACTUR
 | Capa | Paquete | Qué contiene |
 | --- | --- | --- |
 | **Librería portable** | `backend/whatsapp_cloud/` | Cliente HTTP de la Cloud API (Graph) + errores tipados + retry. **Cero** imports de `backend.*`/FastAPI/psycopg (invariante verificado por `whatsapp_cloud/tests/test_portabilidad.py`). Recibe credenciales + `base_url` ya resueltas; devuelve resultado (`wamid`) o error tipado. No persiste, no gatea, no elige número. |
-| **Adapter Rambla** | `backend/services/whatsapp/` | Todo el I/O y las decisiones: credenciales/gating (`config.py`), readiness (`estado.py`), registro de templates (`plantillas.py`) y la **boca de envío** fail-safe + idempotente (`envio.py`). |
+| **Adapter Rambla** | `backend/services/whatsapp/` | Todo el I/O y las decisiones: credenciales/gating (`config.py`), readiness (`estado.py`), registro de templates (`plantillas.py`), la **boca de envío** fail-safe + idempotente (`envio.py`) y el **webhook entrante** (`webhook.py`: firma + estado de entrega + auto-reply). |
 
 ### Librería `whatsapp_cloud/`
-- `client.py::WhatsAppClient.enviar_template(to, template_name, lang_code, body_params)` → `POST {base}/{phone_number_id}/messages`. Mapea la respuesta de Meta a `EnvioResult(wamid)` o a la taxonomía tipada.
+- `client.py::WhatsAppClient.enviar_template(to, template_name, lang_code, body_params)` / `enviar_texto(to, body)` → `POST {base}/{phone_number_id}/messages` (con `template` o `type=text`). Mapea la respuesta de Meta a `EnvioResult(wamid)` o a la taxonomía tipada. `enviar_texto` es texto LIBRE — solo lo usa el auto-reply del webhook, nunca para iniciar contacto (eso son los templates).
 - `errores.py`: `WhatsAppError` base + `WhatsAppAuthError` / `WhatsAppRateLimitError` / `WhatsAppNetworkError` / `WhatsAppRequestError` (Meta rechazó por número/template) / `WhatsAppResponseError` (respuesta inesperada). El **tipo decide** reintentar/avisar (espejo de `arca_fe.errores`). Los códigos de credencial de Meta (190, etc.) mandan sobre el HTTP status.
 - `retry.py::with_retry`: opt-in, reintenta solo network + rate-limit (respeta `Retry-After`).
 - `__version__` arranca en `"0.0.0"` (misma política que `arca_fe`: bumpea al primer envío real en prod).
@@ -35,7 +34,8 @@ Mismo patrón lib-agnóstica + adapter que la facturación ARCA (`SISTEMA_FACTUR
 - `config.py`: `resolver_creds()` (de ENV), `canal_habilitado(conn)` (gating por config), `destinatario_permitido(to)` (allowlist en no-prod).
 - `estado.py::diagnosticar(conn)`: readiness en el shape `{chequeos:[{check,ok,bloqueante,mensaje}], listo}` (molde `facturacion.diagnostico.diagnosticar_emisor`) para el back-office.
 - `plantillas.py::REGISTRO`: **fuente única** de qué templates existen, su nombre en Meta, idioma, el mapeo ctx→params y el copy sugerido para dar de alta.
-- `envio.py::enviar_evento_pedido(plantilla_key, pedido, ctx)`: la boca de envío.
+- `envio.py::enviar_evento_pedido(plantilla_key, pedido, ctx)`: la boca de envío. Si el template pide `whatsapp_contacto` (el WhatsApp real, para invitar a escribir sin decir "respondé este mensaje"), lo agrega acá sobre una copia del ctx — `pedido_email_context` es una función PURA a propósito (unit-testeada sin Postgres) y no abre conexión.
+- `webhook.py`: firma HMAC (`verify_signature`) + handshake de verificación (`verify_challenge`) + `procesar_evento(payload, conn)` — ver sección propia abajo.
 
 ## Credencial y gating: ENV, no DB
 
@@ -97,14 +97,51 @@ devuelve el registro con el copy sugerido para copiar-pegar.
 - `POST /api/admin/whatsapp/test` — envía un template a un número (E.164) para validar el pipeline con el número de test de Meta (respeta la allowlist de no-prod; no persiste en `whatsapp_log`).
 - `POST /api/admin/whatsapp/recordatorios-devolucion/run` — barrido de devolución on-demand (`dry_run=True` por default: preview seguro).
 
+## Webhook entrante (`GET`/`POST /api/webhooks/whatsapp`)
+
+Sin coexistencia ni bandeja, una respuesta del cliente al número de avisos se perdía en el
+aire (ni siquiera un error). El webhook resuelve dos cosas — mismo criterio anti-vanish que
+motivó el copy con `whatsapp_contacto` (arriba):
+
+1. **Estado de entrega real** (`statuses[]`): hasta ahora `whatsapp_log.status='sent'` solo
+   decía que Meta ACEPTÓ el envío, no que llegó. El webhook completa `delivery_status`
+   (`delivered`/`read`/`failed`) + `delivery_error` + `delivered_at` — columnas NUEVAS,
+   nullable (migración `w3bh00k1nb0x`). **`status` no se toca**: esa columna sostiene el
+   índice único de idempotencia (`idx_whatsapp_log_idempotente`, `WHERE status='sent'`) —
+   pisarla con el estado de entrega la sacaría del índice y reabriría la puerta a un
+   duplicado. El cruce es por `wamid`.
+2. **Mensajes entrantes** (`messages[]`): a cada uno le contesta un texto LIBRE
+   (`WhatsAppClient.enviar_texto`, válido dentro de la ventana de servicio de 24h que el
+   propio mensaje abre) redirigiendo al WhatsApp real del negocio
+   (`comunicacion.contacto.telefono_negocio`) — best-effort, un fallo de envío queda
+   logueado sin romper el webhook.
+
+**Auth: HMAC, no sesión** (lo llama Meta server-to-server) — mismo criterio que
+`services/didit/webhook.py`, adaptado al esquema de Meta:
+
+- `GET` — el handshake que Meta hace UNA vez al guardar el Callback URL
+  (`hub.mode=subscribe`, `hub.verify_token`, `hub.challenge`): si el token coincide con
+  `WHATSAPP_WEBHOOK_VERIFY_TOKEN` (un string que vos elegís y pegás en los dos lados),
+  devuelve `hub.challenge` tal cual.
+- `POST` — firma `X-Hub-Signature-256: sha256=<hex>` sobre el body crudo, con
+  `WHATSAPP_APP_SECRET` (el **App Secret** de Meta → tu app → Settings → Basic —
+  **DISTINTO** del access token: ese autoriza a enviar, este verifica que un evento
+  entrante lo mandó Meta). Fail-closed: sin el secret configurado, rechaza todo.
+
+Ambas rutas están exentas del middleware de sesión por el prefijo `/api/webhooks/`
+(`middleware.PUBLIC_API_ANY`, ya usado por Didit). El chequeo `webhook_configurado` de
+`diagnosticar()` es **no bloqueante** (se puede seguir mandando sin esto) y muestra la
+Callback URL exacta a pegar en Meta.
+
 ## Setup (trámite Meta, fuera de código)
 
 1. Crear/vincular la **WhatsApp Business Account (WABA)** en Meta Business Manager (requiere verificación del negocio).
 2. **Display name** aprobado (ej. "Rambla Rental").
 3. **Número** registrado como sender (el de click-to-chat o uno nuevo; si se migra el que ya se usa, planificar la migración).
 4. **Token** (recomendado System User permanente → no expira, no hace falta caché de renovación). Setear en Railway: `WHATSAPP_ACCESS_TOKEN`, `WHATSAPP_PHONE_NUMBER_ID` (+ opcional `WHATSAPP_BUSINESS_ACCOUNT_ID`). En staging/local, dejar vacío o usar el número de test + `WHATSAPP_TEST_RECIPIENTS`.
-5. Dar de alta los **templates utility** de `REGISTRO` y esperar su aprobación.
-6. Prender el canal: `whatsapp_enabled` en `/admin/settings` (o env `WHATSAPP_ENABLED`).
+5. Dar de alta los **templates utility** de `REGISTRO` y esperar su aprobación (botón "Crear las que falten" en `/admin/comunicacion`, o a mano en el WhatsApp Manager con el copy sugerido).
+6. Prender el canal: interruptor en la tarjeta de WhatsApp de `/admin/comunicacion` (o env `WHATSAPP_ENABLED`).
+7. **Webhook** (opcional pero recomendado — sin esto no hay estado de entrega ni respuesta a mensajes entrantes): en Meta → tu app → WhatsApp → Configuration, Callback URL = `{SITE_URL}/api/webhooks/whatsapp`, Verify token = cualquier string que elijas. Setear en Railway ESE MISMO string en `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, más `WHATSAPP_APP_SECRET` (Settings → Basic → App Secret, **no** el access token).
 
 ## Testing
 
@@ -112,7 +149,9 @@ devuelve el registro con el copy sugerido para copiar-pegar.
 - `tests/test_whatsapp_adapter.py` (gating, skips, happy path, mapeo de templates).
 - `tests/test_comunicacion.py` (plan A/B: fallback, ambos, solo_mail, solo_whatsapp; mail al admin siempre; una sola tarea en background).
 - `tests/test_recordatorios_devolucion.py` (config de ventanas + job).
-- La migración `w1h2a3t4s5a6` (whatsapp_log + opt-in) se ejercita en `test_alembic_upgrade_db.py`.
+- La migración `w1h2a3t4s5a6` (whatsapp_log + opt-in) y `w3bh00k1nb0x` (columnas de estado de entrega) se ejercitan en `test_alembic_upgrade_db.py`.
+- `tests/test_whatsapp_webhook.py` (firma HMAC fail-closed, handshake de verificación, aplicar estados de entrega sin tocar `status`, auto-reply a mensajes entrantes, `procesar_evento` nunca propaga).
+- `whatsapp_cloud/tests/test_client.py` cubre `enviar_texto` (mensaje libre, sin `template` en el payload).
 
 ## Embudo de teléfono (`services/telefono.py`)
 
@@ -125,7 +164,7 @@ decision.py` — no-op si ya está bien); y al **enviar** (`normalizar_e164` est
 no dependemos de que cada fuente lo mande formateado. (El **rechazo duro** —bloquear un
 alta con teléfono inválido— es una decisión de UX aparte; hoy el guardado es lenient.)
 
-## Pendiente (fuera del scaffold, a propósito)
+## Pendiente
 
-- **Captura de opt-in en el front** (portal/checkout): la columna `clientes.whatsapp_opt_in` existe; falta el punto de captura y su UI.
-- **Recepción de mensajes / webhooks de estado de entrega**: fuera de alcance (esto es solo saliente).
+- Nada del lado del código: falta la **configuración de Meta** del dueño (token real
+  permanente, número, plantillas aprobadas, webhook). Ver "Setup" arriba.

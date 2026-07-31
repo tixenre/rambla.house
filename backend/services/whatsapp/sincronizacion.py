@@ -28,6 +28,7 @@ _EJEMPLOS = {
     "numero_pedido": "1042",
     "fecha_desde": "15 jun · 10:00",
     "fecha_hasta": "18 jun · 18:00",
+    "whatsapp_contacto": "+54 9 223 585-2510",
 }
 
 

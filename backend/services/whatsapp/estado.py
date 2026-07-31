@@ -84,6 +84,32 @@ def diagnosticar(conn) -> dict:
         }
     )
 
+    # NO bloqueante: sin esto se sigue pudiendo ENVIAR (lo de arriba alcanza).
+    # Falta para RECIBIR — saber si un WhatsApp llegó de verdad (no solo que
+    # Meta lo aceptó) y que una respuesta del cliente no se pierda en el aire.
+    webhook_ok = bool(settings.WHATSAPP_APP_SECRET and settings.WHATSAPP_WEBHOOK_VERIFY_TOKEN)
+    chequeos.append(
+        {
+            "check": "webhook_configurado",
+            "ok": webhook_ok,
+            "bloqueante": False,
+            "mensaje": (
+                "Webhook configurado: sabemos si un WhatsApp llegó de verdad y una "
+                "respuesta del cliente no se pierde."
+                if webhook_ok
+                else (
+                    "Sin webhook: se puede mandar igual, pero no sabemos si llegó y una "
+                    "respuesta del cliente se perdería. Configuralo en Meta → tu app → "
+                    "WhatsApp → Configuration: Callback URL "
+                    f"{settings.SITE_URL}/api/webhooks/whatsapp, Verify token = el valor "
+                    "que cargues en WHATSAPP_WEBHOOK_VERIFY_TOKEN (además falta "
+                    "WHATSAPP_APP_SECRET, el 'App Secret' de Settings → Basic — "
+                    "DISTINTO del access token)."
+                )
+            ),
+        }
+    )
+
     return {
         "chequeos": chequeos,
         "listo": _listo(chequeos),

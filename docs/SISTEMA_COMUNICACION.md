@@ -82,7 +82,7 @@ jobs de recordatorios) — no hay capa de compatibilidad intermedia.
 ## Canales (senders que el despachador reusa)
 
 - **Mail** → `services/email.send_email` (templates HTML en la DB `email_templates`, editables en `/admin/comunicacion`). Ver el propio `services/email`.
-- **WhatsApp** → `services/whatsapp.enviar_evento_pedido` (templates pre-aprobados por Meta). Ver [`SISTEMA_WHATSAPP.md`](SISTEMA_WHATSAPP.md).
+- **WhatsApp** → `services/whatsapp.enviar_evento_pedido` (templates pre-aprobados por Meta). El canal no tiene bandeja: los templates que invitan a escribir usan `whatsapp_contacto` (el WhatsApp real del negocio) en vez de "respondé este mensaje", y un webhook auto-responde a quien igual le escribe al número de avisos. Ver [`SISTEMA_WHATSAPP.md`](SISTEMA_WHATSAPP.md).
 
 **No es "un template para los dos canales"**: cada medio tiene el suyo por diseño (el mail es HTML
 nuestro; el WhatsApp es un template rígido pre-aprobado por Meta). Lo que el registro unifica es el

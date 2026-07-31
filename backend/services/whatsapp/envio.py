@@ -77,6 +77,16 @@ def enviar_evento_pedido(plantilla_key: str, pedido: dict, ctx: dict, *, force: 
 
         from whatsapp_cloud import WhatsAppClient, WhatsAppError
 
+        # `whatsapp_contacto` (el WhatsApp real, para templates que invitan a
+        # escribir) no vive en `pedido_email_context` — esa función es pura
+        # a propósito (unit-testeada sin Postgres). Se agrega ACÁ, sobre una
+        # copia, con la conexión que este envío ya tiene abierta — y solo si
+        # el template puntual lo necesita (no gastar una query de más).
+        if "whatsapp_contacto" in plantilla.campos_ctx and "whatsapp_contacto" not in ctx:
+            from services.comunicacion.contacto import telefono_negocio
+
+            ctx = {**ctx, "whatsapp_contacto": telefono_negocio(conn)}
+
         client = WhatsAppClient(
             phone_number_id=creds.phone_number_id,
             access_token=creds.access_token,

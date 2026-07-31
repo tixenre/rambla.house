@@ -110,6 +110,39 @@ def test_enviar_template_valida_input():
         _client().enviar_template(to="+549", template_name="", lang_code="es_AR")
 
 
+def test_enviar_texto_valida_input():
+    with pytest.raises(ValueError):
+        _client().enviar_texto(to="", body="hola")
+    with pytest.raises(ValueError):
+        _client().enviar_texto(to="+549", body="")
+
+
+def test_enviar_texto_arma_el_payload_de_mensaje_libre(monkeypatch):
+    """Sin template: `type=text` + `text.body`, no `template`."""
+    capturado = {}
+
+    def _fake_post(url, json, headers, timeout):
+        capturado["json"] = json
+        return _resp(200, json={"messages": [{"id": "wamid.TXT"}]})
+
+    monkeypatch.setattr("whatsapp_cloud.client.httpx.post", _fake_post)
+    res = _client().enviar_texto(to="+5492235550000", body="Escribinos a tu WhatsApp de siempre")
+    assert res.message_id == "wamid.TXT"
+    assert res.template_name == ""
+    assert capturado["json"]["type"] == "text"
+    assert capturado["json"]["text"] == {"body": "Escribinos a tu WhatsApp de siempre"}
+    assert "template" not in capturado["json"]
+
+
+def test_enviar_texto_transporte_caido_es_network_error(monkeypatch):
+    def _boom(*a, **k):
+        raise httpx.ConnectError("no route")
+
+    monkeypatch.setattr("whatsapp_cloud.client.httpx.post", _boom)
+    with pytest.raises(WhatsAppNetworkError):
+        _client().enviar_texto(to="+549", body="hola")
+
+
 def test_with_retry_reintenta_network_y_despues_ok():
     llamadas = {"n": 0}
 
