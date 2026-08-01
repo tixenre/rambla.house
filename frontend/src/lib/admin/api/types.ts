@@ -709,6 +709,9 @@ export interface PosicionParte {
 export interface PosicionesData {
   partes: PosicionParte[];
   sugeridos: SugeridoRendicion[];
+  /** Cash real por parte (la CC de un socio no es plata → 0). Ordena quién paga
+   *  primero en `sugeridos`. */
+  liquidez: Record<string, number>;
   /** Plata cobrada de pedidos que todavía no se terminaron de cobrar: está adentro
    *  de la posición pero su devengado no existe aún. */
   float_sin_saldar: number;

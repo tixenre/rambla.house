@@ -1,6 +1,6 @@
 /**
  * fields.tsx — controles chicos compartidos entre los forms de contabilidad
- * (NuevoMovimientoForm, CambioDivisaForm). Extraídos para no duplicar
+ * (MoverPlataForm, CorregirSaldoForm). Extraídos para no duplicar
  * (una sola forma de cada cosa).
  */
 import type { Cuenta } from "@/lib/admin/api";

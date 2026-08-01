@@ -1,13 +1,20 @@
 /**
- * contabilidad.rendicion.lazy.tsx — Rendición mensual entre las 4 partes (#809).
+ * contabilidad.rendicion.lazy.tsx — Reparto entre las 4 partes (#809).
  *
- * El backend de rendición (`_netting`, `saldar`) ya calculaba todo esto — no
- * tenía ninguna pantalla propia. El único lugar que lo mencionaba (Caja
- * Estudio) linkeaba a Liquidación, que es un reporte totalmente distinto (el
- * devengado por dueño). Esta pantalla es la real: cuánto le corresponde a
- * cada parte (Pablo/Tincho/Rental/Estudio), cuánto cobró, cuánto ya se le
- * rindió, y qué transferencia falta para que cierre en cero — con un botón
- * para marcarla hecha.
+ * DOS bloques, y el orden importa:
+ *
+ * 1. **"Al día de hoy"** (`/posiciones`, ACUMULADO) — la verdad de quién le debe a
+ *    quién y de dónde salen las transferencias sugeridas. Para un socio es el mismo
+ *    número que su cuenta corriente; Rental y el Estudio también tienen el suyo.
+ * 2. **"Lo que se generó en {mes}"** (`/rendicion/{mes}`) — la foto del mes, para
+ *    entender de dónde salió cada número. **Sin botones**: `ya_transferido` filtra
+ *    por `rendicion_mes`, así que este bloque arranca de cero cada mes y puede
+ *    sugerir lo contrario que el acumulado. Pasó de verdad en agosto 2026 (el mes
+ *    decía "Rental → Tincho $110.500" mientras Tincho debía $734.088), y marcar ese
+ *    saldado le SUBIÓ la deuda a Tincho.
+ *
+ * Por eso el botón dejó de decir "Marcar saldado" (que se lee como "dar el mes por
+ * visto") y dice lo que de verdad hace: registra una transferencia real en el libro.
  */
 import { createLazyFileRoute } from "@tanstack/react-router";
 import { useState } from "react";
@@ -143,6 +150,44 @@ function RendicionPage() {
                   pedido no cerró.
                 </p>
               )}
+
+              {/* Las transferencias sugeridas salen de ACÁ (el acumulado), no del
+                  mes: es lo que de verdad hay que mover. Un reparto parcial baja
+                  la posición y el resto queda pendiente para la próxima, sin
+                  depender de en qué mes se hizo. */}
+              <div className="mt-4 border-t hairline pt-4">
+                {pos.sugeridos.length === 0 ? (
+                  <EmptyState
+                    icon={<Scale className="h-6 w-6" />}
+                    title="Nada pendiente de repartir"
+                    sub="Las 4 partes están en cero entre ellas."
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Para que las 4 partes queden en cero. Cada botón registra una transferencia
+                      REAL en el libro — usalo cuando la plata se movió de verdad, no para marcar el
+                      mes como visto.
+                    </p>
+                    {pos.sugeridos.map((s, i) => (
+                      <div
+                        key={i}
+                        className="flex flex-wrap items-center gap-3 rounded-md border hairline px-3 py-2.5"
+                      >
+                        <span className="font-medium text-ink">{s.de}</span>
+                        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                        <span className="font-medium text-ink">{s.a}</span>
+                        <span className="ml-auto font-mono text-sm tabular-nums text-ink">
+                          {formatARS(s.monto)}
+                        </span>
+                        <Button variant="outline" size="sm" onClick={() => setSaldarSugerido(s)}>
+                          Registrar la transferencia
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
             </Section>
           )}
         </QueryState>
@@ -177,39 +222,6 @@ function RendicionPage() {
                 </div>
               </Section>
 
-              <Section
-                title="Transferencias sugeridas"
-                subtitle="Para que las 4 partes queden en cero — una sugerida por vez."
-                icon={Scale}
-              >
-                {data.sugeridos.length === 0 ? (
-                  <EmptyState
-                    icon={<Scale className="h-6 w-6" />}
-                    title="Nada pendiente de saldar"
-                    sub={`${mesLabel(mes)} ya cierra en cero entre las 4 partes.`}
-                  />
-                ) : (
-                  <div className="space-y-2">
-                    {data.sugeridos.map((s, i) => (
-                      <div
-                        key={i}
-                        className="flex flex-wrap items-center gap-3 rounded-md border hairline px-3 py-2.5"
-                      >
-                        <span className="font-medium text-ink">{s.de}</span>
-                        <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
-                        <span className="font-medium text-ink">{s.a}</span>
-                        <span className="ml-auto font-mono text-sm tabular-nums text-ink">
-                          {formatARS(s.monto)}
-                        </span>
-                        <Button variant="outline" size="sm" onClick={() => setSaldarSugerido(s)}>
-                          Marcar saldado
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </Section>
-
               <Section title="Movimientos de rendición" variant="plain">
                 {data.movimientos.length === 0 ? (
                   <p className="text-sm text-muted-foreground">
@@ -230,7 +242,6 @@ function RendicionPage() {
 
       {saldarSugerido && (
         <SaldarDialog
-          mes={mes}
           sugerido={saldarSugerido}
           onOpenChange={(open) => !open && setSaldarSugerido(null)}
           onSaldado={() => {
@@ -328,12 +339,10 @@ function ParteCard({ parte }: { parte: RendicionPersona }) {
 }
 
 function SaldarDialog({
-  mes,
   sugerido,
   onOpenChange,
   onSaldado,
 }: {
-  mes: string;
   sugerido: SugeridoRendicion;
   onOpenChange: (open: boolean) => void;
   onSaldado: () => void;
@@ -343,9 +352,15 @@ function SaldarDialog({
   const [fecha, setFecha] = useState<string>(() => new Date().toISOString().slice(0, 10));
   const [nota, setNota] = useState("");
 
+  // El `rendicion_mes` del movimiento sale de la FECHA en que la plata se movió,
+  // no del mes que el admin esté mirando arriba: la sugerencia es acumulada, así
+  // que "qué mes estoy viendo" no dice nada sobre cuándo se hizo la transferencia.
+  // Así el movimiento aparece en el registro del mes correcto.
+  const mesDelMovimiento = (fecha || new Date().toISOString().slice(0, 10)).slice(0, 7);
+
   const saldar = useMutation({
     mutationFn: () =>
-      adminApi.saldarRendicion(mes, {
+      adminApi.saldarRendicion(mesDelMovimiento, {
         de: sugerido.de,
         a: sugerido.a,
         monto: Math.max(0, Number(monto) || 0),

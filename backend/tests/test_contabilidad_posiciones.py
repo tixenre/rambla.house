@@ -182,6 +182,27 @@ class TestSugerirTransferencias:
         pend = {"Rental": -100, "Pablo": 60, "Tincho": 40}
         assert sugerir_transferencias(pend) == sugerir_transferencias(pend)
 
+    def test_paga_primero_el_que_tiene_cash(self):
+        """Sin `liquidez`, el greedy toma a los pagadores en orden de PARTES y
+        sugería "Pablo → Estudio" cuando la plata la tenía Rental. La deuda de un
+        socio es puro balance —su plata está en un banco propio, fuera del
+        sistema—; el Fondo Rental es cash real."""
+        pend = {"Pablo": -283_346, "Tincho": -623_588, "Rental": -241_550,
+                "Estudio": 120_000}
+        sin_liquidez = sugerir_transferencias(pend)
+        assert sin_liquidez[0]["de"] == "Pablo"  # el bug: Pablo no tiene esa plata
+
+        con_liquidez = sugerir_transferencias(
+            pend, {"Rental": 341_000, "Estudio": 0, "Pablo": 0, "Tincho": 0})
+        assert con_liquidez == [{"de": "Rental", "a": "Estudio", "monto": 120_000}]
+
+    def test_la_liquidez_no_rompe_el_determinismo(self):
+        # Empate de liquidez → gana el orden de PARTES (sort estable).
+        pend = {"Pablo": -100, "Tincho": -100, "Estudio": 200}
+        liq = {"Pablo": 0, "Tincho": 0}
+        assert sugerir_transferencias(pend, liq) == sugerir_transferencias(pend, liq)
+        assert sugerir_transferencias(pend, liq)[0]["de"] == "Pablo"
+
     def test_conservacion(self):
         pend = {"Rental": -150, "Pablo": 100, "Tincho": 50, "Estudio": 0}
         sug = sugerir_transferencias(pend)

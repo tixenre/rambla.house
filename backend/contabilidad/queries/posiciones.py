@@ -124,15 +124,26 @@ def flujos_netos(movimientos: list[dict], parte_por_cuenta: dict, cc_por_cuenta:
     return dict(neto)
 
 
-def sugerir_transferencias(pendiente: dict) -> list[dict]:
+def sugerir_transferencias(pendiente: dict, liquidez: dict | None = None) -> list[dict]:
     """PURA. Emparejamiento greedy: quién le transfiere a quién para que todas las
     partes queden en cero. Determinístico (orden fijo de `PARTES`).
 
     `pendiente[p] > 0` → le falta recibir; `< 0` → tiene de más y debe pagar.
     Extraída de `rendicion.py::_netting`, que ahora la importa de acá — una sola
-    forma de emparejar, la use la vista mensual o la acumulada."""
+    forma de emparejar, la use la vista mensual o la acumulada.
+
+    `liquidez` (opcional): {parte: cash real en su caja}. Ordena a los pagadores de
+    más a menos plata disponible, para no sugerir una transferencia que el pagador
+    no puede hacer. Sin esto, el greedy tomaba a los pagadores en orden de `PARTES`
+    y sugería cosas como "Pablo → Estudio $120.000" cuando la plata la tenía Rental:
+    la deuda de un socio es puro balance (su plata está en un banco propio, fuera
+    del sistema), mientras que el Fondo Rental es cash de verdad. El orden de
+    `PARTES` se conserva como desempate — `sort` es estable, así que el resultado
+    sigue siendo determinístico."""
     receptores = [[p, pendiente.get(p, 0)] for p in PARTES if pendiente.get(p, 0) > 0]
     pagadores = [[p, -pendiente.get(p, 0)] for p in PARTES if pendiente.get(p, 0) < 0]
+    if liquidez:
+        pagadores.sort(key=lambda par: -int(liquidez.get(par[0], 0)))
 
     sugeridos = []
     i = j = 0
@@ -223,9 +234,21 @@ def posiciones(conn) -> dict:
     partes = calcular_posiciones(devengado, cobrado, flujo, arranques)
     pendiente = {p["parte"]: p["pendiente"] for p in partes}
 
+    # Quién tiene cash de verdad para pagar. La CC de un socio NO es plata (su
+    # dinero está en un banco propio, fuera del sistema) → queda en 0 y el greedy
+    # la deja para el final.
+    from contabilidad.queries.saldos import saldos
+
+    liquidez: dict = {}
+    for f in saldos(conn)["cajas"]:
+        parte = parte_de_cuenta(f.get("socio"), f.get("tipo"), f.get("nombre"))
+        if parte and (f.get("moneda") or "ARS") == "ARS":
+            liquidez[parte] = liquidez.get(parte, 0) + int(f["saldo"])
+
     return {
         "partes": partes,
-        "sugeridos": sugerir_transferencias(pendiente),
+        "sugeridos": sugerir_transferencias(pendiente, liquidez),
+        "liquidez": liquidez,
         "float_sin_saldar": _float_sin_saldar(conn),
         "as_of": hoy,
     }
