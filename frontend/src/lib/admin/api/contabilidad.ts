@@ -13,6 +13,7 @@ import type {
   GastosPorCategoria,
   ReporteMensual,
   RendicionData,
+  PosicionesData,
   ReconciliacionContable,
 } from "./types";
 
@@ -107,6 +108,9 @@ export const contabilidadMethods = {
   // Rendición de cuentas mensual entre socios
   getRendicion: (mes: string) =>
     authedJson<RendicionData>(`/api/admin/contabilidad/rendicion/${mes}`),
+  // Posición ACUMULADA de las 4 partes (la lectura que dice si mover plata tiene
+  // sentido — la mensual de arriba arranca de cero cada mes).
+  getPosiciones: () => authedJson<PosicionesData>(`/api/admin/contabilidad/posiciones`),
   saldarRendicion: (
     mes: string,
     body: {

@@ -29,6 +29,7 @@ import { SegmentedControl } from "@/design-system/ui/segmented-control";
 import {
   adminApi,
   METODOS_PAGO,
+  type PosicionParte,
   type RendicionPersona,
   type SugeridoRendicion,
 } from "@/lib/admin/api";
@@ -63,7 +64,15 @@ function RendicionPage() {
     enabled: /^\d{4}-\d{2}$/.test(mes),
   });
 
+  // Query propia (no bloquea el mes): la posición acumulada recorre todos los meses
+  // desde el clean start, así que es más cara que la foto de un mes.
+  const posicionesQ = useQuery({
+    queryKey: ["admin", "contabilidad", "posiciones"],
+    queryFn: () => adminApi.getPosiciones(),
+  });
+
   const invalidarTodo = () => {
+    qc.invalidateQueries({ queryKey: ["admin", "contabilidad", "posiciones"] });
     qc.invalidateQueries({ queryKey: ["admin", "contabilidad", "rendicion", mes] });
     qc.invalidateQueries({ queryKey: ["admin", "contabilidad", "saldos"] });
     qc.invalidateQueries({ queryKey: ["admin", "contabilidad", "movimientos"] });
@@ -110,6 +119,34 @@ function RendicionPage() {
       }
     >
       <div className="space-y-6">
+        {/* AL DÍA DE HOY — la lectura acumulada. Va PRIMERO a propósito: es la que
+            dice si mover plata tiene sentido. El bloque mensual de abajo arranca de
+            cero cada mes (`ya_transferido` filtra por `rendicion_mes`), así que
+            puede sugerir lo contrario que el acumulado — fue exactamente lo que
+            pasó con Tincho en agosto 2026. */}
+        <QueryState query={posicionesQ} skeleton={<TableSkeleton rows={1} cols={4} />}>
+          {(pos) => (
+            <Section
+              title="Al día de hoy"
+              subtitle="Sumando todo desde el arranque, no un mes suelto. Es el mismo número que la cuenta corriente de cada socio — y acá también están Rental y el Estudio."
+              icon={Scale}
+            >
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {pos.partes.map((p) => (
+                  <PosicionCard key={p.parte} parte={p} />
+                ))}
+              </div>
+              {pos.float_sin_saldar > 0 && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Ojo: {formatARS(pos.float_sin_saldar)} de esa plata es de pedidos que todavía no
+                  se terminaron de cobrar. Está en la mano de alguien, pero no se repartió porque el
+                  pedido no cerró.
+                </p>
+              )}
+            </Section>
+          )}
+        </QueryState>
+
         <QueryState query={rendicionQ} skeleton={<TableSkeleton rows={4} cols={4} />}>
           {(data) => (
             <div className="space-y-6">
@@ -128,11 +165,17 @@ function RendicionPage() {
               )}
 
               {/* 4 partes: le corresponde / cobró / ya rindió / pendiente. */}
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {data.personas.map((p) => (
-                  <ParteCard key={p.persona} parte={p} />
-                ))}
-              </div>
+              <Section
+                title={`Lo que se generó en ${mesLabel(mes)}`}
+                subtitle="La foto del mes, para entender de dónde salió cada número. Para decidir si mover plata, mirá 'Al día de hoy' arriba."
+                variant="plain"
+              >
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {data.personas.map((p) => (
+                    <ParteCard key={p.persona} parte={p} />
+                  ))}
+                </div>
+              </Section>
 
               <Section
                 title="Transferencias sugeridas"
@@ -212,6 +255,37 @@ const movimientosVacios: {
   destino: string | null;
   monto: number;
 }[] = [];
+
+/** La posición ACUMULADA de una parte. A diferencia de `ParteCard` (la foto de un
+ *  mes), este número no se reinicia: es lo que de verdad hay que saldar. Para
+ *  Pablo/Tincho coincide con su cuenta corriente; para Rental y el Estudio es un
+ *  número que antes no existía en ninguna pantalla de saldos. */
+function PosicionCard({ parte }: { parte: PosicionParte }) {
+  const p = parte.pendiente;
+  const tono =
+    p > 0
+      ? "border-amber/50 bg-amber/10"
+      : p < 0
+        ? "border-destructive/30 bg-destructive/10"
+        : "hairline bg-surface";
+
+  return (
+    <div className={cn("rounded-lg border p-3.5", tono)}>
+      <div className="t-eyebrow">{parte.parte}</div>
+      <div className="mt-1.5 font-mono text-xl font-semibold tabular-nums text-ink">
+        {formatARS(Math.abs(p))}
+      </div>
+      <div className="text-sm text-muted-foreground">
+        {p > 0 ? "le falta recibir" : p < 0 ? "tiene de más" : "al día"}
+      </div>
+      <div className="mt-2 border-t hairline pt-1.5 font-mono text-xs tabular-nums text-muted-foreground">
+        le corresponde {formatARS(parte.le_corresponde)} · cobró {formatARS(parte.cobro)}
+        {parte.arranque !== 0 && <> · arranque {formatARS(parte.arranque)}</>}
+        {parte.repartido !== 0 && <> · repartido {formatARS(parte.repartido)}</>}
+      </div>
+    </div>
+  );
+}
 
 function ParteCard({ parte }: { parte: RendicionPersona }) {
   const pendiente = parte.pendiente;

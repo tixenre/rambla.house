@@ -21,34 +21,26 @@ from reportes.cierres import rango_mes, snapshot_de as _snapshot_liquidacion, va
 
 from contabilidad.constants import PARTES
 from contabilidad.queries.cierres import mes_cerrado
+from contabilidad.queries.posiciones import parte_de_cuenta, sugerir_transferencias
 
 
 def _netting(corresponde: dict, cobrado: dict, ya_transferido: dict) -> dict:
-    """PURA. Calcula, por parte, lo que falta rendir y los movimientos sugeridos
-    para saldar. Determinístico (orden fijo de PARTES).
+    """PURA. Calcula, por parte, lo que falta rendir DENTRO DE UN MES y los
+    movimientos sugeridos para saldar. Determinístico (orden fijo de PARTES).
 
     `pendiente[p] = le_corresponde - cobró - ya_rindió`:
       > 0  → a `p` le falta recibir.
       < 0  → `p` tiene de más y debe pagar.
-    """
+
+    ⚠️ Es la foto de UN MES: `ya_transferido` filtra por `rendicion_mes`, así que
+    esto arranca de cero cada mes y NO ve lo que quedó pendiente de meses
+    anteriores. La lectura acumulada —la que dice si mover plata de verdad tiene
+    sentido— vive en `queries/posiciones.py`. El emparejamiento es el mismo
+    (`sugerir_transferencias`), compartido por las dos vistas."""
     saldo = {p: int(corresponde.get(p, 0)) - int(cobrado.get(p, 0)) - int(ya_transferido.get(p, 0))
              for p in PARTES}
 
-    receptores = [[p, saldo[p]] for p in PARTES if saldo[p] > 0]
-    pagadores = [[p, -saldo[p]] for p in PARTES if saldo[p] < 0]
-
-    sugeridos = []
-    i = j = 0
-    while i < len(pagadores) and j < len(receptores):
-        monto = min(pagadores[i][1], receptores[j][1])
-        if monto > 0:
-            sugeridos.append({"de": pagadores[i][0], "a": receptores[j][0], "monto": monto})
-        pagadores[i][1] -= monto
-        receptores[j][1] -= monto
-        if pagadores[i][1] == 0:
-            i += 1
-        if receptores[j][1] == 0:
-            j += 1
+    sugeridos = sugerir_transferencias(saldo)
 
     personas = [
         {
@@ -91,15 +83,6 @@ def cobrado_por_socio(conn, desde: str, hasta: str) -> dict:
     return out
 
 
-def _parte_de_cuenta(socio, tipo, nombre) -> str | None:
-    """Mapea una cuenta a su parte de rendición (Pablo/Tincho/Rental) o None."""
-    if socio in PARTES:
-        return socio
-    if tipo == "fondo" or (nombre or "").strip().lower() == "fondo rental":
-        return "Rental"
-    return None
-
-
 def ya_transferido(conn, mes: str) -> dict:
     """Neto ya rendido por parte este mes (de los movimientos `es_rendicion` no
     anulados): positivo = recibió, negativo = pagó."""
@@ -116,8 +99,8 @@ def ya_transferido(conn, mes: str) -> dict:
     t = {p: 0 for p in PARTES}
     for r in rows:
         monto = int(r["monto"] or 0)
-        po = _parte_de_cuenta(r["o_socio"], r["o_tipo"], r["o_nombre"])
-        pd = _parte_de_cuenta(r["d_socio"], r["d_tipo"], r["d_nombre"])
+        po = parte_de_cuenta(r["o_socio"], r["o_tipo"], r["o_nombre"])
+        pd = parte_de_cuenta(r["d_socio"], r["d_tipo"], r["d_nombre"])
         if po in t:
             t[po] -= monto
         if pd in t:

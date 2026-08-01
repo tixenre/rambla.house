@@ -695,6 +695,25 @@ export interface RendicionData {
   advertencias: string[];
   movimientos: RendicionMovimiento[];
 }
+/** Posición ACUMULADA de una parte (todo desde el clean start, no un mes suelto).
+ *  `pendiente > 0` → le falta recibir · `< 0` → tiene de más. Para un socio humano
+ *  es el mismo número que su cuenta corriente, con el signo al revés. */
+export interface PosicionParte {
+  parte: string;
+  le_corresponde: number;
+  cobro: number;
+  arranque: number;
+  repartido: number;
+  pendiente: number;
+}
+export interface PosicionesData {
+  partes: PosicionParte[];
+  sugeridos: SugeridoRendicion[];
+  /** Plata cobrada de pedidos que todavía no se terminaron de cobrar: está adentro
+   *  de la posición pero su devengado no existe aún. */
+  float_sin_saldar: number;
+  as_of: string;
+}
 export interface CuentaInput {
   nombre: string;
   tipo: TipoCuenta;
