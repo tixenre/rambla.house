@@ -17,11 +17,11 @@ from rate_limit import limiter, ADMIN_WRITE_LIMIT, ADMIN_UPLOAD_LIMIT, CLIENTE_W
 from clientes.queries.identidad import nombre_completo_cliente
 from reservas import ESTADOS_RESERVADO
 from routes.alquileres import (
-    _dispatch_pedido_creado_emails,
     _enriquecer_pedidos_con_cliente,
     _get_alquiler_detail,
     _next_numero_pedido,
 )
+from services.comunicacion import notificar_pedido
 from services.media.security import _download_image_bytes, _validate_ssrf_only
 from services.media.storage import delete_object as _delete_from_r2
 from services.media import (
@@ -68,6 +68,7 @@ from routes.alquileres.modelos import (
     _validar_descuento_manual_monto,
     _validar_descuento_manual_tipo,
     _validar_descuento_pct,
+    _validar_espacio_monto,
 )
 from services.estudio.commands.promo import crear_promo as _crear_promo
 
@@ -1406,7 +1407,7 @@ def crear_reserva_estudio(body: EstudioReservaCreate, request: Request, backgrou
             conn.rollback()
             raise
 
-    _dispatch_pedido_creado_emails(background, pedido)
+    notificar_pedido("pedido_creado", pedido, background=background)
     return pedido
 
 
@@ -1451,14 +1452,25 @@ def listar_reservas_estudio(
     request: Request, desde: Optional[str] = None, hasta: Optional[str] = None,
 ):
     """Turnos del estudio (tipo='estudio'; NO incluye estudio_fijo — esos son
-    slots recurrentes, ver /admin/estudio/slots) — para la lista del back-office."""
+    slots recurrentes, ver /admin/estudio/slots) — para la lista del back-office.
+
+    Suma los turnos EMBEBIDOS en un pedido de alquiler normal
+    (`alquiler_turnos_estudio`, #1308 rediseño "turno como ítem") — sin esto,
+    un turno embebido desaparecería de esta agenda (viviría SOLO en
+    `/admin/pedidos`), reabriendo del otro lado la confusión que motivó el
+    rediseño. Cada fila trae `turno_estudio_id` (`None` para un turno
+    standalone) para que el front distinga: `id` es SIEMPRE el pedido al que
+    hay que navegar; para uno embebido puede repetirse entre varias filas (un
+    pedido con 2+ turnos), así que la clave estable es
+    `turno_estudio_id ?? \`pedido-${id}\``, no `id` a secas.
+    """
     require_admin(request)
     with get_db() as conn:
         rows = conn.execute(
             """
             SELECT a.id, a.numero_pedido, a.cliente_id, a.cliente_nombre,
                    a.fecha_desde, a.fecha_hasta, a.monto_total, a.monto_pagado,
-                   a.estado
+                   a.estado, a.pedido_principal_id, NULL AS turno_estudio_id
             FROM alquileres a
             WHERE a.tipo = 'estudio'
               AND (%s::date IS NULL OR a.fecha_hasta >= %s::date)
@@ -1468,6 +1480,26 @@ def listar_reservas_estudio(
             (desde, desde, hasta, hasta),
         ).fetchall()
         pedidos = [row_to_dict(r) for r in rows]
+
+        embebidos = conn.execute(
+            """
+            SELECT a.id, a.numero_pedido, a.cliente_id, a.cliente_nombre,
+                   ate.fecha_desde, ate.fecha_hasta,
+                   (SELECT COALESCE(SUM(subtotal), 0) FROM alquiler_items
+                    WHERE turno_estudio_id = ate.id) AS monto_total,
+                   NULL AS monto_pagado, a.estado, NULL AS pedido_principal_id,
+                   ate.id AS turno_estudio_id
+            FROM alquiler_turnos_estudio ate
+            JOIN alquileres a ON a.id = ate.pedido_id
+            WHERE (%s::date IS NULL OR ate.fecha_hasta >= %s::date)
+              AND (%s::date IS NULL OR ate.fecha_desde < %s::date + interval '1 day')
+            ORDER BY ate.fecha_desde DESC
+            """,
+            (desde, desde, hasta, hasta),
+        ).fetchall()
+        pedidos.extend(row_to_dict(r) for r in embebidos)
+        pedidos.sort(key=lambda p: p["fecha_desde"], reverse=True)
+
         _enriquecer_pedidos_con_cliente(conn, pedidos)
         return {"reservas": pedidos}
 
@@ -1475,9 +1507,11 @@ def listar_reservas_estudio(
 @router.get("/admin/estudio/agenda")
 def agenda_estudio(request: Request, desde: str = Query(...), hasta: str = Query(...)):
     """Bloques de ocupación del estudio en [desde, hasta] (YYYY-MM-DD): turnos
-    reales + slots fijos recurrentes (expandidos a fechas concretas) + talleres.
-    Solo lectura — no toca disponibilidad de ningún equipo, es la vista de
-    "qué ocupa el ESPACIO" (mismas fuentes que _estudio_disponible)."""
+    reales (standalone + EMBEBIDOS en un pedido de alquiler normal, #1308
+    rediseño "turno como ítem") + slots fijos recurrentes (expandidos a fechas
+    concretas) + talleres. Solo lectura — no toca disponibilidad de ningún
+    equipo, es la vista de "qué ocupa el ESPACIO" (mismas fuentes que
+    _estudio_disponible)."""
     require_admin(request)
     try:
         desde_d = datetime.strptime(desde, "%Y-%m-%d").date()
@@ -1509,6 +1543,36 @@ def agenda_estudio(request: Request, desde: str = Query(...), hasta: str = Query
                 "fecha_desde": r["fecha_desde"].isoformat(),
                 "fecha_hasta": r["fecha_hasta"].isoformat(),
                 "estado": r["estado"],
+            })
+
+        # Turnos EMBEBIDOS en un pedido de alquiler normal (alquiler_turnos_estudio)
+        # — sin esto, uno desaparecería de la agenda del espacio en cuanto dejara
+        # de vivir en su propia fila `alquileres`. `id`/`numero_pedido` apuntan al
+        # pedido CONTENEDOR (no hay una página propia del turno); `embebido: True`
+        # deja que el front lo distinga visualmente si quiere, sin que la agenda
+        # necesite tratarlo distinto para calcular ocupación.
+        embebidos = conn.execute(
+            f"""
+            SELECT a.id, a.numero_pedido, a.cliente_nombre, a.estado,
+                   ate.fecha_desde, ate.fecha_hasta
+            FROM alquiler_turnos_estudio ate
+            JOIN alquileres a ON a.id = ate.pedido_id
+            WHERE a.estado IN {ESTADOS_RESERVADO}
+              AND ate.fecha_desde < %s AND ate.fecha_hasta > %s
+            ORDER BY ate.fecha_desde
+            """,
+            (hasta_d + timedelta(days=1), desde_d),
+        ).fetchall()
+        for r in embebidos:
+            bloques.append({
+                "tipo": "turno",
+                "id": r["id"],
+                "numero_pedido": r["numero_pedido"],
+                "titulo": r["cliente_nombre"] or "Reserva",
+                "fecha_desde": r["fecha_desde"].isoformat(),
+                "fecha_hasta": r["fecha_hasta"].isoformat(),
+                "estado": r["estado"],
+                "embebido": True,
             })
 
         slots = conn.execute("SELECT * FROM estudio_slots_fijos WHERE activo = TRUE").fetchall()
@@ -1564,6 +1628,7 @@ def cotizar_reserva_estudio(
     pintura_reciente: bool = False,
     sueltos_json: str = Query("[]"),
     pedido_id: Optional[int] = None,
+    exclude_turno_estudio_id: Optional[int] = None,
     espacio_monto: Optional[int] = None,
     descuento_pct: float = 0,
     descuento_manual_tipo: str = "pct",
@@ -1572,9 +1637,14 @@ def cotizar_reserva_estudio(
     """Desglose de plata de una reserva ANTES de crearla — no muta nada (el
     front no calcula plata, MEMORIA 2026-06-29). `sueltos_json` es
     `[{"equipo_id":N,"cantidad":N}]` codificado. `pedido_id`: al cotizar la
-    EDICIÓN de un turno ya existente, se excluye a sí mismo del chequeo de
-    disponibilidad — si no, un turno siempre se vería "ocupado" por su propia
-    franja (bug real encontrado al verificar el editor: #1283 Fase 6).
+    EDICIÓN de un turno STANDALONE ya existente, se excluye a sí mismo del
+    chequeo de disponibilidad — si no, un turno siempre se vería "ocupado" por
+    su propia franja (bug real encontrado al verificar el editor: #1283 Fase
+    6). `exclude_turno_estudio_id` es el equivalente para un turno EMBEBIDO
+    (#1308 Fase 4.4) — mutuamente excluyente con `pedido_id`: excluir por
+    `pedido_id` (el pedido CONTENEDOR) escondería un conflicto real contra un
+    turno HERMANO del mismo pedido (Fase 1, mismo motivo que
+    `_centinela_libre`/`_estudio_disponible` distinguen los dos parámetros).
 
     `espacio_monto`: tarifa NEGOCIADA del espacio, la que el admin tipea en la
     fila "Espacio". Sin esto, la cotización siempre devolvía el precio de LISTA
@@ -1644,7 +1714,9 @@ def cotizar_reserva_estudio(
         }
 
         libre, motivo = _estudio_disponible(
-            conn, estudio, fecha_desde, fecha_hasta, exclude_pedido_id=pedido_id,
+            conn, estudio, fecha_desde, fecha_hasta,
+            exclude_pedido_id=pedido_id,
+            exclude_turno_estudio_id=exclude_turno_estudio_id,
         )
         desglose["espacio_disponible"] = libre
         desglose["espacio_motivo"] = motivo
@@ -1667,6 +1739,11 @@ class EstudioReservaAdminCreate(BaseModel):
     # turno se hereda del pedido principal (`cliente_id`/`cliente_nombre` de
     # este body se ignoran) para que nunca puedan desincronizarse.
     pedido_principal_id: Optional[int] = None
+
+    @field_validator("espacio_monto")
+    @classmethod
+    def _v_espacio_monto(cls, v):
+        return _validar_espacio_monto(v)
 
 
 def _resolver_pedido_principal(conn, pedido_principal_id: int):
@@ -1753,6 +1830,11 @@ class EstudioReservaAdminUpdate(BaseModel):
     descuento_pct: Optional[float] = None
     descuento_manual_tipo: Optional[str] = None
     descuento_manual_monto: Optional[int] = None
+
+    @field_validator("espacio_monto")
+    @classmethod
+    def _v_espacio_monto(cls, v):
+        return _validar_espacio_monto(v)
 
     @field_validator("descuento_pct")
     @classmethod

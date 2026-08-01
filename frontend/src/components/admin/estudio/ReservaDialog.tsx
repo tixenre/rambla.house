@@ -35,7 +35,7 @@ export function ReservaDialog({
   reserva,
   estudio,
   onSaved,
-  pedidoVinculado,
+  pedidoContenedor,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -43,13 +43,13 @@ export function ReservaDialog({
   reserva: EstudioReservaListItem | null;
   estudio: EstudioConfig;
   onSaved: () => void;
-  /** Alta de un turno DESDE la página de un pedido de alquiler normal
-   *  (#1308, sección "Turnos del Estudio"): el cliente Y el estado inicial
-   *  se heredan de ese pedido. Solo aplica al modo alta (`reserva == null`)
-   *  — hoy este caso ya no pasa por acá (`TurnosEstudioSection` monta
-   *  `NuevoTurnoEstudioForm` directo), pero el prop se conserva por si otro
-   *  caller futuro sí necesita el alta vinculada dentro de un Dialog. */
-  pedidoVinculado?: { id: number; clienteNombre: string | null; estado: string };
+  /** Alta de un turno EMBEBIDO (#1308 Fase 4) DESDE la página de un pedido de
+   *  alquiler normal: el cliente se hereda de ese pedido. Solo aplica al modo
+   *  alta (`reserva == null`) — hoy este caso ya no pasa por acá
+   *  (`TurnosEstudioSection` monta `NuevoTurnoEstudioForm` directo), pero el
+   *  prop se conserva por si otro caller futuro sí necesita el alta embebida
+   *  dentro de un Dialog. */
+  pedidoContenedor?: { id: number; clienteNombre: string | null };
 }) {
   const editando = !!reserva;
 
@@ -70,7 +70,7 @@ export function ReservaDialog({
           <DialogTitle>
             {editando
               ? `Editar turno #${reserva?.numero_pedido ?? reserva?.id}`
-              : pedidoVinculado
+              : pedidoContenedor
                 ? "Nuevo turno del Estudio"
                 : "Nuevo turno"}
           </DialogTitle>
@@ -95,7 +95,7 @@ export function ReservaDialog({
           open && (
             <NuevoTurnoEstudioForm
               estudio={estudio}
-              pedidoVinculado={pedidoVinculado}
+              pedidoContenedor={pedidoContenedor}
               onCreated={() => {
                 onSaved();
                 onOpenChange(false);

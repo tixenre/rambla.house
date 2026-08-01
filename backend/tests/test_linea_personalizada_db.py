@@ -149,62 +149,19 @@ def test_lectura_incluye_la_linea_libre(setup):
         conn.close()
 
 
-def test_edicion_del_portal_preserva_lineas_libres(setup):
-    """El portal del cliente solo manda ítems de catálogo. Al reaplicar, las
-    líneas personalizadas (#805) NO se deben borrar (sino se pierde plata)."""
-    from database import get_db
-    from routes.alquileres import _apply_pedido_items, _get_alquiler_items
-    from routes.cliente_portal import (
-        ModificacionItemIn,
-        _items_payload_to_pedido_items,
-        _lineas_libres_actuales,
-        _precios_actuales,
-    )
-
-    conn = get_db()
-    try:
-        _crear_pedido(conn, P1, "solicitado")
-        conn.execute(
-            "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, orden) VALUES (%s,%s,%s,%s,%s)",
-            (P1, EQ, 1, 5000, 0),
-        )
-        conn.execute(
-            "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, nombre_libre, cobro_modo, precio_jornada, orden) "
-            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
-            (P1, None, 1, "Flete", "fijo", 20000, 1),
-        )
-        conn.commit()
-
-        # Simula el camino directo del portal: cambia la cantidad del equipo a 2.
-        precios = _precios_actuales(conn, P1)
-        pedido_items = _items_payload_to_pedido_items(
-            [ModificacionItemIn(equipo_id=EQ, cantidad=2)], precios
-        )
-        pedido_items += _lineas_libres_actuales(conn, P1)
-        _apply_pedido_items(conn, P1, pedido_items)
-        conn.commit()
-
-        items = _get_alquiler_items(conn, P1)
-        # El flete sobrevive a la edición del cliente.
-        libres = [i for i in items if i["equipo_id"] is None]
-        assert len(libres) == 1 and libres[0]["nombre"] == "Flete"
-        eq_line = [i for i in items if i["equipo_id"] == EQ]
-        assert len(eq_line) == 1 and eq_line[0]["cantidad"] == 2
-    finally:
-        conn.rollback()
-        conn.close()
-
-
 def test_create_pedido_arma_la_linea_personalizada(setup, monkeypatch):
     """create_pedido (#805): crear un pedido con una línea personalizada (equipo_id
     None) NO debe dar 404 ni perder nombre_libre/cobro_modo. Antes armaba los ítems
     inline asumiendo equipo_id válido (lookup con None → 404, INSERT de solo 5
     columnas); ahora delega en `_apply_pedido_items`. Regresión de punta a punta."""
-    import routes.alquileres.core as ac
+    import services.alquileres.commands.creacion as cr
     from database import get_db
     from routes.alquileres import PedidoCreate, PedidoItem, create_pedido, _get_alquiler_items
 
-    monkeypatch.setattr(ac, "_dispatch_pedido_creado_emails", lambda *a, **k: None)
+    # El despacho del aviso vive en `services/alquileres/commands/creacion.py` (ahí
+    # quedó `create_pedido` tras el split del motor de pedidos): se stubea DONDE se
+    # llama, no en `routes.alquileres.core` — que hoy solo re-exporta la función.
+    monkeypatch.setattr(cr, "notificar_pedido", lambda *a, **k: None)
 
     pedido = create_pedido(
         PedidoCreate(

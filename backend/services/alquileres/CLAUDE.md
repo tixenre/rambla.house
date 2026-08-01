@@ -29,8 +29,7 @@ services/alquileres/
                            # un command; ver la nota de invariante más abajo)
     detalle.py              # _get_alquiler_items/_detalle/_pagos, _es_historico,
                             # _turnos_vinculados, _pedido_principal_liviano,
-                            # _clases_del_taller, _enriquecer_pedido_con_total,
-                            # _get_historial_modificaciones
+                            # _clases_del_taller, _enriquecer_pedido_con_total
   commands/           # ESCRITURA — única puerta de mutación
     pagos.py             # PagoCreate, DESTINATARIOS_PAGO/METODOS_PAGO/defaults,
                          # _resolver_destino_metodo, _recalcular_monto_pagado,
@@ -75,16 +74,16 @@ sea un command.
 
 ## Reglas que no se rompen
 
-- **El paquete NO importa de `routes.*` — con una excepción documentada y preservada a propósito:**
-  hay un ciclo real `routes.alquileres ↔ routes.cliente_portal` sostenido por imports diferidos
-  (dentro del cuerpo de función, nunca a nivel de módulo) en AMBAS direcciones —
-  `services.alquileres.commands.transiciones::cambiar_estado` necesita
-  `routes.cliente_portal.ESTADOS_MODIFICABLES`/`_cancelar_solicitudes_pendientes` de vuelta;
+- **El paquete NO importa de `routes.*`.** Hasta la remoción de "solicitudes de modificación"
+  (retiro de la feature del portal, ver `docs/DECISIONES.md`) había acá un ciclo real
+  `services.alquileres ↔ routes.cliente_portal` sostenido por imports diferidos en AMBAS
+  direcciones (`cambiar_estado` necesitaba `routes.cliente_portal.ESTADOS_MODIFICABLES`/
+  `_cancelar_solicitudes_pendientes` de vuelta) — se cerró solo, sin rediseño, al borrar esa
+  llamada. Queda una sola dirección real, un import normal (no un ciclo):
   `routes/cliente_portal/pedidos.py::cliente_cancelar_pedido` importa
-  `services.alquileres.commands.transiciones.cambiar_estado`. Preservado TAL CUAL en la Fase 4 (solo
-  cambió el path de origen, no la técnica del import diferido) — no se rediseñó el ciclo en esta
-  iniciativa. Un import a nivel de MÓDULO nuevo entre este paquete y `routes.cliente_portal` rompería
-  el ciclo en tiempo de import — eso sí es un bug real, no una variante aceptable.
+  `services.alquileres.commands.transiciones.cambiar_estado` (deferred dentro de la función, por
+  convención del paquete, no por necesidad de romper un ciclo). Un import a nivel de MÓDULO nuevo
+  DESDE este paquete HACIA `routes.cliente_portal` reabriría un ciclo — eso sí sería un bug real.
 - **`_next_numero_pedido` parece lectura (`SELECT nextval(...)`) pero `nextval()` tiene efecto real**
   (avanza la secuencia) — vive en `commands/pedido.py`, no en `queries/`, pese a la sintaxis.
 - **`_delete_pedido` se extrajo SIN agregarle ningún gate nuevo.** La decisión de si "Eliminar
@@ -107,8 +106,8 @@ sea un command.
   "duplicado" en los dos lugares.
 
 El supervisor marca: lógica de pedidos reimplementada fuera de este paquete; un `queries/`
-importando de `commands/`; un import a nivel de MÓDULO nuevo entre este paquete y
-`routes.cliente_portal` (rompería el ciclo documentado); el `FOR UPDATE`/`pg_advisory_xact_lock`/el
+importando de `commands/`; un import a nivel de MÓDULO nuevo desde este paquete hacia
+`routes.cliente_portal` (reabriría el ciclo ya cerrado); el `FOR UPDATE`/`pg_advisory_xact_lock`/el
 retry-loop de `create_pedido_retry` tocado o reordenado; un gate nuevo agregado a `_delete_pedido`
 sin que la decisión de #1311 se haya tomado; un INSERT nuevo contra `alquiler_items` que no pase por
 `test_gate_not_bypassed.py`.

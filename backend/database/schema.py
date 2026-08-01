@@ -543,6 +543,34 @@ def _init_db_schema(conn):
         CREATE INDEX IF NOT EXISTS idx_pedido_items_equipo ON alquiler_items(equipo_id)
     """)
 
+    # Un turno del Estudio embebido en un pedido de alquiler normal (tipo='diaria') es un GRUPO de
+    # alquiler_items (centinela + opcional promo/sueltos/pintura) colgando de la MISMA fila de
+    # alquileres, en vez de una fila `alquileres` aparte vinculada por pedido_principal_id. Aditivo
+    # puro: ninguna fila existente tiene turno_estudio_id poblado (cero cambio de comportamiento).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS alquiler_turnos_estudio (
+            id                      SERIAL PRIMARY KEY,
+            pedido_id               INTEGER NOT NULL REFERENCES alquileres(id) ON DELETE CASCADE,
+            fecha_desde             TIMESTAMP NOT NULL,
+            fecha_hasta             TIMESTAMP NOT NULL,
+            descuento_pct           NUMERIC(7,4) NOT NULL DEFAULT 0,
+            descuento_manual_tipo   VARCHAR(10) NOT NULL DEFAULT 'pct',
+            descuento_manual_monto  INTEGER NOT NULL DEFAULT 0,
+            created_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at              TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_turnos_estudio_pedido ON alquiler_turnos_estudio(pedido_id)
+    """)
+    conn.execute(
+        "ALTER TABLE alquiler_items ADD COLUMN IF NOT EXISTS turno_estudio_id "
+        "INTEGER REFERENCES alquiler_turnos_estudio(id) ON DELETE CASCADE"
+    )
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_pedido_items_turno_estudio ON alquiler_items(turno_estudio_id)
+    """)
+
     # NOTA: tabla `usuarios` (auth email+password legacy) removida en #76.
     # Auth ahora es 100% Google OAuth + Supabase. La migración Alembic
     # `322b...drop_tabla_usuarios_legacy_76` hace el DROP en prod.
@@ -1110,40 +1138,6 @@ def _init_db_schema(conn):
     conn.execute("ALTER TABLE alquiler_pagos ADD COLUMN IF NOT EXISTS anulado_at TIMESTAMP")
     conn.execute("ALTER TABLE alquiler_pagos ADD COLUMN IF NOT EXISTS anulado_motivo TEXT")
 
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS solicitudes_modificacion (
-            id                SERIAL PRIMARY KEY,
-            pedido_id         INTEGER NOT NULL REFERENCES alquileres(id) ON DELETE CASCADE,
-            cliente_id        INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
-            mensaje           TEXT,
-            estado            TEXT NOT NULL DEFAULT 'pendiente',
-            respuesta         TEXT,
-            cambios_json      JSONB,
-            cambios_aplicados JSONB,
-            tipo              TEXT NOT NULL DEFAULT 'aprobacion',
-            resolved_at       TIMESTAMPTZ,
-            resolved_by       TEXT,
-            created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_solicitudes_pedido ON solicitudes_modificacion(pedido_id)
-    """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_solicitudes_estado ON solicitudes_modificacion(estado)
-    """)
-    conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_solicitudes_cliente ON solicitudes_modificacion(cliente_id)
-    """)
-    # Garantía atómica de "una sola solicitud pendiente por pedido": previene
-    # races multi-tab donde dos requests pasan el check optimista y ambos
-    # insertan.
-    conn.execute("""
-        CREATE UNIQUE INDEX IF NOT EXISTS uniq_solicitud_pendiente_por_pedido
-        ON solicitudes_modificacion (pedido_id)
-        WHERE estado = 'pendiente'
-    """)
-
     # Configuración global de la app (tipo de cambio, defaults, etc.).
     # Es un key-value simple: clave única + valor (string serializado).
     # Se accede vía /api/settings/:key (público read) y PUT /api/admin/settings/:key.
@@ -1484,6 +1478,45 @@ def _init_db_schema(conn):
         WHERE template_key = 'recordatorio_retiro' AND status = 'sent'
     """)
 
+    # whatsapp_log: bitácora de envíos del canal WhatsApp (migración
+    # w1h2a3t4s5a6). Espeja emails_log; su índice único parcial da idempotencia
+    # por pedido (un envío 'sent' por (alquiler_id, template_key)) — clave porque
+    # el gate de los jobs es una var en memoria que se resetea en cada restart.
+    # Sin `cliente_id`: espeja emails_log (que tampoco lo tiene) — keyea por
+    # alquiler_id, que sobrevive un merge de cuentas con el pedido; así NO suma
+    # una FK a `clientes` que habría que clasificar en identity/merge (el cliente
+    # se deriva por join a alquileres si hace falta).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS whatsapp_log (
+            id           BIGSERIAL PRIMARY KEY,
+            to_phone     TEXT NOT NULL,
+            template_key TEXT NOT NULL,
+            alquiler_id  INTEGER REFERENCES alquileres(id) ON DELETE SET NULL,
+            status       TEXT NOT NULL,
+            wamid        TEXT,
+            error        TEXT,
+            sent_at      TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_whatsapp_log_alquiler ON whatsapp_log(alquiler_id)")
+    conn.execute("""
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_whatsapp_log_idempotente
+        ON whatsapp_log(alquiler_id, template_key, to_phone)
+        WHERE status = 'sent'
+    """)
+    # Estado de entrega REAL, que llega por webhook (delivered/read/failed) —
+    # `status` NO se toca (sostiene el índice único de arriba); son columnas
+    # aparte, siempre nullable, que el webhook completa best-effort (migración
+    # w3bh00k1nb0x). `wamid` (ya existe) es la clave para cruzar el evento con
+    # la fila.
+    conn.execute("ALTER TABLE whatsapp_log ADD COLUMN IF NOT EXISTS delivery_status TEXT")
+    conn.execute("ALTER TABLE whatsapp_log ADD COLUMN IF NOT EXISTS delivery_error TEXT")
+    conn.execute("ALTER TABLE whatsapp_log ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ")
+    # Opt-in de WhatsApp por cliente (Meta exige consentimiento demostrable para
+    # utility templates). Default FALSE: no se le manda a nadie hasta que acepta.
+    conn.execute("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS whatsapp_opt_in BOOLEAN NOT NULL DEFAULT FALSE")
+    conn.execute("ALTER TABLE clientes ADD COLUMN IF NOT EXISTS whatsapp_opt_in_at TIMESTAMPTZ")
+
     # equipos.slug (migraciones e4a7c1f8d6b2 + f5b8d2e4a9c1): columna + UNIQUE
     # constraint completo (no partial index — ese era transicional).
     conn.execute("ALTER TABLE equipos ADD COLUMN IF NOT EXISTS slug VARCHAR(80)")
@@ -1510,8 +1543,7 @@ def _init_db_schema(conn):
     from dataio.slug import backfill_equipos_slug
     backfill_equipos_slug(conn)
 
-    # JSONB agregadas por migraciones (b6f8d3e5a2c1, d7c9e1f3a8b2)
-    conn.execute("ALTER TABLE solicitudes_modificacion ADD COLUMN IF NOT EXISTS cambios_json JSONB")
+    # JSONB agregadas por migraciones (d7c9e1f3a8b2)
     conn.execute("ALTER TABLE spec_definitions ADD COLUMN IF NOT EXISTS tabla_columnas JSONB")
 
     # Canonización de spec_keys (#535): renombres idempotentes en spec_definitions.

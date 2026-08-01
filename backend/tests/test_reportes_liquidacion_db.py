@@ -378,6 +378,82 @@ def test_reconciliacion_no_marca_falso_positivo_con_descuento_de_cliente():
             conn.close()
 
 
+def test_reconciliacion_no_marca_falso_positivo_con_turno_embebido_y_descuento():
+    """Candado del hallazgo de auditoría (#1308): `_pedidos_para_desglose` no
+    traía `turno_estudio_id` en el join de ítems, así que `desglose_de_pedido`
+    contaba la línea del turno EMBEBIDO en la base del descuento global —
+    divergía de `monto_total` (que `_recalcular_total_pedido` sí calcula
+    excluyéndola) en CUALQUIER pedido mixto con descuento %. Reproduce el caso
+    real confirmado en vivo: equipo $10.000×3 jornadas ($30.000 bruto) + turno
+    $69.000 fijo, cliente con 10% → `monto_total` correcto = 96.000 (descuento
+    solo sobre los 30.000 del equipo). Antes del fix, `reconciliar` marcaba
+    este pedido divergente (esperaba 89.100, 10% sobre los 99.000 combinados)."""
+    from database import get_db, init_db
+    from reportes.reconciliacion import reconciliar
+
+    E_TURNO = 9_300_905
+    P_TURNO = 9_300_906
+    T_TURNO = 9_300_907
+
+    def _limpiar_local(conn):
+        conn.execute("DELETE FROM alquiler_items WHERE pedido_id = %s", (P_TURNO,))
+        conn.execute("DELETE FROM alquiler_turnos_estudio WHERE id = %s", (T_TURNO,))
+        conn.execute("DELETE FROM alquileres WHERE id = %s", (P_TURNO,))
+        conn.execute("DELETE FROM equipos WHERE id = %s", (E_TURNO,))
+
+    init_db()
+    conn = get_db()
+    try:
+        _limpiar_local(conn)
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, dueno) VALUES (%s,%s,%s,%s)",
+            (E_TURNO, "Equipo turno embebido OK", 5, "Rental"),
+        )
+        conn.execute(
+            """INSERT INTO alquileres (id, cliente_nombre, estado, fecha_desde, fecha_hasta,
+                                       monto_total, monto_pagado, descuento_pct,
+                                       descuento_cliente_pct)
+               VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+            (P_TURNO, "Cliente con turno + descuento", "finalizado",
+             "2026-06-05T00:00:00", "2026-06-08T00:00:00", 96000, 96000, 0, 10.0),
+        )
+        conn.execute(
+            "INSERT INTO alquiler_turnos_estudio (id, pedido_id, fecha_desde, fecha_hasta) "
+            "VALUES (%s,%s,%s,%s)",
+            (T_TURNO, P_TURNO, "2026-06-05T10:00:00", "2026-06-05T12:00:00"),
+        )
+        conn.execute(
+            """INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada,
+                                           cobro_modo, turno_estudio_id)
+               VALUES (%s,%s,%s,%s,%s,NULL)""",
+            (P_TURNO, E_TURNO, 1, 10000, "jornada"),
+        )
+        conn.execute(
+            """INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada,
+                                           cobro_modo, turno_estudio_id)
+               VALUES (%s,%s,%s,%s,%s,%s)""",
+            (P_TURNO, None, 1, 69000, "fijo", T_TURNO),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    try:
+        conn = get_db()
+        try:
+            rec = reconciliar(conn)
+        finally:
+            conn.close()
+        assert P_TURNO not in rec["desglose_divergente"]["ids"], rec["desglose_divergente"]
+    finally:
+        conn = get_db()
+        try:
+            _limpiar_local(conn)
+            conn.commit()
+        finally:
+            conn.close()
+
+
 def test_suma_items_cero_no_pierde_plata():
     """Fase 5 (#1184): P_SUBTOTAL_CERO tiene AMBOS ítems con subtotal 0 (ej. 100%
     de descuento a nivel ítem) pero monto_total=30000. Antes, `NULLIF(suma_items, 0)`

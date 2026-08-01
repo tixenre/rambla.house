@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from routes.alquileres import _pedido_email_context, _cuerpo_mail_simple
+from routes.alquileres import _cuerpo_mail_simple
+from services.comunicacion import pedido_email_context as _pedido_email_context
 from config import SITE_URL
 
 pytestmark = pytest.mark.unit

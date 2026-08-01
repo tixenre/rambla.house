@@ -88,6 +88,29 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = ""
     EMAIL_ADMIN_TO: str = ""
 
+    # ── WhatsApp Business — Meta Cloud API (construido, activado por config) ──
+    # Una sola cuenta de plataforma (marca Rambla única): el token y el número
+    # viven en ENV (como RESEND/DIDIT), NO cifrados en DB — así cada ambiente de
+    # Railway tiene el suyo y staging (BD clonada de prod) nunca hereda el token
+    # de prod. Sin token/phone_number_id el canal es inerte. Ver
+    # services/whatsapp/config.py.
+    WHATSAPP_ACCESS_TOKEN: str = ""
+    WHATSAPP_PHONE_NUMBER_ID: str = ""
+    WHATSAPP_BUSINESS_ACCOUNT_ID: str = ""
+    # Allowlist de destinatarios (E.164 coma-separados) para NO-producción: fuera
+    # de prod solo se le manda a estos números (red anti-spam; el número de test
+    # de Meta igual restringe server-side, esto es defensa en profundidad).
+    WHATSAPP_TEST_RECIPIENTS: str = ""
+    # Webhook entrante (estados de entrega + mensajes que responde el cliente):
+    # DISTINTO del access token — es el "App Secret" del Meta App Dashboard
+    # (Settings → Basic), firma `X-Hub-Signature-256`. Sin esto, el webhook
+    # rechaza todo (fail-closed, mismo criterio que DIDIT_WEBHOOK_SECRET).
+    WHATSAPP_APP_SECRET: str = ""
+    # String que vos elegís (cualquier valor) y pegás TAMBIÉN en el WhatsApp
+    # Manager al configurar el webhook ("Verify token") — confirma que la URL
+    # de callback es tuya durante el handshake GET inicial.
+    WHATSAPP_WEBHOOK_VERIFY_TOKEN: str = ""
+
     # ── Integraciones ────────────────────────────────────────────────────
     GOOGLE_MAPS_API_KEY: str = ""
 

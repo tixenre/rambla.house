@@ -29,7 +29,14 @@ def _pedidos_para_desglose(conn) -> list[dict]:
     promo) en vez de $0, así que `desglose_de_pedido` cierra contra
     `monto_total` igual que un alquiler normal — no hace falta excluirlos.
     Backfill de los pedidos creados ANTES de este cambio: migración
-    `q2r3s4t5u6v7_backfill_items_estudio_veraces`."""
+    `q2r3s4t5u6v7_backfill_items_estudio_veraces`.
+
+    `pi.turno_estudio_id` (#1308 rediseño "turno como ítem"): sin esta
+    columna, `desglose_de_pedido` no podía distinguir las líneas de un turno
+    EMBEBIDO y las contaba en el descuento global — este chequeo terminaba
+    marcando `desglose_divergente` en CUALQUIER pedido mixto con descuento %
+    (hallazgo real de auditoría, arreglado en el mismo lote que
+    `finanzas_flujo/pedido.py`)."""
     from database import row_to_dict
 
     rows = conn.execute(
@@ -51,7 +58,7 @@ def _pedidos_para_desglose(conn) -> list[dict]:
     placeholders = ", ".join("%s" for _ in ids)
     items_rows = conn.execute(
         f"""SELECT pi.pedido_id, pi.equipo_id, pi.cantidad, pi.precio_jornada, pi.cobro_modo,
-                   e.tipo AS equipo_tipo
+                   pi.turno_estudio_id, e.tipo AS equipo_tipo
             FROM alquiler_items pi
             LEFT JOIN equipos e ON e.id = pi.equipo_id
             WHERE pi.pedido_id IN ({placeholders})""",

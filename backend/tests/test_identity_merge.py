@@ -70,7 +70,7 @@ def test_merge_reasigna_todo_y_borra_source():
     merge.merge_accounts(source=1, target=2, conn=rec)
 
     # Reasigna cada tabla con datos al target (2), desde el source (1).
-    for tabla in ("alquileres", "solicitudes_modificacion", "cliente_listas",
+    for tabla in ("alquileres", "cliente_listas",
                   "kyc_events", "passkey_credentials"):
         upd = _sql(rec, f"UPDATE {tabla} SET cliente_id=%s WHERE cliente_id=%s")
         assert upd and upd[0][1] == (2, 1), f"{tabla} no se reasignó al target"

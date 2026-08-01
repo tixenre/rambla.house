@@ -19,7 +19,7 @@ from services.pedidos_enriquecimiento import (
     _enriquecer_pedido_con_cliente,
     _enriquecer_pedido_con_cliente_fiscal,
 )
-from services.pedidos_notificaciones import _pedido_email_context
+from services.comunicacion import pedido_email_context
 from services.email.service import primer_nombre
 from pdf import _pedido_html, _albaran_html, _contrato_html, _packing_list_html, _pedido_filename
 from services.alquileres.queries.detalle import (
@@ -152,6 +152,13 @@ def _doc_html(conn, id: int, kind: str) -> tuple[str, str]:
         if not row:
             raise HTTPException(404, "Pedido no encontrado")
         pedido = row_to_dict(row)
+        # `pi.turno_estudio_id IS NULL` (#1308 rediseño "turno como ítem"):
+        # este SELECT era ciego a la columna — el centinela/sueltos/pintura de
+        # un turno del Estudio EMBEBIDO se declaraban al seguro del cliente
+        # como equipo saliendo del local, cuando en realidad un turno se usa
+        # ENTERO adentro del Estudio (nunca sale con el cliente) — hallazgo de
+        # auditoría. Se excluyen acá, no en el template: así `_albaran_html`
+        # ni `_agrupar_items_por_categoria` necesitan saber de turnos.
         items = conn.execute(f"""
             SELECT pi.cantidad, COALESCE(e.nombre, pi.nombre_libre) AS nombre,
                    {MARCA_SUBQUERY}, e.modelo, e.serie, e.valor_reposicion, e.foto_url,
@@ -159,7 +166,7 @@ def _doc_html(conn, id: int, kind: str) -> tuple[str, str]:
                    e.nombre_publico, e.nombre_publico_largo, pi.equipo_id
             FROM alquiler_items pi
             LEFT JOIN equipos e ON e.id = pi.equipo_id
-            WHERE pi.pedido_id = %s
+            WHERE pi.pedido_id = %s AND pi.turno_estudio_id IS NULL
             ORDER BY pi.orden, pi.id
         """, (id,)).fetchall()
         pedido["items"] = [row_to_dict(i) for i in items]
@@ -183,6 +190,15 @@ def _doc_html(conn, id: int, kind: str) -> tuple[str, str]:
         _enriquecer_pedido_con_cliente_fiscal(conn, pedido)
         # `_get_alquiler_items` ya ordena por el orden manual (orden, id, #806).
         pedido["items"] = _get_alquiler_items(conn, id)
+        # `turno_estudio_id IS NULL` (#1308 rediseño "turno como ítem"): el
+        # centinela/sueltos/pintura de un turno del Estudio EMBEBIDO se usan
+        # ENTERO adentro del Estudio — nunca salen con el cliente ni vuelven a
+        # controlarse al retiro/devolución — así que no pertenecen al Checklist
+        # de retiro (hallazgo de auditoría, mismo criterio que Contrato y
+        # Detalle de seguro). Se excluyen ACÁ, antes de agrupar: así
+        # `_packing_list_html`/`_agrupar_items_por_categoria` no necesitan
+        # saber de turnos.
+        pedido["items"] = [it for it in pedido["items"] if not it.get("turno_estudio_id")]
         # Check físico → agrupar por categoría (#814).
         pedido["grupos"] = _agrupar_items_por_categoria(conn, pedido["items"])
         return _packing_list_html(pedido), _pedido_filename(pedido, doc="packing-list")
@@ -210,7 +226,7 @@ def _ctx_mail_pedido(conn, id: int, docs: list[str], mensaje: Optional[str],
     ped["items"] = _get_alquiler_items(conn, id)
     _enriquecer_pedido_con_cliente(conn, ped)
     _enriquecer_pedido_con_total(conn, ped)
-    ctx = _pedido_email_context(ped)
+    ctx = pedido_email_context(ped)
     ctx["docs_adjuntos"] = [DOCUMENTOS[k] for k in docs]
     if mensaje and mensaje.strip():
         ctx["mensaje_admin"] = mensaje.strip()

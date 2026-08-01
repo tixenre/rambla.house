@@ -7,7 +7,7 @@
  * endpoint (ver TODO en NotificacionesSection).
  *
  * Toda la lógica de pedidos (fetch, filtros, cancelaciones, documentos,
- * solicitudes, timeline) se preserva en los componentes PedidoCard, DocActions,
+ * timeline) se preserva en los componentes PedidoCard, DocActions,
  * DocPreviewModal, DocAvailablePopup, PedidoTimeline, buildTimelineSteps.
  */
 
@@ -17,7 +17,6 @@ import { useEquipos } from "@/hooks/useEquipos";
 import { useFavoritos } from "@/hooks/useFavoritos";
 import { EquipmentCard } from "@/components/rental/EquipmentCard";
 import { authedFetch } from "@/lib/authedFetch";
-import { clienteApi } from "@/lib/cliente/api";
 import { TopBar } from "@/components/rental/shell/TopBar";
 import { StatCard } from "@/design-system/composites/StatCard";
 import {
@@ -142,16 +141,9 @@ export default function ClientePortal() {
   const verifHandledRef = useRef(false);
   const [tab, setTab] = useState<Filtro>("todos");
   const [query, setQuery] = useState<string>("");
-  const [ventanaHoras, setVentanaHoras] = useState<number>(24);
   const [docsNuevos, setDocsNuevos] = useState<
     Array<{ pedidoId: number; numero: string; tipo: DocTipo }>
   >([]);
-
-  function reloadPedidos() {
-    authedFetch("/api/cliente/pedidos").then(async (r) => {
-      if (r.ok) setPedidos(await r.json());
-    });
-  }
 
   useEffect(() => {
     let alive = true;
@@ -167,14 +159,6 @@ export default function ClientePortal() {
       })
       .catch(() => navigate({ to: "/cliente/login" }))
       .finally(() => alive && setLoading(false));
-    clienteApi
-      .modificacionConfig()
-      .then((c) => {
-        if (alive) setVentanaHoras(c.ventana_horas);
-      })
-      .catch(() => {
-        /* default 24 */
-      });
     return () => {
       alive = false;
     };
@@ -652,8 +636,6 @@ export default function ClientePortal() {
                       expanded={expanded === p.id}
                       highlight={highlightId === p.id}
                       onToggle={() => setExpanded(expanded === p.id ? null : p.id)}
-                      ventanaHoras={ventanaHoras}
-                      onChanged={reloadPedidos}
                       perfilImpuestos={perfil?.perfil_impuestos ?? null}
                     />
                   ))}

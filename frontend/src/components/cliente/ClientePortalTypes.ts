@@ -36,6 +36,8 @@ export type Perfil = {
   fecha_nacimiento_renaper?: string | null;
   direccion_renaper?: string | null;
   apodo?: string | null;
+  /** Consentimiento explícito para recibir avisos por WhatsApp (lo exige Meta). */
+  whatsapp_opt_in?: boolean | null;
 };
 
 export type Item = {
@@ -52,16 +54,14 @@ export type Item = {
   foto_url?: string;
   nombre_publico?: string | null;
   nombre_publico_largo?: string | null;
+  /** Presente si esta línea pertenece a un turno del Estudio EMBEBIDO (#1308
+   *  rediseño "turno como ítem") — el centinela/sueltos/pintura de un turno
+   *  NO son equipos alquilables: no se listan como "Equipos" ni se pueden
+   *  repetir al carrito, aunque `equipo_id` tenga un valor real. `null`/
+   *  ausente = ítem normal, el 100% de los pedidos sin turno embebido. */
+  turno_estudio_id?: number | null;
 };
 export type Pago = { id?: number; monto: number; concepto?: string | null; fecha: string };
-export type SolicitudPortal = {
-  id: number;
-  estado: "pendiente" | "aprobada" | "rechazada" | "cancelada";
-  respuesta?: string | null;
-  resolved_by?: string | null;
-  resolved_at?: string | null;
-  created_at: string;
-};
 export type Pedido = {
   id: number;
   numero_pedido: string;
@@ -75,7 +75,6 @@ export type Pedido = {
   created_at?: string | null;
   items: Item[];
   pagos?: Pago[];
-  solicitudes?: SolicitudPortal[];
   documentos_disponibles: {
     remito: boolean;
     contrato: boolean;
@@ -119,7 +118,6 @@ export const ACTIVE_STATES = estadosSet(
   "entregado",
 );
 export const HIST_STATES = estadosSet("devuelto", "finalizado", "cancelado");
-export const MODIFICABLE_STATES = new Set(["solicitado", "confirmado"]);
 
 // "packing-list" (Checklist de retiro) queda afuera a propósito, igual que
 // "remito": ambos están disponibles desde el mismo momento que se crea el

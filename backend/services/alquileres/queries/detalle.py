@@ -28,16 +28,24 @@ def _es_historico(fuente: str | None) -> bool:
 
 
 def _get_alquiler_items(conn, pedido_id: int) -> list[dict]:
+    # `ate.fecha_desde/hasta AS turno_fecha_desde/hasta` (#1308 rediseño "turno
+    # como ítem"): la PROPIA ventana horaria de un ítem de turno embebido
+    # (`pi.turno_estudio_id`, ya viene en `pi.*`) — puede no coincidir con el
+    # período del pedido (equipos de un `diaria` mixto). Consumido por
+    # `pdf_templates.py::_turno_embebido_label`. LEFT JOIN: NULL para el 100%
+    # de los ítems sin turno, para siempre.
     rows = conn.execute(f"""
         SELECT pi.*, COALESCE(e.nombre, pi.nombre_libre) AS nombre,
                {MARCA_SUBQUERY},
                e.modelo, e.serie, e.valor_reposicion,
                e.foto_url, e.foto_url_sm, e.foto_url_thumb, e.cantidad AS stock_total,
                e.nombre_publico, e.nombre_publico_largo, e.tipo AS equipo_tipo,
-               ef.contenido_incluido_json
+               ef.contenido_incluido_json,
+               ate.fecha_desde AS turno_fecha_desde, ate.fecha_hasta AS turno_fecha_hasta
         FROM alquiler_items pi
         LEFT JOIN equipos e ON e.id = pi.equipo_id
         LEFT JOIN equipo_fichas ef ON ef.equipo_id = e.id
+        LEFT JOIN alquiler_turnos_estudio ate ON ate.id = pi.turno_estudio_id
         WHERE pi.pedido_id = %s
         ORDER BY pi.orden, pi.id
     """, (pedido_id,)).fetchall()
@@ -79,7 +87,6 @@ def _get_alquiler_detail(conn, id: int) -> dict:
     pedido = row_to_dict(row)
     pedido["items"] = _get_alquiler_items(conn, id)
     pedido["pagos"] = _get_alquiler_pagos(conn, id)
-    pedido["historial_modificaciones"] = _get_historial_modificaciones(conn, id)
     pedido["clases_taller"] = (
         _clases_del_taller(conn, pedido["taller_edicion_id"])
         if pedido.get("taller_edicion_id") else []
@@ -89,10 +96,18 @@ def _get_alquiler_detail(conn, id: int) -> dict:
         if pedido.get("pedido_principal_id") else None
     )
     pedido["turnos_estudio_vinculados"] = _turnos_vinculados(conn, id)
+    # Turnos EMBEBIDOS (#1308 rediseño "turno como ítem", Fase 4) — a
+    # diferencia de los vinculados (arriba, fila `alquileres` aparte), sus
+    # ítems YA están en `pedido["items"]` (con `turno_estudio_id`) — este
+    # array es SOLO metadata de agrupación (fecha/hora propia + descuento
+    # propio) para que el front pueda listar "Turnos del Estudio" de este
+    # pedido sin tener que reagrupar `items` a mano.
+    pedido["turnos_estudio_embebidos"] = _turnos_embebidos(conn, id)
     # ¿Tiene contenido real (ítems O un turno vinculado activo)? Fuente única
     # (`_pedido_tiene_contenido`) que el front consume en vez de mirar solo
     # `items.length` — un pedido "2 horas de estudio y nada más" SÍ tiene
-    # contenido (#1313/#1314-adjacent).
+    # contenido (#1313/#1314-adjacent). Un turno EMBEBIDO no necesita entrar
+    # acá aparte: sus ítems ya cuentan en `pedido["items"]`.
     pedido["tiene_contenido"] = _pedido_tiene_contenido(
         pedido["items"],
         any(t["estado"] != "cancelado" for t in pedido["turnos_estudio_vinculados"]),
@@ -182,6 +197,34 @@ def _turnos_vinculados(conn, pedido_id: int) -> list[dict]:
     return turnos
 
 
+def _turnos_embebidos(conn, pedido_id: int) -> list[dict]:
+    """Turnos del Estudio EMBEBIDOS en este pedido (#1308 rediseño "turno
+    como ítem", Fase 4) — mismo propósito liviano que `_turnos_vinculados`
+    (mecanismo VIEJO) para que el front pueda listar "Turnos del Estudio" de
+    la misma forma sea cual sea el mecanismo de cada pedido.
+
+    Sin `estado`/`monto_pagado`/`pagos` propios (a diferencia de un
+    vinculado): un turno embebido NUNCA fue su propia venta — no tiene
+    estado ni cobro aparte, vive el del pedido contenedor. `monto_total` acá
+    es la suma de SUS `alquiler_items` (no una columna propia en la tabla —
+    `alquiler_turnos_estudio` no tiene `monto_total`), informativo para el
+    front; la plata real ya está en `pedido["items"]`, este número no se usa
+    para calcular nada."""
+    rows = conn.execute(
+        """
+        SELECT ate.id, ate.fecha_desde, ate.fecha_hasta,
+               ate.descuento_pct, ate.descuento_manual_tipo, ate.descuento_manual_monto,
+               COALESCE((SELECT SUM(subtotal) FROM alquiler_items
+                         WHERE turno_estudio_id = ate.id), 0) AS monto_total
+        FROM alquiler_turnos_estudio ate
+        WHERE ate.pedido_id = %s
+        ORDER BY ate.fecha_desde
+        """,
+        (pedido_id,),
+    ).fetchall()
+    return [row_to_dict(r) for r in rows]
+
+
 def _clases_del_taller(conn, edicion_id: int) -> list[dict]:
     """Clases reales (fecha + franja horaria) de la edición de taller que
     generó este pedido — la verdad temporal que `_regenerar_pedidos_taller`
@@ -203,21 +246,3 @@ def _enriquecer_pedido_con_total(conn, pedido: dict) -> dict:
     """
     from services.finanzas_flujo.pedido import desglose_de_pedido
     return desglose_de_pedido(conn, pedido)
-
-
-def _get_historial_modificaciones(conn, pedido_id: int) -> list[dict]:
-    """Timeline de cambios solicitados por el cliente sobre el pedido.
-
-    Incluye tanto solicitudes de aprobación como cambios directos
-    (autosave en `presupuesto`) — el admin se beneficia de ver todo.
-    `cambios_aplicados` puede diferir de `cambios_json` cuando el admin
-    aprobó con contrapropuesta.
-    """
-    rows = conn.execute("""
-        SELECT id, mensaje, estado, respuesta, cambios_json, cambios_aplicados,
-               tipo, resolved_at, resolved_by, created_at
-        FROM solicitudes_modificacion
-        WHERE pedido_id = %s
-        ORDER BY created_at DESC
-    """, (pedido_id,)).fetchall()
-    return [row_to_dict(r) for r in rows]

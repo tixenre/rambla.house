@@ -14,8 +14,17 @@
  * Dialog para el alta "suelta" desde la agenda del Estudio (`chrome="dialog"`,
  * default — cliente picker real + Total propio, sin pedido que herede);
  * `TurnosEstudioSection` lo monta directo en la página del pedido
- * (`chrome="inline"`, con `pedidoVinculado` — sin cliente ni Total, ya se ven
+ * (`chrome="inline"`, con `pedidoContenedor` — sin cliente ni Total, ya se ven
  * arriba/en el rail combinado).
+ *
+ * `pedidoContenedor` presente = turno EMBEBIDO (#1308 Fase 4.4, rediseño
+ * "turno como ítem"): `POST /alquileres/{id}/turnos-estudio`, un ÍTEM MÁS del
+ * pedido — no una fila `alquileres` propia. Reemplaza al mecanismo viejo
+ * (`pedido_principal_id`, turno VINCULADO con su propio id/estado) para TODA
+ * alta nueva; los turnos vinculados ya existentes se siguen viendo vía
+ * `Pedido.turnos_estudio_vinculados` hasta que la Fase 5 los migre. Un turno
+ * embebido no tiene estado propio (`TurnoEstudioEmbebido` no lo declara — vive
+ * el del pedido contenedor), así que el alta no manda `estado`.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { keepPreviousData, useMutation, useQuery } from "@tanstack/react-query";
@@ -30,6 +39,7 @@ import { formatARS } from "@/lib/format";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { buildTimeSlots } from "@/lib/estudio-slots";
 import {
+  adminApi,
   estudioAdminApi,
   type Cliente,
   type Equipo,
@@ -55,20 +65,20 @@ type EstadoAlta = (typeof ESTADOS_ADMIN_CREACION)[number];
 
 export function NuevoTurnoEstudioForm({
   estudio,
-  pedidoVinculado,
+  pedidoContenedor,
   chrome = "dialog",
   onCreated,
   onCancel,
 }: {
   estudio: EstudioConfig;
-  /** Alta DESDE la página de un pedido de alquiler normal (#1308): el
-   *  cliente se hereda de ese pedido — oculta el picker y manda
-   *  `pedido_principal_id` en vez de cliente_id/nombre. También hereda el
-   *  ESTADO inicial del pedido principal (oculta el selector — el pedido ya
-   *  tiene su propio control de estado, no hace falta uno redundante acá).
+  /** Alta DESDE la página de un pedido de alquiler normal (#1308 Fase 4): el
+   *  cliente se hereda de ese pedido — oculta el picker y crea el turno como
+   *  ÍTEM de este pedido (`POST .../turnos-estudio`) en vez de cliente_id/
+   *  nombre + una fila `alquileres` propia. Sin selector de estado: el turno
+   *  embebido no tiene uno propio, sigue siempre al del pedido contenedor.
    *  Ausente = alta suelta desde la agenda del Estudio, con picker de
-   *  cliente y selector de estado propios. */
-  pedidoVinculado?: { id: number; clienteNombre: string | null; estado: string };
+   *  cliente y selector de estado propios (turno STANDALONE). */
+  pedidoContenedor?: { id: number; clienteNombre: string | null };
   /** "dialog" (default, cero cambio para `ReservaDialog`): cliente picker
    *  real + Total propio + Cancelar/Crear turno. "inline" (montado en
    *  `TurnosEstudioSection`): sin cliente (ya se ve arriba, en el pedido) ni
@@ -85,12 +95,6 @@ export function NuevoTurnoEstudioForm({
    *  un botón que no haría nada. */
   onCancel?: () => void;
 }) {
-  const estadoHeredado: EstadoAlta =
-    pedidoVinculado &&
-    (ESTADOS_ADMIN_CREACION as readonly string[]).includes(pedidoVinculado.estado)
-      ? (pedidoVinculado.estado as EstadoAlta)
-      : "confirmado";
-
   const slots = useMemo(
     () => buildTimeSlots(estudio.open_hour, estudio.close_hour, estudio.min_horas || 1),
     [estudio.open_hour, estudio.close_hour, estudio.min_horas],
@@ -141,25 +145,31 @@ export function NuevoTurnoEstudioForm({
 
   const mutation = useMutation({
     mutationFn: () =>
-      estudioAdminApi.createReserva({
-        fecha,
-        start,
-        horas,
-        // Vinculado: el cliente lo resuelve el backend desde el pedido
-        // principal — no mandamos cliente_id/nombre de acá (el picker ni
-        // siquiera se muestra en ese caso, ver el render).
-        ...(pedidoVinculado
-          ? { pedido_principal_id: pedidoVinculado.id }
-          : {
-              cliente_id: clienteId,
-              cliente_nombre: clienteId ? null : clienteNombreLibre.trim() || null,
-            }),
-        con_promo: conPromo,
-        pintura_reciente: pinturaReciente,
-        sueltos: sueltosInput,
-        espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
-        estado: pedidoVinculado ? estadoHeredado : estadoAlta,
-      }),
+      pedidoContenedor
+        ? // Embebido (#1308 Fase 4): un ÍTEM MÁS del pedido — el cliente y el
+          // estado los resuelve/hereda el backend del pedido contenedor, no
+          // se mandan acá.
+          adminApi.agregarTurnoEstudio(pedidoContenedor.id, {
+            fecha,
+            start,
+            horas,
+            con_promo: conPromo,
+            pintura_reciente: pinturaReciente,
+            sueltos: sueltosInput,
+            espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
+          })
+        : estudioAdminApi.createReserva({
+            fecha,
+            start,
+            horas,
+            cliente_id: clienteId,
+            cliente_nombre: clienteId ? null : clienteNombreLibre.trim() || null,
+            con_promo: conPromo,
+            pintura_reciente: pinturaReciente,
+            sueltos: sueltosInput,
+            espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
+            estado: estadoAlta,
+          }),
     onSuccess: (pedido) => {
       toast.success("Turno creado");
       if (pedido.promo_advertencia) {
@@ -251,10 +261,10 @@ export function NuevoTurnoEstudioForm({
   return (
     <div className="space-y-4">
       {chrome === "dialog" &&
-        (pedidoVinculado ? (
-          <Field label="Cliente" hint="Heredado del pedido al que se vincula este turno.">
+        (pedidoContenedor ? (
+          <Field label="Cliente" hint="Heredado del pedido al que se agrega este turno.">
             <div className="rounded-md border hairline bg-muted/20 px-2.5 py-1.5 text-sm text-muted-foreground">
-              {pedidoVinculado.clienteNombre || "Sin cliente"}
+              {pedidoContenedor.clienteNombre || "Sin cliente"}
             </div>
           </Field>
         ) : (
@@ -329,7 +339,7 @@ export function NuevoTurnoEstudioForm({
         }
       />
 
-      {!pedidoVinculado && (
+      {!pedidoContenedor && (
         <Field label="Estado inicial">
           <select
             value={estadoAlta}

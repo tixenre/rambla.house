@@ -270,7 +270,7 @@ def test_el_turno_vinculado_no_recibe_recordatorio_de_retiro(client_con_db, setu
                 (manana, manana + timedelta(hours=2), pid),
             )
         conn.commit()
-        ids = {p["id"] for p in _pedidos_para_retiro(conn, now_ar(), 1)}
+        ids = {p["id"] for p in _pedidos_para_retiro(conn, now_ar(), manana + timedelta(hours=3))}
     finally:
         conn.close()
 

@@ -53,7 +53,7 @@ _COOKIE = f"session={signer.dumps({'email': 'estudioveraz@test.com', 'role': 'cl
 @pytest.fixture(autouse=True)
 def _sessions_active(monkeypatch):
     """jti obligatorio: la cookie de test no está en la allowlist real →
-    stubbeamos is_active (mismo patrón que test_cliente_modificar_pedido_gate_db.py)."""
+    stubbeamos is_active (mismo patrón que otros tests de sesión cliente)."""
     monkeypatch.setattr("auth.queries.sessions.is_active", lambda jti: {"jti": jti})
 
 

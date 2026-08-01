@@ -2,7 +2,7 @@
 
 Invariante: toda función de ruta que INSERTA en `alquiler_items` (es decir,
 reserva stock) o referencia el gate de validación (`_check_stock` /
-`_check_stock_hipotetico` / `_centinela_libre`), o está en una ALLOWLIST explícita
+`_centinela_libre`), o está en una ALLOWLIST explícita
 de helpers que delegan la validación en su caller (patrón documentado en el
 código).
 
@@ -43,10 +43,7 @@ SERVICES_ALQUILERES_DIR = os.path.join(
 )
 
 GATE_SYMBOLS = {
-    "_check_stock", "_check_stock_hipotetico", "_centinela_libre",
-    # `estudio.py` no alias-ea `validar_stock_hipotetico` (lo importa tal cual
-    # de `reservas`, a diferencia de `cliente_portal` que lo envuelve como
-    # `_check_stock_hipotetico`) — misma pieza del motor sagrado, otro nombre.
+    "_check_stock", "_centinela_libre",
     "validar_stock_hipotetico",
     # `_estudio_disponible` (estudio.py) es el gate CANÓNICO del espacio: slot
     # fijo → taller → `_centinela_libre` (buffer propio). Una función que lo
@@ -86,6 +83,12 @@ GATE_SYMBOLS = {
 #     `_centinela_libre`. Se inserta directo desde `_crear_pedido_estudio`/
 #     `editar_reserva`, DESPUÉS de que esas funciones ya validaron
 #     espacio/promo/sueltos vía el gate real.
+#   - _insertar_item_centinela (services/estudio/commands/reserva.py, #1308
+#     rediseño "turno como ítem" Fase 4 — extraído del INSERT que antes vivía
+#     inline en `_crear_pedido_estudio`): el chequeo real (`_centinela_libre`,
+#     bajo el `FOR UPDATE` del centinela) pasa SIEMPRE en el CALLER
+#     (`_crear_pedido_estudio`/`agregar_turno_embebido`), inmediatamente antes
+#     de llamar a este helper — que solo hace el INSERT, sin decidir nada.
 # Clave = path relativo a routes/ (ej. "alquileres/core.py") o al árbol
 # services/estudio|talleres/ con su prefijo (ver `fuentes` abajo), así
 # desambigua entre los varios core.py de los paquetes split (#501) y entre árboles.
@@ -94,6 +97,7 @@ ALLOWLIST_DELEGADORES = {
     ("estudio.py", "_regenerar_pedidos_slot"),
     ("services/talleres/commands/economia.py", "_regenerar_pedidos_taller"),
     ("services/estudio/commands/reserva.py", "_insertar_item_pintura"),
+    ("services/estudio/commands/reserva.py", "_insertar_item_centinela"),
 }
 
 

@@ -61,10 +61,16 @@ def validar_stock(conn, pedido_id: int, fecha_desde: str, fecha_hasta: str) -> l
     pedido se excluye del consumo de OTROS pedidos (`excl_pedido_id=pedido_id`).
     """
     # `equipo_id IS NOT NULL` excluye las líneas personalizadas (#805): no son del
-    # catálogo y no reservan stock, así que no entran al gate.
+    # catálogo y no reservan stock, así que no entran al gate. `turno_estudio_id
+    # IS NULL` excluye los ítems de un turno del Estudio EMBEBIDO (centinela +
+    # opcional promo/sueltos/pintura, `alquiler_turnos_estudio`): tienen su
+    # PROPIA ventana horaria, distinta de la del pedido — se validan aparte
+    # (services/estudio) contra el buffer/gate propio del espacio, nunca acá.
+    # Para un pedido sin turnos embebidos (100% de los pedidos hoy) esta
+    # cláusula es un no-op: la columna es siempre NULL.
     items = conn.execute(
         "SELECT equipo_id, cantidad FROM alquiler_items "
-        "WHERE pedido_id = %s AND equipo_id IS NOT NULL",
+        "WHERE pedido_id = %s AND equipo_id IS NOT NULL AND turno_estudio_id IS NULL",
         (pedido_id,),
     ).fetchall()
 
@@ -89,8 +95,8 @@ def validar_stock_hipotetico(
     re-implementaba la expansión "en seco" importando internos del motor y se
     desincronizaba en silencio si el gate cambiaba; ahora no pueden divergir.
 
-    `items` es un iterable de objetos con `.equipo_id` y `.cantidad` (p. ej.
-    `ModificacionItemIn`). `excl_pedido_id` es el pedido que se está modificando:
+    `items` es un iterable de objetos con `.equipo_id` y `.cantidad` (cualquier
+    objeto con esa forma sirve). `excl_pedido_id` es el pedido que se está modificando:
     sus reservas actuales NO compiten con la propuesta para el mismo rango, así que
     se excluyen del consumo. Es de SOLO LECTURA salvo el `FOR UPDATE` del núcleo
     (que vive y muere en la transacción del caller, igual que el gate real).

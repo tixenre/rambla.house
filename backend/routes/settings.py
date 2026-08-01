@@ -16,6 +16,8 @@ from fastapi import APIRouter, Request, HTTPException
 from database import get_db, MARCA_SUBQUERY
 from auth.guards import require_admin
 from rate_limit import limiter, ADMIN_WRITE_LIMIT, ADMIN_UPLOAD_LIMIT
+from services.comunicacion import estrategia as _estrategia
+from services.comunicacion.eventos import REGISTRO as _EVENTOS_COMUNICACION
 from services.media.processing import _optimize_og_image
 
 logger = logging.getLogger(__name__)
@@ -183,12 +185,34 @@ ALLOWED_SETTINGS_KEYS = {
     # ── Reportes ─────────────────────────────────────────────────────
     "comisiones_modelo",       # Reparto de ingresos por dueño (#88). JSON {dueño: {beneficiario: %}}.
     # ── Recordatorio de retiro (Fase B mails) ────────────────────────
-    # Control del job "mañana retirás" desde la UI. Override por env
-    # (REMINDERS_ENABLED/REMINDERS_HOUR/REMINDERS_DIAS_ANTES) — ver
-    # jobs/recordatorios_config.py. Lo resuelve el scheduler en runtime.
-    "recordatorios_enabled",      # Encendido del recordatorio automático. "1"/"0".
-    "recordatorios_hora",         # Hora AR del barrido diario. Int 0-23.
-    "recordatorios_dias_antes",   # Días de anticipación. Int 1-14.
+    # Control del recordatorio de retiro desde la UI. Cuándo sale depende de la
+    # HORA del retiro (mismo día a la mañana / víspera a la hora de cierre) — ver
+    # jobs/recordatorios_config.py. Override por env (REMINDERS_ENABLED/
+    # REMINDERS_HOUR/REMINDERS_CORTE_MANANA). Lo resuelve el scheduler en runtime.
+    "recordatorios_enabled",        # Encendido del recordatorio automático. "1"/"0".
+    "recordatorios_hora",           # Hora AR del aviso del mismo día. Int 0-23.
+    "recordatorios_corte_manana",   # Retiro antes de esta hora → aviso la víspera. Int 1-23.
+    # ── Recordatorio de DEVOLUCIÓN (WhatsApp) — 3 ventanas independientes ──
+    # Cada una on/off desde el back-office. Override por env (REMINDERS_
+    # DEVOLUCION_D1/_D0/_VENCIDO/_HOUR) — ver jobs/recordatorios_devolucion_config.
+    "recordatorios_devolucion_d1_enabled",       # D-1 (víspera). "1"/"0".
+    "recordatorios_devolucion_d0_enabled",       # D-0 (día de devolución). "1"/"0".
+    "recordatorios_devolucion_vencido_enabled",  # D+1 (vencido, sin devolver). "1"/"0".
+    "recordatorios_devolucion_hora",             # Hora AR del barrido. Int 0-23.
+    "recordatorios_devolucion_dias_antes",       # Antelación de la víspera. Int 1-14.
+    # ── Canal WhatsApp (Meta Cloud API) ──────────────────────────────
+    # Toggle del canal desde el back-office (el token/número van en ENV, no acá).
+    # Override por env WHATSAPP_ENABLED — ver services/whatsapp/config.py.
+    "whatsapp_enabled",           # Encendido del canal WhatsApp. "1"/"0".
+    "whatsapp_admin_numeros",     # Números del equipo (E.164, coma-separados) para avisos internos.
+}
+
+# Por dónde sale cada evento de comunicación (WhatsApp / mail / los dos): una key
+# por evento, DERIVADA del registro (`services/comunicacion/eventos.py`, fuente
+# única) — si se agrega un evento, su setting existe sola, sin tocar esta lista.
+# El valor válido depende del evento (`estrategia.posibles`): se valida al guardar.
+ALLOWED_SETTINGS_KEYS |= {
+    _estrategia.setting_de(_k) for _k in _EVENTOS_COMUNICACION
 }
 
 # Subset de ALLOWED_SETTINGS_KEYS que el catálogo ANÓNIMO (sin sesión) puede
@@ -229,6 +253,27 @@ CLEARABLE_SETTINGS_KEYS = {
     "ga4_measurement_id",  # Vaciarlo apaga Google Analytics.
     "disclaimer_antelacion_texto",       # Vaciarlo vuelve al texto default.
     "disclaimer_horarios_finde_texto",
+    "whatsapp_admin_numeros",  # Vaciarlo = no se le avisa a nadie del equipo por WhatsApp.
+    # Vaciar la estrategia de un evento = volver al default que declara el registro.
+    *(_estrategia.setting_de(_k) for _k in _EVENTOS_COMUNICACION),
+}
+
+# Settings booleanas que la UI edita con un switch: se normalizan a "1"/"0" para
+# que el lector (env > settings > default) no tenga que adivinar formatos.
+BOOL_SETTINGS_KEYS = {
+    "recordatorios_enabled",
+    "recordatorios_devolucion_d1_enabled",
+    "recordatorios_devolucion_d0_enabled",
+    "recordatorios_devolucion_vencido_enabled",
+    "whatsapp_enabled",
+}
+
+# Settings numéricas con rango cerrado: {key: (mínimo, máximo, qué es)}.
+RANGO_SETTINGS_KEYS = {
+    "recordatorios_hora": (0, 23, "hora"),
+    "recordatorios_corte_manana": (1, 23, "hora"),
+    "recordatorios_devolucion_hora": (0, 23, "hora"),
+    "recordatorios_devolucion_dias_antes": (1, 14, "días"),
 }
 
 # Formato de un Measurement ID de GA4: 'G-' seguido de alfanuméricos.
@@ -323,6 +368,8 @@ def update_setting(key: str, payload: dict, request: Request):
         with get_db() as conn:
             conn.execute("DELETE FROM app_settings WHERE key = %s", (key,))
             conn.commit()
+            if _estrategia.evento_de_setting(key) is not None:
+                _estrategia.invalidar_cache()  # vuelve al default del registro ya
             return {"key": key, "value": "", "updated_by": None}
     value = str(value).strip()
     # Validaciones livianas para datos de contacto (display-only).
@@ -349,25 +396,54 @@ def update_setting(key: str, payload: dict, request: Request):
             value = str(v)
         except (ValueError, TypeError) as e:
             raise HTTPException(400, f"Valor inválido para '{key}': debe ser un entero >= 0 ({e})")
-    if key == "recordatorios_enabled":
-        # Checkbox → normalizamos a "1"/"0".
+    if key in BOOL_SETTINGS_KEYS:
+        # Switch → normalizamos a "1"/"0".
         value = "1" if value.lower() in ("1", "true", "yes", "on") else "0"
-    if key == "recordatorios_hora":
+    if key in RANGO_SETTINGS_KEYS:
+        lo, hi, que = RANGO_SETTINGS_KEYS[key]
         try:
             v = int(value)
-            if not (0 <= v <= 23):
-                raise ValueError("fuera de rango 0-23")
+            if not (lo <= v <= hi):
+                raise ValueError(f"fuera de rango {lo}-{hi}")
             value = str(v)
         except (ValueError, TypeError) as e:
-            raise HTTPException(400, f"Valor inválido para '{key}': hora entre 0 y 23 ({e})")
-    if key == "recordatorios_dias_antes":
-        try:
-            v = int(value)
-            if not (1 <= v <= 14):
-                raise ValueError("fuera de rango 1-14")
-            value = str(v)
-        except (ValueError, TypeError) as e:
-            raise HTTPException(400, f"Valor inválido para '{key}': días entre 1 y 14 ({e})")
+            raise HTTPException(400, f"Valor inválido para '{key}': {que} entre {lo} y {hi} ({e})")
+    evento_key = _estrategia.evento_de_setting(key)
+    if evento_key is not None:
+        # Por dónde sale un evento: solo se puede elegir un canal que ese evento
+        # tenga cableado (un evento sin plantilla de mail no puede ser "solo mail").
+        ev = _EVENTOS_COMUNICACION.get(evento_key)
+        if ev is None:
+            raise HTTPException(400, f"Evento de comunicación desconocido: '{evento_key}'")
+        if value not in _estrategia.posibles(ev):
+            raise HTTPException(
+                400,
+                f"'{value}' no es una forma válida de mandar este aviso "
+                f"(puede ser: {', '.join(_estrategia.posibles(ev))})",
+            )
+    if key == "whatsapp_admin_numeros":
+        # Los números del equipo pasan por el embudo único (services/telefono) al
+        # GUARDARLOS, no recién al enviar: si uno está mal, el admin se entera acá
+        # y no cuando un aviso no llegó. Se persisten normalizados a E.164.
+        from services.telefono import normalizar_e164
+
+        numeros, invalidos = [], []
+        for parte in value.split(","):
+            crudo = parte.strip()
+            if not crudo:
+                continue
+            num = normalizar_e164(crudo)
+            if num is None:
+                invalidos.append(crudo)
+            elif num not in numeros:
+                numeros.append(num)
+        if invalidos:
+            raise HTTPException(
+                400,
+                "No pude leer estos números: " + ", ".join(invalidos) +
+                ". Escribilos con código de país (ej. +5492235550000).",
+            )
+        value = ", ".join(numeros)
     if key == "ga4_measurement_id":
         # GA4 IDs son case-insensitive pero conviven mejor en mayúscula.
         value = value.upper()
@@ -404,6 +480,10 @@ def update_setting(key: str, payload: dict, request: Request):
             if key == "buffer_horas_alquiler":
                 from reservas import invalidate_buffer_cache
                 invalidate_buffer_cache()
+            # El despacho cachea por dónde sale cada evento (TTL corto): al
+            # cambiarlo, que aplique al toque en este worker.
+            if evento_key is not None:
+                _estrategia.invalidar_cache()
             return {"key": key, "value": value, "updated_by": actor}
         except Exception:
             conn.rollback()

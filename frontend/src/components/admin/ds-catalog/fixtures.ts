@@ -414,7 +414,6 @@ export const adminPedidoSolicitado: AdminPedido = {
   saldo_pendiente: true,
   items: itemsAdminPedido(9101),
   pagos: [],
-  tiene_solicitud_pendiente: true,
 };
 
 /** CONFIRMADO con saldo — pagó la seña, debe el resto. */

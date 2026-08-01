@@ -20,13 +20,16 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # `IF EXISTS`: la feature se retiró después (`s0l1c1tudb4j`) — un bootstrap
+    # fresco ya no crea esta tabla en `init_db()`, así que esto no-opea ahí en
+    # vez de romper `alembic upgrade head`. Prod no se ve afectado (ya corrió).
     op.execute(
-        "ALTER TABLE solicitudes_modificacion "
+        "ALTER TABLE IF EXISTS solicitudes_modificacion "
         "ADD COLUMN IF NOT EXISTS cambios_aplicados JSONB"
     )
 
 
 def downgrade() -> None:
     op.execute(
-        "ALTER TABLE solicitudes_modificacion DROP COLUMN IF EXISTS cambios_aplicados"
+        "ALTER TABLE IF EXISTS solicitudes_modificacion DROP COLUMN IF EXISTS cambios_aplicados"
     )

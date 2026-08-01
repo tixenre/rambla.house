@@ -149,7 +149,7 @@ function PedidoEditorPage() {
   // keepDateTime: el selector de fechas+horas escribe datetime (con hora) en
   // fecha_desde/fecha_hasta; sin esto el draft las recortaría a date-only y se
   // perdería la hora en el round-trip del autosave.
-  const draft = usePedidoDraft(p, { mode: "admin", keepDateTime: true });
+  const draft = usePedidoDraft(p, { keepDateTime: true });
   const [openDateModal, setOpenDateModal] = useState(false);
 
   // Sensores del drag-reorder de líneas (#806). Hook → antes de cualquier
@@ -169,14 +169,29 @@ function PedidoEditorPage() {
     enabled: !!p,
   });
 
-  // Cotización en vivo (useCotizacion) — recalcula al editar items/fechas/descuento
+  // Cotización en vivo (useCotizacion) — recalcula al editar items/fechas/descuento.
+  // `draft.items` (el editor de "Alquiler de equipos") YA NO trae los ítems de
+  // un turno del Estudio EMBEBIDO (#1308 Fase 4 — `usePedidoDraft.ts` los
+  // filtra, ver ahí el porqué) — así que acá se suman aparte, DIRECTO de `p`
+  // (el pedido tal cual lo tiene el server, nunca tocado por ese editor): sin
+  // esto el Total en vivo del rail perdía la plata del turno apenas se
+  // agregaba uno.
+  const itemsTurnosEmbebidos = (p?.items ?? []).filter((it) => it.turno_estudio_id != null);
   const cotizacionQ = useCotizacion({
-    items: (draft.items ?? []).map((it) => ({
-      equipoId: it.equipo_id,
-      cantidad: it.cantidad,
-      precioJornada: it.precio_jornada,
-      cobroModo: it.cobro_modo,
-    })),
+    items: [
+      ...(draft.items ?? []).map((it) => ({
+        equipoId: it.equipo_id,
+        cantidad: it.cantidad,
+        precioJornada: it.precio_jornada,
+        cobroModo: it.cobro_modo,
+      })),
+      ...itemsTurnosEmbebidos.map((it) => ({
+        equipoId: it.equipo_id,
+        cantidad: it.cantidad,
+        precioJornada: it.precio_jornada,
+        cobroModo: it.cobro_modo,
+      })),
+    ],
     fechaDesde: draft.datos?.fecha_desde || null,
     fechaHasta: draft.datos?.fecha_hasta || null,
     clienteId: p?.cliente_id ?? null,
@@ -363,6 +378,22 @@ function PedidoEditorPage() {
   const total = totales.total;
   const pagadoMonto = p.monto_pagado ?? 0;
 
+  // "Alquiler de equipos" (la `TotalSeccion` de la sección + el `BdRow` del
+  // rail) necesita SU PROPIO bruto/neto — sin la plata de un turno del
+  // Estudio embebido, que ya tiene su propia sección/fila. `totales.subtotal`/
+  // `totales.totalNeto` suman TODAS las líneas (equipos + turno embebido, a
+  // propósito — ver el comentario de `itemsTurnosEmbebidos` arriba), así que
+  // alcanza con restarle la plata del turno (ya resuelta, sin recalcular
+  // nada): el descuento del pedido (`descuentoPct`/`descuentoMonto`/
+  // `subtotalDescontable`) YA excluye esas líneas de su base en el backend
+  // (Fase 3.1, #1308) — son "solo equipos" sin tocarlas.
+  const turnoEmbebidoSubtotal = itemsTurnosEmbebidos.reduce(
+    (acc, it) => acc + (it.subtotal ?? 0),
+    0,
+  );
+  const equipoBruto = (totales.subtotal ?? 0) - turnoEmbebidoSubtotal;
+  const equipoTotalNeto = (totales.totalNeto ?? 0) - turnoEmbebidoSubtotal;
+
   // Combinado con los turnos del Estudio vinculados (#1308). Lo COBRADO se
   // suma acá (son montos ya cobrados, no una regla de plata); el TOTAL viene
   // resuelto del backend (`totales.combinado`), que aplica el IVA sobre el neto
@@ -382,6 +413,22 @@ function PedidoEditorPage() {
    *  el 21% (MEMORIA 2026-06-29). */
   const netoResumen = hayTurnos ? (totales.combinado?.totalNeto ?? 0) : totales.totalNeto;
   const ivaResumen = hayTurnos ? (totales.combinado?.iva ?? 0) : totales.iva;
+
+  /** Filas de turno del rail — TODOS los turnos del pedido, vinculados
+   *  (mecanismo viejo, `combinado.turnos`) + embebidos (#1308 Fase 4,
+   *  `p.turnos_estudio_embebidos`). Solo para PINTAR: nunca se usa para sumar
+   *  plata — esa plata ya está adentro de `combinado.totalCombinado` (el
+   *  vinculado se suma aparte, el embebido ya viene incluido en
+   *  `totales.total` desde el backend) — sumarla de nuevo acá la contaría dos
+   *  veces. Sin esto, el fix de "Alquiler de equipos" (arriba) le sacaría la
+   *  plata de un turno embebido a esa fila sin darle ninguna fila propia. */
+  const turnosBreakdown = [
+    ...combinado.turnos.map((t) => ({ key: `v-${t.id}`, monto_total: t.monto_total })),
+    ...(p.turnos_estudio_embebidos ?? []).map((t) => ({
+      key: `e-${t.id}`,
+      monto_total: t.monto_total,
+    })),
+  ];
 
   // stockMap: { equipo_id → libres tras TODO el draft } (con signo; negativo =
   // faltan unidades). hasOverstock lo deriva el hook con la misma regla.
@@ -493,20 +540,6 @@ function PedidoEditorPage() {
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_340px] gap-0 lg:gap-0 min-h-0">
         {/* ── Columna de trabajo ── */}
         <div className="min-w-0 px-4 md:px-6 py-5 space-y-5 lg:border-r hairline pb-28 lg:pb-5">
-          {/* Banner solicitud pendiente (deferido — solo aviso read-only) */}
-          {p.tiene_solicitud_pendiente && (
-            <div className="flex items-start gap-2 rounded-lg border border-amber/40 bg-amber/5 px-3 py-2.5 text-sm">
-              <Info className="h-4 w-4 text-ink shrink-0 mt-0.5" />
-              <div className="min-w-0">
-                <span className="font-medium text-ink">Hay una solicitud de cambio pendiente.</span>{" "}
-                <Link to="/admin/solicitudes" className="underline text-muted-foreground">
-                  Revisarla en Solicitudes
-                </Link>
-                .
-              </div>
-            </div>
-          )}
-
           {/* (El breadcrumb "Turno vinculado al pedido #N" se retiró: un turno
               vinculado ya no llega hasta acá — redirige a su principal, arriba.) */}
 
@@ -977,14 +1010,14 @@ function PedidoEditorPage() {
                       diciendo lo mismo ("¿podemos unificar esos dos campos?
                       ... y el modificador de descuento, in place"). */}
                   <TotalSeccion
-                    bruto={totales.subtotal}
+                    bruto={equipoBruto}
                     descuentoLabel={
                       descuentoLabel(totales.descuentoOrigen, jornadas, datos.cliente_nombre) ||
                       "Descuento"
                     }
                     descuentoPct={totales.descuentoPct}
                     descuentoMonto={totales.descuentoMonto}
-                    total={totales.totalNeto}
+                    total={equipoTotalNeto}
                     descuentoControl={
                       <DescuentoControl
                         value={{
@@ -1032,7 +1065,7 @@ function PedidoEditorPage() {
         </div>
 
         {/* ── Rail ── (visible en lg en el lado derecho; en mobile fluye debajo) */}
-        <aside className="px-4 md:px-5 py-5 space-y-4 bg-surface/40 lg:border-t-0 border-t hairline pb-28 lg:pb-5">
+        <aside className="px-4 md:px-5 py-5 space-y-4 bg-surface/40 lg:border-t-0 border-t hairline pb-28 lg:pb-5 lg:sticky lg:top-0 lg:z-10 lg:self-start">
           {/* Estado */}
           <RailSection label="Estado del pedido">
             <FlowStrip estado={p.estado} />
@@ -1102,24 +1135,21 @@ function PedidoEditorPage() {
                   escribir el mismo desglose dos veces, y además obligaba a
                   inventar un label de jornadas para un taller o un turno, cuyo
                   rango de fechas no son jornadas reales. */}
-              <BdRow
-                l={esTaller ? "Taller" : "Alquiler de equipos"}
-                v={fmtArs(totales.totalNeto)}
-              />
+              <BdRow l={esTaller ? "Taller" : "Alquiler de equipos"} v={fmtArs(equipoTotalNeto)} />
               {/* "Estudio" a secas, sin fecha/hora: la franja exacta YA se ve
                   en la sección "Turnos del Estudio" de arriba — repetirla acá
                   era el mismo dato dos veces (el dueño: "ese detalle de fecha
-                  y hora me parece redundante"). Con más de un turno vinculado
-                  se numeran (no hay otro identificador liviano y comparable al
-                  de "Alquiler de equipos" de la fila de arriba). */}
-              {hayTurnos &&
-                combinado.turnos.map((t, i) => (
-                  <BdRow
-                    key={t.id}
-                    l={combinado.turnos.length > 1 ? `Estudio ${i + 1}` : "Estudio"}
-                    v={fmtArs(t.monto_total)}
-                  />
-                ))}
+                  y hora me parece redundante"). Con más de un turno (vinculado
+                  o embebido, sumados en `turnosBreakdown`) se numeran (no hay
+                  otro identificador liviano y comparable al de "Alquiler de
+                  equipos" de la fila de arriba). */}
+              {turnosBreakdown.map((t, i) => (
+                <BdRow
+                  key={t.key}
+                  l={turnosBreakdown.length > 1 ? `Estudio ${i + 1}` : "Estudio"}
+                  v={fmtArs(t.monto_total)}
+                />
+              ))}
 
               <div className="border-t hairline my-1" />
               {/* Con IVA se muestra el neto para que el total se explique

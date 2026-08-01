@@ -254,6 +254,25 @@ def validar_horarios_habilitados(conn, fecha_desde, fecha_hasta) -> str | None:
     return _check(fecha_desde, "retiro") or _check(fecha_hasta, "devolución")
 
 
+DEFAULT_ULTIMA_HORA_LABORAL = 18
+
+
+def ultima_hora_laboral(conn, fecha) -> int:
+    """Hora (0-23) a la que cierra el galpón ese día, según `horarios_retiro`.
+
+    Día cerrado o sin config → `DEFAULT_ULTIMA_HORA_LABORAL`. La usa el
+    recordatorio de retiro para mandar "a última hora" la víspera: si el cliente
+    retira temprano, avisarle a la mañana del mismo día llega tarde."""
+    horarios = horarios_habilitados(conn)
+    franja = (horarios or {}).get(_DIAS_HORARIO[fecha.weekday()])
+    if not franja:
+        return DEFAULT_ULTIMA_HORA_LABORAL
+    try:
+        return max(0, min(23, int(str(franja["hasta"]).split(":")[0])))
+    except (KeyError, ValueError, AttributeError, TypeError):
+        return DEFAULT_ULTIMA_HORA_LABORAL
+
+
 def _franja_minutos(franja: dict | None) -> int:
     """Duración en minutos de una franja `{desde,hasta}` HH:MM. 0 si cerrada/ausente."""
     if not franja:

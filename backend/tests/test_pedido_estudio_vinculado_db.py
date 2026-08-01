@@ -46,21 +46,39 @@ import main  # noqa: E402 — importado después del gating, mismo patrón que l
 
 CLIENTE_PRINCIPAL_ID = 9_476_001
 CLIENTE_OTRO_ID = 9_476_002
+CLIENTE_TARDIO_ID = 9_476_003
 PEDIDO_PRINCIPAL_ID = 9_476_010
 PEDIDO_ESTUDIO_AJENO_ID = 9_476_011
+PEDIDO_PRINCIPAL_SIN_CLIENTE_ID = 9_476_012
+
+
+_PRINCIPAL_IDS = (PEDIDO_PRINCIPAL_ID, PEDIDO_ESTUDIO_AJENO_ID, PEDIDO_PRINCIPAL_SIN_CLIENTE_ID)
 
 
 def _limpiar(conn):
+    # `pedido_principal_id IN (...)` es necesario ADEMÁS de `cliente_id`/`id`:
+    # un turno vinculado a `PEDIDO_PRINCIPAL_SIN_CLIENTE_ID` nace con
+    # `cliente_id=NULL` (esa es la reproducción del bug) y un `id` propio
+    # nuevo — sin este filtro, ese turno no matchea ningún otro criterio y
+    # queda huérfano en la base de test para siempre, chocando con la franja
+    # de un test futuro (409 falso "El estudio no está disponible").
     conn.execute(
         "DELETE FROM alquiler_items WHERE pedido_id IN "
-        "(SELECT id FROM alquileres WHERE cliente_id IN (%s,%s) OR id IN (%s,%s))",
-        (CLIENTE_PRINCIPAL_ID, CLIENTE_OTRO_ID, PEDIDO_PRINCIPAL_ID, PEDIDO_ESTUDIO_AJENO_ID),
+        "(SELECT id FROM alquileres WHERE cliente_id IN (%s,%s,%s) OR id IN (%s,%s,%s) "
+        "OR pedido_principal_id IN (%s,%s,%s))",
+        (CLIENTE_PRINCIPAL_ID, CLIENTE_OTRO_ID, CLIENTE_TARDIO_ID,
+         *_PRINCIPAL_IDS, *_PRINCIPAL_IDS),
     )
     conn.execute(
-        "DELETE FROM alquileres WHERE cliente_id IN (%s,%s) OR id IN (%s,%s)",
-        (CLIENTE_PRINCIPAL_ID, CLIENTE_OTRO_ID, PEDIDO_PRINCIPAL_ID, PEDIDO_ESTUDIO_AJENO_ID),
+        "DELETE FROM alquileres WHERE cliente_id IN (%s,%s,%s) OR id IN (%s,%s,%s) "
+        "OR pedido_principal_id IN (%s,%s,%s)",
+        (CLIENTE_PRINCIPAL_ID, CLIENTE_OTRO_ID, CLIENTE_TARDIO_ID,
+         *_PRINCIPAL_IDS, *_PRINCIPAL_IDS),
     )
-    conn.execute("DELETE FROM clientes WHERE id IN (%s,%s)", (CLIENTE_PRINCIPAL_ID, CLIENTE_OTRO_ID))
+    conn.execute(
+        "DELETE FROM clientes WHERE id IN (%s,%s,%s)",
+        (CLIENTE_PRINCIPAL_ID, CLIENTE_OTRO_ID, CLIENTE_TARDIO_ID),
+    )
 
 
 @pytest.fixture
@@ -97,6 +115,20 @@ def setup(monkeypatch):
             "VALUES (%s,%s,'Ajeno Estudio','confirmado',"
             "'2030-06-01 10:00','2030-06-01 12:00',947602,'estudio')",
             (PEDIDO_ESTUDIO_AJENO_ID, CLIENTE_OTRO_ID),
+        )
+        # Un pedido PRINCIPAL sin cliente todavía asignado (carga manual) — para
+        # probar que el turno vinculado a él no queda "Sin cliente" para
+        # siempre si el principal consigue cliente DESPUÉS.
+        conn.execute(
+            "INSERT INTO alquileres (id, cliente_id, cliente_nombre, estado, "
+            "fecha_desde, fecha_hasta, numero_pedido) "
+            "VALUES (%s,NULL,'','confirmado','2030-06-07','2030-06-09',947603)",
+            (PEDIDO_PRINCIPAL_SIN_CLIENTE_ID,),
+        )
+        conn.execute(
+            "INSERT INTO clientes (id, nombre, apellido, email, telefono) "
+            "VALUES (%s,'Tardio','Asignado','tardio@test.com','+5491100000003')",
+            (CLIENTE_TARDIO_ID,),
         )
         conn.execute(
             "UPDATE estudio SET precio_hora=10000, buffer_horas=0, min_horas=1, "
@@ -245,3 +277,47 @@ def test_borrar_el_principal_se_lleva_el_turno(client_con_db, setup):
     finally:
         conn.close()
     assert row is None, "el turno vinculado tiene que irse con su pedido, no quedar huérfano"
+
+
+def test_lista_de_reservas_no_queda_sin_cliente_si_el_principal_lo_consigue_despues(
+    client_con_db, setup,
+):
+    """Bug real reportado por el dueño en vivo: un turno se creó cuando su
+    pedido principal TODAVÍA no tenía cliente asignado (carga manual, orden
+    normal de trabajo) — `_resolver_pedido_principal` congela esa foto vacía
+    en el turno al crearlo. El principal consigue cliente DESPUÉS y el turno
+    se quedaba mostrando "Sin cliente" en `/admin/estudio/reservas` para
+    siempre, aunque su principal ya tuviera uno — la lista del Estudio no
+    resolvía el contacto en vivo vía el eje `pedido_principal_id` (solo lo
+    hacía para el `cliente_id` propio del pedido)."""
+    r = client_con_db.post(
+        "/api/admin/estudio/reservas",
+        json={
+            "fecha": "2030-06-08", "start": "18:30", "horas": 2,
+            "pedido_principal_id": PEDIDO_PRINCIPAL_SIN_CLIENTE_ID,
+        },
+    )
+    assert r.status_code == 201, r.text
+    turno_id = r.json()["id"]
+    assert r.json()["cliente_id"] is None  # foto congelada: el principal no tenía cliente
+
+    from database import get_db
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "UPDATE alquileres SET cliente_id = %s, cliente_nombre = 'Tardio Asignado' "
+            "WHERE id = %s",
+            (CLIENTE_TARDIO_ID, PEDIDO_PRINCIPAL_SIN_CLIENTE_ID),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    r2 = client_con_db.get(
+        "/api/admin/estudio/reservas", params={"desde": "2030-06-08", "hasta": "2030-06-08"}
+    )
+    assert r2.status_code == 200
+    reservas = [x for x in r2.json()["reservas"] if x["id"] == turno_id]
+    assert len(reservas) == 1
+    assert reservas[0]["cliente_nombre"] == "Tardio Asignado"

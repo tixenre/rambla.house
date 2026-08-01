@@ -34,6 +34,7 @@ import {
   HardDriveDownload,
   Settings,
   AlertTriangle,
+  MessagesSquare,
   type LucideIcon,
 } from "lucide-react";
 
@@ -126,6 +127,10 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     label: "Sistema",
     defaultOpen: false,
     items: [
+      // Comunicación agrupa los DOS canales (mail + WhatsApp) y los eventos: qué
+      // le decimos al cliente y por dónde sale. WhatsApp no lleva entrada propia —
+      // es un canal de este módulo, no una sección aparte.
+      { title: "Comunicación", url: "/admin/comunicacion", icon: MessagesSquare },
       { title: "Assets y diseño", url: "/admin/diseno", icon: Palette },
       { title: "Marca", url: "/admin/marca", icon: Megaphone },
       { title: "Novedades", url: "/admin/novedades", icon: Sparkles },

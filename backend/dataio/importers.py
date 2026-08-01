@@ -685,24 +685,56 @@ def import_alquileres(
         if a.pedido_principal_numero is not None:
             vinculos_pendientes.append((alq_id, a.pedido_principal_numero))
 
-        # Items: replace. Borrar todos los del pedido y reinsertar.
+        # Items + turnos del Estudio embebidos (#1308): replace completo, mismo
+        # criterio que items/pagos ("un pedido no acumula entre imports"). Los
+        # ítems se borran ANTES de los turnos — el cascade de
+        # `alquiler_turnos_estudio` ya no tiene nada que arrastrar, y así el
+        # DELETE de turnos no depende de en qué orden corra.
         conn.execute(
             "DELETE FROM alquiler_items WHERE pedido_id = %s", (alq_id,)
         )
+        conn.execute(
+            "DELETE FROM alquiler_turnos_estudio WHERE pedido_id = %s", (alq_id,)
+        )
+        # `turno_ids[i]` = id REAL del turno que estaba en la posición `i` del
+        # JSON — los ítems lo resuelven vía `it.turno_index`.
+        turno_ids: list[int] = []
+        for t in a.turnos_estudio:
+            cur = conn.execute(
+                """
+                INSERT INTO alquiler_turnos_estudio
+                    (pedido_id, fecha_desde, fecha_hasta, descuento_pct,
+                     descuento_manual_tipo, descuento_manual_monto)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING id
+                """,
+                (alq_id, t.fecha_desde, t.fecha_hasta, t.descuento_pct,
+                 t.descuento_manual_tipo, t.descuento_manual_monto),
+            )
+            turno_ids.append(cur.fetchone()["id"])
+
         for it in a.items:
-            equipo_id = resolver.equipo_id(it.equipo_slug)
-            if equipo_id is None:
-                raise ImportError_(
-                    f"alquileres[{a.numero_pedido}].items: equipo_slug="
-                    f"{it.equipo_slug!r} no existe"
-                )
+            if it.equipo_slug is not None:
+                equipo_id = resolver.equipo_id(it.equipo_slug)
+                if equipo_id is None:
+                    raise ImportError_(
+                        f"alquileres[{a.numero_pedido}].items: equipo_slug="
+                        f"{it.equipo_slug!r} no existe"
+                    )
+            else:
+                equipo_id = None  # línea personalizada (#805) — sin FK
+            turno_estudio_id = (
+                turno_ids[it.turno_index] if it.turno_index is not None else None
+            )
             conn.execute(
                 """
                 INSERT INTO alquiler_items
-                    (pedido_id, equipo_id, cantidad, precio_jornada, subtotal)
-                VALUES (%s, %s, %s, %s, %s)
+                    (pedido_id, equipo_id, cantidad, precio_jornada, subtotal,
+                     cobro_modo, nombre_libre, turno_estudio_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
-                (alq_id, equipo_id, it.cantidad, it.precio_jornada, it.subtotal),
+                (alq_id, equipo_id, it.cantidad, it.precio_jornada, it.subtotal,
+                 it.cobro_modo, it.nombre_libre, turno_estudio_id),
             )
 
         # Pagos: replace. Idem. `anulado`+auditoría viajan tal cual (#1184/

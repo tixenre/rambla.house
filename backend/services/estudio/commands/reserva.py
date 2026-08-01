@@ -157,11 +157,15 @@ def _validar_e_insertar_promo_sueltos(
     conn, pedido_id: int, fecha_desde, fecha_hasta, *,
     estudio, con_promo: bool, sueltos: list,
     promo_precio: int, precios_sueltos: dict[int, int],
+    turno_estudio_id: Optional[int] = None,
+    excl_pedido_id: Optional[int] = None,
 ) -> Optional[str]:
     """Valida stock e inserta los `alquiler_items` de promo/sueltos de una
     reserva del Estudio YA con `pedido_id` (fila de `alquileres` insertada) —
-    compartido por `_crear_pedido_estudio` (alta) y `editar_reserva` (edición),
-    antes duplicado byte a byte entre ambos.
+    compartido por `_crear_pedido_estudio` (alta standalone), `editar_reserva`
+    (edición standalone) y `agregar_turno_embebido`/`editar_turno_embebido`
+    (#1308 rediseño "turno como ítem"), antes duplicado byte a byte entre los
+    dos primeros.
 
     Promo (combo): BEST-EFFORT, nunca bloquea — mismo criterio que tenía el
     pack ⏰ retirado: lo que no hay no frena la reserva, se cobra el precio
@@ -175,11 +179,25 @@ def _validar_e_insertar_promo_sueltos(
     antes, el lock implícito FOR KEY SHARE del propio insert quedaría en el
     camino del FOR UPDATE del gate — mismo motivo que el orden lock-antes-de-
     insertar del centinela (ver `_crear_pedido_estudio`). Devuelve
-    `promo_advertencia` (o `None`); no commitea (responsabilidad del caller)."""
+    `promo_advertencia` (o `None`); no commitea (responsabilidad del caller).
+
+    `turno_estudio_id`: si viene, cada `alquiler_items` insertado lo lleva —
+    agrupa la línea bajo un turno EMBEBIDO en vez de dejarla "suelta" del
+    pedido (`None`, default, comportamiento IDÉNTICO a antes de #1308).
+
+    `excl_pedido_id`: qué id excluir de su propia demanda al validar stock —
+    default `pedido_id` (comportamiento de siempre, correcto para un turno
+    STANDALONE, donde `pedido_id` es su propia fila). Para un turno EMBEBIDO,
+    el CALLER pasa el sentinel `0` (ningún pedido real tiene ese id): usar el
+    `pedido_id` real del CONTENEDOR excluiría también su demanda propia
+    (equipos normales del mismo pedido) del chequeo, escondiendo el
+    auto-conflicto documentado en la Fase 1 (#1308) — el mismo equipo usado a
+    la vez como ítem normal del pedido y como suelto del turno."""
+    excl_pedido_id = pedido_id if excl_pedido_id is None else excl_pedido_id
     promo_advertencia: Optional[str] = None
     if con_promo:
         errores_promo = validar_stock_hipotetico(
-            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
+            conn, excl_pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
             [_Item(estudio["promo_combo_id"], 1)],
         )
         if errores_promo:
@@ -189,7 +207,7 @@ def _validar_e_insertar_promo_sueltos(
 
     if sueltos:
         errores_sueltos = validar_stock_hipotetico(
-            conn, pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
+            conn, excl_pedido_id, fecha_desde.isoformat(), fecha_hasta.isoformat(),
             [_Item(s.equipo_id, s.cantidad) for s in sueltos],
         )
         if errores_sueltos:
@@ -199,40 +217,63 @@ def _validar_e_insertar_promo_sueltos(
         conn.execute(
             """
             INSERT INTO alquiler_items
-                (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo)
-            VALUES (%s,%s,1,%s,%s,'fijo')
+                (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo, turno_estudio_id)
+            VALUES (%s,%s,1,%s,%s,'fijo',%s)
             """,
-            (pedido_id, estudio["promo_combo_id"], promo_precio, promo_precio),
+            (pedido_id, estudio["promo_combo_id"], promo_precio, promo_precio, turno_estudio_id),
         )
     for s in sueltos:
         precio = precios_sueltos[s.equipo_id]
         conn.execute(
             """
             INSERT INTO alquiler_items
-                (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo)
-            VALUES (%s,%s,%s,%s,%s,'fijo')
+                (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo, turno_estudio_id)
+            VALUES (%s,%s,%s,%s,%s,'fijo',%s)
             """,
-            (pedido_id, s.equipo_id, s.cantidad, precio, precio * s.cantidad),
+            (pedido_id, s.equipo_id, s.cantidad, precio, precio * s.cantidad, turno_estudio_id),
         )
 
     return promo_advertencia
 
 
-def _insertar_item_pintura(conn, pedido_id: int, precio: int) -> None:
+def _insertar_item_pintura(
+    conn, pedido_id: int, precio: int, turno_estudio_id: Optional[int] = None,
+) -> None:
     """Inserta la línea libre del add-on "recién pintado" (#1300 seguimiento) —
     mismo patrón que el flete/#805: `equipo_id=NULL` + `nombre_libre`, NUNCA
     un equipo real (no es un recurso con stock, es un cargo fijo opcional).
     El caller decide si corresponde llamarla (`pintura_reciente=True`);
     inserta aunque `precio` sea 0 (el dueño todavía no cargó un valor en
     `estudio.precio_pintura_reciente`) — deja registro de que se pidió,
-    mismo criterio "ítems veraces" que el resto del paquete."""
+    mismo criterio "ítems veraces" que el resto del paquete.
+
+    `turno_estudio_id`: ver `_validar_e_insertar_promo_sueltos` — agrupa la
+    línea bajo un turno EMBEBIDO cuando viene (#1308)."""
     conn.execute(
         """
         INSERT INTO alquiler_items
-            (pedido_id, equipo_id, nombre_libre, cantidad, precio_jornada, subtotal, cobro_modo)
-        VALUES (%s, NULL, %s, 1, %s, %s, 'fijo')
+            (pedido_id, equipo_id, nombre_libre, cantidad, precio_jornada, subtotal, cobro_modo, turno_estudio_id)
+        VALUES (%s, NULL, %s, 1, %s, %s, 'fijo', %s)
         """,
-        (pedido_id, NOMBRE_ITEM_PINTURA_RECIENTE, precio, precio),
+        (pedido_id, NOMBRE_ITEM_PINTURA_RECIENTE, precio, precio, turno_estudio_id),
+    )
+
+
+def _insertar_item_centinela(
+    conn, pedido_id: int, equipo_id: int, monto: int, turno_estudio_id: Optional[int] = None,
+) -> None:
+    """Inserta el ítem del centinela (el "espacio") — extraído de
+    `_crear_pedido_estudio` para compartirlo con `agregar_turno_embebido`
+    (#1308). `cobro_modo='fijo'` con el monto real (Fase 2, ítems veraces).
+    `turno_estudio_id`: ver `_validar_e_insertar_promo_sueltos` — `None`
+    (default) para un turno STANDALONE, seteado para uno EMBEBIDO."""
+    conn.execute(
+        """
+        INSERT INTO alquiler_items
+            (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo, turno_estudio_id)
+        VALUES (%s,%s,1,%s,%s,'fijo',%s)
+        """,
+        (pedido_id, equipo_id, monto, monto, turno_estudio_id),
     )
 
 
@@ -353,14 +394,7 @@ def _crear_pedido_estudio(
     # este ítem iba a $0 (la plata vivía solo en el header) — sin esto,
     # cualquier recálculo/desglose/reconciliación que sume por ítem daba
     # $0 en vez del total real (bugs vivos arreglados en la Fase 1/2).
-    conn.execute(
-        """
-        INSERT INTO alquiler_items
-            (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo)
-        VALUES (%s,%s,1,%s,%s,'fijo')
-        """,
-        (pedido_id, estudio["equipo_id"], espacio_monto_final, espacio_monto_final),
-    )
+    _insertar_item_centinela(conn, pedido_id, estudio["equipo_id"], espacio_monto_final)
 
     return pedido_id, promo_advertencia
 
@@ -554,3 +588,394 @@ def editar_reserva(
     )
 
     return promo_advertencia
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+#  Turno EMBEBIDO en un pedido de alquiler existente (#1308 rediseño "turno
+#  como ítem", Fase 4). A diferencia de un turno STANDALONE (arriba, su propia
+#  fila `alquileres`), acá el turno es un GRUPO — una fila de
+#  `alquiler_turnos_estudio` + sus `alquiler_items` (`turno_estudio_id`
+#  seteado) — dentro de un pedido `tipo='diaria'` YA EXISTENTE. Reusa el MISMO
+#  motor de disponibilidad/precio (`_slot_bloqueante`/`_taller_bloqueante`/
+#  `_centinela_libre`/`_precio_promo_y_sueltos`/`total_turno_estudio`) y el
+#  MISMO orden lock-antes-de-insertar que el turno standalone — no hay un
+#  segundo mecanismo de reserva, solo un destino distinto para sus ítems.
+# ═══════════════════════════════════════════════════════════════════════════
+
+def _neto_por_linea(brutos: list[int], neto: int) -> list[int]:
+    """Reparte `neto` (con el descuento PROPIO del turno YA aplicado, ver
+    `total_turno_estudio`) entre `brutos` (bruto de lista de cada línea, en
+    orden — la primera es SIEMPRE el centinela). Sin descuento (`neto ==
+    sum(brutos)`, el caso común: un turno nace sin descuento) es un no-op —
+    cada línea conserva su precio de lista, cero ruido de redondeo. El
+    centinela (primera línea, siempre presente, cantidad=1) absorbe el
+    remanente de redondeo; el resto escala proporcional limpio — mismo
+    criterio que la Factura reparte su bonificación entre líneas
+    (MEMORIA 2026-07-03)."""
+    bruto_total = sum(brutos)
+    if bruto_total == 0 or bruto_total == neto:
+        return list(brutos)
+    resto = [round(b * neto / bruto_total) for b in brutos[1:]]
+    return [neto - sum(resto)] + resto
+
+
+def _aplicar_descuento_a_items_turno(
+    conn, turno_id: int, centinela_equipo_id: int, neto: int,
+) -> None:
+    """Post-procesa los `alquiler_items` YA INSERTADOS de un turno embebido
+    (precio de LISTA, igual que un turno standalone — los helpers compartidos
+    de inserción no cambian) para que su suma dé exactamente `neto`. No-op si
+    no hace falta (bruto == neto, el caso sin descuento — el común, cubre
+    a `agregar_turno_embebido` que SIEMPRE llama con `neto == bruto`, ya que
+    un turno nace sin descuento). Solo `editar_turno_embebido` puede pasar un
+    `neto` distinto del bruto. Reparto vía `_neto_por_linea` (centinela
+    absorbe el remanente); persiste `precio_jornada` (por unidad) y
+    `subtotal` (total de la línea) consistentes entre sí."""
+    items = conn.execute(
+        "SELECT id, equipo_id, cantidad, subtotal FROM alquiler_items WHERE turno_estudio_id = %s",
+        (turno_id,),
+    ).fetchall()
+    if not items:
+        return
+    centinela = next((it for it in items if it["equipo_id"] == centinela_equipo_id), None)
+    otros = [it for it in items if it is not centinela]
+    orden = ([centinela] if centinela else []) + otros
+    brutos = [it["subtotal"] for it in orden]
+    if sum(brutos) == neto:
+        return  # no-op: cero UPDATEs innecesarios en el caso común (sin descuento)
+    ajustados = _neto_por_linea(brutos, neto)
+    for it, subtotal in zip(orden, ajustados):
+        precio_unitario = round(subtotal / it["cantidad"]) if it["cantidad"] else subtotal
+        conn.execute(
+            "UPDATE alquiler_items SET precio_jornada = %s, subtotal = %s WHERE id = %s",
+            (precio_unitario, subtotal, it["id"]),
+        )
+
+
+def agregar_turno_embebido(
+    conn, pedido_id: int, *, estudio, fecha_desde, fecha_hasta,
+    con_promo: bool, sueltos: list | None, pintura_reciente: bool = False,
+    espacio_monto: int | None,
+) -> tuple[int, Optional[str]]:
+    """Agrega un turno del Estudio como ÍTEM de un pedido de alquiler
+    EXISTENTE (#1308 Fase 4) — el turno NUNCA es una fila `alquileres` aparte:
+    es una fila de `alquiler_turnos_estudio` (grupo) + sus `alquiler_items`
+    (centinela + promo/sueltos/pintura, todos con `turno_estudio_id`
+    seteado). Mismo orden lock-antes-de-insertar y mismas funciones que
+    `_crear_pedido_estudio` (turno STANDALONE) — la diferencia real es que
+    acá no hay fila `alquileres` que crear, `pedido_id` ya existe.
+
+    NO valida identidad ni anticipación (gates del caller — #1308 es
+    admin-only por scope, no tiene equivalente público). SÍ valida
+    slot/taller (conflicto estructural) y todo el stock/disponibilidad,
+    igual que el turno standalone.
+
+    `espacio_monto`: igual contrato que `_crear_pedido_estudio` — `None`
+    calcula `precio_hora × horas`; un valor es un override manual (tarifa
+    negociada).
+
+    Un turno embebido nace SIN descuento propio (0) — igual que uno
+    standalone; se edita después vía `editar_turno_embebido`. Por eso NO
+    llama a `total_turno_estudio`/`_aplicar_descuento_a_items_turno` acá: con
+    descuento 0, ambos serían no-ops — los ítems quedan a precio de lista tal
+    cual los insertan los helpers compartidos.
+
+    Recalcula `monto_total` del PEDIDO CONTENEDOR al final
+    (`_recalcular_total_pedido`, ya turno-aware desde la Fase 1/3.1 — excluye
+    estas líneas del descuento automático del pedido) — no escribe
+    `alquileres.monto_total` a mano acá, evita que este código y el recálculo
+    genérico diverjan en la fórmula. Esa función toma su propio `FOR UPDATE`
+    sobre la fila del pedido — sin necesidad de lockearla antes acá (ver su
+    docstring: re-lee bajo lock, correcto incluso con dos altas concurrentes
+    al mismo pedido).
+
+    Devuelve `(turno_id, promo_advertencia)`. No commitea — responsabilidad
+    del caller (route)."""
+    pedido = conn.execute(
+        "SELECT id, tipo FROM alquileres WHERE id = %s", (pedido_id,)
+    ).fetchone()
+    if not pedido:
+        raise HTTPException(404, "Pedido no encontrado")
+    if pedido["tipo"] != "diaria":
+        raise HTTPException(
+            400, "Solo un pedido de alquiler normal puede llevar un turno del Estudio"
+        )
+
+    slot_cliente = _slot_bloqueante(conn, fecha_desde, fecha_hasta)
+    if slot_cliente:
+        raise HTTPException(409, f"Esa franja está reservada de forma fija ({slot_cliente})")
+
+    taller_nombre = _taller_bloqueante(conn, fecha_desde, fecha_hasta)
+    if taller_nombre:
+        raise HTTPException(409, f"Esa franja está reservada para el taller «{taller_nombre}»")
+
+    con_promo = bool(con_promo) and bool(estudio["promo_combo_id"])
+    sueltos = sueltos or []
+
+    horas = int(round((fecha_hasta - fecha_desde).total_seconds() / 3600))
+    espacio_monto_final = (
+        espacio_monto if espacio_monto is not None else (estudio["precio_hora"] or 0) * horas
+    )
+    promo_precio, precios_sueltos = _precio_promo_y_sueltos(conn, estudio, con_promo, sueltos)
+    pintura_precio = (estudio["precio_pintura_reciente"] or 0) if pintura_reciente else 0
+
+    turno_id = conn.insert_returning(
+        "INSERT INTO alquiler_turnos_estudio (pedido_id, fecha_desde, fecha_hasta) VALUES (%s,%s,%s)",
+        (pedido_id, fecha_desde, fecha_hasta),
+    )
+
+    # Promo (BEST-EFFORT) + sueltos (DURO) — sentinel `excl_pedido_id=0`
+    # (Fase 1, edge case de auto-conflicto #1308): el pedido CONTENEDOR puede
+    # tener su propia demanda del MISMO equipo elegido como suelto — usar el
+    # `pedido_id` real lo excluiría de su propio chequeo. `0` nunca es un
+    # pedido real. `turno_estudio_id=turno_id`: agrupa cada línea bajo este
+    # turno (a diferencia de un standalone, donde queda `None`/NULL).
+    promo_advertencia = _validar_e_insertar_promo_sueltos(
+        conn, pedido_id, fecha_desde, fecha_hasta,
+        estudio=estudio, con_promo=con_promo, sueltos=sueltos,
+        promo_precio=promo_precio, precios_sueltos=precios_sueltos,
+        turno_estudio_id=turno_id, excl_pedido_id=0,
+    )
+
+    if pintura_reciente:
+        _insertar_item_pintura(conn, pedido_id, pintura_precio, turno_estudio_id=turno_id)
+
+    # ── Espacio (centinela): requisito DURO ─────────────────────────────────
+    # Lock PRIMERO, INSERT después — mismo orden y mismo motivo que
+    # `_crear_pedido_estudio` (deadlock simétrico si el INSERT fuera antes del
+    # FOR UPDATE, ver su comentario). Sin `exclude_*`: es un turno NUEVO, no
+    # hay nada que este chequeo deba excluirse a sí mismo todavía.
+    conn.execute("SELECT id FROM equipos WHERE id = %s FOR UPDATE", (estudio["equipo_id"],))
+    if not _centinela_libre(conn, estudio["equipo_id"], fecha_desde, fecha_hasta,
+                            estudio["buffer_horas"]):
+        raise HTTPException(409, "El estudio no está disponible en esa franja")
+    _insertar_item_centinela(
+        conn, pedido_id, estudio["equipo_id"], espacio_monto_final, turno_estudio_id=turno_id,
+    )
+
+    from services.alquileres.commands.items import _recalcular_total_pedido
+    _recalcular_total_pedido(conn, pedido_id)
+
+    return turno_id, promo_advertencia
+
+
+def editar_turno_embebido(
+    conn, turno_id: int, *,
+    fecha: str | None = None, start: str | None = None, horas: int | None = None,
+    con_promo: bool | None = None, sueltos: list | None = None,
+    pintura_reciente: bool | None = None,
+    espacio_monto: int | None = None,
+    descuento_pct: float | None = None,
+    descuento_manual_tipo: str | None = None,
+    descuento_manual_monto: int | None = None,
+) -> Optional[str]:
+    """Edita un turno del Estudio EMBEBIDO ya existente (#1308 Fase 4) —
+    hermana de `editar_reserva` (turno STANDALONE): mismo contrato de
+    "reemplazo completo" de ítems no-centinela y el MISMO contrato de `None`
+    por campo (ver el docstring de `editar_reserva` — `espacio_monto=None`
+    vuelve a precio de lista; `descuento_*=None` no toca lo persistido, a
+    propósito lo opuesto de `espacio_monto`).
+
+    Toma `FOR UPDATE` sobre la fila de `alquiler_turnos_estudio` (no sobre el
+    pedido contenedor — `_recalcular_total_pedido`, al final, toma esa lock
+    ella misma; reentrante, no deadlockea).
+
+    **Descuento propio del turno**: a diferencia de un turno standalone (que
+    guarda su neto YA descontado directo en `alquileres.monto_total`), acá el
+    contenedor deriva `monto_total` SUMANDO `alquiler_items.subtotal` (mismo
+    mecanismo genérico que cualquier pedido, vía `_recalcular_total_pedido`)
+    — así que el descuento del turno se aplica **repartiéndolo entre sus
+    propios ítems** (`_aplicar_descuento_a_items_turno`, precio de lista →
+    ajustado) ANTES de recalcular el contenedor, no en una columna aparte.
+    `alquiler_turnos_estudio.descuento_pct`/etc. igual se persisten (registro/
+    display de qué descuento tiene aplicado), pero la plata real vive en los
+    ítems.
+
+    Devuelve `promo_advertencia` (o `None`). No commitea — responsabilidad
+    del caller (route)."""
+    turno = conn.execute(
+        "SELECT * FROM alquiler_turnos_estudio WHERE id = %s FOR UPDATE", (turno_id,)
+    ).fetchone()
+    if not turno:
+        raise HTTPException(404, "Turno no encontrado")
+    pedido_id = turno["pedido_id"]
+
+    estudio = _get_estudio_row(conn)
+
+    fecha_desde = to_datetime(turno["fecha_desde"])
+    fecha_hasta = to_datetime(turno["fecha_hasta"])
+    reprograma = fecha is not None or start is not None or horas is not None
+    if reprograma:
+        horas_actuales = int(round((fecha_hasta - fecha_desde).total_seconds() / 3600))
+        fecha_desde, fecha_hasta = _franja_estudio(
+            estudio,
+            fecha or fecha_desde.strftime("%Y-%m-%d"),
+            start or fecha_desde.strftime("%H:%M"),
+            horas if horas is not None else horas_actuales,
+        )
+
+    # `exclude_turno_estudio_id` (NO `exclude_pedido_id`, Fase 1 #1308): este
+    # turno puede no ser el único embebido en su pedido contenedor — excluir
+    # por pedido escondería un conflicto real contra un turno HERMANO del
+    # mismo pedido.
+    libre, motivo = _estudio_disponible(
+        conn, estudio, fecha_desde, fecha_hasta, exclude_turno_estudio_id=turno_id,
+    )
+    if not libre:
+        raise HTTPException(409, f"El espacio no está disponible: {motivo}")
+
+    # Mismo `IS DISTINCT FROM` que `editar_reserva` — un ítem libre (pintura
+    # reciente) tiene `equipo_id IS NULL`, `!=` lo excluiría en silencio.
+    items_actuales = conn.execute(
+        "SELECT equipo_id, cantidad, nombre_libre "
+        "FROM alquiler_items WHERE turno_estudio_id = %s AND equipo_id IS DISTINCT FROM %s",
+        (turno_id, estudio["equipo_id"]),
+    ).fetchall()
+    promo_actual = any(it["equipo_id"] == estudio["promo_combo_id"] for it in items_actuales)
+    pintura_actual = any(
+        it["equipo_id"] is None and it["nombre_libre"] == NOMBRE_ITEM_PINTURA_RECIENTE
+        for it in items_actuales
+    )
+
+    con_promo = con_promo if con_promo is not None else promo_actual
+    pintura_reciente = pintura_reciente if pintura_reciente is not None else pintura_actual
+    if sueltos is not None:
+        sueltos_finales = sueltos
+    else:
+        ids_conocidos = {estudio["promo_combo_id"]}
+        sueltos_finales = [
+            SueltoItem(equipo_id=it["equipo_id"], cantidad=it["cantidad"])
+            for it in items_actuales
+            if it["equipo_id"] is not None and it["equipo_id"] not in ids_conocidos
+        ]
+
+    # Mismo contrato de `espacio_monto` que `editar_reserva` (gotcha real,
+    # pedido #445): `None` SIEMPRE recalcula a precio de lista.
+    espacio_monto_final = (
+        espacio_monto if espacio_monto is not None
+        else (estudio["precio_hora"] or 0)
+        * int(round((fecha_hasta - fecha_desde).total_seconds() / 3600))
+    )
+
+    # Reemplazo completo de los ítems no-centinela — mismo criterio que
+    # `editar_reserva`.
+    conn.execute(
+        "DELETE FROM alquiler_items WHERE turno_estudio_id = %s AND equipo_id IS DISTINCT FROM %s",
+        (turno_id, estudio["equipo_id"]),
+    )
+
+    con_promo = bool(con_promo) and bool(estudio["promo_combo_id"])
+
+    promo_precio, precios_sueltos = _precio_promo_y_sueltos(
+        conn, estudio, con_promo, sueltos_finales,
+    )
+    pintura_precio = (estudio["precio_pintura_reciente"] or 0) if pintura_reciente else 0
+
+    # `None` acá = "no lo toques" (ver docstring): el descuento sobrevive a
+    # cualquier otra edición del turno que no lo mencione.
+    dto_pct = turno["descuento_pct"] if descuento_pct is None else descuento_pct
+    dto_tipo = (
+        turno["descuento_manual_tipo"] if descuento_manual_tipo is None
+        else descuento_manual_tipo
+    )
+    dto_monto = (
+        turno["descuento_manual_monto"] if descuento_manual_monto is None
+        else descuento_manual_monto
+    )
+
+    promo_advertencia = _validar_e_insertar_promo_sueltos(
+        conn, pedido_id, fecha_desde, fecha_hasta,
+        estudio=estudio, con_promo=con_promo, sueltos=sueltos_finales,
+        promo_precio=promo_precio, precios_sueltos=precios_sueltos,
+        turno_estudio_id=turno_id, excl_pedido_id=0,
+    )
+    if pintura_reciente:
+        _insertar_item_pintura(conn, pedido_id, pintura_precio, turno_estudio_id=turno_id)
+
+    conn.execute(
+        "UPDATE alquiler_items SET precio_jornada = %s, subtotal = %s "
+        "WHERE turno_estudio_id = %s AND equipo_id = %s",
+        (espacio_monto_final, espacio_monto_final, turno_id, estudio["equipo_id"]),
+    )
+
+    # Reparte el descuento (si hay) entre los ítems recién insertados — ver el
+    # docstring de arriba. Con descuento 0 (el caso común) es un no-op.
+    neto = total_turno_estudio(
+        conn, estudio=estudio, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
+        espacio_monto=espacio_monto_final, con_promo=con_promo,
+        promo_precio=promo_precio, sueltos=sueltos_finales, precios_sueltos=precios_sueltos,
+        pintura_reciente=bool(pintura_reciente), pintura_precio=pintura_precio,
+        descuento_pct=dto_pct or 0,
+        descuento_manual_tipo=dto_tipo or "pct",
+        descuento_manual_monto=dto_monto or 0,
+    )["neto"]
+    _aplicar_descuento_a_items_turno(conn, turno_id, estudio["equipo_id"], neto)
+
+    conn.execute(
+        "UPDATE alquiler_turnos_estudio SET fecha_desde = %s, fecha_hasta = %s, "
+        "descuento_pct = %s, descuento_manual_tipo = %s, descuento_manual_monto = %s, "
+        "updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+        (
+            fecha_desde, fecha_hasta,
+            dto_pct or 0, dto_tipo or "pct", int(dto_monto or 0),
+            turno_id,
+        ),
+    )
+
+    from services.alquileres.commands.items import _recalcular_total_pedido
+    _recalcular_total_pedido(conn, pedido_id)
+
+    return promo_advertencia
+
+
+def eliminar_turno_embebido(conn, turno_id: int) -> None:
+    """Borra un turno del Estudio EMBEBIDO (#1308 Fase 4) — cascade simple
+    sobre el grupo: `alquiler_items.turno_estudio_id` es `ON DELETE CASCADE`,
+    así que borrar la fila de `alquiler_turnos_estudio` se lleva sus ítems
+    solo. A diferencia de sacar un turno VINCULADO (mecanismo viejo,
+    `pedidos_vinculados.py`), acá no hay una fila `alquileres` aparte ni
+    `monto_pagado` propio que verificar — el turno nunca fue "su propia
+    venta", siempre fue parte de ESTE pedido; el pago vive en el contenedor.
+
+    Gate de sobrepago (hallazgo de auditoría — mismo espíritu que el "plata
+    cobrada" del mecanismo VIEJO, adaptado: acá no hay un `monto_pagado`
+    propio del turno que mirar, así que se mira el efecto en el contenedor).
+    Los ítems del turno NUNCA absorben el descuento global del pedido
+    (`calcular_total` los excluye del `bruto_descontable`, F3.1) — por eso
+    `SUM(subtotal)` de sus propios ítems es EXACTAMENTE cuánto restaría este
+    turno de `monto_total` al sacarse, sin aproximar. Si lo ya cobrado
+    (`monto_pagado`) superaría ese total reducido, se frena: sacar el turno en
+    silencio dejaría al pedido mostrando un cobro de más que nadie corrigió.
+    `FOR UPDATE` en la fila del pedido — mismo lock que toma un pago
+    (`_agregar_pago`/`_agregar_pago_combinado`) para que un cobro en vuelo no
+    se cuele entre este chequeo y el DELETE de abajo.
+
+    Recalcula `monto_total` del pedido contenedor al final. No commitea —
+    responsabilidad del caller (route)."""
+    turno = conn.execute(
+        "SELECT pedido_id FROM alquiler_turnos_estudio WHERE id = %s", (turno_id,)
+    ).fetchone()
+    if not turno:
+        raise HTTPException(404, "Turno no encontrado")
+    pedido_id = turno["pedido_id"]
+
+    pedido = conn.execute(
+        "SELECT monto_total, monto_pagado FROM alquileres WHERE id = %s FOR UPDATE",
+        (pedido_id,),
+    ).fetchone()
+    turno_monto = conn.execute(
+        "SELECT COALESCE(SUM(subtotal), 0) AS monto FROM alquiler_items WHERE turno_estudio_id = %s",
+        (turno_id,),
+    ).fetchone()["monto"]
+    nuevo_total = (pedido["monto_total"] or 0) - turno_monto
+    if (pedido["monto_pagado"] or 0) > nuevo_total:
+        raise HTTPException(
+            409,
+            "Sacar este turno dejaría el pedido sobrepagado. Anulá o ajustá el "
+            "pago antes de sacarlo.",
+        )
+
+    conn.execute("DELETE FROM alquiler_turnos_estudio WHERE id = %s", (turno_id,))
+
+    from services.alquileres.commands.items import _recalcular_total_pedido
+    _recalcular_total_pedido(conn, pedido_id)

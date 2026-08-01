@@ -39,6 +39,11 @@ _jinja_text = jinja2.Environment(autoescape=False, undefined=jinja2.Undefined)
 _IDEMPOTENT_PER_PEDIDO = {
     "pedido_creado_cliente",
     "pedido_confirmado_cliente",
+    # Los avisos de devolución salen UNA vez por pedido y ventana: el barrido
+    # puede correr varias veces el mismo día (scheduler + botón del back-office).
+    "recordatorio_devolucion_d1",
+    "recordatorio_devolucion_d0",
+    "recordatorio_devolucion_vencido",
 }
 
 

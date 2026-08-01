@@ -6,7 +6,7 @@
  * /api/cliente/... y validan ownership en el backend.
  */
 
-import { authedFetch, authedJson } from "@/lib/authedFetch";
+import { authedJson } from "@/lib/authedFetch";
 import type { Pedido } from "@/lib/admin/api";
 
 export type ClientePedidoFull = Pedido & {
@@ -17,36 +17,7 @@ export type ClientePedidoFull = Pedido & {
     factura: boolean;
     "packing-list": boolean;
   };
-  solicitudes?: SolicitudModificacion[];
 };
-
-export type SolicitudModificacion = {
-  id: number;
-  mensaje: string | null;
-  estado: "pendiente" | "aprobada" | "rechazada" | "cancelada";
-  respuesta: string | null;
-  cambios_json?: ModificacionPayload | null;
-  tipo?: "directo" | "aprobacion";
-  resolved_at?: string | null;
-  resolved_by?: string | null;
-  created_at: string;
-};
-
-export type ModificacionItem = {
-  equipo_id: number;
-  cantidad: number;
-};
-
-export type ModificacionPayload = {
-  fecha_desde?: string | null;
-  fecha_hasta?: string | null;
-  items: ModificacionItem[];
-  mensaje?: string | null;
-};
-
-export type ModificacionResp =
-  | { ok: true; tipo: "directo"; pedido: Pedido }
-  | { ok: true; tipo: "aprobacion" };
 
 // ── Listas / kits personales del cliente (#1092) ──────────────────────────────
 // Se guarda SOLO la composición (equipo_id + cantidad); nombre/foto/precio se
@@ -62,39 +33,6 @@ export type ListaPersonal = {
 
 export const clienteApi = {
   getPedido: (id: number) => authedJson<ClientePedidoFull>(`/api/cliente/pedidos/${id}`),
-
-  modificacionConfig: () =>
-    authedJson<{ ventana_horas: number }>("/api/cliente/modificacion-config"),
-
-  /** Aplica un cambio (directo si presupuesto, propuesta si confirmado). */
-  enviarModificacion: (id: number, payload: ModificacionPayload) =>
-    authedJson<ModificacionResp>(`/api/cliente/pedidos/${id}/modificacion`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    }),
-
-  /** Cancela una solicitud pendiente que el propio cliente creó. */
-  cancelarSolicitud: async (pedidoId: number, sm_id: number) => {
-    const res = await authedFetch(`/api/cliente/pedidos/${pedidoId}/modificacion/${sm_id}`, {
-      method: "DELETE",
-    });
-    if (!res.ok) {
-      const detail = await res.json().catch(() => ({}));
-      throw new Error(detail?.detail ?? `DELETE → ${res.status}`);
-    }
-  },
-
-  /** Disponibilidad por equipo en un rango, excluyendo el pedido actual.
-   *  `items` ("id:cantidad,...", el draft de modificación): el backend descuenta
-   *  todo el draft con la expansión de kits del motor → valores con signo. */
-  getDisponibilidad: (pedidoId: number, fechaDesde: string, fechaHasta: string, items?: string) => {
-    const sp = new URLSearchParams({ fecha_desde: fechaDesde, fecha_hasta: fechaHasta });
-    if (items) sp.set("items", items);
-    return authedJson<Record<string, number>>(
-      `/api/cliente/pedidos/${pedidoId}/disponibilidad?${sp.toString()}`,
-    );
-  },
 
   // ── Favoritos ──────────────────────────────────────────────────────────────
 

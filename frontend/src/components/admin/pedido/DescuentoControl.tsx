@@ -40,6 +40,13 @@ export function DescuentoControl({
    *  que responde primero con un valor más viejo — una regresión silenciosa,
    *  no solo un dato stale en pantalla. */
   disabled,
+  /** Oculta el toggle %/$ y fuerza el modo %: lo usa el ledger COMBINADO de
+   *  "Turnos del Estudio" (2+ turnos) — un $ fijo repartido entre varios
+   *  turnos con brutos distintos obligaría al FRONT a decidir cuánto le toca
+   *  a cada uno, justo lo que "el front no calcula plata" prohíbe (MEMORIA
+   *  2026-06-29). Un % combinado no tiene ese problema — el backend lo aplica
+   *  igual a cada turno. */
+  soloPct = false,
 }: {
   value: DescuentoManual;
   onChange: (next: DescuentoManual) => void;
@@ -48,6 +55,7 @@ export function DescuentoControl({
   efectivoMonto: number;
   className?: string;
   disabled?: boolean;
+  soloPct?: boolean;
 }) {
   return (
     // Sin wrapper ni label propios: este control ya NO es un bloque aparte —
@@ -57,30 +65,32 @@ export function DescuentoControl({
     // separadas diciendo lo mismo: un control arriba y una fila abajo con el
     // resultado. Ahora la fila ES el control.
     <div className={cn("flex items-center gap-1.5", className)}>
-      <SegmentedControl
-        value={value.tipo}
-        onChange={(v) =>
-          onChange(
-            // Convertir al equivalente del OTRO campo (el % y el $ efectivos
-            // que ya muestra el desglose, calculados por el backend) en vez
-            // de resetear a 0 — cambiar de unidad no debería perder el
-            // descuento actual. El campo que se deja de usar se resetea (sin
-            // esto queda un valor "fantasma" que podía reaparecer si el admin
-            // volvía a tocar el selector).
-            v === "monto"
-              ? { tipo: "monto", monto: efectivoMonto, pct: 0 }
-              : { tipo: "pct", pct: efectivoPct, monto: 0 },
-          )
-        }
-        options={[
-          { value: "pct", label: "%" },
-          { value: "monto", label: "$" },
-        ]}
-        ariaLabel="Unidad del descuento: porcentaje o pesos"
-        className="w-[96px] shrink-0 md:w-[68px]"
-        disabled={disabled}
-      />
-      {value.tipo === "monto" ? (
+      {!soloPct && (
+        <SegmentedControl
+          value={value.tipo}
+          onChange={(v) =>
+            onChange(
+              // Convertir al equivalente del OTRO campo (el % y el $ efectivos
+              // que ya muestra el desglose, calculados por el backend) en vez
+              // de resetear a 0 — cambiar de unidad no debería perder el
+              // descuento actual. El campo que se deja de usar se resetea (sin
+              // esto queda un valor "fantasma" que podía reaparecer si el admin
+              // volvía a tocar el selector).
+              v === "monto"
+                ? { tipo: "monto", monto: efectivoMonto, pct: 0 }
+                : { tipo: "pct", pct: efectivoPct, monto: 0 },
+            )
+          }
+          options={[
+            { value: "pct", label: "%" },
+            { value: "monto", label: "$" },
+          ]}
+          ariaLabel="Unidad del descuento: porcentaje o pesos"
+          className="w-[96px] shrink-0 md:w-[68px]"
+          disabled={disabled}
+        />
+      )}
+      {!soloPct && value.tipo === "monto" ? (
         <MoneyInput
           min={0}
           max={maxMonto}

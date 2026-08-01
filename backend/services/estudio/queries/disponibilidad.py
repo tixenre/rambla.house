@@ -86,7 +86,8 @@ def _viola_anticipacion_pintura(estudio, fecha_desde) -> bool:
 
 def _centinela_libre(conn, equipo_id: int, fecha_desde, fecha_hasta,
                      buffer_horas: int, exclude_pedido_id: int | None = None,
-                     exclude_slot_id: int | None = None) -> bool:
+                     exclude_slot_id: int | None = None,
+                     exclude_turno_estudio_id: int | None = None) -> bool:
     """True si el centinela del estudio está libre en [fecha_desde, fecha_hasta],
     aplicando SOLO el buffer propio del estudio (expande el rango por
     `buffer_horas` a cada lado). Query dedicada — NO usa el motor sagrado, así
@@ -94,7 +95,13 @@ def _centinela_libre(conn, equipo_id: int, fecha_desde, fecha_hasta,
 
     El centinela es un recurso único (stock=1): cualquier reserva activa que se
     pise con la franja expandida (half-open: fecha_desde < hi AND fecha_hasta > lo)
-    significa ocupado. `exclude_pedido_id` excluye el propio pedido en el POST.
+    significa ocupado. `exclude_pedido_id` excluye el propio pedido en el POST — usado por un
+    turno STANDALONE (toda la fila es el turno). **Un turno EMBEBIDO en un pedido de alquiler
+    normal NO debe pasar `exclude_pedido_id`**: excluiría TODO el pedido, incluyendo cualquier
+    OTRO turno embebido en la misma fila — dos turnos del mismo pedido con horarios que se pisan
+    pasarían el chequeo por error. Para un turno embebido, usar `exclude_turno_estudio_id` (el id
+    de `alquiler_turnos_estudio` del turno que se está editando) en su lugar — excluye solo su
+    propio ítem, no el resto del pedido.
 
     `exclude_slot_id`: dejado por compatibilidad de firma con `_slot_bloqueante` (que sí lo
     usa) — desde que esta query excluye `TIPOS_SIN_RETIRO_SQL` (ver abajo, taller/estudio_fijo),
@@ -112,6 +119,16 @@ def _centinela_libre(conn, equipo_id: int, fecha_desde, fecha_hasta,
     7 días corridos aunque el taller real fueran 2 clases de 4h — bug real reportado por el
     dueño en el pedido #445. Los turnos reales (`tipo='estudio'`) SÍ tienen que seguir
     contándose acá: es la única forma en que dos turnos por hora se pisan entre sí.
+
+    `COALESCE(ate.fecha_desde, p.fecha_desde)`/`fecha_hasta` (turno del Estudio EMBEBIDO en un
+    pedido de alquiler normal, `alquiler_turnos_estudio`, #1308 rediseño "turno como ítem"): un
+    ítem del centinela puede tener su PROPIA ventana horaria, distinta de la del pedido
+    contenedor (equipo de 3 días + turno de 2hs en el MISMO pedido) — sin el COALESCE, esta
+    query usaría la fecha del pedido entero y bloquearía el espacio 3 días en vez de 2hs. Para
+    cualquier ítem sin turno (el centinela de un turno STANDALONE, 100% de los casos hasta que
+    exista la Fase 4) esto es un no-op algebraico: `ate.fecha_desde` es NULL, `COALESCE` cae a
+    `p.fecha_desde`, igual que hoy. `exclude_turno_estudio_id` excluye el turno propio al editar
+    uno entre varios embebidos en el mismo pedido — mismo patrón que `exclude_slot_id`.
     """
     lo = fecha_desde - timedelta(hours=max(0, buffer_horas or 0))
     hi = fecha_hasta + timedelta(hours=max(0, buffer_horas or 0))
@@ -120,16 +137,19 @@ def _centinela_libre(conn, equipo_id: int, fecha_desde, fecha_hasta,
         SELECT COUNT(*) AS cnt
         FROM alquiler_items pi
         JOIN alquileres p ON p.id = pi.pedido_id
+        LEFT JOIN alquiler_turnos_estudio ate ON ate.id = pi.turno_estudio_id
         WHERE pi.equipo_id = %s
           AND p.estado IN {ESTADOS_RESERVADO}
           AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
           AND (%s IS NULL OR p.id != %s)
           AND (%s IS NULL OR p.estudio_slot_id IS DISTINCT FROM %s)
-          AND p.fecha_desde < %s
-          AND p.fecha_hasta > %s
+          AND (%s IS NULL OR pi.turno_estudio_id IS DISTINCT FROM %s)
+          AND COALESCE(ate.fecha_desde, p.fecha_desde) < %s
+          AND COALESCE(ate.fecha_hasta, p.fecha_hasta) > %s
         """,
         (equipo_id, exclude_pedido_id, exclude_pedido_id,
-         exclude_slot_id, exclude_slot_id, hi, lo),
+         exclude_slot_id, exclude_slot_id,
+         exclude_turno_estudio_id, exclude_turno_estudio_id, hi, lo),
     ).fetchone()
     return (row["cnt"] or 0) == 0
 
@@ -241,9 +261,14 @@ def _taller_bloqueante(conn, fecha_desde, fecha_hasta,
 def _estudio_disponible(conn, estudio, fecha_desde, fecha_hasta,
                         exclude_pedido_id: Optional[int] = None,
                         exclude_taller_id: Optional[int] = None,
-                        exclude_slot_id: Optional[int] = None) -> tuple:
+                        exclude_slot_id: Optional[int] = None,
+                        exclude_turno_estudio_id: Optional[int] = None) -> tuple:
     """Engine de lectura unificada. Orden: slot → taller → centinela.
-    Devuelve (True, None) si libre; (False, motivo) si ocupado."""
+    Devuelve (True, None) si libre; (False, motivo) si ocupado.
+
+    `exclude_turno_estudio_id`: para un turno EMBEBIDO en un pedido de alquiler normal (ver
+    docstring de `_centinela_libre`) — excluye solo el ítem de ESE turno, no el pedido entero.
+    Un turno standalone sigue usando `exclude_pedido_id`, sin pasar este parámetro."""
     s = _slot_bloqueante(conn, fecha_desde, fecha_hasta, exclude_slot_id=exclude_slot_id)
     if s:
         return False, f"slot fijo «{s}»"
@@ -252,7 +277,8 @@ def _estudio_disponible(conn, estudio, fecha_desde, fecha_hasta,
         return False, f"taller «{t}»"
     if not _centinela_libre(conn, estudio["equipo_id"], fecha_desde, fecha_hasta,
                             estudio["buffer_horas"], exclude_pedido_id=exclude_pedido_id,
-                            exclude_slot_id=exclude_slot_id):
+                            exclude_slot_id=exclude_slot_id,
+                            exclude_turno_estudio_id=exclude_turno_estudio_id):
         return False, "ya reservado en esa franja"
     return True, None
 
@@ -296,6 +322,70 @@ def revalidar_disponibilidad_estudio(conn, pedido) -> list[str]:
             [_Item(it["equipo_id"], it["cantidad"]) for it in items],
         )
         errores.extend(f"Sin stock suficiente: {s}" for s in sin_stock)
+
+    return errores
+
+
+def _revalidar_turnos_embebidos(conn, pedido_id: int) -> list[str]:
+    """Re-valida cada turno del Estudio EMBEBIDO en este pedido de alquiler normal
+    (`alquiler_turnos_estudio`, #1308 rediseño "turno como ítem") al transicionar de
+    estado — mismo criterio que `revalidar_disponibilidad_estudio`, pero por GRUPO
+    (un pedido puede tener 0, 1 o varios turnos embebidos) en vez de por pedido
+    completo. No-op barato (una query vacía) si el pedido no tiene ninguno.
+
+    ESPACIO (centinela): por `_estudio_disponible` con `exclude_turno_estudio_id`
+    (NO `exclude_pedido_id`: excluiría el pedido ENTERO, incluyendo cualquier OTRO
+    turno embebido en la misma fila — dos turnos del mismo pedido que se pisan en
+    horario pasarían el chequeo por error). EQUIPOS reales (sueltos, si los hay):
+    por el motor sagrado `validar_stock_hipotetico`, excluyendo el PEDIDO contenedor
+    (mismo criterio que `revalidar_disponibilidad_estudio` para un turno standalone:
+    excusa la demanda YA persistida de este turno contra sí misma).
+
+    Limitación conocida, documentada a propósito (no resuelta acá): excluir por
+    `pedido_id` en el chequeo de sueltos también excusa, de paso, la demanda de
+    OTRO ítem del MISMO pedido para el mismo equipo (un ítem de alquiler normal, o
+    el suelto de OTRO turno embebido) — el motor sagrado solo excluye a nivel
+    PEDIDO, no a nivel turno/ítem. Ese auto-conflicto SÍ se cazó al crear el turno
+    (Fase 4: valida contra TODA la demanda existente, sin excluir el pedido
+    contenedor, antes de insertar) — revalidar en una transición de estado no
+    vuelve a abrir ese caso, solo cazar nueva competencia de OTROS pedidos desde
+    la creación. Tocar esto requeriría una exclusión a nivel turno en el núcleo
+    sagrado (`_validar_demanda`/`reservado_directo_batch`), fuera de alcance de
+    esta fase (no se toca el núcleo sagrado sin un caso real que lo justifique).
+
+    `pedido_id` es el pedido CONTENEDOR (ya leído `FOR UPDATE` por el caller,
+    `cambiar_estado`) — esta función no relockea nada."""
+    turnos = conn.execute(
+        "SELECT id, fecha_desde, fecha_hasta FROM alquiler_turnos_estudio WHERE pedido_id = %s",
+        (pedido_id,),
+    ).fetchall()
+    if not turnos:
+        return []
+
+    estudio = _get_estudio_row(conn)
+    errores: list[str] = []
+    _Item = namedtuple("_Item", ["equipo_id", "cantidad"])
+
+    for t in turnos:
+        fd, fh = to_datetime(t["fecha_desde"]), to_datetime(t["fecha_hasta"])
+        libre, motivo = _estudio_disponible(
+            conn, estudio, fd, fh, exclude_turno_estudio_id=t["id"],
+        )
+        etiqueta = f"{fd.strftime('%d/%m %H:%M')}-{fh.strftime('%H:%M')}" if fd and fh else f"#{t['id']}"
+        if not libre:
+            errores.append(f"El turno del Estudio del {etiqueta} no está disponible: {motivo}")
+
+        items = conn.execute(
+            "SELECT equipo_id, cantidad FROM alquiler_items "
+            "WHERE turno_estudio_id = %s AND equipo_id IS NOT NULL AND equipo_id != %s",
+            (t["id"], estudio["equipo_id"]),
+        ).fetchall()
+        if items:
+            sin_stock = validar_stock_hipotetico(
+                conn, pedido_id, t["fecha_desde"], t["fecha_hasta"],
+                [_Item(it["equipo_id"], it["cantidad"]) for it in items],
+            )
+            errores.extend(f"Sin stock suficiente ({etiqueta}): {s}" for s in sin_stock)
 
     return errores
 

@@ -10,7 +10,7 @@ from datetime import datetime
 
 import pytest
 
-from routes.alquileres import _ics_adjunto_pedido
+from services.comunicacion import ics_adjunto_pedido as _ics_adjunto_pedido
 from services.email.base import Attachment
 
 pytestmark = pytest.mark.unit

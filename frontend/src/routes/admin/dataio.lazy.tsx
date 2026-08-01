@@ -226,9 +226,9 @@ function DataIoPage() {
             <div className="space-y-1">
               <h2 className="font-display text-lg text-destructive">Arrancar de cero</h2>
               <p className="text-sm text-muted-foreground">
-                Borra <strong>todos los clientes y pedidos</strong> (con sus items, pagos y
-                solicitudes) y reinicia los contadores, incluida la numeración de pedidos (el
-                próximo vuelve a ser #1). El catálogo y la configuración no se tocan.{" "}
+                Borra <strong>todos los clientes y pedidos</strong> (con sus items y pagos) y
+                reinicia los contadores, incluida la numeración de pedidos (el próximo vuelve a ser
+                #1). El catálogo y la configuración no se tocan.{" "}
                 <strong className="text-destructive">No es reversible</strong> — descargá el backup
                 de Clientes y Pedidos antes.
               </p>
@@ -251,8 +251,8 @@ function DataIoPage() {
               <AlertDialogHeader>
                 <AlertDialogTitle>¿Borrar TODOS los clientes y pedidos?</AlertDialogTitle>
                 <AlertDialogDescription>
-                  Elimina permanentemente todos los clientes, pedidos, items, pagos y solicitudes.
-                  El catálogo y la configuración no se tocan.
+                  Elimina permanentemente todos los clientes, pedidos, items y pagos. El catálogo y
+                  la configuración no se tocan.
                   <br />
                   <br />
                   Para confirmar, escribí{" "}

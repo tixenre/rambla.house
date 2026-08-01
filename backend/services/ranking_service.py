@@ -68,10 +68,15 @@ def calcular_estadisticas_equipo(
             COUNT(DISTINCT a.id) AS cant_pedidos,
             COALESCE(SUM(
                 ai.cantidad * COALESCE(ai.precio_jornada, 0) *
-                GREATEST(
-                    1,
-                    (a.fecha_hasta::date - a.fecha_desde::date)
-                )
+                -- `cobro_modo='fijo'` (líneas personalizadas, combos, turno del
+                -- Estudio EMBEBIDO #1308) ya cobra el monto único — multiplicarlo
+                -- por los días DEL PEDIDO (que pueden no tener nada que ver con la
+                -- duración real de esa línea) inflaba el ingreso atribuido. Solo
+                -- 'jornada' se multiplica por día; el resto cuenta 1 vez.
+                CASE WHEN ai.cobro_modo = 'jornada'
+                     THEN GREATEST(1, (a.fecha_hasta::date - a.fecha_desde::date))
+                     ELSE 1
+                END
             ), 0) AS ingreso_total_ars
         FROM alquiler_items ai
         JOIN alquileres a ON a.id = ai.pedido_id
@@ -248,10 +253,15 @@ def _recalcular_ranking_categorias(
             COUNT(DISTINCT a.id) AS cant_pedidos,
             COALESCE(SUM(
                 ai.cantidad * COALESCE(ai.precio_jornada, 0) *
-                GREATEST(
-                    1,
-                    (a.fecha_hasta::date - a.fecha_desde::date)
-                )
+                -- `cobro_modo='fijo'` (líneas personalizadas, combos, turno del
+                -- Estudio EMBEBIDO #1308) ya cobra el monto único — multiplicarlo
+                -- por los días DEL PEDIDO (que pueden no tener nada que ver con la
+                -- duración real de esa línea) inflaba el ingreso atribuido. Solo
+                -- 'jornada' se multiplica por día; el resto cuenta 1 vez.
+                CASE WHEN ai.cobro_modo = 'jornada'
+                     THEN GREATEST(1, (a.fecha_hasta::date - a.fecha_desde::date))
+                     ELSE 1
+                END
             ), 0) AS ingreso_total_ars
         FROM categorias c
         LEFT JOIN equipo_categorias ec ON ec.categoria_id = c.id
@@ -319,10 +329,15 @@ def _recalcular_ranking_marcas(
             COUNT(DISTINCT a.id) AS cant_pedidos,
             COALESCE(SUM(
                 ai.cantidad * COALESCE(ai.precio_jornada, 0) *
-                GREATEST(
-                    1,
-                    (a.fecha_hasta::date - a.fecha_desde::date)
-                )
+                -- `cobro_modo='fijo'` (líneas personalizadas, combos, turno del
+                -- Estudio EMBEBIDO #1308) ya cobra el monto único — multiplicarlo
+                -- por los días DEL PEDIDO (que pueden no tener nada que ver con la
+                -- duración real de esa línea) inflaba el ingreso atribuido. Solo
+                -- 'jornada' se multiplica por día; el resto cuenta 1 vez.
+                CASE WHEN ai.cobro_modo = 'jornada'
+                     THEN GREATEST(1, (a.fecha_hasta::date - a.fecha_desde::date))
+                     ELSE 1
+                END
             ), 0) AS ingreso_total_ars
         FROM marcas m
         LEFT JOIN equipos e ON e.brand_id = m.id

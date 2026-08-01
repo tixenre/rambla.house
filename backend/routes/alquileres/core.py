@@ -65,20 +65,14 @@ from routes.alquileres.detalle import (
     _get_alquiler_detail,  # noqa: F401 — re-export, ver comentario arriba
     _get_alquiler_items,  # noqa: F401 — re-export, ver comentario arriba
     _get_alquiler_pagos,  # noqa: F401 — re-export, ver comentario arriba
-    _get_historial_modificaciones,  # noqa: F401 — re-export, ver comentario arriba
     _maybe_finalizar,  # noqa: F401 — re-export, ver comentario arriba
     _next_numero_pedido,  # noqa: F401 — re-export, ver comentario arriba
     _enriquecer_pedido_con_total,  # noqa: F401 — re-export, ver comentario arriba
 )
-# Armado de mails/ICS del pedido: vive en `services/pedidos_notificaciones.py`
-# (split #1254, Corte B — espeja `services/pedidos_enriquecimiento`). Re-exportado
-# acá TAL CUAL — lo consumen `jobs/recordatorios.py` y varios tests
-# (`routes.alquileres.core` directo o vía el paquete).
-from services.pedidos_notificaciones import (
-    _dispatch_pedido_creado_emails,  # noqa: F401 — re-export, ver comentario arriba
-    _ics_adjunto_pedido,  # noqa: F401 — re-export, ver comentario arriba
-    _pedido_email_context,  # noqa: F401 — re-export, ver comentario arriba
-)
+# El armado de contexto/`.ics` y el despacho de avisos al cliente viven ahora en la
+# capa única de comunicación (`services/comunicacion`, 2026-07-11): el ex-módulo
+# `services/pedidos_notificaciones` se eliminó y los consumidores importan directo
+# de ahí, sin re-export intermedio.
 
 # Motor de reservas: la fuente única vive en el paquete `reservas`.
 # `ESTADOS_RESERVADO` se re-exporta porque es la constante canónica del

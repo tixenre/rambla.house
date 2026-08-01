@@ -115,7 +115,9 @@ class StockFakeConn:
 
         # Reservas directas batcheadas (#626): IN + GROUP BY,
         # params = (*equipo_ids, excl, fh_buf, fd_buf).
-        if "FROM ALQUILER_ITEMS PI2 JOIN ALQUILERES P ON P.ID = PI2.PEDIDO_ID WHERE PI2.EQUIPO_ID IN" in s_up:
+        # Substrings (no un match contiguo): #1308 sumó un LEFT JOIN
+        # alquiler_turnos_estudio entre el JOIN a alquileres y el WHERE.
+        if "FROM ALQUILER_ITEMS PI2" in s_up and "WHERE PI2.EQUIPO_ID IN" in s_up:
             eq_ids = params[:-3]
             return FakeCursor([
                 FakeRow({0: e, 1: self.reservas_directas.get(e, 0)}) for e in eq_ids

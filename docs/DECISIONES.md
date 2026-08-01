@@ -3256,6 +3256,191 @@ passed).
 `pdf` + version), `backend/arca_fe/README.md` (instalación, Quickstart, sección nueva "Render a
 PDF/imagen", "Qué NO cubre").
 
+### 2026-07-11 — Canal WhatsApp (Meta Cloud API): cuenta única Rambla, token en ENV, embudo de teléfono a E.164
+
+**Contexto.** El dueño pidió integrar WhatsApp Business Platform (Meta Cloud API) para notificaciones
+salientes a clientes (recordatorios/confirmaciones/avisos). El precedente más cercano era ARCA
+(`arca_fe/` lib portable + `services/facturacion/` adapter, credencial cifrada en DB, multi-emisor). Ya
+existía la decisión _2026-05-27 — Notificaciones canal-agnósticas_ ("multi-canal a un punto único, mail
+hoy, WhatsApp follow-up, se activan por config no código") y un issue de tracking diferido (#65, con
+Twilio/360dialog como opciones). Tres preguntas abiertas: (a) qué evento dispara, (b) cuenta única vs
+por-emisor, (c) qué dato de teléfono falta y quién lo carga.
+
+**Decisiones con el dueño.** (a) Los 4 eventos: pedido creado, confirmado, recordatorio de retiro y de
+devolución (este último con 3 ventanas D-1/D-0/vencido, cada una prendible desde el back-office). (b)
+**Una sola cuenta Rambla** — la app es single-tenant explícito (MANIFIESTO lista "multi-tenant" entre lo
+que NO existe), "emisor" es puramente fiscal (un pedido no tiene emisor hasta facturarse), el cliente ve
+siempre la marca Rambla. (c) Se confirmó, contra el workflow Didit **publicado** de Rambla (feature
+`PHONE_VERIFICATION`), que los clientes verificados traen el teléfono en E.164 en `verified_contacts`, y
+como el pedido exige Didit, la cobertura para clientes con pedido es alta → no hizo falta una campaña de
+medición previa.
+
+**Token en ENV, no cifrado en `app_settings` (a diferencia de ARCA) — la decisión de criterio central.**
+WhatsApp no tiene un host de "homologación" como ARCA (que en staging pega a AFIP-homo, inocuo) — es el
+mismo `graph.facebook.com` y envíos reales. Si el token viviera cifrado en `app_settings`, staging —que
+corre con una **BD clonada de prod**— heredaría el token de prod y podría **mensajear a clientes reales**.
+En ENV cada ambiente de Railway tiene el suyo (o ninguno → canal inerte) → staging seguro por
+construcción. Es además el patrón idiomático del repo para keys de terceros de una sola cuenta
+(`RESEND_API_KEY`, `DIDIT_API_KEY` en ENV); ARCA es la excepción justamente por ser multi-emisor con
+certs que el admin sube por UI. Defensa en profundidad: `destinatario_permitido` restringe los envíos
+fuera de prod a la allowlist `WHATSAPP_TEST_RECIPIENTS`.
+
+**Arquitectura.** Lib portable `backend/whatsapp_cloud/` (cero imports de `backend.*`, verificado por
+test de portabilidad; cliente HTTP + errores tipados auth/rate-limit/network/request/response + retry
+opt-in; `__version__` "0.0.0" hasta el primer envío real, política de `arca_fe`) + adapter
+`backend/services/whatsapp/` (credenciales/gating `config.py`, readiness `estado.py` con el shape de
+`diagnosticar_emisor`, registro de templates `plantillas.py`, boca de envío `envio.py`). El canal se
+acopla a `services/pedidos_notificaciones.py` (creación/confirmación — la confirmación se **extrajo** del
+inline en `routes/alquileres/pedidos.py`, move-verbatim para el mail) y a los jobs (`recordatorios.py`
+retiro + `recordatorios_devolucion.py` nuevo, ambos vía el scheduler in-process). `enviar_evento_pedido`
+respeta el contrato de `send_email` (nunca propaga, loguea, idempotente).
+
+**Idempotencia por pedido.** `whatsapp_log` con índice único parcial `(alquiler_id, template_key) WHERE
+status='sent'` — clave porque el gate de los jobs del scheduler es una var en memoria que se resetea en
+cada restart (el mismo bug que causó el spam del mail de reconciliación). Espeja `emails_log`: SIN
+`cliente_id` (lo tenía en el primer intento, pero el guard `test_identity_merge_cobertura` lo cazó como
+FK a `clientes` sin clasificar en `identity/merge`; en vez de clasificarlo se quitó porque es redundante
+—todo envío tiene `alquiler_id`— y así keyea por `alquiler_id`, que sobrevive un merge de cuentas con el
+pedido, igual que `emails_log`).
+
+**Embudo de teléfono `services/telefono.py`.** A pedido del dueño ("ese validador/formateador es el
+embudo, nos aseguramos siempre de que el número esté bien, sin depender de que cada fuente lo mande
+formateado"): puerta única de validación/formateo a E.164 sobre libphonenumber (`phonenumbers==9.0.34`,
+región AR; entiende el `0`/`15` móvil argentino). `normalizar_e164` (estricto → E.164 o None, lo usa el
+envío) + `formatear_para_guardar` (lenient → E.164 si vale, si no el crudo, no bloquea el alta; lo usan
+registro/perfil `cliente_portal/cuenta.py` y alta admin `clientes.py`) + `es_valido`. El `full_number`
+de Didit se re-chequea por el embudo en `services/didit/decision.py` (no-op si ya está bien); el fallback
+`phone_number` local NO se normaliza (sin código de país es ambiguo móvil/fijo). El **rechazo duro**
+(bloquear un alta con teléfono inválido) quedó como decisión de UX aparte — hoy el guardado es lenient.
+
+**Diferido a propósito.** La captura del opt-in en el front (portal/checkout; la columna
+`clientes.whatsapp_opt_in` ya existe) y la recepción/webhooks de estado de entrega (esto es solo
+saliente). El comprobante de pago como 5º evento queda de backlog en #65.
+
+**Enforcement (el supervisor marca).** Un token de WhatsApp guardado en `app_settings`; un canal que
+mensajee fuera de la allowlist en no-prod; una boca de WhatsApp ad-hoc fuera de `enviar_evento_pedido`;
+un teléfono guardado o enviado sin pasar por `services/telefono`; o `whatsapp_log` con una FK a
+`clientes` reintroducida.
+
+**Tests/CI.** Lib (`whatsapp_cloud/tests/`, portabilidad + mapeo de respuesta) + adapter
+(`test_whatsapp_adapter.py`) + wiring (`test_pedidos_notificaciones_whatsapp.py`) + devolución
+(`test_recordatorios_devolucion.py`) + embudo (`test_telefono.py`). CI: `whatsapp_cloud/tests/` sumado
+al paso de pytest. La migración `w1h2a3t4s5a6` (down_revision = head único `f604c6bd934c`) se ejercita en
+`test_alembic_upgrade_db.py`. Un rojo real de CI (el guard de `identity/merge`) se cazó y arregló en el
+mismo PR.
+
+**Archivos:** `backend/whatsapp_cloud/*`, `backend/services/whatsapp/*`, `backend/services/telefono.py`,
+`backend/routes/whatsapp.py`; wiring en `services/pedidos_notificaciones.py` /
+`routes/alquileres/{pedidos,core,__init__}.py` / `jobs/{recordatorios,recordatorios_devolucion,
+recordatorios_devolucion_config,scheduler}.py`; writers en `routes/cliente_portal/cuenta.py` /
+`routes/clientes.py` / `services/didit/decision.py`; esquema en `database/schema.py` + migración
+`w1h2a3t4s5a6`; `config.py` (env vars); `routes/settings.py` (toggles); `docs/SISTEMA_WHATSAPP.md` +
+MANIFIESTO §8. Historia: PR #1268 / tracking #65.
+
+### 2026-07-11 — `services/comunicacion/` = capa única de comunicación multi-canal (facade + registro, no CQRS-lite)
+
+**Contexto.** Con el canal WhatsApp sumado (misma fecha), el despacho de notificaciones quedaba disperso:
+cada evento nombraba a mano su template de mail y su template de WhatsApp en routes (`pedidos.py`,
+`estudio.py`) y jobs. El dueño pidió "hacer el sistema full completo bien, ordenado y en sync con la
+comunicación" y preguntó explícitamente si convenía un módulo `comunicacion` **con CQRS-lite** (el patrón de
+`contabilidad/`/`services/specs/`).
+
+**Decisión de forma: facade + registro, NO CQRS-lite.** Recomendado por la sesión y elegido por el dueño.
+CQRS-lite (`queries/`+`commands/`) rinde donde hay una superficie de **mutación de dominio con invariantes**
+que debe pasar por una sola puerta (`contabilidad/`: cajas/movimientos, locking, soft-delete, plata que no se
+mezcla). Comunicación no es eso: es **orquestación** (leo config + opt-in → fan-out) + **logs append-only**
+(`emails_log`/`whatsapp_log`, que ya viven dentro de cada sender). No hay estado de dominio con invariantes
+que proteger detrás de un `commands/`. Meterle CQRS sería ceremonia sin pago (empirismo proporcional
+_2026-06-27_ + el precedente de medir-y-rechazar sobre-consolidación _2026-06-23_). El molde es
+`services/finanzas_flujo/` (facade orquestador) / `services/carrito/` (puerta única de lógica). **Cuándo SÍ
+entraría CQRS:** si el módulo pasa a poseer preferencias por cliente (CRUD de opt-in/out por canal) + una cola
+de mensajes con estados (encolado→enviado→entregado→falló, reintentos) — ahí aparece un `commands/` real; se
+agrega entonces, incremental, no preventivo.
+
+**Estructura.** `comunicacion/eventos.py`: `REGISTRO[evento] = EventoComunicacion(mail=CanalMail(...),
+whatsapp="<template>", canales=(...))` — fuente única de qué se comunica y por qué medio. `comunicacion/
+despacho.py`: `notificar_pedido(evento, pedido, ctx=None, *, background, canales)` lee el registro y hace
+fan-out reusando los senders; `ctx` opcional (se arma con `pedido_email_context` si no se pasa — los jobs lo
+pasan con extras como `dias_antes`); devuelve `{"mail": [...], "whatsapp": ...}`; nunca propaga. Arma el
+contexto (`pedido_email_context`) y el `.ics` (`ics_adjunto_pedido`) — move-verbatim del ex-
+`services/pedidos_notificaciones.py`, que se **eliminó** (era un shim de compat; los consumidores importan
+directo de `comunicacion` — "una sola forma", sin capa intermedia).
+
+**No es "un template para los dos canales".** Cada medio tiene el suyo por diseño: el mail es HTML nuestro
+(editable en `/admin/email-templates`, tabla `email_templates`), el WhatsApp es un template pre-aprobado por
+Meta (rígido, `{{n}}`). Lo que el registro unifica es el **evento**: el mismo disparador y contexto eligen,
+por canal, su template, y qué medios salen. Un test (`test_registro_referencia_templates_whatsapp_reales`)
+valida que cada key de WhatsApp del registro exista en `whatsapp/plantillas.REGISTRO` (CI protege contra un
+rename futuro).
+
+**Comportamiento por evento (idéntico al de antes del refactor, verificado por el supervisor):**
+pedido_creado → mail cliente + mail admin + WhatsApp (sin `.ics`); pedido_confirmado → mail cliente con `.ics`
++ WhatsApp (sin admin); recordatorio_retiro → mail + WhatsApp; recordatorio_devolucion_{d1,d0,vencido} → solo
+WhatsApp. Los jobs conservan su idempotencia (`emails_log`/`whatsapp_log`), su conteo de resumen y su dry_run.
+
+**Enforcement (el supervisor marca).** Un aviso al cliente que nombre plantillas a mano o dispare un canal por
+fuera de `notificar_pedido`/el registro; un módulo de comunicación que reimplemente un sender en vez de
+reusarlo; o un `commands/`/`queries/` agregado sin que haya mutación de dominio real con invariantes.
+
+**Archivos.** `backend/services/comunicacion/{__init__,eventos,despacho}.py`; consumidores migrados
+(`routes/alquileres/{core,pedidos,documentos,__init__}.py`, `routes/estudio.py`, `jobs/recordatorios*.py`);
+`services/pedidos_notificaciones.py` eliminado; tests `test_comunicacion.py` (+ los de contexto/`.ics`
+repunteados a `comunicacion`); manual `docs/SISTEMA_COMUNICACION.md` + índice MANIFIESTO §8. Historia: PR
+#1268 (parte de #65).
+
+### 2026-07-12 — Comunicación plan A/B: WhatsApp primero, mail de respaldo (no los dos); estrategia por evento
+
+**Contexto.** El refactor del 2026-07-11 dejó el despacho como **fan-out**: cada evento salía por mail **y**
+WhatsApp a la vez. El dueño lo cerró distinto para la etapa de producto: _"que WhatsApp sea plan A, y mails
+plan B para la comunicación. Igualmente, algunas cosas las quiero mandar por mail, como el contrato"_, y sobre
+la confirmación: _"WhatsApp + un mail con el `.ics`"_. O sea: al cliente NO le llegan los dos avisos del mismo
+evento — se prefiere WhatsApp y el mail es el respaldo; con dos excepciones nombradas (la confirmación manda
+los dos porque el mail carga el calendario, y lo formal va siempre por mail).
+
+**Decisión: una `estrategia` por evento.** `EventoComunicacion` gana un campo `estrategia` (se retira el
+`canales` de tupla, que no expresaba la relación entre canales):
+
+- **`FALLBACK`** — plan A/B real: corre el sender de WhatsApp y, **solo si no llegó**, manda el mail. Eventos:
+  `pedido_creado`, `recordatorio_retiro`.
+- **`AMBOS`** — WhatsApp **y** mail. Única razón de mandar los dos: el mail **lleva el `.ics`** de la reserva
+  (WhatsApp no adjunta calendario). Evento: `pedido_confirmado`. Si WhatsApp no está disponible, el mail sigue
+  siendo la confirmación completa (con su `.ics`); si está, el cliente recibe el WhatsApp + el mail-calendario.
+- **`SOLO_MAIL`** — comunicaciones **formales** (contrato / documentos): siempre por mail, nunca WhatsApp.
+  Está en el modelo y testeado (`_despachar_cliente` con un evento sintético), pero **sin evento cableado
+  todavía** — no se fabricó un disparador que no exista; el contrato hoy no pasa por `notificar_pedido`.
+- **`SOLO_WHATSAPP`** — devolución (nació canal-only): `recordatorio_devolucion_{d1,d0,vencido}`.
+
+**El mail al admin es independiente del plan A/B del cliente.** `CanalMail.template_admin` sale **siempre**
+por mail cuando el evento lo declara (hoy `pedido_creado`), gane o pierda el WhatsApp del cliente — el admin
+necesita enterarse del pedido pase lo que pase. Por eso el admin no entra en el fallback: se despacha aparte.
+
+**Por qué el fallback vive adentro de una sola tarea de background.** La decisión "¿mando el mail?" depende
+del **resultado real** del WhatsApp (`wamid` = salió; `skipped/duplicado` = ya había salido antes → también
+llegó; cualquier otro skip por gate o un fallo del provider → cae a mail). Si en producción encoláramos
+WhatsApp y mail como **dos** background tasks a ciegas (como hacía el fan-out), el mail saldría siempre,
+rompiendo el plan A/B. La solución: `notificar_pedido(..., background=bg)` encola **una sola** tarea (`_run`)
+que corre `_despachar_cliente` (WhatsApp síncrono → mira el resultado → quizás mail) + el mail al admin. Así
+el fallback usa el resultado real sin bloquear el request. En modo síncrono (`background=None`, jobs/scripts)
+devuelve `{"mail": [...], "whatsapp": ...}`.
+
+**Ajuste en el job de retiro.** Antes contaba "enviado" solo por el canal mail y filtraba candidatos solo
+contra `emails_log`. Con plan A/B un pedido puede quedar cubierto por WhatsApp (sin fila en `emails_log`), así
+que: (1) el `NOT EXISTS` del barrido ahora excluye a los ya alcanzados por **`emails_log` O `whatsapp_log`**
+(no se re-lista ni se re-golpea el gate cada corrida), y (2) el resumen cuenta "enviado" si el cliente fue
+alcanzado por **cualquiera** de los dos canales (`canal: "whatsapp"|"mail"` en el detalle). El requisito de
+`cliente_email` en la query de candidatos se mantiene (el email es el ancla de identidad — Google/Didit —, así
+que un cliente WhatsApp-only sin email es inexistente en la práctica; ampliar el SQL a "alcanzable por algún
+canal" queda fuera de alcance por eso).
+
+**Enforcement (el supervisor marca).** Un evento al cliente que salga por los dos canales cuando su estrategia
+es `FALLBACK`; un fallback que decida el plan B sin ver el resultado del WhatsApp (dos envíos encolados a
+ciegas); una comunicación formal (contrato/documento) despachada por WhatsApp en vez de `SOLO_MAIL`.
+
+**Archivos.** `services/comunicacion/{eventos,despacho}.py` (estrategia + `_despachar_cliente`/
+`_whatsapp_entregado`; se retiran `_despachar_mail`/`_despachar_whatsapp`/`canales`); `jobs/recordatorios.py`
+(conteo por canal + doble `NOT EXISTS`); tests `test_comunicacion.py` reescritos (fallback/ambos/solo_mail/
+solo_whatsapp, admin siempre, una sola tarea en background); manuales `SISTEMA_COMUNICACION.md` +
+`SISTEMA_WHATSAPP.md`. Refina —no reemplaza— _2026-07-11 (facade + registro)_. Historia: PR #1268 (parte de #65).
 ### 2026-07-24 — `_regenerar_pedidos_taller` = nuevo miembro de la familia motor-único (espejo de `_regenerar_pedidos_slot`)
 
 - **Contexto.** El dueño pidió "traer un poco de orden" a Talleres: que cada edición genere un pedido
@@ -3869,3 +4054,64 @@ PDF/imagen", "Qué NO cubre").
   `UPDATE` ciego sin chequear si ya existe una fila con el valor destino — el mismo patrón de
   colisión se repite en cualquier columna con UNIQUE + un valor sembrado por `init_db()` antes de que
   Alembic corra.
+
+### 2026-07-31 — Se elimina "solicitudes de modificación" del portal cliente; toda modificación va por WhatsApp
+
+- **Contexto.** Pedido explícito del dueño: "las solicitudes de modificación complejizan los flujos
+  innecesariamente, solo quiero aclararle bien a los clientes que si quieren modificar algo, se
+  comuniquen por WhatsApp." La feature dejaba proponer cambios (fechas/ítems) desde el portal
+  cliente logueado, con un flujo de aprobación/rechazo del admin (`/admin/solicitudes`) — nunca
+  llegó a sentirse simple ni para el cliente ni para el admin.
+- **Decisión: baja completa, no solo apagado.** Dos preguntas resueltas con el dueño vía
+  `AskUserQuestion`: (1) la tabla `solicitudes_modificacion` se **DROPEA** (no se deja sin usar) —
+  nueva migración `s0l1c1tudb4j_solicitudes_modificacion_baja` borra la tabla + sus 3 templates de
+  mail huérfanos + el setting `modificacion_ventana_horas`; (2) el tercer lugar donde comunicar
+  WhatsApp (además del mail y el portal) es la **FAQ pública** — investigado y ya tenía la Q&A
+  correcta ("¿Puedo modificar o cancelar una reserva? Sí... escribinos por WhatsApp...") en
+  `frontend/src/data/faq.ts`, sin necesitar cambio de código (el default hardcodeado; si el dueño
+  alguna vez customizó el setting editable `app_settings.faq_json` desde `/admin/settings`, vale la
+  pena que confirme que esa copia editada también menciona WhatsApp para modificaciones).
+- **Alcance del removido (backend).** Endpoint completo `routes/cliente_portal/solicitudes.py` (767
+  líneas, 6 endpoints); `ESTADOS_MODIFICABLES`/ventana horaria de `cliente_portal/core.py`; el hook
+  de cancelación automática en `services/alquileres/commands/transiciones.py`
+  (`_cancelar_solicitudes_pendientes` al cambiar de estado); `_get_historial_modificaciones` de
+  `services/alquileres/queries/detalle.py`; el batch `tiene_solicitud_pendiente` de `list_pedidos`;
+  la reasignación en `identity/merge.py`; la secuencia operacional en `dataio.py`. El ciclo de
+  import `services.alquileres ↔ routes.cliente_portal` (documentado en el `CLAUDE.md` del paquete)
+  queda **cerrado** — ya no hay vuelta desde `services.alquileres` hacia `routes.cliente_portal`.
+- **Alcance del removido (frontend).** El editor de pedido del cliente
+  (`cliente.pedidos.$id.editar.tsx`), la página admin `/admin/solicitudes`, el botón/badge
+  "Solicitudes" de la lista de pedidos, el banner "Hay una solicitud de cambio pendiente" del
+  detalle admin, el botón "Modificar pedido"/diálogo "Cancelar solicitud" del portal cliente, y el
+  adaptador `ChangeRequest`/`adaptChangeRequests` de `lib/orders.ts` (leía un campo `solicitudes` que
+  el backend ya no manda). Esto **colapsó** la dicotomía admin-vs-cliente de
+  `usePedidoDraft`/`useDisponibilidadDraft` (el parámetro `mode`/`submitMode`) a un solo camino
+  admin-only, confirmado como único caller real tras el removido — no quedó ninguna abstracción
+  sirviendo a un solo lado.
+- **Copy nuevo (dónde se avisa WhatsApp).** Mail de "pedido creado"/"pedido confirmado"
+  (`services/email/default_templates.py`): línea "¿Necesitás modificar el pedido (fechas, equipos)?
+  Escribinos por WhatsApp." Portal cliente (`ClientePortalPedido.tsx`): misma línea arriba del botón
+  de WhatsApp ya existente. Reusa infraestructura YA existente (no una nueva): el link de WhatsApp en
+  el footer de cada mail (`services/email/service.py::_wrap_email_html`, fuente
+  `app_settings.whatsapp_phone`) y el botón de WhatsApp del portal — ninguno de los dos se creó para
+  esto.
+- **Gotcha real: "esquema en dos capas" al borrar una tabla del bootstrap.** Sacar
+  `solicitudes_modificacion` de `init_db()` rompió un bootstrap fresco (`init_db()` + `alembic
+  upgrade head` desde cero) porque 5 migraciones históricas asumían que la tabla ya existía (`ALTER
+  TABLE`/`CREATE UNIQUE INDEX` sin guardas). Se agregaron guardas (`IF EXISTS` / `to_regclass()` /
+  `.get(key)` en vez de `[key]`) a esas 5 migraciones — no-ops en prod (ya corrieron ahí), solo
+  arreglan un ambiente nuevo desde cero. `test_alembic_upgrade_db.py` es el candado que lo detectó.
+- **Verificación.** Backend: ruff + suite completa + `test_alembic_upgrade_db.py` (Postgres real,
+  bootstrap desde cero) en verde; se borró/editó la red de tests que dependía de la feature
+  (`test_cliente_modificar_pedido_gate_db.py` borrado, casos ajustados en
+  `test_gate_not_bypassed.py`/`test_reservas_reservado_helpers.py`/`test_routes_contract.py`/etc.).
+  Frontend: `tsc --noEmit` + `eslint` + `prettier --check` + `npm run build` (regenera
+  `routeTree.gen.ts` sin la ruta borrada) + `npm run check:routes` (80 rutas, todas con `<Outlet/>`)
+  en verde. No se rearmó el stack local completo (DB+backend+frontend+staging-login) para un
+  render-compare en vivo de los 2 flujos autenticados (portal cliente, detalle admin) — el diff es
+  mayormente deletion de bloques condicionales autocontenidos + copy estática, cubierto con solidez
+  por la verificación estructural + lectura manual línea por línea de cada archivo tocado; queda
+  para el pase de prueba del dueño en staging (plan de prueba en el mismo commit).
+- El supervisor marca: cualquier reintroducción de un flujo de propuesta/aprobación de cambios del
+  cliente sobre un pedido ya hecho — la única vía de modificar un pedido confirmado es el contacto
+  humano por WhatsApp, no un mecanismo en la app.

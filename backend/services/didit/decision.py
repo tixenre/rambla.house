@@ -29,6 +29,8 @@ Refs: https://docs.didit.me/sessions-api/retrieve-session
 
 from dataclasses import dataclass
 
+from services.telefono import formatear_para_guardar
+
 
 @dataclass
 class DatosRenaper:
@@ -220,7 +222,12 @@ def extraer_contactos(decision: dict | None) -> ContactosVerificados:
         # Preferimos full_number (internacional / E.164); fallback al número local.
         p = _elegir_contacto(pvs, "full_number") or _elegir_contacto(pvs, "phone_number")
         if p is not None:
-            phone_val = _limpiar(p.get("full_number") or p.get("phone_number"))
+            # `full_number` ya viene E.164 de Didit; se re-chequea por el embudo único
+            # (`services/telefono`) — no-op si está bien, pero nos asegura el formato.
+            # El fallback `phone_number` local NO se normaliza: sin código de país es
+            # ambiguo (móvil vs fijo), mejor guardar el crudo verificado que arriesgar.
+            full = _limpiar(p.get("full_number"))
+            phone_val = formatear_para_guardar(full) if full else _limpiar(p.get("phone_number"))
             phone = ContactoVerificado(
                 kind="phone",
                 value=phone_val,

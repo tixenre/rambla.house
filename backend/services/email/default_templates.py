@@ -1,17 +1,18 @@
-"""Contenido por defecto de las plantillas de email (los 7 mails del sistema).
+"""Contenido por defecto de las plantillas de email del sistema.
 
 **Fuente única forward del copy de los templates.** Espeja el end-state de la
 cadena de migraciones (`a4e8c2b9d710` siembra → `e7c3a9f5d1b8` → `c1e9f3a7b5d2`
-branded → `f2a4c6e8b0d1` botón calendario → `a7d4f1c9e2b5` restyle Design System;
-los 3 mails `modificacion_*` los sembró `b6f8d3e5a2c1` y los repintó al DS
-`c5e9a3f7d1b4`). `init_db()` siembra estas filas de forma idempotente
+branded → `f2a4c6e8b0d1` botón calendario → `a7d4f1c9e2b5` restyle Design System).
+Los 3 mails `modificacion_*` (sembrados por `b6f8d3e5a2c1`) se retiraron junto con
+la feature de solicitudes de modificación del portal — ver la migración que
+los borra. `init_db()` siembra estas filas de forma idempotente
 (`ON CONFLICT DO NOTHING`) para que las plantillas **existan siempre**, aunque las
 migraciones se traben — la red del esquema en dos capas (ver `docs/MEMORIA.md`
 2026-06-03).
 
 El layout branded (header con logo, colores, footer) lo pone el shell común en
 `services/email/service.py` (`_wrap_email_html`); estos bodies guardan **solo el
-contenido editable** (el admin los puede editar desde `/admin/email-templates`).
+contenido editable** (el admin los puede editar desde `/admin/comunicacion`).
 
 Los tokens visuales (colores, fuentes) y los helpers (`btn`, `H`, `LBL`, …) viven
 en `services/email/branding.py` — **fuente única**, no se repiten hex acá.
@@ -36,7 +37,7 @@ DEFAULT_TEMPLATES: dict[str, dict[str, str]] = {
 <p {b.TOTAL}><strong>Total estimado: {{{{ total }}}}</strong></p>
 {{% if docs_adjuntos %}}<p style="margin:6px 0 4px;">Te adjuntamos en este mail: <strong>{{{{ docs_adjuntos|join(', ') }}}}</strong>.</p>{{% endif %}}
 {b.btn("portal_url", "Ver mi pedido")}
-<p {b.MUTED_P}>Cuando confirmemos el pedido vas a poder descargar el <strong>remito</strong> y el <strong>contrato</strong> desde tu portal. ¿Tenés alguna duda? Respondé este mail.</p>
+<p {b.MUTED_P}>Cuando confirmemos el pedido vas a poder descargar el <strong>remito</strong> y el <strong>contrato</strong> desde tu portal. ¿Necesitás modificar el pedido (fechas, equipos)? Escribinos por WhatsApp. ¿Alguna otra duda? Respondé este mail.</p>
 <p style="margin:18px 0 0;">— El equipo de Rambla</p>""",
         "body_text": """Hola {{ cliente_nombre_pila }},
 
@@ -57,7 +58,7 @@ Te adjuntamos en este mail: {{ docs_adjuntos|join(', ') }}.
 Seguí tu pedido en el portal: {{ portal_url }}
 Cuando lo confirmemos vas a poder descargar el remito y el contrato desde ahí.
 
-¿Dudas? Respondé este mail.
+¿Necesitás modificar el pedido? Escribinos por WhatsApp. ¿Alguna otra duda? Respondé este mail.
 — El equipo de Rambla""",
     },
     "pedido_confirmado_cliente": {
@@ -76,7 +77,7 @@ Cuando lo confirmemos vas a poder descargar el remito y el contrato desde ahí.
 <p style="margin:0 0 4px;">Te adjuntamos en este mail: <strong>{{{{ docs_adjuntos|join(', ') }}}}</strong>.</p>{{% else %}}<p {b.MUTED_P}>Ya podés descargar el <strong>remito</strong> y el <strong>contrato</strong> desde tu portal.</p>{{% endif %}}
 {b.btn("portal_url", "Ver mi pedido")}
 {{% if gcal_url %}}{b.btn_secondary("gcal_url", "📅 Agregar al calendario")}{{% endif %}}
-<p {b.MUTED_P}>Te esperamos en el galpón el día del retiro. ¿Dudas? Respondé este mail.</p>
+<p {b.MUTED_P}>Te esperamos en el galpón el día del retiro. ¿Necesitás modificar el pedido (fechas, equipos)? Escribinos por WhatsApp. ¿Alguna otra duda? Respondé este mail.</p>
 <p style="margin:18px 0 0;">— El equipo de Rambla</p>""",
         "body_text": """Hola {{ cliente_nombre_pila }},
 
@@ -102,7 +103,7 @@ Ya podés descargar el remito y el contrato desde tu portal: {{ portal_url }}
 {% endif %}{% if gcal_url %}
 Agregá la reserva a tu calendario: {{ gcal_url }}
 {% endif %}
-Te esperamos en el galpón el día del retiro. ¿Dudas? Respondé este mail.
+Te esperamos en el galpón el día del retiro. ¿Necesitás modificar el pedido? Escribinos por WhatsApp. ¿Alguna otra duda? Respondé este mail.
 
 — El equipo de Rambla""",
     },
@@ -133,19 +134,19 @@ Total: {{ total }}
 Ver en el back-office: {{ admin_url }}""",
     },
     "recordatorio_retiro": {
-        # El copy se adapta a `dias_antes` (configurable desde /admin/settings):
-        # con 1 día dice "mañana"; con N>1 dice "en N días". `dias_antes` lo
-        # inyecta el job (jobs/recordatorios.py) y el preview del admin (=1).
-        "subject": "{% if dias_antes == 1 %}Mañana retirás{% else %}Faltan {{ dias_antes }} días para retirar{% endif %} tu pedido #{{ numero_pedido }} — Rambla Rental",
-        "body_html": f"""<p {b.H}>{{% if dias_antes == 1 %}}¡Mañana es el día!{{% else %}}¡Falta poco!{{% endif %}}</p>
-<p style="margin:0 0 8px;">Hola {{{{ cliente_nombre_pila }}}}, te recordamos que <strong>{{% if dias_antes == 1 %}}mañana{{% else %}}en {{{{ dias_antes }}}} días{{% endif %}} ({{{{ fecha_desde }}}})</strong> retirás tu pedido <strong>#{{{{ numero_pedido }}}}</strong>.</p>
+        # El copy se adapta a la pasada del barrido (jobs/recordatorios.py):
+        # `dias_antes` = 0 cuando sale el MISMO día del retiro y 1 cuando sale la
+        # víspera (retiro temprano). El preview del admin usa 1.
+        "subject": "{% if dias_antes == 0 %}Hoy retirás{% else %}Mañana retirás{% endif %} tu pedido #{{ numero_pedido }} — Rambla Rental",
+        "body_html": f"""<p {b.H}>{{% if dias_antes == 0 %}}¡Hoy es el día!{{% else %}}¡Mañana es el día!{{% endif %}}</p>
+<p style="margin:0 0 8px;">Hola {{{{ cliente_nombre_pila }}}}, te recordamos que <strong>{{% if dias_antes == 0 %}}hoy{{% else %}}mañana{{% endif %}} ({{{{ fecha_desde }}}})</strong> retirás tu pedido <strong>#{{{{ numero_pedido }}}}</strong>.</p>
 {{{{ items_html|safe }}}}
 {b.btn("portal_url", "Ver mi pedido")}
 <p {b.MUTED_P}>Te esperamos en el galpón. Si necesitás reagendar, escribinos cuanto antes.</p>
 <p style="margin:18px 0 0;">— El equipo de Rambla</p>""",
         "body_text": """Hola {{ cliente_nombre_pila }},
 
-{% if dias_antes == 1 %}Mañana{% else %}En {{ dias_antes }} días{% endif %} ({{ fecha_desde }}) retirás tu pedido #{{ numero_pedido }}.
+{% if dias_antes == 0 %}Hoy{% else %}Mañana{% endif %} ({{ fecha_desde }}) retirás tu pedido #{{ numero_pedido }}.
 
 {{ items_text }}
 
@@ -154,61 +155,67 @@ Tu portal: {{ portal_url }}
 
 — El equipo de Rambla""",
     },
-    "modificacion_solicitada_admin": {
-        "subject": "Modificación pedida — pedido #{{ numero_pedido }} ({{ cliente_nombre }})",
-        "body_html": f"""<p {b.H}>El cliente pidió modificar un pedido</p>
-<p style="margin:0 0 4px;"><strong>#{{{{ numero_pedido }}}}</strong> de <strong>{{{{ cliente_nombre }}}}</strong></p>
-<p style="margin:0 0 4px;color:{b.MUTED};font-size:14px;">{{{{ cliente_email }}}}</p>
-<p {b.LBL}>Pedido actual</p>
-<p style="margin:0 0 4px;"><strong>Fechas:</strong> {{{{ fecha_desde_actual }}}} → {{{{ fecha_hasta_actual }}}}</p>
-<p {b.TOTAL}><strong>Total: {{{{ total_actual }}}}</strong></p>
-<p {b.LBL}>Cambios propuestos</p>
-<p style="margin:0 0 4px;"><strong>Fechas:</strong> {{{{ fecha_desde_propuesta }}}} → {{{{ fecha_hasta_propuesta }}}}</p>
-{{{{ diff_html|safe }}}}
-{{% if mensaje %}}<p {b.MUTED_P}><strong>Comentario del cliente:</strong> {{{{ mensaje }}}}</p>{{% endif %}}
-{b.btn("admin_url", "Revisar en el back-office")}""",
-        "body_text": """El cliente {{ cliente_nombre }} ({{ cliente_email }}) pidió modificar el pedido #{{ numero_pedido }}.
 
-Pedido actual:
-  Fechas: {{ fecha_desde_actual }} → {{ fecha_hasta_actual }}
-  Total: {{ total_actual }}
-
-Cambios propuestos:
-  Fechas: {{ fecha_desde_propuesta }} → {{ fecha_hasta_propuesta }}
-{{ diff_text }}
-{% if mensaje %}
-Comentario del cliente: {{ mensaje }}{% endif %}
-
-Revisar en el back-office: {{ admin_url }}""",
-    },
-    "modificacion_resuelta_cliente": {
-        "subject": "Tu solicitud de modificación del pedido #{{ numero_pedido }} fue {{ estado_label }}",
-        "body_html": f"""<p {b.H}>Tu solicitud fue {{{{ estado_label }}}}</p>
-<p style="margin:0 0 8px;">Hola {{{{ cliente_nombre_pila }}}}, tu solicitud de modificación del pedido <strong>#{{{{ numero_pedido }}}}</strong> fue <strong>{{{{ estado_label }}}}</strong>.</p>
-{{% if respuesta %}}<p {b.LBL}>Nota</p>
-<p style="margin:0 0 4px;">{{{{ respuesta }}}}</p>{{% endif %}}
+    # ── Devolución ────────────────────────────────────────────────────────────
+    # Los 3 avisos de devolución nacieron canal-WhatsApp; estas plantillas existen
+    # para que el dueño pueda elegir el mail (o los dos) desde /admin/comunicacion.
+    # Su default sigue siendo "solo WhatsApp" (el registro de eventos lo declara).
+    "recordatorio_devolucion_d1": {
+        "subject": "Se acerca la devolución de tu pedido #{{ numero_pedido }} — Rambla Rental",
+        "body_html": f"""<p {b.H}>Se acerca la devolución</p>
+<p style="margin:0 0 8px;">Hola {{{{ cliente_nombre_pila }}}}, te recordamos que tu reserva <strong>#{{{{ numero_pedido }}}}</strong> vence el <strong>{{{{ fecha_hasta }}}}</strong>: pasá a devolver el equipo.</p>
+{{{{ items_html|safe }}}}
 {b.btn("portal_url", "Ver mi pedido")}
-<p {b.MUTED_P}>Podés ver el detalle del pedido actualizado en tu portal.</p>
+<p {b.MUTED_P}>Si necesitás extender el alquiler, escribinos antes del vencimiento.</p>
 <p style="margin:18px 0 0;">— El equipo de Rambla</p>""",
         "body_text": """Hola {{ cliente_nombre_pila }},
 
-Tu solicitud de modificación del pedido #{{ numero_pedido }} fue {{ estado_label }}.
-{% if respuesta %}
-Nota: {{ respuesta }}{% endif %}
+Tu reserva #{{ numero_pedido }} vence el {{ fecha_hasta }}: pasá a devolver el equipo.
 
-Podés ver el detalle del pedido actualizado en tu portal: {{ portal_url }}
+{{ items_text }}
+
+Si necesitás extender el alquiler, escribinos antes del vencimiento.
+Tu portal: {{ portal_url }}
 
 — El equipo de Rambla""",
     },
-    "modificacion_cancelada_admin": {
-        "subject": "El cliente canceló su solicitud — pedido #{{ numero_pedido }}",
-        "body_html": f"""<p {b.H}>El cliente canceló su solicitud</p>
-<p style="margin:0 0 4px;"><strong>{{{{ cliente_nombre }}}}</strong> canceló su solicitud de modificación del pedido <strong>#{{{{ numero_pedido }}}}</strong>.</p>
-<p style="margin:0 0 4px;color:{b.MUTED};font-size:14px;">{{{{ cliente_email }}}}</p>
-{b.btn("admin_url", "Ver pedido")}""",
-        "body_text": """El cliente {{ cliente_nombre }} ({{ cliente_email }}) canceló su solicitud de modificación del pedido #{{ numero_pedido }}.
+    "recordatorio_devolucion_d0": {
+        "subject": "Hoy vence tu pedido #{{ numero_pedido }} — Rambla Rental",
+        "body_html": f"""<p {b.H}>Hoy vence tu reserva</p>
+<p style="margin:0 0 8px;">Hola {{{{ cliente_nombre_pila }}}}, tu reserva <strong>#{{{{ numero_pedido }}}}</strong> vence <strong>hoy ({{{{ fecha_hasta }}}})</strong>. Coordiná con nosotros la devolución del equipo.</p>
+{{{{ items_html|safe }}}}
+{b.btn("portal_url", "Ver mi pedido")}
+<p {b.MUTED_P}>Si ya lo devolviste, ignorá este mensaje.</p>
+<p style="margin:18px 0 0;">— El equipo de Rambla</p>""",
+        "body_text": """Hola {{ cliente_nombre_pila }},
 
-Ver pedido: {{ admin_url }}""",
+Tu reserva #{{ numero_pedido }} vence hoy ({{ fecha_hasta }}). Coordiná con nosotros la devolución del equipo.
+
+{{ items_text }}
+
+Si ya lo devolviste, ignorá este mensaje.
+Tu portal: {{ portal_url }}
+
+— El equipo de Rambla""",
+    },
+    "recordatorio_devolucion_vencido": {
+        "subject": "Tu pedido #{{ numero_pedido }} figura sin devolver — Rambla Rental",
+        "body_html": f"""<p {b.H}>El equipo figura sin devolver</p>
+<p style="margin:0 0 8px;">Hola {{{{ cliente_nombre_pila }}}}, tu reserva <strong>#{{{{ numero_pedido }}}}</strong> venció el <strong>{{{{ fecha_hasta }}}}</strong> y el equipo todavía figura sin devolver. Por favor comunicate para coordinar la devolución.</p>
+{{{{ items_html|safe }}}}
+{b.btn("portal_url", "Ver mi pedido")}
+<p {b.MUTED_P}>Si ya lo devolviste y seguís viendo esto, avisanos para corregirlo.</p>
+<p style="margin:18px 0 0;">— El equipo de Rambla</p>""",
+        "body_text": """Hola {{ cliente_nombre_pila }},
+
+Tu reserva #{{ numero_pedido }} venció el {{ fecha_hasta }} y el equipo todavía figura sin devolver. Por favor comunicate para coordinar la devolución.
+
+{{ items_text }}
+
+Si ya lo devolviste y seguís viendo esto, avisanos para corregirlo.
+Tu portal: {{ portal_url }}
+
+— El equipo de Rambla""",
     },
 
     # ── Talleres ──────────────────────────────────────────────────────────────

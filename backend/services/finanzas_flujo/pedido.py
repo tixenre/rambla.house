@@ -82,6 +82,15 @@ def desglose_de_pedido(conn, pedido: dict) -> dict:
             # Fase C-3 (#1219): no acumula el descuento global — ya trae el
             # suyo propio (`kit_componentes.descuento_pct`) horneado en el precio.
             "es_combo": it.get("equipo_tipo") == "combo",
+            # `turno_estudio_id` (#1308 rediseño "turno como ítem"): SIN esto,
+            # `calcular_total` (que excluye estas líneas del descuento global,
+            # ver su docstring) las trataba como cualquier equipo normal — el
+            # desglose de ACÁ (display/factura/portal) divergía del persistido
+            # por `_recalcular_total_pedido` (`commands/items.py`, que SÍ pasa
+            # esta clave) en cuanto el pedido tenía un descuento % — hallazgo
+            # real de auditoría, confirmado en vivo ($6.900 de diferencia en
+            # un pedido con 10% de descuento + un turno de $69.000).
+            "turno_estudio_id": it.get("turno_estudio_id"),
         }
         for it in pedido.get("items", [])
     ]
@@ -241,4 +250,49 @@ def combinar_turnos_vinculados(conn, pedido: dict, *, expandir_periodo: bool = F
         }
         for t in turnos
     ]
+    return pedido
+
+
+def expandir_periodo_turnos_embebidos(conn, pedido: dict) -> dict:
+    """Estira `fecha_desde`/`fecha_hasta` del pedido para cubrir también la
+    franja de sus turnos del Estudio EMBEBIDOS (`alquiler_turnos_estudio`,
+    #1308 rediseño "turno como ítem") — mutación in-place, mismo propósito y
+    mismo patrón min/max que `combinar_turnos_vinculados(expandir_periodo=
+    True)` de acá arriba, pero para el mecanismo NUEVO.
+
+    **No hay nada que sumar en plata acá** (a diferencia de la hermana de
+    arriba): un turno embebido no es una fila `alquileres` aparte con su
+    propio `monto_total` — es un GRUPO de `alquiler_items` del MISMO pedido,
+    así que `desglose_de_pedido` ya lo incluyó al iterar `pedido["items"]`
+    (aislado del descuento automático desde la Fase 3.1, #1308). Esta función
+    solo resuelve la fecha declarada del comprobante.
+
+    Se llama SOLO desde el motor de facturación (`services/facturacion/
+    engine.py::_get_pedido`), DESPUÉS de `desglose_de_pedido` — igual que su
+    hermana, nunca desde la pantalla del pedido: ahí las fechas tienen que
+    seguir siendo las del retiro/devolución de EQUIPOS; la franja de cada
+    turno se muestra aparte (`pdf_templates._turno_embebido_label`), no
+    estirando el rango de días del documento en pantalla.
+    """
+    turnos = conn.execute(
+        "SELECT fecha_desde, fecha_hasta FROM alquiler_turnos_estudio WHERE pedido_id = %s",
+        (pedido["id"],),
+    ).fetchall()
+    if not turnos:
+        return pedido
+
+    validas_desde = [
+        to_datetime(f)
+        for f in [pedido.get("fecha_desde"), *(t["fecha_desde"] for t in turnos)]
+        if f
+    ]
+    validas_hasta = [
+        to_datetime(f)
+        for f in [pedido.get("fecha_hasta"), *(t["fecha_hasta"] for t in turnos)]
+        if f
+    ]
+    if validas_desde:
+        pedido["fecha_desde"] = min(validas_desde)
+    if validas_hasta:
+        pedido["fecha_hasta"] = max(validas_hasta)
     return pedido

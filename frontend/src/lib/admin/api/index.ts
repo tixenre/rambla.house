@@ -10,7 +10,6 @@ export * from "./types";
 export { estudioAdminApi, trabajosAdminApi } from "./estudio";
 export { descuentosJornadaApi } from "./estudio";
 export { talleresAdminApi } from "./talleres";
-export { solicitudesAdminApi } from "./solicitudes";
 export { dataioAdminApi } from "./dataio";
 export { facturacionApi } from "./facturacion";
 export type {

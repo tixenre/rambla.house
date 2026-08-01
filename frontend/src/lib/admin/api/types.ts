@@ -1115,6 +1115,11 @@ export type PedidoItem = {
   /** Línea personalizada (#805): nombre libre + modo de cobro por línea. */
   nombre_libre?: string | null;
   cobro_modo?: CobroModo;
+  /** Presente si esta línea pertenece a un turno del Estudio EMBEBIDO (#1308
+   *  rediseño "turno como ítem") — agrupa el ítem bajo su
+   *  `turnos_estudio_embebidos[].id`. `null`/ausente = ítem normal del
+   *  pedido (el 100% de los ítems antes de #1308, para siempre). */
+  turno_estudio_id?: number | null;
 };
 
 export type PedidoPago = {
@@ -1152,6 +1157,23 @@ export type ClaseTallerPedido = {
   nota: string;
   portada_media_id: number | null;
   portada_url: string;
+};
+
+/** Metadata liviana de agrupación de un turno del Estudio EMBEBIDO (#1308
+ *  rediseño "turno como ítem") — sus ítems reales viven en `Pedido.items`
+ *  (con `turno_estudio_id === este.id`); esto es solo lo que agrupa: franja
+ *  propia + descuento propio + su aporte a `monto_total` (informativo, ya
+ *  incluido en el total del pedido). A diferencia de un turno VINCULADO
+ *  (`PedidoGeneradoEdicion`, mecanismo viejo), no tiene `estado`/`pagos`
+ *  propios — nunca fue su propia venta, vive la del pedido contenedor. */
+export type TurnoEstudioEmbebido = {
+  id: number;
+  fecha_desde: string;
+  fecha_hasta: string;
+  descuento_pct: number;
+  descuento_manual_tipo: "pct" | "monto";
+  descuento_manual_monto: number;
+  monto_total: number;
 };
 
 export type Pedido = {
@@ -1219,6 +1241,12 @@ export type Pedido = {
    *  Estudio (no cancelados) tiene vinculados este pedido — el turno en sí
    *  ya no aparece como fila propia ahí, esto es la señal de que existen. */
   turnos_vinculados_count?: number;
+  /** Turnos del Estudio EMBEBIDOS en este pedido (#1308 rediseño "turno como
+   *  ítem", Fase 4) — el mecanismo NUEVO, reemplaza a `turnos_estudio_vinculados`
+   *  para cualquier turno creado desde acá en adelante (los ya vinculados
+   *  antes de esta fase se siguen viendo vía ese array hasta que la Fase 5
+   *  los migre). Vacío/ausente = sin turnos embebidos. */
+  turnos_estudio_embebidos?: TurnoEstudioEmbebido[];
   /** ¿Tiene contenido real — al menos un ítem de alquiler O un turno del
    *  Estudio vinculado activo? Lo calcula el backend
    *  (`_pedido_tiene_contenido`, services/alquileres/queries/detalle.py) en
@@ -1258,12 +1286,6 @@ export type Pedido = {
   promo_advertencia?: string | null;
   items: PedidoItem[];
   pagos?: PedidoPago[];
-  /** True si hay una `solicitudes_modificacion` con estado='pendiente' para
-   * este pedido. Sólo viene en el listado, no en el detalle. */
-  tiene_solicitud_pendiente?: boolean;
-  /** Solo presente en el detalle (`getPedido`). Timeline de cambios del
-   * cliente desde el portal. */
-  historial_modificaciones?: PedidoHistorialItem[];
   // Desglose canónico del total — viene del backend
   // (services/precios.calcular_total). El frontend lo lee directo sin
   // reimplementar la fórmula (#496).
@@ -1275,28 +1297,6 @@ export type Pedido = {
   total_con_iva?: number;
   con_iva?: boolean;
   cantidad_jornadas?: number;
-};
-
-export type PedidoCambiosSnapshot = {
-  fecha_desde?: string | null;
-  fecha_hasta?: string | null;
-  items?: { equipo_id: number; cantidad: number }[];
-  mensaje?: string | null;
-};
-
-export type PedidoHistorialItem = {
-  id: number;
-  mensaje: string | null;
-  estado: "pendiente" | "aprobada" | "rechazada" | "cancelada";
-  respuesta: string | null;
-  cambios_json: PedidoCambiosSnapshot | null;
-  /** Lo que efectivamente se aplicó al aprobar (≠ cambios_json si admin
-   *  envió contrapropuesta). null si la solicitud no se aprobó. */
-  cambios_aplicados: PedidoCambiosSnapshot | null;
-  tipo: "directo" | "aprobacion";
-  resolved_at: string | null;
-  resolved_by: string | null;
-  created_at: string;
 };
 
 export type PedidosListResp = {
@@ -1778,39 +1778,4 @@ export type Interesado = {
   telefono: string;
   created_at: string | null;
   notificado_at: string | null;
-};
-
-// ── Solicitudes ───────────────────────────────────────────────────────────────
-export type ModificacionItem = { equipo_id: number; cantidad: number };
-export type CambiosJson = {
-  fecha_desde?: string | null;
-  fecha_hasta?: string | null;
-  items: ModificacionItem[];
-  mensaje?: string | null;
-};
-export type Solicitud = {
-  id: number;
-  pedido_id: number;
-  cliente_nombre: string;
-  cliente_apellido?: string | null;
-  cliente_email: string | null;
-  numero_pedido: number | null;
-  mensaje: string | null;
-  estado: "pendiente" | "aprobada" | "rechazada" | "cancelada";
-  respuesta: string | null;
-  cambios_json: CambiosJson | null;
-  tipo: "directo" | "aprobacion";
-  resolved_at: string | null;
-  resolved_by: string | null;
-  created_at: string;
-  pedido_fecha_desde: string | null;
-  pedido_fecha_hasta: string | null;
-  monto_total: number;
-};
-export type PedidoLite = {
-  id: number;
-  numero_pedido: number | null;
-  fecha_desde: string | null;
-  fecha_hasta: string | null;
-  items: { equipo_id: number; cantidad: number; nombre: string; nombre_publico?: string | null }[];
 };

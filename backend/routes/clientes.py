@@ -12,6 +12,7 @@ from pydantic import BaseModel
 from urllib.parse import quote
 
 from database import get_db
+from services.telefono import formatear_para_guardar
 from auth.guards import require_admin
 from auth.commands import magic as magic_commands
 from config import settings
@@ -166,7 +167,7 @@ def invitar_cliente(request: Request, body: InvitarClienteIn):
             cliente_id = conn.insert_returning(
                 "INSERT INTO clientes (email, nombre, telefono, cuenta_estado) "
                 "VALUES (%s, %s, %s, 'liviana')",
-                (email, (body.nombre or "").strip() or None, (body.telefono or "").strip() or None),
+                (email, (body.nombre or "").strip() or None, formatear_para_guardar(body.telefono)),
             )
             conn.commit()
             ya_existia = False

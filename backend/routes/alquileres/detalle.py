@@ -18,7 +18,6 @@ from services.alquileres.queries.detalle import (
     _get_alquiler_detail,  # noqa: F401 — re-export, ver docstring arriba
     _get_alquiler_items,  # noqa: F401 — re-export, ver docstring arriba
     _get_alquiler_pagos,  # noqa: F401 — re-export, ver docstring arriba
-    _get_historial_modificaciones,  # noqa: F401 — re-export, ver docstring arriba
     _pedido_principal_liviano,  # noqa: F401 — re-export, ver docstring arriba
     _turnos_vinculados,  # noqa: F401 — re-export, ver docstring arriba
 )

@@ -28,7 +28,6 @@ import {
   perfilRechazado,
   listasDemo,
   equiposDemo,
-  noop,
   noopAsync,
 } from "../fixtures";
 
@@ -46,8 +45,6 @@ function PedidoCardDemo({
       pedido={pedido}
       expanded={expanded}
       onToggle={() => setExpanded((v) => !v)}
-      ventanaHoras={24}
-      onChanged={noop}
       perfilImpuestos={null}
     />
   );

@@ -312,7 +312,6 @@ _OPERACIONAL_SEQUENCES = (
     "alquileres_id_seq",
     "alquiler_items_id_seq",
     "alquiler_pagos_id_seq",
-    "solicitudes_modificacion_id_seq",
     "numero_pedido_seq",
 )
 
@@ -343,7 +342,7 @@ def reset_operacional(
             clientes_before = conn.execute("SELECT COUNT(*) AS n FROM clientes").fetchone()["n"]
             alquileres_before = conn.execute("SELECT COUNT(*) AS n FROM alquileres").fetchone()["n"]
 
-            # alquileres primero: CASCADE limpia items, pagos y solicitudes_modificacion.
+            # alquileres primero: CASCADE limpia items y pagos.
             conn.execute("DELETE FROM alquileres")
             conn.execute("DELETE FROM clientes")
 

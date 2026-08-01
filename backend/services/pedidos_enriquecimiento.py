@@ -189,6 +189,23 @@ def _aplicar_contacto_cliente(pedido: dict, c: dict) -> None:
     pedido["cliente_dni_validado_at"] = c.get("dni_validado_at")
 
 
+def _cliente_id_efectivo(conn, pedido: dict) -> int | None:
+    """El cliente a mostrar para UN pedido: si es un turno del Estudio vinculado
+    (`pedido_principal_id`), el de SU PRINCIPAL EN VIVO — no la foto de
+    `cliente_id` que el turno guardó al crearse (`_resolver_pedido_principal`),
+    que queda stale si el principal no tenía cliente asignado todavía en ese
+    momento y lo consigue después (el turno nunca se re-sincronizaba, aunque
+    "el turno hereda SIEMPRE del principal" es la garantía documentada). Si no
+    es un turno vinculado, el propio `cliente_id` — sin cambio de comportamiento."""
+    principal_id = pedido.get("pedido_principal_id")
+    if not principal_id:
+        return pedido.get("cliente_id")
+    row = conn.execute(
+        "SELECT cliente_id FROM alquileres WHERE id = %s", (principal_id,)
+    ).fetchone()
+    return row["cliente_id"] if row else pedido.get("cliente_id")
+
+
 def _enriquecer_pedido_con_cliente(conn, pedido: dict) -> dict:
     """Muestra los datos de contacto/identidad SIEMPRE en vivo desde la ficha.
 
@@ -200,7 +217,7 @@ def _enriquecer_pedido_con_cliente(conn, pedido: dict) -> dict:
     existe, se conserva la foto. La plata (precio/descuento) NO se toca acá: esa
     sí queda congelada en confirmados/finalizados.
     """
-    cid = pedido.get("cliente_id")
+    cid = _cliente_id_efectivo(conn, pedido)
     if not cid:
         return pedido
     row = conn.execute(
@@ -216,7 +233,22 @@ def _enriquecer_pedido_con_cliente(conn, pedido: dict) -> dict:
 
 def _enriquecer_pedidos_con_cliente(conn, pedidos: list[dict]) -> None:
     """Versión batch de `_enriquecer_pedido_con_cliente` para listados (sin N+1)."""
-    ids = sorted({p["cliente_id"] for p in pedidos if p.get("cliente_id")})
+    principal_ids = sorted({p["pedido_principal_id"] for p in pedidos if p.get("pedido_principal_id")})
+    cliente_id_de_principal: dict[int, int | None] = {}
+    if principal_ids:
+        ph_p = ",".join(["%s"] * len(principal_ids))
+        rows_p = conn.execute(
+            f"SELECT id, cliente_id FROM alquileres WHERE id IN ({ph_p})", principal_ids
+        ).fetchall()
+        cliente_id_de_principal = {r["id"]: r["cliente_id"] for r in rows_p}
+
+    def _efectivo(p: dict) -> int | None:
+        principal_id = p.get("pedido_principal_id")
+        if principal_id:
+            return cliente_id_de_principal.get(principal_id)
+        return p.get("cliente_id")
+
+    ids = sorted({cid for p in pedidos if (cid := _efectivo(p))})
     if not ids:
         return
     ph = ",".join(["%s"] * len(ids))
@@ -228,6 +260,6 @@ def _enriquecer_pedidos_con_cliente(conn, pedidos: list[dict]) -> None:
     ).fetchall()
     by_id = {r["id"]: row_to_dict(r) for r in rows}
     for p in pedidos:
-        c = by_id.get(p.get("cliente_id"))
+        c = by_id.get(_efectivo(p))
         if c:
             _aplicar_contacto_cliente(p, c)

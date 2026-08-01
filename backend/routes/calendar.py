@@ -145,6 +145,13 @@ def _items_por_pedido(conn, pedido_ids: list[int]) -> dict[int, list[dict]]:
         FROM alquiler_items pi
         JOIN equipos e ON e.id = pi.equipo_id
         WHERE pi.pedido_id IN ({placeholders})
+          -- `turno_estudio_id IS NULL` (#1308 rediseño "turno como ítem"): el
+          -- centinela/sueltos/pintura de un turno del Estudio EMBEBIDO se usan
+          -- ENTERO adentro del Estudio — nunca salen con el cliente — así que
+          -- no pertenecen a la descripción de "equipos" del evento del
+          -- calendario (mismo criterio que Contrato/Detalle de seguro/
+          -- Checklist de retiro, hallazgo de auditoría).
+          AND pi.turno_estudio_id IS NULL
         """,
         pedido_ids,
     ).fetchall()

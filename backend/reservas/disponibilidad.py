@@ -48,14 +48,18 @@ def _libres_crudos(conn, fecha_desde, fecha_hasta, exclude_pedido_id=None) -> di
 
     # Items reservados (directos) por pedidos activos que se pisan con el rango
     # bufferizado, agregados por equipo. Excluye el propio pedido al editar.
+    # COALESCE(ate.fecha_desde, p.fecha_desde): un ítem puede pertenecer a un turno del
+    # Estudio EMBEBIDO (alquiler_turnos_estudio) con su propia ventana horaria, distinta
+    # de la del pedido contenedor — no-op para ítems sin turno (ate.* es NULL).
     res_rows = conn.execute(f"""
         SELECT pi.equipo_id AS eid, COALESCE(SUM(pi.cantidad), 0) AS cant
         FROM alquiler_items pi
         JOIN alquileres p ON p.id = pi.pedido_id
+        LEFT JOIN alquiler_turnos_estudio ate ON ate.id = pi.turno_estudio_id
         WHERE p.estado IN {ESTADOS_RESERVADO}
           AND pi.equipo_id IS NOT NULL
-          AND p.fecha_desde < %s
-          AND p.fecha_hasta > %s
+          AND COALESCE(ate.fecha_desde, p.fecha_desde) < %s
+          AND COALESCE(ate.fecha_hasta, p.fecha_hasta) > %s
           AND (%s IS NULL OR p.id != %s)
         GROUP BY pi.equipo_id
     """, (fh_buf, fd_buf, excl, excl)).fetchall()
@@ -228,14 +232,19 @@ def dias_no_disponibles(conn, items: dict[int, int], desde: str, hasta: str) -> 
     segs: dict[int, list[tuple]] = {eid: [] for eid in ids}
     graph = componentes_de(conn)
     exp_cache: dict[int, dict] = {}
+    # COALESCE: un ítem de un turno del Estudio EMBEBIDO tiene su propia ventana horaria
+    # (alquiler_turnos_estudio) — no-op para ítems sin turno.
     res_segs = conn.execute(
         f"""
-        SELECT pi.equipo_id AS eid, p.fecha_desde AS fd, p.fecha_hasta AS fh, pi.cantidad AS cant
+        SELECT pi.equipo_id AS eid, COALESCE(ate.fecha_desde, p.fecha_desde) AS fd,
+               COALESCE(ate.fecha_hasta, p.fecha_hasta) AS fh, pi.cantidad AS cant
         FROM alquiler_items pi
         JOIN alquileres p ON p.id = pi.pedido_id
+        LEFT JOIN alquiler_turnos_estudio ate ON ate.id = pi.turno_estudio_id
         WHERE p.estado IN {ESTADOS_RESERVADO}
           AND pi.equipo_id IS NOT NULL
-          AND p.fecha_hasta > %s AND p.fecha_desde < %s
+          AND COALESCE(ate.fecha_hasta, p.fecha_hasta) > %s
+          AND COALESCE(ate.fecha_desde, p.fecha_desde) < %s
         """,
         (win_lo, win_hi),
     ).fetchall()
@@ -451,14 +460,19 @@ def estado_diario_equipo(conn, equipo_id: int, desde: str, hasta: str) -> dict:
     graph = componentes_de(conn)
     exp_cache: dict[int, dict] = {}
     segs: list[tuple] = []
+    # COALESCE: un ítem de un turno del Estudio EMBEBIDO tiene su propia ventana horaria
+    # (alquiler_turnos_estudio) — no-op para ítems sin turno.
     res_rows = conn.execute(
         f"""
-        SELECT pi.equipo_id AS eid, p.fecha_desde AS fd, p.fecha_hasta AS fh, pi.cantidad AS cant
+        SELECT pi.equipo_id AS eid, COALESCE(ate.fecha_desde, p.fecha_desde) AS fd,
+               COALESCE(ate.fecha_hasta, p.fecha_hasta) AS fh, pi.cantidad AS cant
         FROM alquiler_items pi
         JOIN alquileres p ON p.id = pi.pedido_id
+        LEFT JOIN alquiler_turnos_estudio ate ON ate.id = pi.turno_estudio_id
         WHERE p.estado IN {ESTADOS_RESERVADO}
           AND pi.equipo_id IS NOT NULL
-          AND p.fecha_hasta > %s AND p.fecha_desde < %s
+          AND COALESCE(ate.fecha_hasta, p.fecha_hasta) > %s
+          AND COALESCE(ate.fecha_desde, p.fecha_desde) < %s
         """,
         (win_lo, win_hi),
     ).fetchall()

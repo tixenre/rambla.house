@@ -241,9 +241,11 @@ def equipos_kpis(request: Request):
             SELECT COALESCE(SUM(pi.cantidad), 0)
             FROM alquiler_items pi
             JOIN alquileres p ON p.id = pi.pedido_id
+            JOIN equipos e ON e.id = pi.equipo_id
             WHERE p.estado = 'retirado'
               AND p.fecha_desde::date <= CURRENT_DATE
               AND p.fecha_hasta::date >= CURRENT_DATE
+              AND e.es_recurso_interno = FALSE
         """).fetchone()[0]
         mantenimiento = conn.execute("""
             SELECT COUNT(DISTINCT equipo_id)
@@ -929,7 +931,14 @@ def get_equipo_historial(id: int):
                 p.fecha_desde, p.fecha_hasta,
                 COALESCE(c.nombre || ' ' || c.apellido, p.cliente_nombre) AS cliente,
                 pi.cantidad, pi.precio_jornada AS precio_item,
-                GREATEST(1, (p.fecha_hasta::date - p.fecha_desde::date))::INTEGER AS dias
+                -- `cobro_modo='fijo'` (líneas personalizadas, combos, turno del
+                -- Estudio EMBEBIDO #1308) ya cobra el monto único — contarle los
+                -- días DEL PEDIDO contenedor (que pueden no tener nada que ver con
+                -- su duración real) inflaba total_dias/total_revenue de este equipo.
+                (CASE WHEN pi.cobro_modo = 'jornada'
+                      THEN GREATEST(1, (p.fecha_hasta::date - p.fecha_desde::date))
+                      ELSE 1
+                 END)::INTEGER AS dias
             FROM alquiler_items pi
             JOIN alquileres p ON p.id = pi.pedido_id
             LEFT JOIN clientes c ON c.id = p.cliente_id

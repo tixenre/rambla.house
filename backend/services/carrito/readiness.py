@@ -33,12 +33,9 @@ def equipo_visible_catalogo(conn, equipo_id: int) -> None:
     con precio definido.
 
     Extraído (#1209) para que la creación de pedido del cliente
-    (`precios_catalogo_para_reserva`, abajo) y la MODIFICACIÓN de un pedido ya
-    existente (`cliente_portal/solicitudes.py::cliente_modificar_pedido`)
-    apliquen EXACTAMENTE el mismo chequeo — antes solo lo aplicaba la creación:
-    un cliente podía, vía `POST .../modificacion`, agregar a un presupuesto un
-    equipo oculto/interno (o inexistente/soft-deleted) que la creación sí
-    hubiera rechazado, reservando stock de un recurso que el negocio nunca
+    (`precios_catalogo_para_reserva`, abajo) aplique el mismo chequeo que ya
+    exigía el resto del catálogo — un cliente no puede reservar stock de un
+    equipo oculto/interno (o inexistente/soft-deleted) que el negocio nunca
     ofreció públicamente.
 
     Lanza ``HTTPException(404)`` si el equipo no existe, está soft-deleted, no

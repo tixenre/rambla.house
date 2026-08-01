@@ -20,7 +20,6 @@ import pytest
 import services.precios as precios
 from services.alquileres.queries import cotizacion as ruta_cotizar
 from routes.cliente_portal import pedidos as ruta_crear
-from routes.cliente_portal import solicitudes as ruta_modificar
 from services.carrito import readiness as carrito_readiness
 
 pytestmark = pytest.mark.unit
@@ -74,17 +73,16 @@ def test_precio_nulo_es_cero():
 
 # ── 2 · Source-scan (candado: una sola fuente) ────────────────────────────────
 
-# Dónde se resuelve el precio EFECTIVO que después se persiste, tras F6:
+# Dónde se resuelve el precio EFECTIVO que después se persiste:
 #  - cotizar (cotizacion.py) lo resuelve para mostrar el total,
 #  - crear delega en la puerta del carrito `readiness.precios_catalogo_para_reserva`
-#    (que es quien llama al resolutor único),
-#  - modificar (solicitudes.py) lo resuelve en `_equipo_precio_catalogo`.
-# Los tres deben pasar por `precio_jornada_efectivo`, ninguno inlinear el combo.
-_RESOLVERS = [ruta_cotizar, carrito_readiness, ruta_modificar]
+#    (que es quien llama al resolutor único).
+# Los dos deben pasar por `precio_jornada_efectivo`, ninguno inlinear el combo.
+_RESOLVERS = [ruta_cotizar, carrito_readiness]
 
 # Ningún camino que toque la plata persistida puede reintroducir la resolución de
 # combo inline (así nacía el drift). Incluye al route de crear, que delega.
-_SIN_COMBO_INLINE = [ruta_cotizar, ruta_crear, ruta_modificar, carrito_readiness]
+_SIN_COMBO_INLINE = [ruta_cotizar, ruta_crear, carrito_readiness]
 
 
 def _src(mod) -> str:

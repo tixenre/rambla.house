@@ -283,7 +283,9 @@ class EstudioConflictoFakeConn:
 
         # Reservas directas: sumamos las que se pisan con el rango consultado.
         # Batcheado (#626): IN + GROUP BY, params = (*equipo_ids, excl, fh_buf, fd_buf).
-        if "FROM ALQUILER_ITEMS PI2 JOIN ALQUILERES P ON P.ID = PI2.PEDIDO_ID WHERE PI2.EQUIPO_ID IN" in s:
+        # Substrings (no un match contiguo): #1308 sumó un LEFT JOIN
+        # alquiler_turnos_estudio entre el JOIN a alquileres y el WHERE.
+        if "FROM ALQUILER_ITEMS PI2" in s and "WHERE PI2.EQUIPO_ID IN" in s:
             eq_ids = params[:-3]
             fh_consulta, fd_consulta = params[-2], params[-1]
             fh_c = self._parse(fh_consulta)
@@ -352,9 +354,12 @@ class CentinelaFakeConn:
         if s.startswith("SELECT ID FROM EQUIPOS WHERE ID = %S FOR UPDATE"):
             return _Cur([{"id": params[0]}])
 
-        # Query dedicada de overlap del centinela.
+        # Query dedicada de overlap del centinela. #1308 rediseño "turno como
+        # ítem" sumó exclude_turno_estudio_id (par de params, mismo patrón que
+        # exclude_pedido_id/exclude_slot_id) — 9 params en vez de 7.
         if "SELECT COUNT(*) AS CNT FROM ALQUILER_ITEMS PI JOIN ALQUILERES P" in s:
-            _eq, _excl, _excl2, _excl_slot, _excl_slot2, hi, lo = params
+            (_eq, _excl, _excl2, _excl_slot, _excl_slot2,
+             _excl_turno, _excl_turno2, hi, lo) = params
             hi_d, lo_d = self._parse(hi), self._parse(lo)
             cnt = sum(
                 1 for (fd, fh) in self.reservas
@@ -666,7 +671,7 @@ def _patch_post_collaborators(monkeypatch, conn, estudio_row):
         lambda c, eid, fd, fh, buf, exclude_pedido_id=None: True,
     )
     monkeypatch.setattr(estudio_mod, "_get_alquiler_detail", lambda c, pid: {"id": pid})
-    monkeypatch.setattr(estudio_mod, "_dispatch_pedido_creado_emails", lambda bg, p: None)
+    monkeypatch.setattr(estudio_mod, "notificar_pedido", lambda *a, **k: None)
     # v2-B: login obligatorio — cliente_id sale de la sesión.
     monkeypatch.setattr(estudio_mod, "_require_cliente", lambda req: {"cliente_id": 7, "role": "cliente"})
 

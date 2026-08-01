@@ -189,6 +189,15 @@ def _revalidar_stock(conn, p) -> list[str]:
       ese mes sí contiene) dan un resultado con sentido. El bloqueo real de
       las clases puntuales ya lo hace `_taller_bloqueante`/el gate de la
       edición (`services/talleres/commands/ediciones.py`), no este endpoint.
+    - Un pedido `diaria` (la rama genérica de abajo) SUMA además la
+      revalidación de sus turnos del Estudio EMBEBIDOS, si tiene alguno
+      (`_revalidar_turnos_embebidos`, #1308 rediseño "turno como ítem") — un
+      pedido de equipos y un turno embebido conviven en la MISMA fila, así que
+      ambas validaciones corren, no una en lugar de la otra. No-op barato si el
+      pedido no tiene ningún turno embebido (100% de los pedidos hasta la Fase
+      4). Un pedido `estudio`/`estudio_fijo`/`taller` nunca tiene turnos
+      embebidos propios (son ellos mismos el turno/la clase) — no hace falta
+      sumar la llamada en esas dos ramas de arriba.
 
     Import diferido de `services.estudio` — mismo estilo que el resto de los
     imports diferidos de este archivo, ver `cambiar_estado`."""
@@ -197,6 +206,10 @@ def _revalidar_stock(conn, p) -> list[str]:
         return revalidar_disponibilidad_estudio(conn, p)
     if es_pedido_taller(p):
         return []
+    from services.estudio.queries.disponibilidad import _revalidar_turnos_embebidos
+    # `_revalidar_turnos_embebidos` ya devuelve mensajes completos y legibles (no
+    # fragmentos crudos como `_check_stock`) — no se re-envuelven con un prefijo.
+    errores = list(_revalidar_turnos_embebidos(conn, p["id"]))
     # Mismo advisory lock por equipo que `create_pedido`/`_apply_pedido_items`
     # (namespace 5390412, `_lock_equipos_por_id`) — sin esto, este `FOR UPDATE`
     # genérico contra `equipos` no participaba de la misma serialización y
@@ -205,15 +218,16 @@ def _revalidar_stock(conn, p) -> list[str]:
     equipo_ids = [
         r["equipo_id"] for r in conn.execute(
             "SELECT DISTINCT equipo_id FROM alquiler_items "
-            "WHERE pedido_id = %s AND equipo_id IS NOT NULL",
+            "WHERE pedido_id = %s AND equipo_id IS NOT NULL AND turno_estudio_id IS NULL",
             (p["id"],),
         ).fetchall()
     ]
     _lock_equipos_por_id(conn, equipo_ids)
-    return [
+    errores.extend(
         f"Sin stock suficiente: {s}"
         for s in _check_stock(conn, p["id"], p["fecha_desde"], p["fecha_hasta"])
-    ]
+    )
+    return errores
 
 
 def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, actor: str) -> dict:
@@ -350,16 +364,6 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
 
     set_clause = ", ".join(f"{k}=%s" for k in updates)
     conn.execute(f"UPDATE alquileres SET {set_clause} WHERE id=%s", (*updates.values(), pedido_id))
-
-    # Import diferido — evita el ciclo alquileres↔cliente_portal (mismo
-    # workaround que ya usaba `update_pedido`).
-    from routes.cliente_portal import ESTADOS_MODIFICABLES, _cancelar_solicitudes_pendientes
-    if estado_nuevo not in ESTADOS_MODIFICABLES:
-        _cancelar_solicitudes_pendientes(
-            conn, pedido_id,
-            motivo=f"El pedido pasó a estado '{estado_nuevo}'.",
-            actor=actor,
-        )
 
     from services.alquileres.commands.pedido import _maybe_finalizar
     _maybe_finalizar(conn, pedido_id)

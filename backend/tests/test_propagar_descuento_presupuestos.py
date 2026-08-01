@@ -106,8 +106,8 @@ def test_propaga_a_presupuestos_sin_override_y_recotiza():
     # 1 ítem 10.000 x 7 = 70.000. Cliente pasa a tener 20% de descuento.
     rows = {10: _pedido(10), 11: _pedido(11)}
     items = {
-        10: [{"id": 100, "equipo_id": 42, "cantidad": 1, "precio_jornada": 10000, "cobro_modo": "jornada"}],
-        11: [{"id": 101, "equipo_id": 42, "cantidad": 1, "precio_jornada": 10000, "cobro_modo": "jornada"}],
+        10: [{"id": 100, "equipo_id": 42, "cantidad": 1, "precio_jornada": 10000, "cobro_modo": "jornada", "turno_estudio_id": None}],
+        11: [{"id": 101, "equipo_id": 42, "cantidad": 1, "precio_jornada": 10000, "cobro_modo": "jornada", "turno_estudio_id": None}],
     }
     conn = FakeConn([10, 11], rows, items, descuentos_jornada=[(1, 0.0)], clientes={5: 20})
 
@@ -124,8 +124,8 @@ def test_presupuesto_con_override_manual_no_se_toca():
     presupuesto sin override (#10) sigue al cliente."""
     rows = {10: _pedido(10, descuento_pct=0), 11: _pedido(11, descuento_pct=15)}
     items = {
-        10: [{"id": 100, "equipo_id": 42, "cantidad": 1, "precio_jornada": 10000, "cobro_modo": "jornada"}],
-        11: [{"id": 101, "equipo_id": 42, "cantidad": 1, "precio_jornada": 10000, "cobro_modo": "jornada"}],
+        10: [{"id": 100, "equipo_id": 42, "cantidad": 1, "precio_jornada": 10000, "cobro_modo": "jornada", "turno_estudio_id": None}],
+        11: [{"id": 101, "equipo_id": 42, "cantidad": 1, "precio_jornada": 10000, "cobro_modo": "jornada", "turno_estudio_id": None}],
     }
     conn = FakeConn([10, 11], rows, items, descuentos_jornada=[(1, 0.0)], clientes={5: 20})
 
@@ -146,7 +146,7 @@ def test_sin_presupuestos_no_hace_nada():
 def test_recalcular_usa_el_descuento_mayor_entre_cliente_y_jornadas():
     # Sin override manual (0): descuento cliente 5% vs jornadas 10% → gana jornadas.
     rows = {7: _pedido(7, cliente_id=9, descuento_pct=0)}
-    items = {7: [{"id": 70, "equipo_id": 1, "cantidad": 2, "precio_jornada": 5000, "cobro_modo": "jornada"}]}
+    items = {7: [{"id": 70, "equipo_id": 1, "cantidad": 2, "precio_jornada": 5000, "cobro_modo": "jornada", "turno_estudio_id": None}]}
     # 2 x 5000 x 7 = 70.000 bruto. A 7 jornadas → 10%. → 63.000 neto.
     conn = FakeConn([7], rows, items, descuentos_jornada=[(1, 0.0), (7, 10.0)], clientes={9: 5})
     _recalcular_total_pedido(conn, 7)
@@ -157,7 +157,7 @@ def test_recalcular_override_manual_gana_outright_no_compite():
     """Jerarquía (Fase C-1): un override manual (5%) gana OUTRIGHT aunque
     jornadas (20%) sea numéricamente mayor — no es una competencia por tamaño."""
     rows = {7: _pedido(7, cliente_id=9, descuento_pct=5)}
-    items = {7: [{"id": 70, "equipo_id": 1, "cantidad": 2, "precio_jornada": 5000, "cobro_modo": "jornada"}]}
+    items = {7: [{"id": 70, "equipo_id": 1, "cantidad": 2, "precio_jornada": 5000, "cobro_modo": "jornada", "turno_estudio_id": None}]}
     conn = FakeConn([7], rows, items, descuentos_jornada=[(1, 0.0), (7, 20.0)], clientes={9: 0})
     _recalcular_total_pedido(conn, 7)
     # 70.000 − 5% = 66.500 (NO 56.000, que sería con el 20% de jornadas).
@@ -172,7 +172,7 @@ def test_recalcular_override_monto_fijo_gana_outright_capeado():
         7: _pedido(7, cliente_id=9, descuento_pct=5,
                    descuento_manual_tipo="monto", descuento_manual_monto=30_000),
     }
-    items = {7: [{"id": 70, "equipo_id": 1, "cantidad": 2, "precio_jornada": 5000, "cobro_modo": "jornada"}]}
+    items = {7: [{"id": 70, "equipo_id": 1, "cantidad": 2, "precio_jornada": 5000, "cobro_modo": "jornada", "turno_estudio_id": None}]}
     conn = FakeConn([7], rows, items, descuentos_jornada=[(1, 0.0), (7, 20.0)], clientes={9: 0})
     _recalcular_total_pedido(conn, 7)
     # 70.000 − 30.000 = 40.000 neto.
@@ -192,7 +192,7 @@ def test_recalcular_confirmado_no_relee_cliente_ni_jornadas_en_vivo():
         7: _pedido(7, cliente_id=9, descuento_pct=0, estado="confirmado",
                    descuento_cliente_pct=5.0),
     }
-    items = {7: [{"id": 70, "equipo_id": 1, "cantidad": 2, "precio_jornada": 5000, "cobro_modo": "jornada"}]}
+    items = {7: [{"id": 70, "equipo_id": 1, "cantidad": 2, "precio_jornada": 5000, "cobro_modo": "jornada", "turno_estudio_id": None}]}
     conn = FakeConn([7], rows, items, descuentos_jornada=[(1, 0.0), (7, 20.0)], clientes={9: 99})
     _recalcular_total_pedido(conn, 7)
     # 70.000 − 5% (congelado) = 66.500 — NO 700 (que sería con el 99% en vivo).

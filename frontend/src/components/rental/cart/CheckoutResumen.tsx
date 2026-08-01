@@ -27,6 +27,7 @@ import {
 import { FacturacionModal } from "@/components/rental/account/FacturacionModal";
 import { TerminosModal } from "@/components/rental/account/TerminosModal";
 import { ContratoPreviewModal } from "@/components/rental/ContratoPreviewModal";
+import { OptInWhatsApp } from "@/components/rental/cart/OptInWhatsApp";
 import { DOC_DESCRIPTION, DOC_LABEL } from "@/components/cliente/ClientePortalTypes";
 
 /** Los 4 docs disponibles desde "solicitado" (ver `_documentos_disponibles`
@@ -476,6 +477,11 @@ export function CheckoutResumen({
               .
             </p>
           </div>
+
+          {/* Consentimiento para avisarle por WhatsApp. Va acá, junto al resto de
+            lo que acepta al confirmar: Meta exige un OK explícito del cliente —
+            no alcanza con que haya cargado un teléfono. */}
+          <OptInWhatsApp className="rounded-lg border border-hairline px-3 py-2.5" />
 
           {cargando && (
             <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
