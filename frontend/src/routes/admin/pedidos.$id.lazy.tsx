@@ -1065,7 +1065,7 @@ function PedidoEditorPage() {
         </div>
 
         {/* ── Rail ── (visible en lg en el lado derecho; en mobile fluye debajo) */}
-        <aside className="px-4 md:px-5 py-5 space-y-4 bg-surface/40 lg:border-t-0 border-t hairline pb-28 lg:pb-5">
+        <aside className="px-4 md:px-5 py-5 space-y-4 bg-surface/40 lg:border-t-0 border-t hairline pb-28 lg:pb-5 lg:sticky lg:top-0 lg:z-10 lg:self-start">
           {/* Estado */}
           <RailSection label="Estado del pedido">
             <FlowStrip estado={p.estado} />
