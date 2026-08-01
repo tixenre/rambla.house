@@ -26,10 +26,42 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import re
+import unicodedata
 
 logger = logging.getLogger(__name__)
 
 _ESTADOS_ENTREGA = {"delivered", "read", "failed"}
+
+# Palabras/frases de baja. Meta exige opt-in demostrable pero no un keyword de
+# baja tipo SMS/10DLC — igual es lo esperable de cara al cliente: si escribe
+# "BAJA" al número de avisos, tiene que dejar de recibir WhatsApp de verdad, no
+# solo escuchar el redirect genérico. Best-effort por diseño (no cubre
+# cualquier frase en lenguaje natural).
+#
+# "baja" se chequea SIN plegar acentos (solo minúsculas) a propósito: plegar
+# acentos volvería "bajá" (imperativo de "bajar", ej. "bajá el volumen")
+# indistinguible de "baja" (dar de baja) — un falso positivo real. El resto de
+# las frases sí se pliegan (más tolerantes a como cada uno tipea "cancelá"/
+# "más").
+_BAJA_EXACTA = re.compile(r"\bbaja\b")
+_OTRAS_FRASES_BAJA = re.compile(
+    r"\b(stop|unsubscribe|cancelar)\b|no\s+(me\s+)?(escriban|molest\w*)|no\s+quiero\s+mas\s+avisos"
+)
+
+
+def _sin_acentos(texto: str) -> str:
+    return unicodedata.normalize("NFKD", texto).encode("ascii", "ignore").decode("ascii")
+
+
+def es_mensaje_de_baja(texto: str) -> bool:
+    """True si el texto entrante pide baja de WhatsApp (best-effort, ver arriba)."""
+    if not texto:
+        return False
+    minuscula = texto.lower().strip()
+    if _BAJA_EXACTA.search(minuscula):
+        return True
+    return bool(_OTRAS_FRASES_BAJA.search(_sin_acentos(minuscula)))
 
 
 class WhatsAppWebhookError(Exception):
@@ -118,11 +150,59 @@ def _aplicar_estados(value: dict, conn) -> int:
     return aplicados
 
 
+def _resolver_cliente_por_telefono(conn, telefono_e164: str) -> int | None:
+    """Cliente dueño de `telefono_e164`, o None. Prioriza `verified_contacts`
+    (E.164 real, verificado por Didit) y cae al `clientes.telefono` base —
+    ese último puede no estar en E.164 estricto (guardado lenient, ver
+    `services/telefono.py`), así que un cliente cuyo teléfono base quedó en
+    formato crudo puede no matchear acá. Best-effort a propósito: es el mismo
+    costo/beneficio que el resto del auto-reply (mejor un opt-out que a veces
+    no encuentra la cuenta, que ningún opt-out real)."""
+    row = conn.execute(
+        "SELECT cliente_id FROM verified_contacts WHERE kind = 'phone' AND value = %s LIMIT 1",
+        (telefono_e164,),
+    ).fetchone()
+    if row:
+        return row["cliente_id"]
+    row = conn.execute(
+        "SELECT id FROM clientes WHERE telefono = %s LIMIT 1", (telefono_e164,)
+    ).fetchone()
+    return row["id"] if row else None
+
+
+def _procesar_baja(conn, de: str) -> bool:
+    """Si `de` matchea a un cliente conocido, apaga su `whatsapp_opt_in`.
+    Devuelve True si encontró y actualizó la cuenta (para elegir el copy de
+    respuesta); False si no pudo resolver el teléfono a un cliente."""
+    from database import now_ar
+    from services.telefono import normalizar_e164
+
+    telefono = normalizar_e164(de if de.startswith("+") else f"+{de}")
+    if not telefono:
+        return False
+    cliente_id = _resolver_cliente_por_telefono(conn, telefono)
+    if cliente_id is None:
+        return False
+    conn.execute(
+        "UPDATE clientes SET whatsapp_opt_in = FALSE, whatsapp_opt_in_at = %s WHERE id = %s",
+        (now_ar(), cliente_id),
+    )
+    logger.info("whatsapp webhook: baja de %s aplicada (cliente_id=%s)", de, cliente_id)
+    return True
+
+
 def _responder_entrantes(value: dict, conn) -> int:
     """A cada mensaje entrante le contesta un texto libre (ventana de servicio de
-    24h que el propio mensaje abre) redirigiendo al WhatsApp real del negocio —
-    nunca se pierde en el aire, ni silenciosamente ni con un error. Best-effort:
-    un fallo de envío queda logueado, nunca rompe el webhook."""
+    24h que el propio mensaje abre). Dos casos:
+
+    - Pide **baja** (`es_mensaje_de_baja`): si se resuelve el teléfono a un
+      cliente conocido, se apaga `whatsapp_opt_in` (best-effort, ver
+      `_resolver_cliente_por_telefono`) y se confirma con un copy distinto.
+    - Cualquier otro texto: redirige al WhatsApp real del negocio — nunca se
+      pierde en el aire, ni silenciosamente ni con un error.
+
+    Best-effort en todo: un fallo de envío queda logueado, nunca rompe el
+    webhook."""
     from services.comunicacion.contacto import telefono_negocio
     from services.whatsapp.config import resolver_creds
     from whatsapp_cloud import WhatsAppClient, WhatsAppError
@@ -135,9 +215,13 @@ def _responder_entrantes(value: dict, conn) -> int:
         return 0
 
     contacto = telefono_negocio(conn) or "nuestro WhatsApp habitual"
-    texto = (
+    texto_redirect = (
         "Este número es solo para avisos automáticos de Rambla — no llegan "
         f"mensajes acá. Para consultas, escribinos a tu WhatsApp de siempre: {contacto}."
+    )
+    texto_baja_ok = (
+        "Listo, no te vamos a volver a escribir por este número. Si más adelante "
+        f"querés reactivarlo, lo hacés desde tu portal, o escribinos a {contacto}."
     )
     client = WhatsAppClient(
         phone_number_id=creds.phone_number_id,
@@ -149,6 +233,12 @@ def _responder_entrantes(value: dict, conn) -> int:
         de = m.get("from")
         if not de:
             continue
+        texto_entrante = ((m.get("text") or {}).get("body")) or ""
+        if es_mensaje_de_baja(texto_entrante):
+            dado_de_baja = _procesar_baja(conn, de)
+            texto = texto_baja_ok if dado_de_baja else texto_redirect
+        else:
+            texto = texto_redirect
         logger.warning(
             "whatsapp webhook: mensaje entrante de %s (wamid=%s) — auto-respondido",
             de, m.get("id"),

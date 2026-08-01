@@ -114,7 +114,22 @@ motivó el copy con `whatsapp_contacto` (arriba):
    (`WhatsAppClient.enviar_texto`, válido dentro de la ventana de servicio de 24h que el
    propio mensaje abre) redirigiendo al WhatsApp real del negocio
    (`comunicacion.contacto.telefono_negocio`) — best-effort, un fallo de envío queda
-   logueado sin romper el webhook.
+   logueado sin romper el webhook. Si el texto pide **baja**
+   (`webhook.es_mensaje_de_baja`: "baja"/"stop"/"cancelar"/"no me escriban"/"no molest*",
+   sin distinguir mayúsculas/acentos salvo el caso puntual "baja" vs "bajá" — ver el
+   comentario en el código), y el teléfono resuelve a un cliente conocido
+   (`_resolver_cliente_por_telefono`: `verified_contacts` primero, `clientes.telefono` de
+   fallback), se apaga `whatsapp_opt_in` de ESE cliente y se confirma con un copy distinto
+   ("no te vamos a volver a escribir"). Best-effort por diseño: no cubre cualquier frase en
+   lenguaje natural, y si el teléfono no resuelve a un cliente conocido, cae al redirect
+   genérico (no hay a quién apagarle el opt-in).
+
+**Tope de tamaño del body** (`_MAX_WEBHOOK_BODY` en `routes/whatsapp.py`, 256 KB): el
+endpoint es público (sin sesión) — antes de verificar la firma se corta un `Content-Length`
+declarado por encima del tope, y tras leer el body se vuelve a chequear (por si el header
+mentía o faltaba, ej. chunked transfer). Evita que cualquiera, sin firma válida, fuerce al
+server a bufferear/hashear un payload desproporcionado. Los payloads reales de Meta son de
+unos pocos KB.
 
 **Auth: HMAC, no sesión** (lo llama Meta server-to-server) — mismo criterio que
 `services/didit/webhook.py`, adaptado al esquema de Meta:
@@ -150,7 +165,8 @@ Callback URL exacta a pegar en Meta.
 - `tests/test_comunicacion.py` (plan A/B: fallback, ambos, solo_mail, solo_whatsapp; mail al admin siempre; una sola tarea en background).
 - `tests/test_recordatorios_devolucion.py` (config de ventanas + job).
 - La migración `w1h2a3t4s5a6` (whatsapp_log + opt-in) y `w3bh00k1nb0x` (columnas de estado de entrega) se ejercitan en `test_alembic_upgrade_db.py`.
-- `tests/test_whatsapp_webhook.py` (firma HMAC fail-closed, handshake de verificación, aplicar estados de entrega sin tocar `status`, auto-reply a mensajes entrantes, `procesar_evento` nunca propaga).
+- `tests/test_whatsapp_webhook.py` (firma HMAC fail-closed, handshake de verificación, aplicar estados de entrega sin tocar `status`, auto-reply a mensajes entrantes, detección de baja + apagado de `whatsapp_opt_in`, `procesar_evento` nunca propaga).
+- `tests/test_whatsapp_webhook_route.py` (HTTP real vía `TestClient`: tope de tamaño del body antes de la firma).
 - `whatsapp_cloud/tests/test_client.py` cubre `enviar_texto` (mensaje libre, sin `template` en el payload).
 
 ## Embudo de teléfono (`services/telefono.py`)

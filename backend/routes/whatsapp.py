@@ -24,6 +24,13 @@ router = APIRouter()
 
 _E164 = re.compile(r"^\+\d{8,15}$")
 
+# Tope de tamaño del body del webhook entrante. Los payloads reales de Meta son
+# de unos pocos KB (un lote de `statuses[]`/`messages[]`) — 256 KB es margen
+# amplio, no el límite real. Sin esto, cualquiera (sin firma válida) puede
+# mandarle un POST enorme a este endpoint público y forzar al server a
+# bufferear/hashear el body entero antes de rechazarlo por firma inválida.
+_MAX_WEBHOOK_BODY = 256 * 1024
+
 
 @router.get("/admin/whatsapp/estado")
 def estado_whatsapp(request: Request):
@@ -182,7 +189,32 @@ async def recibir_webhook_whatsapp(request: Request):
     server. Siempre devuelve 200 con firma válida (Meta reintenta si no)."""
     from services.whatsapp import WhatsAppWebhookError, procesar_evento, verify_signature
 
+    # Corte barato ANTES de leer el body entero: si Meta (o quien sea) mandó un
+    # Content-Length honesto por encima del tope, ni lo bufferizamos.
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            declarado_grande = int(content_length) > _MAX_WEBHOOK_BODY
+        except ValueError:
+            declarado_grande = False  # header corrupto: el chequeo post-lectura de abajo igual protege
+        if declarado_grande:
+            logger.warning(
+                "whatsapp webhook: Content-Length %s supera el tope (%s), rechazado sin leer",
+                content_length, _MAX_WEBHOOK_BODY,
+            )
+            raise HTTPException(413, "Payload demasiado grande")
+
     body = await request.body()
+    # Red final (Content-Length ausente/mentiroso, ej. chunked transfer): FastAPI
+    # ya bufferizó el body para llegar acá, pero al menos no seguimos procesando
+    # ni gastamos el hash HMAC sobre algo desproporcionado.
+    if len(body) > _MAX_WEBHOOK_BODY:
+        logger.warning(
+            "whatsapp webhook: body de %s bytes supera el tope (%s), rechazado",
+            len(body), _MAX_WEBHOOK_BODY,
+        )
+        raise HTTPException(413, "Payload demasiado grande")
+
     signature = request.headers.get("X-Hub-Signature-256", "")
     try:
         verify_signature(body, signature)

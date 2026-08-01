@@ -105,6 +105,90 @@ def test_aplicar_estados_ignora_estado_desconocido_o_sin_wamid():
     assert conn.updates == []
 
 
+# ── es_mensaje_de_baja ────────────────────────────────────────────────────
+@pytest.mark.parametrize(
+    "texto",
+    [
+        "BAJA", "baja", "Baja por favor", "STOP", "no me escriban mas",
+        "No me escriban", "cancelar avisos", "unsubscribe", "NO MOLESTEN",
+        "no molestar", "no me molesten mas",
+    ],
+)
+def test_es_mensaje_de_baja_detecta_variantes(texto):
+    assert wh.es_mensaje_de_baja(texto) is True
+
+
+@pytest.mark.parametrize(
+    "texto",
+    ["", "hola", "trabajaba en eso", "cuando retiro el equipo?", "gracias!", "che bajá el volumen"],
+)
+def test_es_mensaje_de_baja_no_falsos_positivos_obvios(texto):
+    assert wh.es_mensaje_de_baja(texto) is False
+
+
+# ── _resolver_cliente_por_telefono / _procesar_baja ───────────────────────
+class _FakeCursorRow:
+    def __init__(self, row):
+        self._row = row
+
+    def fetchone(self):
+        return self._row
+
+
+class _FakeConnClientes:
+    """Sirve los SELECT de verified_contacts/clientes y registra el UPDATE."""
+
+    def __init__(self, *, verified=None, cliente=None):
+        self._verified = verified
+        self._cliente = cliente
+        self.updates = []
+
+    def execute(self, sql, params=()):
+        upper = sql.strip().upper()
+        if "VERIFIED_CONTACTS" in upper:
+            return _FakeCursorRow(self._verified)
+        if upper.startswith("SELECT ID FROM CLIENTES"):
+            return _FakeCursorRow(self._cliente)
+        if upper.startswith("UPDATE CLIENTES"):
+            self.updates.append(params)
+            return _FakeCursorRow(None)
+        raise AssertionError(f"query inesperada en el fake: {sql}")
+
+
+def test_resolver_cliente_por_telefono_prioriza_verified_contacts():
+    conn = _FakeConnClientes(verified={"cliente_id": 7}, cliente={"id": 999})
+    assert wh._resolver_cliente_por_telefono(conn, "+5492235550000") == 7
+
+
+def test_resolver_cliente_por_telefono_cae_a_clientes_base():
+    conn = _FakeConnClientes(verified=None, cliente={"id": 9})
+    assert wh._resolver_cliente_por_telefono(conn, "+5492235550000") == 9
+
+
+def test_resolver_cliente_por_telefono_no_encuentra():
+    conn = _FakeConnClientes(verified=None, cliente=None)
+    assert wh._resolver_cliente_por_telefono(conn, "+5492235550000") is None
+
+
+def test_procesar_baja_actualiza_opt_in_y_devuelve_true():
+    conn = _FakeConnClientes(verified={"cliente_id": 7})
+    assert wh._procesar_baja(conn, "5492235550000") is True
+    assert len(conn.updates) == 1
+    assert conn.updates[0][1] == 7  # (now_ar(), cliente_id)
+
+
+def test_procesar_baja_sin_cliente_conocido_no_actualiza_y_devuelve_false():
+    conn = _FakeConnClientes(verified=None, cliente=None)
+    assert wh._procesar_baja(conn, "5492235550000") is False
+    assert conn.updates == []
+
+
+def test_procesar_baja_telefono_invalido_no_actualiza():
+    conn = _FakeConnClientes(verified={"cliente_id": 7})
+    assert wh._procesar_baja(conn, "no-es-un-telefono") is False
+    assert conn.updates == []
+
+
 # ── _responder_entrantes ──────────────────────────────────────────────────
 def test_responder_entrantes_sin_creds_no_hace_nada(monkeypatch):
     monkeypatch.setattr("services.whatsapp.config.resolver_creds", lambda: None)
@@ -140,6 +224,72 @@ def test_responder_entrantes_envia_y_cuenta(monkeypatch):
     assert n == 1
     assert enviados[0][0] == "+5492235550000"
     assert "+54 9 223 585-2510" in enviados[0][1]
+
+
+def test_responder_entrantes_baja_con_cliente_conocido_apaga_opt_in_y_confirma(monkeypatch):
+    import whatsapp_cloud
+
+    class _Creds:
+        phone_number_id = "123"
+        access_token = "TOK"
+        base_url = "https://graph.example/v21.0"
+
+    monkeypatch.setattr("services.whatsapp.config.resolver_creds", lambda: _Creds())
+    monkeypatch.setattr("services.comunicacion.contacto.telefono_negocio", lambda conn: "+549")
+
+    enviados = []
+
+    class _FakeClient:
+        def __init__(self, **kw):
+            pass
+
+        def enviar_texto(self, *, to, body):
+            enviados.append((to, body))
+            return whatsapp_cloud.EnvioResult(message_id="wamid.OUT", to=to)
+
+    monkeypatch.setattr(whatsapp_cloud, "WhatsAppClient", _FakeClient)
+
+    conn = _FakeConnClientes(verified={"cliente_id": 42})
+    value = {
+        "messages": [
+            {"from": "5492235550000", "id": "wamid.IN", "text": {"body": "BAJA por favor"}}
+        ]
+    }
+    n = wh._responder_entrantes(value, conn=conn)
+    assert n == 1
+    assert conn.updates and conn.updates[0][1] == 42  # opt_in apagado para ESE cliente
+    assert "no te vamos a volver a escribir" in enviados[0][1].lower()
+
+
+def test_responder_entrantes_baja_sin_cliente_conocido_solo_redirige(monkeypatch):
+    import whatsapp_cloud
+
+    class _Creds:
+        phone_number_id = "123"
+        access_token = "TOK"
+        base_url = "https://graph.example/v21.0"
+
+    monkeypatch.setattr("services.whatsapp.config.resolver_creds", lambda: _Creds())
+    monkeypatch.setattr("services.comunicacion.contacto.telefono_negocio", lambda conn: "+549")
+
+    enviados = []
+
+    class _FakeClient:
+        def __init__(self, **kw):
+            pass
+
+        def enviar_texto(self, *, to, body):
+            enviados.append((to, body))
+            return whatsapp_cloud.EnvioResult(message_id="wamid.OUT", to=to)
+
+    monkeypatch.setattr(whatsapp_cloud, "WhatsAppClient", _FakeClient)
+
+    conn = _FakeConnClientes(verified=None, cliente=None)
+    value = {"messages": [{"from": "5492235550000", "id": "wamid.IN", "text": {"body": "STOP"}}]}
+    n = wh._responder_entrantes(value, conn=conn)
+    assert n == 1
+    assert conn.updates == []
+    assert "no llegan" in enviados[0][1].lower()  # el copy genérico de redirect
 
 
 def test_responder_entrantes_un_fallo_de_envio_no_rompe(monkeypatch):
