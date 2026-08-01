@@ -397,23 +397,65 @@ def export_alquileres(conn) -> list[dict]:
         return []
 
     alquiler_ids = [r["alquiler_id"] for r in rows]
-    # Items con equipo_slug en batch
+
+    # Turnos del Estudio EMBEBIDOS en batch (#1308) — ANTES de los items:
+    # arma el índice (pedido_id, turno_id) → posición que los items necesitan
+    # para referenciar "a cuál turno pertenezco" sin usar el id real (no
+    # estable entre ambientes).
+    turnos_by_alq: dict[int, list[schema.AlquilerTurnoEstudioRef]] = {}
+    turno_index_por_id: dict[int, int] = {}
+    turno_rows = conn.execute("""
+        SELECT id, pedido_id, fecha_desde, fecha_hasta, descuento_pct,
+               descuento_manual_tipo, descuento_manual_monto
+        FROM alquiler_turnos_estudio
+        WHERE pedido_id = ANY(%s)
+        ORDER BY pedido_id, id
+    """, (alquiler_ids,)).fetchall()
+    for tr in turno_rows:
+        lista = turnos_by_alq.setdefault(tr["pedido_id"], [])
+        turno_index_por_id[tr["id"]] = len(lista)
+        lista.append(
+            schema.AlquilerTurnoEstudioRef(
+                fecha_desde=_to_iso(tr["fecha_desde"]) or "",
+                fecha_hasta=_to_iso(tr["fecha_hasta"]) or "",
+                descuento_pct=float(tr["descuento_pct"] or 0.0),
+                descuento_manual_tipo=tr["descuento_manual_tipo"] or "pct",
+                descuento_manual_monto=int(tr["descuento_manual_monto"] or 0),
+            )
+        )
+
+    # Items en batch — LEFT JOIN (no INNER): una línea personalizada (#805,
+    # `equipo_id IS NULL`, ej. flete o la "Pintura reciente" de un turno del
+    # Estudio) no tiene equipo que matchear y antes se perdía en silencio.
+    # `ai.equipo_id` viaja aparte de `equipo_slug` para distinguir "sin equipo
+    # a propósito" de "equipo sin slug" (anomalía real pero distinta —
+    # ver el filtro de abajo, mismo comportamiento que el INNER JOIN de antes
+    # para ESE caso puntual).
     items_by_alq: dict[int, list[schema.AlquilerItemRef]] = {}
     item_rows = conn.execute("""
-        SELECT ai.pedido_id, e.slug AS equipo_slug, ai.cantidad,
-               ai.precio_jornada, ai.subtotal
+        SELECT ai.pedido_id, ai.equipo_id, e.slug AS equipo_slug, ai.cantidad,
+               ai.precio_jornada, ai.subtotal, ai.cobro_modo, ai.nombre_libre,
+               ai.turno_estudio_id
         FROM alquiler_items ai
-        JOIN equipos e ON e.id = ai.equipo_id
-        WHERE ai.pedido_id = ANY(%s) AND e.slug IS NOT NULL
+        LEFT JOIN equipos e ON e.id = ai.equipo_id
+        WHERE ai.pedido_id = ANY(%s)
         ORDER BY ai.pedido_id, ai.id
     """, (alquiler_ids,)).fetchall()
     for ir in item_rows:
+        if ir["equipo_id"] is not None and ir["equipo_slug"] is None:
+            continue  # equipo sin slug (anomalía) — mismo drop que antes
+        turno_id = ir["turno_estudio_id"]
         items_by_alq.setdefault(ir["pedido_id"], []).append(
             schema.AlquilerItemRef(
                 equipo_slug=ir["equipo_slug"],
                 cantidad=int(ir["cantidad"] or 1),
                 precio_jornada=int(ir["precio_jornada"] or 0),
                 subtotal=int(ir["subtotal"] or 0),
+                cobro_modo=ir["cobro_modo"] or "jornada",
+                nombre_libre=ir["nombre_libre"],
+                turno_index=(
+                    turno_index_por_id.get(turno_id) if turno_id is not None else None
+                ),
             )
         )
 
@@ -468,6 +510,7 @@ def export_alquileres(conn) -> list[dict]:
                 fuente=r["fuente"] or "sistema",
                 items=items_by_alq.get(alq_id, []),
                 pagos=pagos_by_alq.get(alq_id, []),
+                turnos_estudio=turnos_by_alq.get(alq_id, []),
             ).model_dump()
         )
     return out

@@ -219,11 +219,40 @@ class Cliente(_Base):
 
 
 class AlquilerItemRef(_Base):
-    """Item embebido dentro de un Alquiler (no es entidad top-level)."""
-    equipo_slug: str  # FK → equipos.slug
+    """Item embebido dentro de un Alquiler (no es entidad top-level).
+
+    `equipo_slug=None` = línea personalizada (#805, ej. flete/servicio):
+    antes el exportador las excluía en silencio (INNER JOIN con `equipos`),
+    perdiéndolas en cualquier ciclo export→import — mismo defecto por el que
+    la línea "Pintura reciente" de un turno del Estudio (`equipo_id=NULL`,
+    ver `services.estudio.commands.reserva`) desaparecía.
+
+    `turno_index` (#1308 rediseño "turno como ítem"): índice (0-based) en
+    `Alquiler.turnos_estudio` — agrupa este ítem bajo ESE turno. `None` = ítem
+    normal del pedido. Por POSICIÓN, no por id: los ids de
+    `alquiler_turnos_estudio` no son estables entre ambientes (igual que los
+    de `alquiler_items` mismos, que tampoco se exportan)."""
+    equipo_slug: str | None = None  # FK → equipos.slug; None = línea personalizada
     cantidad: int = 1
     precio_jornada: int = 0
     subtotal: int = 0
+    cobro_modo: str = "jornada"
+    nombre_libre: str | None = None  # solo si equipo_slug es None
+    turno_index: int | None = None
+
+
+class AlquilerTurnoEstudioRef(_Base):
+    """Turno del Estudio EMBEBIDO en un Alquiler (#1308 rediseño "turno como
+    ítem"): grupo de ítems con su propia franja horaria + descuento propio,
+    NUNCA una fila `alquileres` aparte. Sin clave natural propia (nace y
+    muere con el pedido que lo contiene) — los ítems que le pertenecen lo
+    referencian por POSICIÓN en `Alquiler.turnos_estudio`
+    (`AlquilerItemRef.turno_index`), no por id."""
+    fecha_desde: str  # ISO datetime string
+    fecha_hasta: str  # ISO datetime string
+    descuento_pct: float = 0.0
+    descuento_manual_tipo: str = "pct"
+    descuento_manual_monto: int = 0
 
 
 class AlquilerPagoRef(_Base):
@@ -277,6 +306,8 @@ class Alquiler(_Base):
     # Embebidas para autosuficiencia
     items: list[AlquilerItemRef] = Field(default_factory=list)
     pagos: list[AlquilerPagoRef] = Field(default_factory=list)
+    # Turnos del Estudio EMBEBIDOS (#1308) — ver AlquilerTurnoEstudioRef.
+    turnos_estudio: list[AlquilerTurnoEstudioRef] = Field(default_factory=list)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
