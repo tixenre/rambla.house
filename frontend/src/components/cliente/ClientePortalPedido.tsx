@@ -265,12 +265,21 @@ export function PedidoCard({
     }
   }
 
+  // Ítems que son EQUIPOS reales del pedido — excluye las líneas de un turno
+  // del Estudio EMBEBIDO (#1308 rediseño "turno como ítem"): el centinela/
+  // sueltos/pintura de un turno tienen `equipo_id` real pero no son
+  // alquilables por su cuenta (viven en "Turnos del Estudio" del admin, sin
+  // superficie propia en el portal todavía) — sin este filtro se listaban
+  // como "Equipos" y "Repetir pedido" los empujaba al carrito como si fueran
+  // catálogo (hallazgo de auditoría).
+  const itemsEquipos = pedido.items.filter((it) => it.turno_estudio_id == null);
+
   // Repetir pedido: rearma el carrito con los equipos de catálogo de este pedido
   // y lleva a elegir nuevas fechas. Re-resuelve precio y disponibilidad ACTUALES
   // (no reusa el snapshot del pedido — ver lib/rearmar-carrito.ts). Las líneas
   // personalizadas (#805, sin equipo_id) no se pueden repetir → se omiten.
   const [askRepetir, setAskRepetir] = useState(false);
-  const itemsRepetibles = pedido.items.filter((it) => it.equipo_id != null);
+  const itemsRepetibles = itemsEquipos.filter((it) => it.equipo_id != null);
   function repetirPedido() {
     setAskRepetir(false);
     rearmarCarrito(
@@ -496,9 +505,9 @@ export function PedidoCard({
             </section>
 
             <section>
-              <h3 className="t-section mb-2">Equipos ({pedido.items.length})</h3>
+              <h3 className="t-section mb-2">Equipos ({itemsEquipos.length})</h3>
               <ul>
-                {pedido.items.map((item, i) => {
+                {itemsEquipos.map((item, i) => {
                   const display = item.nombre_publico || item.nombre;
                   return (
                     <li

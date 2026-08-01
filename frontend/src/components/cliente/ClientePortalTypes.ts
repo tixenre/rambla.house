@@ -54,6 +54,12 @@ export type Item = {
   foto_url?: string;
   nombre_publico?: string | null;
   nombre_publico_largo?: string | null;
+  /** Presente si esta línea pertenece a un turno del Estudio EMBEBIDO (#1308
+   *  rediseño "turno como ítem") — el centinela/sueltos/pintura de un turno
+   *  NO son equipos alquilables: no se listan como "Equipos" ni se pueden
+   *  repetir al carrito, aunque `equipo_id` tenga un valor real. `null`/
+   *  ausente = ítem normal, el 100% de los pedidos sin turno embebido. */
+  turno_estudio_id?: number | null;
 };
 export type Pago = { id?: number; monto: number; concepto?: string | null; fecha: string };
 export type Pedido = {

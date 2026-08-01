@@ -31,6 +31,12 @@ router = APIRouter()
 _ITEM_CAMPOS_PORTAL = (
     "cantidad", "precio_jornada", "subtotal", "equipo_id", "nombre", "marca",
     "modelo", "foto_url", "nombre_publico", "nombre_publico_largo",
+    # `turno_estudio_id` (#1308 rediseño "turno como ítem"): sin esto, el
+    # portal no podía distinguir el centinela de un turno del Estudio
+    # embebido de un equipo real — "Repetir pedido" lo empujaba al carrito
+    # como si fuera alquilable (hallazgo de auditoría). `null`/ausente = ítem
+    # normal, el 100% de los pedidos sin turno embebido.
+    "turno_estudio_id",
 )
 # Los documentos (contrato/remito/albarán/checklist) suman los campos de
 # identificación del equipo + los que usa el checklist de retiro (fecha de
