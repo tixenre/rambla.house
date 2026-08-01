@@ -383,6 +383,22 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
     });
   }, []);
 
+  // Saca la entrada de `cotizaciones` de un turno recién borrado — sin esto,
+  // el ledger combinado seguía sumando su última cotización conocida para
+  // siempre (hasta navegar afuera del pedido y volver), mostrando un total
+  // más alto que el real. Mismo idiom que `lib/cart-store.ts`/`ds-catalog/
+  // sections/flujos.tsx` para sacar una key de un Record de estado: copia
+  // superficial + `delete`, no destructuring-omit.
+  const handleTurnoEliminado = useCallback((turnoKey: string) => {
+    setComponiendo(false);
+    setCotizaciones((prev) => {
+      if (!(turnoKey in prev)) return prev;
+      const next = { ...prev };
+      delete next[turnoKey];
+      return next;
+    });
+  }, []);
+
   const cotizacionesList = useMemo(() => Object.values(cotizaciones), [cotizaciones]);
   const cotizacionesOk = useMemo(
     () =>
@@ -427,7 +443,7 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
                 key={`vinculado-${t.id}`}
                 turnoId={t.id}
                 pedidoPrincipalId={pedido.id}
-                onEliminado={() => setComponiendo(false)}
+                onEliminado={() => handleTurnoEliminado(`v-${t.id}`)}
                 descuentoPctOverride={combinedPctOverride ?? undefined}
                 onCotizacion={(estado) => handleCotizacion(`v-${t.id}`, estado)}
               />
@@ -439,7 +455,7 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
                   turno={t}
                   contenedor={pedido}
                   estudio={estudioQ.data!}
-                  onEliminado={() => setComponiendo(false)}
+                  onEliminado={() => handleTurnoEliminado(`e-${t.id}`)}
                   descuentoPctOverride={combinedPctOverride ?? undefined}
                   onCotizacion={(estado) => handleCotizacion(`e-${t.id}`, estado)}
                 />
@@ -461,7 +477,7 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
                   recalcular.
                 </span>
               </div>
-            ) : !combinedListo && combinedPctOverride === null ? (
+            ) : !combinedListo ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground">
                 <Spinner size="sm" /> Calculando…
               </div>
