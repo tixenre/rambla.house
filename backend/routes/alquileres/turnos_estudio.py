@@ -11,9 +11,27 @@ sobre el router compartido del paquete `routes.alquileres` — mismo prefijo
 `/alquileres/{id}/...` que documentos/pagos, porque un turno embebido SIEMPRE
 cuelga de un pedido existente (a diferencia de `/admin/estudio/reservas`, que
 es la puerta de un turno STANDALONE, sin pedido contenedor).
+
+**Reintento ante deadlock** (`_reintentar_ante_deadlock`, mismo patrón que
+`create_pedido_retry` — `services/alquileres/commands/creacion.py`): 2+
+turnos del MISMO pedido mutados a la vez (ej. el descuento combinado de
+"Turnos del Estudio", que dispara un PATCH por turno desde el mismo cambio de
+estado del padre) insertan/actualizan `alquiler_items` bajo ese `pedido_id` —
+cada insert toma un FK KEY-SHARE implícito sobre la fila de `alquileres`
+ANTES de que `_recalcular_total_pedido` (al final de las 3 operaciones) pida
+subir a FOR UPDATE sobre esa misma fila → dos transacciones así se
+deadlockean simétricamente (mismo mecanismo que el comentario de
+`_crear_pedido_estudio` sobre el centinela, un nivel más arriba: acá el
+recurso compartido es el PEDIDO contenedor, no el equipo). Sin esto,
+`DeadlockDetected` sube crudo (`map_pg_errors` no lo traduce, solo
+`UniqueViolation`/`NumericValueOutOfRange`) como 500. Agotados los intentos →
+503, nunca 500.
 """
+import logging
+import time
 from typing import Optional
 
+import psycopg.errors
 from fastapi import Request, HTTPException
 from pydantic import BaseModel, field_validator
 
@@ -37,6 +55,30 @@ from services.estudio.commands.reserva import (
 )
 from services.estudio.queries.disponibilidad import _franja_estudio
 from services.estudio.queries.estudio import _get_estudio_row
+
+logger = logging.getLogger(__name__)
+
+
+def _reintentar_ante_deadlock(intento, intentos: int = 5):
+    """Reintenta `intento()` (una llamada que abre su propia conexión/
+    transacción de punta a punta, ver docstring del módulo) ante un deadlock
+    transitorio de Postgres — mismos intentos/backoff que
+    `create_pedido_retry`. `intento` debe ser idempotente en caso de fallo
+    (rollback antes de propagar, como ya hacen los 3 endpoints de acá)."""
+    for i in range(intentos):
+        try:
+            return intento()
+        except psycopg.errors.DeadlockDetected:
+            if i == intentos - 1:
+                logger.warning(
+                    "Turno del Estudio: deadlock persistente tras %d intentos → 503", intentos
+                )
+                raise HTTPException(
+                    503, "Hay mucha demanda sobre este pedido en este momento. "
+                         "Reintentá en unos segundos.")
+            time.sleep(0.04 * (i + 1))  # backoff corto; el scheduling rompe el ciclo
+    # Inalcanzable con intentos >= 1 (la última vuelta siempre retorna o tira 503).
+    raise HTTPException(503, "No se pudo completar la operación")
 
 
 class TurnoEstudioCreate(BaseModel):
@@ -101,24 +143,28 @@ def agregar_turno_estudio(id: int, body: TurnoEstudioCreate, request: Request):
     {id}`) — el front reemplaza su cache entera con la respuesta en vez de
     reconciliar un turno aparte."""
     require_admin(request)
-    with get_db() as conn:
-        try:
-            estudio = _get_estudio_row(conn)
-            if not estudio["equipo_id"]:
-                raise HTTPException(409, "El estudio todavía no tiene un recurso asociado")
-            fecha_desde, fecha_hasta = _franja_estudio(estudio, body.fecha, body.start, body.horas)
-            _turno_id, promo_advertencia = agregar_turno_embebido(
-                conn, id, estudio=estudio, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
-                con_promo=body.con_promo, sueltos=body.sueltos,
-                pintura_reciente=body.pintura_reciente, espacio_monto=body.espacio_monto,
-            )
-            conn.commit()
-            pedido = _get_alquiler_detail(conn, id)
-            pedido["promo_advertencia"] = promo_advertencia
-            return pedido
-        except Exception:
-            conn.rollback()
-            raise
+
+    def _intento():
+        with get_db() as conn:
+            try:
+                estudio = _get_estudio_row(conn)
+                if not estudio["equipo_id"]:
+                    raise HTTPException(409, "El estudio todavía no tiene un recurso asociado")
+                fecha_desde, fecha_hasta = _franja_estudio(estudio, body.fecha, body.start, body.horas)
+                _turno_id, promo_advertencia = agregar_turno_embebido(
+                    conn, id, estudio=estudio, fecha_desde=fecha_desde, fecha_hasta=fecha_hasta,
+                    con_promo=body.con_promo, sueltos=body.sueltos,
+                    pintura_reciente=body.pintura_reciente, espacio_monto=body.espacio_monto,
+                )
+                conn.commit()
+                pedido = _get_alquiler_detail(conn, id)
+                pedido["promo_advertencia"] = promo_advertencia
+                return pedido
+            except Exception:
+                conn.rollback()
+                raise
+
+    return _reintentar_ante_deadlock(_intento)
 
 
 @router.patch("/alquileres/{id}/turnos-estudio/{turno_id}")
@@ -129,33 +175,37 @@ def editar_turno_estudio(id: int, turno_id: int, body: TurnoEstudioUpdate, reque
     fecha/hora, reemplaza promo/sueltos/pintura, y/o cambia su descuento
     propio. Devuelve el pedido completo actualizado, igual que el alta."""
     require_admin(request)
-    with get_db() as conn:
-        try:
-            turno = conn.execute(
-                "SELECT pedido_id FROM alquiler_turnos_estudio WHERE id = %s", (turno_id,)
-            ).fetchone()
-            if not turno:
-                raise HTTPException(404, "Turno no encontrado")
-            if turno["pedido_id"] != id:
-                raise HTTPException(404, "Ese turno no pertenece a este pedido")
 
-            promo_advertencia = editar_turno_embebido(
-                conn, turno_id,
-                fecha=body.fecha, start=body.start, horas=body.horas,
-                con_promo=body.con_promo, sueltos=body.sueltos,
-                pintura_reciente=body.pintura_reciente,
-                espacio_monto=body.espacio_monto,
-                descuento_pct=body.descuento_pct,
-                descuento_manual_tipo=body.descuento_manual_tipo,
-                descuento_manual_monto=body.descuento_manual_monto,
-            )
-            conn.commit()
-            pedido = _get_alquiler_detail(conn, id)
-            pedido["promo_advertencia"] = promo_advertencia
-            return pedido
-        except Exception:
-            conn.rollback()
-            raise
+    def _intento():
+        with get_db() as conn:
+            try:
+                turno = conn.execute(
+                    "SELECT pedido_id FROM alquiler_turnos_estudio WHERE id = %s", (turno_id,)
+                ).fetchone()
+                if not turno:
+                    raise HTTPException(404, "Turno no encontrado")
+                if turno["pedido_id"] != id:
+                    raise HTTPException(404, "Ese turno no pertenece a este pedido")
+
+                promo_advertencia = editar_turno_embebido(
+                    conn, turno_id,
+                    fecha=body.fecha, start=body.start, horas=body.horas,
+                    con_promo=body.con_promo, sueltos=body.sueltos,
+                    pintura_reciente=body.pintura_reciente,
+                    espacio_monto=body.espacio_monto,
+                    descuento_pct=body.descuento_pct,
+                    descuento_manual_tipo=body.descuento_manual_tipo,
+                    descuento_manual_monto=body.descuento_manual_monto,
+                )
+                conn.commit()
+                pedido = _get_alquiler_detail(conn, id)
+                pedido["promo_advertencia"] = promo_advertencia
+                return pedido
+            except Exception:
+                conn.rollback()
+                raise
+
+    return _reintentar_ante_deadlock(_intento)
 
 
 @router.delete("/alquileres/{id}/turnos-estudio/{turno_id}")
@@ -165,19 +215,23 @@ def borrar_turno_estudio(id: int, turno_id: int, request: Request):
     """Saca el turno `turno_id` del pedido `id` (cascade sobre sus ítems) y
     devuelve el pedido completo actualizado."""
     require_admin(request)
-    with get_db() as conn:
-        try:
-            turno = conn.execute(
-                "SELECT pedido_id FROM alquiler_turnos_estudio WHERE id = %s", (turno_id,)
-            ).fetchone()
-            if not turno:
-                raise HTTPException(404, "Turno no encontrado")
-            if turno["pedido_id"] != id:
-                raise HTTPException(404, "Ese turno no pertenece a este pedido")
 
-            eliminar_turno_embebido(conn, turno_id)
-            conn.commit()
-            return _get_alquiler_detail(conn, id)
-        except Exception:
-            conn.rollback()
-            raise
+    def _intento():
+        with get_db() as conn:
+            try:
+                turno = conn.execute(
+                    "SELECT pedido_id FROM alquiler_turnos_estudio WHERE id = %s", (turno_id,)
+                ).fetchone()
+                if not turno:
+                    raise HTTPException(404, "Turno no encontrado")
+                if turno["pedido_id"] != id:
+                    raise HTTPException(404, "Ese turno no pertenece a este pedido")
+
+                eliminar_turno_embebido(conn, turno_id)
+                conn.commit()
+                return _get_alquiler_detail(conn, id)
+            except Exception:
+                conn.rollback()
+                raise
+
+    return _reintentar_ante_deadlock(_intento)

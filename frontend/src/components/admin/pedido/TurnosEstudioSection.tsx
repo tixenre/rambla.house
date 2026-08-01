@@ -36,7 +36,7 @@
  * `pedido.items` con `turno_estudio_id`, ver
  * `services/estudio/commands/reserva.py::agregar_turno_embebido`).
  */
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Clapperboard, Plus, X } from "lucide-react";
 import { toast } from "sonner";
@@ -49,17 +49,24 @@ import {
   adminApi,
   estudioAdminApi,
   type EstudioConfig,
+  type EstudioCotizacion,
   type Pedido,
   type TurnoEstudioEmbebido,
 } from "@/lib/admin/api";
-import { ReservaEstudioSection } from "@/components/admin/estudio/ReservaEstudioSection";
+import {
+  ReservaEstudioSection,
+  type CotizTurnoEstado,
+} from "@/components/admin/estudio/ReservaEstudioSection";
 import { NuevoTurnoEstudioForm } from "@/components/admin/estudio/NuevoTurnoEstudioForm";
 import { TotalSeccion } from "@/components/admin/pedido/TotalSeccion";
+import { DescuentoControl } from "@/components/admin/pedido/DescuentoControl";
 
 function TurnoVinculadoCard({
   turnoId,
   pedidoPrincipalId,
   onEliminado,
+  descuentoPctOverride,
+  onCotizacion,
 }: {
   turnoId: number;
   pedidoPrincipalId: number;
@@ -68,6 +75,10 @@ function TurnoVinculadoCard({
    *  compose (que se lee como "ya hay un turno", justo lo que se quería
    *  evitar). */
   onEliminado: () => void;
+  /** Ver el mismo prop en `ReservaEstudioSection` — el ledger combinado de
+   *  abajo lo aplica igual a un turno vinculado o embebido. */
+  descuentoPctOverride?: number;
+  onCotizacion?: (estado: CotizTurnoEstado) => void;
 }) {
   const qc = useQueryClient();
   const estudioQ = useQuery({
@@ -156,6 +167,11 @@ function TurnoVinculadoCard({
       // derecha de la banda de tiempo — el mismo lugar que en un turno todavía
       // sin crear, así la ✕ está siempre donde uno la busca.
       anidada
+      // El ledger propio se apaga: con 2+ turnos, el combinado de abajo de
+      // `TurnosEstudioSection` es el único que se ve (y el único editable).
+      mostrarTotal={false}
+      descuentoPctOverride={descuentoPctOverride}
+      onCotizacion={onCotizacion}
       accion={
         <IconButton
           aria-label="Quitar el turno del pedido"
@@ -212,12 +228,17 @@ function TurnoEmbebidoCard({
   contenedor,
   estudio,
   onEliminado,
+  descuentoPctOverride,
+  onCotizacion,
 }: {
   turno: TurnoEstudioEmbebido;
   contenedor: Pedido;
   estudio: EstudioConfig;
   /** Ver el mismo prop en `TurnoVinculadoCard`. */
   onEliminado: () => void;
+  /** Ver el mismo prop en `ReservaEstudioSection`. */
+  descuentoPctOverride?: number;
+  onCotizacion?: (estado: CotizTurnoEstado) => void;
 }) {
   const qc = useQueryClient();
 
@@ -260,6 +281,11 @@ function TurnoEmbebidoCard({
       pedido={pedidoSintetico}
       estudio={estudio}
       anidada
+      // Ver el comentario en `TurnoVinculadoCard` — mismo tratamiento para
+      // los dos mecanismos.
+      mostrarTotal={false}
+      descuentoPctOverride={descuentoPctOverride}
+      onCotizacion={onCotizacion}
       accion={
         <IconButton
           aria-label="Quitar el turno del pedido"
@@ -308,13 +334,83 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
   // permanente sería una fila fantasma que se lee como un turno más y que,
   // con el alta automática, se pondría a crear turnos sola.
   const [componiendo, setComponiendo] = useState(false);
-  // Total agregado — solo con 2+ turnos: con uno solo, su propia tarjeta ya
-  // muestra el total y repetirlo acá sería el mismo número dos veces (mismo
-  // criterio que "Equipos · N" no se convierte en "Total $X" salvo que sume
-  // más de una línea con montos distintos que valga la pena agregar).
-  const totalTurnosMonto =
-    turnosVinculados.reduce((acc, t) => acc + (t.monto_total || 0), 0) +
-    turnosEmbebidos.reduce((acc, t) => acc + (t.monto_total || 0), 0);
+
+  // Ledger COMBINADO (pedido del dueño: "no quiero los subtotales en cada
+  // turno, quiero un total parcial que abarque todos, y ahí el descuento").
+  // Cada tarjeta apaga su propio ledger (`mostrarTotal={false}`) y reporta
+  // acá su cotización en vivo vía `onCotizacion` — este bloque suma bruto/
+  // descuento/total de TODOS los turnos y es el único lugar donde se edita
+  // el %. `cotizaciones` mapea `turnoKey` ("v-<id>"/"e-<id>", los mismos
+  // prefijos que las `key` de los `.map()` de abajo, para que un id de
+  // vinculado y uno de embebido nunca puedan chocar) → el último estado que
+  // reportó esa tarjeta.
+  const [cotizaciones, setCotizaciones] = useState<Record<string, CotizTurnoEstado>>({});
+  // `null` = el admin TODAVÍA no tocó el control combinado — ningún turno
+  // recibe `descuentoPctOverride` (ver los `.map()` de abajo) y cada uno
+  // sigue cotizando/autoguardando con SU PROPIO % real, exactamente como
+  // antes de este cambio. Recién se vuelve un número real cuando el admin
+  // edita el control — desde ahí sí se empuja parejo a todos.
+  //
+  // ¡Importante! Se probó (y se descartó) derivar este valor automáticamente
+  // de lo que YA tienen los turnos apenas cargan (ej. "si los dos están en
+  // 10%, arrancar ahí"): en la práctica, un turno cuyo autosave falla por
+  // cualquier motivo transitorio (ej. una carrera de guardado ajena a este
+  // cambio) queda con su % real desincronizado del resto — y como el % de
+  // ese turno YA aparecía como override activo, la próxima vez que la
+  // sección detectaba "no coinciden, caigo a 0%" ESE 0% se empujaba como
+  // override y el autosave de la tarjeta lo persistía, BORRANDO un
+  // descuento real que estaba bien. Detectado en vivo (Postgres real, 2
+  // turnos con precios distintos) antes de shippear. Por eso el override
+  // solo nace de una acción explícita del admin, nunca de lo que ya había.
+  const [combinedPctOverride, setCombinedPctOverride] = useState<number | null>(null);
+
+  useEffect(() => {
+    setCotizaciones({});
+    setCombinedPctOverride(null);
+  }, [pedido.id]);
+
+  // Bail-out: si el estado reportado es IGUAL al que ya había para ese turno,
+  // devuelve la MISMA referencia de `prev` — así React no re-renderiza en
+  // cascada cada vez que una tarjeta hermana reporta la suya.
+  const handleCotizacion = useCallback((turnoKey: string, estado: CotizTurnoEstado) => {
+    setCotizaciones((prev) => {
+      const anterior = prev[turnoKey];
+      if (anterior?.status === estado.status) {
+        if (estado.status !== "ok") return prev;
+        if (anterior.status === "ok" && anterior.cotiz === estado.cotiz) return prev;
+      }
+      return { ...prev, [turnoKey]: estado };
+    });
+  }, []);
+
+  const cotizacionesList = useMemo(() => Object.values(cotizaciones), [cotizaciones]);
+  const cotizacionesOk = useMemo(
+    () =>
+      cotizacionesList.filter(
+        (e): e is { status: "ok"; cotiz: EstudioCotizacion } => e.status === "ok",
+      ),
+    [cotizacionesList],
+  );
+  const combinedListo = totalTurnosCount > 0 && cotizacionesOk.length >= totalTurnosCount;
+  const combinedError = cotizacionesList.some((e) => e.status === "error");
+  const combinedBruto = cotizacionesOk.reduce((acc, e) => acc + e.cotiz.bruto, 0);
+  const combinedDescuentoMonto = cotizacionesOk.reduce(
+    (acc, e) => acc + e.cotiz.descuento_monto,
+    0,
+  );
+  const combinedNeto = cotizacionesOk.reduce((acc, e) => acc + e.cotiz.monto_total, 0);
+  // Solo para MOSTRAR el número dentro del control antes de tocarlo — nunca
+  // se empuja como override (ver el comentario de `combinedPctOverride`
+  // arriba). Si todos los turnos ya cotizados comparten el mismo %, ese es
+  // el que se ve; si divergen, se ve 0% (no hay un número combinado real que
+  // mostrar) hasta que el admin fije uno.
+  const pctMostrado =
+    combinedPctOverride ??
+    (() => {
+      if (!combinedListo) return 0;
+      const pcts = cotizacionesOk.map((e) => e.cotiz.descuento_pct ?? 0);
+      return pcts.every((p) => p === pcts[0]) ? pcts[0] : 0;
+    })();
 
   return (
     <Section variant="card" tone="elevated" icon={Clapperboard} title="Turnos del Estudio">
@@ -332,6 +428,8 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
                 turnoId={t.id}
                 pedidoPrincipalId={pedido.id}
                 onEliminado={() => setComponiendo(false)}
+                descuentoPctOverride={combinedPctOverride ?? undefined}
+                onCotizacion={(estado) => handleCotizacion(`v-${t.id}`, estado)}
               />
             ))}
             {estudioQ.data &&
@@ -342,17 +440,49 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
                   contenedor={pedido}
                   estudio={estudioQ.data!}
                   onEliminado={() => setComponiendo(false)}
+                  descuentoPctOverride={combinedPctOverride ?? undefined}
+                  onCotizacion={(estado) => handleCotizacion(`e-${t.id}`, estado)}
                 />
               ))}
-            {/* Con 2+ turnos, cada uno ya muestra su propio Subtotal/Descuento/
-                Total — sin este cierre, la sección se leía como "varios
-                totales" en vez de uno solo (lo reportó el dueño viendo dos
-                turnos, cada uno con su "Total $120.000" propio, sin ningún
-                número que sume los dos). Con 1 solo turno, su propia tarjeta
-                YA es el total de la sección — repetirlo acá sería la misma
-                cifra dos veces (mismo criterio que "Equipos · N" arriba). */}
-            {totalTurnosCount > 1 && (
-              <TotalSeccion bruto={totalTurnosMonto} total={totalTurnosMonto} />
+            {/* Ledger ÚNICO de la sección — antes cada tarjeta mostraba su
+                propio Subtotal/Descuento/Total y acá abajo solo se sumaban
+                los totales ya resueltos, sin control de descuento (lo
+                reportó el dueño: "no quiero los subtotales en cada turno,
+                quiero un total parcial que abarque todos, y ahí el
+                descuento"). Se muestra con 1 turno o más — a diferencia del
+                criterio viejo (2+), acá es el ÚNICO ledger visible de toda
+                la sección: con 1 solo turno ya no hay otro lugar donde ver
+                su Subtotal/Descuento/Total. */}
+            {combinedError ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span>
+                  No se pudo calcular el total de uno o más turnos — no es confiable hasta
+                  recalcular.
+                </span>
+              </div>
+            ) : !combinedListo && combinedPctOverride === null ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Spinner size="sm" /> Calculando…
+              </div>
+            ) : (
+              <TotalSeccion
+                bruto={combinedBruto}
+                descuentoLabel="Descuento"
+                descuentoPct={pctMostrado}
+                descuentoMonto={combinedDescuentoMonto}
+                total={combinedNeto}
+                descuentoControl={
+                  <DescuentoControl
+                    soloPct
+                    value={{ tipo: "pct", pct: pctMostrado, monto: 0 }}
+                    onChange={(next) => setCombinedPctOverride(next.pct)}
+                    maxMonto={combinedBruto}
+                    efectivoPct={pctMostrado}
+                    efectivoMonto={combinedDescuentoMonto}
+                  />
+                }
+              />
             )}
           </div>
         )}
@@ -378,6 +508,37 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
               // El total del rail sí está montado: sale de `/api/cotizar`,
               // cuya caché no sabe que apareció este turno.
               qc.invalidateQueries({ queryKey: ["cotizar"] });
+              // El turno nuevo nace SIEMPRE en 0% (el backend no acepta
+              // descuento al crear, ver `agregar_turno_embebido`) — si el
+              // admin YA fijó un % combinado (`combinedPctOverride !== null`,
+              // acción explícita — nunca un valor derivado en silencio, ver
+              // el comentario de esa variable) y es > 0, se lo aplica acá con
+              // un PATCH extra. Sin esto, el override lo MOSTRARÍA con el %
+              // del grupo pero el valor persistido seguiría en 0% (el
+              // autosave solo REGISTRA el primer payload, no lo guarda) — un
+              // F5 lo regresaría a 0% en silencio.
+              const nuevo = (actualizado.turnos_estudio_embebidos ?? []).find(
+                (t) => !turnosEmbebidos.some((e) => e.id === t.id),
+              );
+              if (nuevo && combinedPctOverride != null && combinedPctOverride > 0) {
+                adminApi
+                  .editarTurnoEstudio(pedido.id, nuevo.id, {
+                    descuento_pct: combinedPctOverride,
+                    descuento_manual_tipo: "pct",
+                  })
+                  .then((actualizado2) => {
+                    qc.setQueryData(["admin", "pedido", pedido.id], actualizado2);
+                    qc.invalidateQueries({ queryKey: ["cotizar"] });
+                  })
+                  .catch((e: Error) =>
+                    toast.error(
+                      "El turno se creó, pero no se pudo aplicar el descuento del grupo",
+                      {
+                        description: e.message,
+                      },
+                    ),
+                  );
+              }
               setComposeKey((k) => k + 1);
               // El turno ya existe y se administra en su propia tarjeta: acá no
               // queda nada abierto (si no, el alta automática crearía otro).

@@ -46,6 +46,7 @@ import {
   estudioAdminApi,
   type Equipo,
   type EstudioConfig,
+  type EstudioCotizacion,
   type EstudioReservaUpdateInput,
   type Pedido,
 } from "@/lib/admin/api";
@@ -60,6 +61,27 @@ function horasEntre(desde?: string | null, hasta?: string | null, fallback = 2):
   if (!desde || !hasta) return fallback;
   const ms = new Date(hasta).getTime() - new Date(desde).getTime();
   return Math.max(1, Math.round(ms / 3_600_000));
+}
+
+/** El override inicial del precio del Espacio — factorizado para poder
+ *  usarse tanto en el `useState` inicial de `espacioOverride` como en la
+ *  hidratación de abajo (misma fórmula, un solo lugar). Que el `useState`
+ *  arranque YA con este valor (en vez de `""`) es lo que evita una carrera
+ *  real: si arranca vacío y la hidratación lo cambia recién en su primer
+ *  efecto, el autosave — que registra como "línea de base" el PRIMER
+ *  `payloadKey` que ve — toma el `""` como base y lee el cambio de la
+ *  hidratación como una edición real del admin, disparando un PATCH
+ *  espontáneo apenas carga la página. Con un turno cuyo descuento YA está
+ *  horneado en su `precio_jornada` (el caso normal tras usar el ledger
+ *  combinado de `TurnosEstudioSection`) esto pasaba en CADA carga, no solo
+ *  la primera vez — detectado en vivo (Postgres real, dos turnos
+ *  autoguardándose a la vez) como un deadlock real entre las dos tarjetas. */
+function espacioOverrideDe(pedido: PedidoParaReserva, estudio: EstudioConfig): string {
+  const centinela = estudio.equipo_id;
+  const horasIniciales = horasEntre(pedido.fecha_desde, pedido.fecha_hasta, estudio.min_horas || 2);
+  const centinelaItem = pedido.items.find((it) => it.equipo_id === centinela);
+  const autoEsperado = (estudio.precio_hora || 0) * horasIniciales;
+  return espacioOverrideInicial(centinelaItem?.precio_jornada, autoEsperado);
 }
 
 /** Lo mínimo que la sección necesita del pedido para hidratarse — un turno
@@ -80,6 +102,17 @@ type CotizarReservaFn = (
   params: Omit<Parameters<typeof estudioAdminApi.cotizarReserva>[0], "pedido_id">,
 ) => ReturnType<typeof estudioAdminApi.cotizarReserva>;
 
+/** Estado de la cotización de UN turno, reportado hacia arriba vía `onCotizacion`
+ *  (ver el prop, más abajo) — lo consume `TurnosEstudioSection` para armar el
+ *  ledger COMBINADO de varios turnos. `undefined` no alcanza para distinguir
+ *  "todavía no cargó" de "falló": sin esa distinción, un turno que erroró podía
+ *  desaparecer en silencio de la suma combinada en vez de marcarla como no
+ *  confiable. */
+export type CotizTurnoEstado =
+  | { status: "cargando" }
+  | { status: "error" }
+  | { status: "ok"; cotiz: EstudioCotizacion };
+
 export function ReservaEstudioSection({
   pedido,
   estudio,
@@ -88,6 +121,9 @@ export function ReservaEstudioSection({
   onSaved,
   cotizar,
   guardar,
+  mostrarTotal = true,
+  descuentoPctOverride,
+  onCotizacion,
 }: {
   pedido: PedidoParaReserva;
   estudio: EstudioConfig;
@@ -105,6 +141,20 @@ export function ReservaEstudioSection({
   /** Ver el docstring del módulo — default: turno STANDALONE. */
   cotizar?: CotizarReservaFn;
   guardar?: (payload: EstudioReservaUpdateInput) => Promise<Pedido>;
+  /** `false` cuando el caller arma un ledger COMBINADO de varios turnos (p.ej.
+   *  `TurnosEstudioSection` con 2+ turnos) — oculta SOLO el `TotalSeccion`
+   *  propio; el spinner/error de cotización y el aviso "espacio no disponible"
+   *  siguen siempre visibles (son señales operativas de ESTE turno, no ledger). */
+  mostrarTotal?: boolean;
+  /** Cuando viene, reemplaza el % de descuento propio del turno para la
+   *  cotización/el guardado — lo usa el ledger combinado para aplicar el MISMO
+   *  % a cada turno. El estado/hidratación interna de `descuento` sigue
+   *  intacta, simplemente deja de leerse mientras el override está activo. */
+  descuentoPctOverride?: number;
+  /** Reporta el estado de la cotización YA calculada acá adentro — no agrega
+   *  ningún cálculo nuevo, solo relee `cotizarQ` para que el caller pueda sumar
+   *  el bruto/descuento/total de varios turnos sin recalcular nada él mismo. */
+  onCotizacion?: (estado: CotizTurnoEstado) => void;
 }) {
   // `false` = un turno EMBEBIDO (el caller inyectó `cotizar`/`guardar`) — ver
   // el uso en `mutation.onSuccess` abajo.
@@ -122,7 +172,7 @@ export function ReservaEstudioSection({
   const [conPromo, setConPromo] = useState(false);
   const [pinturaReciente, setPinturaReciente] = useState(false);
   const [sueltos, setSueltos] = useState<SueltoLocal[]>([]);
-  const [espacioOverride, setEspacioOverride] = useState("");
+  const [espacioOverride, setEspacioOverride] = useState(() => espacioOverrideDe(pedido, estudio));
   // Descuento PROPIO del turno (#1308, decisión del dueño): aparte del de los
   // equipos, editable acá adentro. Persiste en las columnas de descuento manual
   // que la fila de `alquileres` ya tiene — un turno ES un pedido, no hace falta
@@ -161,9 +211,7 @@ export function ReservaEstudioSection({
       pedido.fecha_hasta,
       estudio.min_horas || 2,
     );
-    const centinelaItem = pedido.items.find((it) => it.equipo_id === centinela);
-    const autoEsperado = (estudio.precio_hora || 0) * horasActuales;
-    setEspacioOverride(espacioOverrideInicial(centinelaItem?.precio_jornada, autoEsperado));
+    setEspacioOverride(espacioOverrideDe(pedido, estudio));
     setFecha(pedido.fecha_desde?.slice(0, 10) ?? "");
     setStart(pedido.fecha_desde?.slice(11, 16) ?? "");
     setHoras(horasActuales);
@@ -180,6 +228,19 @@ export function ReservaEstudioSection({
     [sueltos],
   );
 
+  // Memoizado: un objeto nuevo sin memoizar en cada render (p.ej. un literal
+  // `override != null ? {...} : descuento` inline) rompería el debounce de
+  // `cotizarDebounced` de abajo, que compara por REFERENCIA — reiniciaría el
+  // timer de 400ms en cada render del padre, no solo cuando el % realmente
+  // cambia.
+  const descuentoEfectivo = useMemo(
+    () =>
+      descuentoPctOverride != null
+        ? { tipo: "pct" as const, pct: descuentoPctOverride, monto: 0 }
+        : descuento,
+    [descuentoPctOverride, descuento],
+  );
+
   const cotizarParams = useMemo(
     () => ({
       fecha,
@@ -192,11 +253,20 @@ export function ReservaEstudioSection({
       // así lo que muestra la fila "Espacio" y el Total es lo que se cobra, no
       // el precio de lista.
       espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
-      descuento_pct: descuento.pct,
-      descuento_manual_tipo: descuento.tipo,
-      descuento_manual_monto: descuento.monto,
+      descuento_pct: descuentoEfectivo.pct,
+      descuento_manual_tipo: descuentoEfectivo.tipo,
+      descuento_manual_monto: descuentoEfectivo.monto,
     }),
-    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput, espacioOverride, descuento],
+    [
+      fecha,
+      start,
+      horas,
+      conPromo,
+      pinturaReciente,
+      sueltosInput,
+      espacioOverride,
+      descuentoEfectivo,
+    ],
   );
   const cotizarDebounced = useDebouncedValue(cotizarParams, 400);
 
@@ -230,11 +300,20 @@ export function ReservaEstudioSection({
       pintura_reciente: pinturaReciente,
       sueltos: sueltosInput,
       espacio_monto: espacioOverride.trim() ? Number(espacioOverride) : null,
-      descuento_pct: descuento.pct,
-      descuento_manual_tipo: descuento.tipo,
-      descuento_manual_monto: descuento.monto,
+      descuento_pct: descuentoEfectivo.pct,
+      descuento_manual_tipo: descuentoEfectivo.tipo,
+      descuento_manual_monto: descuentoEfectivo.monto,
     }),
-    [fecha, start, horas, conPromo, pinturaReciente, sueltosInput, espacioOverride, descuento],
+    [
+      fecha,
+      start,
+      horas,
+      conPromo,
+      pinturaReciente,
+      sueltosInput,
+      espacioOverride,
+      descuentoEfectivo,
+    ],
   );
   const payloadKey = useMemo(() => JSON.stringify(payload), [payload]);
   /** Último payload que la base ya tiene. `null` = recién hidratado, todavía no
@@ -308,6 +387,16 @@ export function ReservaEstudioSection({
   const cotiz = cotizarQ.data;
   const puedeGuardar = !!fecha && !!start && horas >= (estudio.min_horas || 1);
 
+  // Relee lo que `cotizarQ` YA calculó — no agrega ningún cómputo nuevo, solo
+  // lo relaya hacia el caller (el ledger combinado de `TurnosEstudioSection`).
+  useEffect(() => {
+    if (!onCotizacion) return;
+    if (cotizarQ.isError) onCotizacion({ status: "error" });
+    else if (cotiz) onCotizacion({ status: "ok", cotiz });
+    else onCotizacion({ status: "cargando" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `onCotizacion` es responsabilidad del caller memoizarlo (bail-out); incluirlo acá no cambia qué se reporta
+  }, [cotiz, cotizarQ.isError]);
+
   // Autosave con debounce — TODO lo demás del pedido se guarda solo (decisión
   // del dueño: "todo en el pedido se autosalva, creo que es mejor así"), así
   // que un botón "Guardar cambios" acá era la única cosa de la pantalla que
@@ -335,6 +424,30 @@ export function ReservaEstudioSection({
         ? "dirty"
         : "saved";
 
+  // Sin `mostrarTotal`, el `SaveIndicator` de error que vivía como `trailing`
+  // del `TotalSeccion` (más abajo) se queda sin lugar — se suma acá, al lado
+  // de la ✕, para no perder la señal de "esta tarjeta puntual no se guardó"
+  // cuando el ledger combinado es el único que se ve.
+  const accionConEstado = mostrarTotal ? (
+    accion
+  ) : (
+    <div className="flex items-center gap-1.5">
+      <SaveIndicator status={saveStatus} onlyError />
+      {accion}
+    </div>
+  );
+
+  // Con `mostrarTotal=false` (ledger combinado en el caller) el `TotalSeccion`
+  // de acá abajo no se dibuja — pero el spinner/error de la cotización y el
+  // aviso de "espacio no disponible" son señales de ESTE turno puntual y
+  // siguen siempre visibles. Sin este gate explícito, además, un turno sin
+  // nada que mostrar (todo bien, `mostrarTotal=false`) dejaba un divisor
+  // (`border-t-2 pt-4`) vacío al pie de la tarjeta, sin motivo.
+  const hayAlgoAbajo =
+    cotizarQ.isLoading ||
+    cotizarQ.isError ||
+    (!!cotiz && (mostrarTotal || !cotiz.espacio_disponible));
+
   return (
     <Section
       variant="card"
@@ -343,11 +456,11 @@ export function ReservaEstudioSection({
       // el recuadro), y el ✕ baja a la banda de tiempo.
       icon={anidada ? undefined : Clapperboard}
       title={anidada ? "" : "Reserva del Estudio"}
-      actions={anidada ? undefined : accion}
+      actions={anidada ? undefined : accionConEstado}
     >
       <div className="space-y-4">
         <EstudioIncluyeList
-          accion={anidada ? accion : undefined}
+          accion={anidada ? accionConEstado : undefined}
           estudio={estudio}
           fecha={fecha}
           onChangeFecha={setFecha}
@@ -374,79 +487,86 @@ export function ReservaEstudioSection({
             contable (pedido del dueño: "una línea horizontal más ancha para
             separar los equipos de la parte contable"); las dos secciones son
             gemelas, la frontera tiene que leerse igual en las dos. */}
-        <div className="border-t-2 border-ink/35 pt-4">
-          {/* Total en vivo — el front no calcula, solo muestra (2026-06-29).
-              Sin wrapper propio: `TotalSeccion` ya pone su propio recuadro;
-              acá arriba había un `<div>` viejo con ESA MISMA caja, sobrante
-              de antes de extraer el componente — quedaba una caja adentro de
-              otra caja (lo vio el dueño: "veo doble recuadro"). El descuento
-              propio del turno (#1308) va COMO PROP, dentro de la fila
-              "Descuento del turno" del ledger — antes era un bloque suelto
-              arriba, o sea el control y su resultado separados diciendo lo
-              mismo ("¿podemos unificar esos dos campos? ... y el modificador
-              de descuento, in place"). Es la MISMA pieza que usa "Alquiler de
-              equipos", no una copia. */}
-          {cotizarQ.isLoading ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <Spinner size="sm" /> Calculando…
-            </div>
-          ) : cotizarQ.isError ? (
-            // Antes `cotizarQ.isError` no se leía acá: un fallo de red dejaba
-            // el bloque mostrando el ÚLTIMO total bueno (`keepPreviousData`)
-            // sin ningún aviso de que ya no es de fiar — el Total del turno
-            // podía estar mintiendo en silencio.
-            <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive">
-              <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-              <span>
-                No se pudo calcular el total del turno — no es confiable hasta recalcular.
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="ml-auto"
-                onClick={() => void cotizarQ.refetch()}
-              >
-                Reintentar
-              </Button>
-            </div>
-          ) : cotiz ? (
-            <>
-              <TotalSeccion
-                bruto={cotiz.bruto ?? 0}
-                descuentoLabel="Descuento del turno"
-                descuentoPct={cotiz.descuento_pct}
-                descuentoMonto={cotiz.descuento_monto}
-                total={cotiz.monto_total}
-                descuentoControl={
-                  <DescuentoControl
-                    value={descuento}
-                    onChange={setDescuento}
-                    maxMonto={cotiz.bruto_descontable ?? cotiz.monto_total ?? 0}
-                    efectivoPct={cotiz.descuento_pct ?? 0}
-                    efectivoMonto={cotiz.descuento_monto ?? 0}
-                    disabled={mutation.isPending}
+        {hayAlgoAbajo && (
+          <div className="border-t-2 border-ink/35 pt-4">
+            {/* Total en vivo — el front no calcula, solo muestra (2026-06-29).
+                Sin wrapper propio: `TotalSeccion` ya pone su propio recuadro;
+                acá arriba había un `<div>` viejo con ESA MISMA caja, sobrante
+                de antes de extraer el componente — quedaba una caja adentro de
+                otra caja (lo vio el dueño: "veo doble recuadro"). El descuento
+                propio del turno (#1308) va COMO PROP, dentro de la fila
+                "Descuento del turno" del ledger — antes era un bloque suelto
+                arriba, o sea el control y su resultado separados diciendo lo
+                mismo ("¿podemos unificar esos dos campos? ... y el modificador
+                de descuento, in place"). Es la MISMA pieza que usa "Alquiler de
+                equipos", no una copia. Con `mostrarTotal=false` (ledger
+                combinado de varios turnos, ver `TurnosEstudioSection`) este
+                bloque se apaga — el aviso de "espacio no disponible" de más
+                abajo sigue mostrándose igual, es independiente del ledger. */}
+            {cotizarQ.isLoading ? (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Spinner size="sm" /> Calculando…
+              </div>
+            ) : cotizarQ.isError ? (
+              // Antes `cotizarQ.isError` no se leía acá: un fallo de red dejaba
+              // el bloque mostrando el ÚLTIMO total bueno (`keepPreviousData`)
+              // sin ningún aviso de que ya no es de fiar — el Total del turno
+              // podía estar mintiendo en silencio.
+              <div className="flex flex-wrap items-center gap-2 rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-2 text-xs text-destructive">
+                <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                <span>
+                  No se pudo calcular el total del turno — no es confiable hasta recalcular.
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="ml-auto"
+                  onClick={() => void cotizarQ.refetch()}
+                >
+                  Reintentar
+                </Button>
+              </div>
+            ) : cotiz ? (
+              <>
+                {mostrarTotal && (
+                  <TotalSeccion
+                    bruto={cotiz.bruto ?? 0}
+                    descuentoLabel="Descuento del turno"
+                    descuentoPct={cotiz.descuento_pct}
+                    descuentoMonto={cotiz.descuento_monto}
+                    total={cotiz.monto_total}
+                    descuentoControl={
+                      <DescuentoControl
+                        value={descuento}
+                        onChange={setDescuento}
+                        maxMonto={cotiz.bruto_descontable ?? cotiz.monto_total ?? 0}
+                        efectivoPct={cotiz.descuento_pct ?? 0}
+                        efectivoMonto={cotiz.descuento_monto ?? 0}
+                        disabled={mutation.isPending}
+                      />
+                    }
+                    // onlyError: el indicador general de arriba a la derecha ya
+                    // cubre "está todo guardado" — repetir "Guardado"/"Sin
+                    // guardar"/"Guardando…" acá abajo leía como el mismo aviso,
+                    // dos veces (el dueño lo notó dos veces seguidas: primero por
+                    // "Guardado" en reposo, después por "Sin guardar" mientras
+                    // tipeaba). Son técnicamente autosaves DISTINTOS (este
+                    // PATCHea el turno, no el pedido) — pero esas transiciones
+                    // duran bien menos de un segundo, no hace falta narrarlas.
+                    // Lo único que el general NO puede avisar es un error real de
+                    // ESTE PATCH, así que es lo único que sigue en pantalla.
+                    trailing={<SaveIndicator status={saveStatus} onlyError />}
                   />
-                }
-                // onlyError: el indicador general de arriba a la derecha ya
-                // cubre "está todo guardado" — repetir "Guardado"/"Sin
-                // guardar"/"Guardando…" acá abajo leía como el mismo aviso,
-                // dos veces (el dueño lo notó dos veces seguidas: primero por
-                // "Guardado" en reposo, después por "Sin guardar" mientras
-                // tipeaba). Son técnicamente autosaves DISTINTOS (este
-                // PATCHea el turno, no el pedido) — pero esas transiciones
-                // duran bien menos de un segundo, no hace falta narrarlas.
-                // Lo único que el general NO puede avisar es un error real de
-                // ESTE PATCH, así que es lo único que sigue en pantalla.
-                trailing={<SaveIndicator status={saveStatus} onlyError />}
-              />
-              {!cotiz.espacio_disponible && (
-                <p className="text-xs text-destructive">
-                  El espacio no está disponible: {cotiz.espacio_motivo}
-                </p>
-              )}
-            </>
-          ) : null}
-        </div>
+                )}
+                {!cotiz.espacio_disponible && (
+                  <p className="text-xs text-destructive">
+                    El espacio no está disponible: {cotiz.espacio_motivo}
+                  </p>
+                )}
+              </>
+            ) : null}
+          </div>
+        )}
       </div>
     </Section>
   );
