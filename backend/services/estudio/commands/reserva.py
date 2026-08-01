@@ -933,10 +933,22 @@ def eliminar_turno_embebido(conn, turno_id: int) -> None:
     sobre el grupo: `alquiler_items.turno_estudio_id` es `ON DELETE CASCADE`,
     así que borrar la fila de `alquiler_turnos_estudio` se lleva sus ítems
     solo. A diferencia de sacar un turno VINCULADO (mecanismo viejo,
-    `pedidos_vinculados.py`), acá no hay una fila `alquileres` aparte ni plata
-    propia que verificar — el turno nunca fue "su propia venta", siempre fue
-    parte de ESTE pedido. Sin gate de "plata cobrada": el pago vive en el
-    contenedor, no en el turno (a diferencia del mecanismo viejo).
+    `pedidos_vinculados.py`), acá no hay una fila `alquileres` aparte ni
+    `monto_pagado` propio que verificar — el turno nunca fue "su propia
+    venta", siempre fue parte de ESTE pedido; el pago vive en el contenedor.
+
+    Gate de sobrepago (hallazgo de auditoría — mismo espíritu que el "plata
+    cobrada" del mecanismo VIEJO, adaptado: acá no hay un `monto_pagado`
+    propio del turno que mirar, así que se mira el efecto en el contenedor).
+    Los ítems del turno NUNCA absorben el descuento global del pedido
+    (`calcular_total` los excluye del `bruto_descontable`, F3.1) — por eso
+    `SUM(subtotal)` de sus propios ítems es EXACTAMENTE cuánto restaría este
+    turno de `monto_total` al sacarse, sin aproximar. Si lo ya cobrado
+    (`monto_pagado`) superaría ese total reducido, se frena: sacar el turno en
+    silencio dejaría al pedido mostrando un cobro de más que nadie corrigió.
+    `FOR UPDATE` en la fila del pedido — mismo lock que toma un pago
+    (`_agregar_pago`/`_agregar_pago_combinado`) para que un cobro en vuelo no
+    se cuele entre este chequeo y el DELETE de abajo.
 
     Recalcula `monto_total` del pedido contenedor al final. No commitea —
     responsabilidad del caller (route)."""
@@ -946,6 +958,22 @@ def eliminar_turno_embebido(conn, turno_id: int) -> None:
     if not turno:
         raise HTTPException(404, "Turno no encontrado")
     pedido_id = turno["pedido_id"]
+
+    pedido = conn.execute(
+        "SELECT monto_total, monto_pagado FROM alquileres WHERE id = %s FOR UPDATE",
+        (pedido_id,),
+    ).fetchone()
+    turno_monto = conn.execute(
+        "SELECT COALESCE(SUM(subtotal), 0) AS monto FROM alquiler_items WHERE turno_estudio_id = %s",
+        (turno_id,),
+    ).fetchone()["monto"]
+    nuevo_total = (pedido["monto_total"] or 0) - turno_monto
+    if (pedido["monto_pagado"] or 0) > nuevo_total:
+        raise HTTPException(
+            409,
+            "Sacar este turno dejaría el pedido sobrepagado. Anulá o ajustá el "
+            "pago antes de sacarlo.",
+        )
 
     conn.execute("DELETE FROM alquiler_turnos_estudio WHERE id = %s", (turno_id,))
 
