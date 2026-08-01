@@ -45,7 +45,6 @@ import { Section } from "@/design-system/composites/Section";
 import { Button } from "@/design-system/ui/button";
 import { IconButton } from "@/design-system/ui/icon-button";
 import { Spinner } from "@/design-system/ui/spinner";
-import { fmtArs } from "@/lib/format";
 import {
   adminApi,
   estudioAdminApi,
@@ -55,6 +54,7 @@ import {
 } from "@/lib/admin/api";
 import { ReservaEstudioSection } from "@/components/admin/estudio/ReservaEstudioSection";
 import { NuevoTurnoEstudioForm } from "@/components/admin/estudio/NuevoTurnoEstudioForm";
+import { TotalSeccion } from "@/components/admin/pedido/TotalSeccion";
 
 function TurnoVinculadoCard({
   turnoId,
@@ -317,26 +317,14 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
     turnosEmbebidos.reduce((acc, t) => acc + (t.monto_total || 0), 0);
 
   return (
-    <Section
-      variant="card"
-      tone="elevated"
-      icon={Clapperboard}
-      title="Turnos del Estudio"
-      actions={
-        totalTurnosCount > 1 ? (
-          <span className="font-mono text-xs text-muted-foreground">
-            {totalTurnosCount} turnos · {fmtArs(totalTurnosMonto)}
-          </span>
-        ) : undefined
-      }
-    >
+    <Section variant="card" tone="elevated" icon={Clapperboard} title="Turnos del Estudio">
       <div className="space-y-4">
         {totalTurnosCount > 0 && (
           <div className="space-y-4">
             {/* "Turnos · N" — mismo eyebrow que "Equipos · N" en la sección
-                gemela; con 2+ también arriba (`actions`) el total agregado.
-                Un solo conteo para las dos listas: la distinción vieja/nuevo
-                es interna, el dueño solo ve "turnos de este pedido". */}
+                gemela. Un solo conteo para las dos listas: la distinción
+                vieja/nuevo es interna, el dueño solo ve "turnos de este
+                pedido". */}
             <div className="t-eyebrow">Turnos · {totalTurnosCount}</div>
             {turnosVinculados.map((t) => (
               <TurnoVinculadoCard
@@ -356,6 +344,16 @@ export function TurnosEstudioSection({ pedido }: { pedido: Pedido }) {
                   onEliminado={() => setComponiendo(false)}
                 />
               ))}
+            {/* Con 2+ turnos, cada uno ya muestra su propio Subtotal/Descuento/
+                Total — sin este cierre, la sección se leía como "varios
+                totales" en vez de uno solo (lo reportó el dueño viendo dos
+                turnos, cada uno con su "Total $120.000" propio, sin ningún
+                número que sume los dos). Con 1 solo turno, su propia tarjeta
+                YA es el total de la sección — repetirlo acá sería la misma
+                cifra dos veces (mismo criterio que "Equipos · N" arriba). */}
+            {totalTurnosCount > 1 && (
+              <TotalSeccion bruto={totalTurnosMonto} total={totalTurnosMonto} />
+            )}
           </div>
         )}
 
