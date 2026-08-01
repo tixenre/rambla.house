@@ -129,6 +129,32 @@ pisada por una **env var** viaja con `bloqueada_por_env` y la pantalla la muestr
 El plan A/B, el gating por canal (WhatsApp gateado por credencial/opt-in/E.164), la
 idempotencia y el fail-safe salen gratis de los senders y de la estrategia declarada.
 
+## Robustez: reintento, alerta y retención
+
+Tres jobs cross-canal (mail + WhatsApp) en el mismo scheduler in-process (`jobs/scheduler.py`,
+cero costo de infra nuevo):
+
+- **`jobs/reintentar_comunicacion.py::reintentar_fallidos`** (cada 1h): un envío `failed`
+  (Meta/Resend caídos unos minutos, timeout) ya no se queda así para siempre. Por cada
+  evento del `REGISTRO`, busca pedidos con un `failed` reciente (24h) y NINGÚN `sent` — en
+  ningún canal — para ese evento (si el plan A/B ya alcanzó al cliente por el otro canal, no
+  hay que reintentar: sería un aviso duplicado por otra vía), con tope de 3 intentos totales.
+  Reintenta re-llamando a `notificar_pedido` — la MISMA puerta del disparo original, no
+  reimplementa el envío.
+- **`jobs/comunicacion_alertas.py::chequear_fallas_y_alertar`** (1×/día, mirror de
+  `jobs/reconciliacion.py`): si `emails_log`/`whatsapp_log` acumulan `UMBRAL_FALLOS` (3)
+  fallos en las últimas 24h, manda un mail resumen a los admins. No repara nada, solo avisa.
+  Dedup contra `emails_log` (20h) para no alertar más de una vez por día por incidente.
+- **`jobs/purgar_logs_comunicacion.py::purgar_logs_comunicacion_viejos`** (1×/día): borra
+  filas de `emails_log`/`whatsapp_log` con `sent_at` más viejo que `RETENCION_DIAS` (365,
+  decisión del dueño) — antes era la única tabla con PII de contacto del repo sin ninguna
+  política de retención.
+
+De paso, `jobs/reconciliacion.py::chequear_reconciliacion_y_alertar` (#1184 Fase 2) se
+conectó al scheduler por primera vez — existía desde ese PR con tests propios, pero nunca
+se había llamado desde ningún lado (corría solo si un admin abría `/admin/reportes`/
+`/admin/contabilidad` a mirar el semáforo).
+
 ## Tests
 
 `tests/test_comunicacion.py` (registro consistente + plan A/B por evento/canal; `ctx` opcional),

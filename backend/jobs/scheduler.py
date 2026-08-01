@@ -48,6 +48,11 @@ _CHECK_EVERY_S = 600  # 10 min: granularidad del sondeo
 # minutos, no en días, así que un corte a medianoche no aplica.
 _RECHECK_DIDIT_EVERY = timedelta(minutes=30)
 
+# Reintento de comunicación fallida: por tiempo transcurrido, no por fecha —
+# una falla transitoria (Meta/Resend caídos unos minutos) se quiere recuperar
+# dentro de la hora, no esperar al barrido diario siguiente.
+_REINTENTAR_COMUNICACION_EVERY = timedelta(hours=1)
+
 
 def _hard_disabled() -> bool:
     """Kill-switch de ops/CI: apaga el thread por completo (no sondea). Útil en
@@ -68,6 +73,10 @@ def _loop() -> None:
     from jobs.cleanup_livianas import purgar_cuentas_livianas_stale
     from jobs.recheck_didit_pendientes import recheck_verificaciones_pendientes
     from jobs.purgar_auth import purgar_sesiones_y_challenges_expirados
+    from jobs.reintentar_comunicacion import reintentar_fallidos
+    from jobs.comunicacion_alertas import chequear_fallas_y_alertar
+    from jobs.purgar_logs_comunicacion import purgar_logs_comunicacion_viejos
+    from jobs.reconciliacion import chequear_reconciliacion_y_alertar
 
     ultima_manana = None      # recordatorios de retiro, pasada de la mañana
     ultima_vispera = None     # recordatorios de retiro, pasada de la víspera
@@ -75,6 +84,10 @@ def _loop() -> None:
     ultima_limpieza = None    # cleanup de cuentas livianas (independiente)
     ultimo_recheck_didit = None  # recheck de verificaciones pendientes (por intervalo, no por día)
     ultima_purga_auth = None  # housekeeping de auth_sessions/auth_challenges (independiente)
+    ultimo_reintento_comunicacion = None  # reintento de mail/whatsapp fallidos (por intervalo)
+    ultima_alerta_comunicacion = None  # alerta de fallas de comunicación (independiente)
+    ultima_purga_logs_comunicacion = None  # retención de emails_log/whatsapp_log (independiente)
+    ultima_reconciliacion = None  # alerta de reconciliación de plata (#1184 Fase 2 — dormida hasta ahora)
     while True:
         ahora = now_ar()
         try:
@@ -138,6 +151,42 @@ def _loop() -> None:
                 purgar_sesiones_y_challenges_expirados()
         except Exception:
             logger.exception("Falló el housekeeping de auth_sessions/auth_challenges")
+        try:
+            # Reintento de comunicación fallida: cada _REINTENTAR_COMUNICACION_EVERY,
+            # independiente de los demás. Idempotente (notificar_pedido hereda el
+            # gating/idempotencia de cada canal) — un reinicio del proceso no
+            # duplica nada, en el peor caso reintenta antes de tiempo.
+            if (
+                ultimo_reintento_comunicacion is None
+                or (ahora - ultimo_reintento_comunicacion) >= _REINTENTAR_COMUNICACION_EVERY
+            ):
+                ultimo_reintento_comunicacion = ahora
+                reintentar_fallidos()
+        except Exception:
+            logger.exception("Falló el reintento de comunicación fallida")
+        try:
+            # Alerta de fallas de comunicación: 1×/día, independiente de los demás.
+            if ahora.date() != ultima_alerta_comunicacion:
+                ultima_alerta_comunicacion = ahora.date()
+                chequear_fallas_y_alertar()
+        except Exception:
+            logger.exception("Falló la alerta de fallas de comunicación")
+        try:
+            # Retención de logs de comunicación: 1×/día, independiente de los demás.
+            if ahora.date() != ultima_purga_logs_comunicacion:
+                ultima_purga_logs_comunicacion = ahora.date()
+                purgar_logs_comunicacion_viejos()
+        except Exception:
+            logger.exception("Falló la purga de logs de comunicación")
+        try:
+            # Alerta de reconciliación de plata (#1184 Fase 2): existía desde ese PR
+            # pero nunca se había conectado acá — corría solo si un admin abría
+            # /admin/reportes o /admin/contabilidad a mirar. 1×/día, independiente.
+            if ahora.date() != ultima_reconciliacion:
+                ultima_reconciliacion = ahora.date()
+                chequear_reconciliacion_y_alertar()
+        except Exception:
+            logger.exception("Falló la alerta de reconciliación de plata")
         time.sleep(_CHECK_EVERY_S)
 
 
