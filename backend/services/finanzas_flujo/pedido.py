@@ -82,6 +82,15 @@ def desglose_de_pedido(conn, pedido: dict) -> dict:
             # Fase C-3 (#1219): no acumula el descuento global — ya trae el
             # suyo propio (`kit_componentes.descuento_pct`) horneado en el precio.
             "es_combo": it.get("equipo_tipo") == "combo",
+            # `turno_estudio_id` (#1308 rediseño "turno como ítem"): SIN esto,
+            # `calcular_total` (que excluye estas líneas del descuento global,
+            # ver su docstring) las trataba como cualquier equipo normal — el
+            # desglose de ACÁ (display/factura/portal) divergía del persistido
+            # por `_recalcular_total_pedido` (`commands/items.py`, que SÍ pasa
+            # esta clave) en cuanto el pedido tenía un descuento % — hallazgo
+            # real de auditoría, confirmado en vivo ($6.900 de diferencia en
+            # un pedido con 10% de descuento + un turno de $69.000).
+            "turno_estudio_id": it.get("turno_estudio_id"),
         }
         for it in pedido.get("items", [])
     ]
