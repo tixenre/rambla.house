@@ -143,6 +143,25 @@ def _validar_descuento_manual_monto(v):
     return v
 
 
+def _validar_espacio_monto(v):
+    """Tarifa NEGOCIADA del espacio del Estudio (`alquiler_items.precio_jornada`,
+    INTEGER) — un valor negativo restaría del total del pedido en vez de sumar
+    (hallazgo de auditoría: antes se aceptaba sin chequeo y producía un
+    `monto_total` negativo). Mismo tope superior que `_validar_descuento_manual_
+    monto` (`NumericValueOutOfRange` crudo de Postgres si no se corta acá).
+    Fuente única compartida por el turno STANDALONE (`EstudioReservaAdminCreate`/
+    `Update`, routes/estudio.py) y el turno EMBEBIDO (`TurnoEstudioCreate`/
+    `Update`, routes/alquileres/turnos_estudio.py) — los dos caminos que
+    persisten esta tarifa no pueden aceptar rangos distintos."""
+    if v is None:
+        return v
+    if v < 0:
+        raise ValueError("espacio_monto no puede ser negativo")
+    if v >= 2_147_483_647:
+        raise ValueError("espacio_monto demasiado alto")
+    return v
+
+
 class PedidoDatos(BaseModel):
     cliente_id:       Optional[int]   = Field(default=None, gt=0, lt=2_147_483_647)
     cliente_nombre:   Optional[str]   = None

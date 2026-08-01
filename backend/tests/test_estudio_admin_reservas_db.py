@@ -268,6 +268,20 @@ def test_crear_reserva_admin_con_promo_y_espacio_override(client_con_db, setup):
     assert data["promo_advertencia"] is None
 
 
+def test_crear_reserva_admin_rechaza_espacio_monto_negativo(client_con_db, setup):
+    """Hallazgo de auditoría: un `espacio_monto` negativo no se chequeaba —
+    restaría del `monto_total` del pedido en vez de sumar."""
+    r = client_con_db.post(
+        "/api/admin/estudio/reservas",
+        json={
+            "fecha": "2030-05-25", "start": "10:00", "horas": 2,
+            "cliente_nombre": "Reserva admin test — espacio negativo",
+            "espacio_monto": -1,
+        },
+    )
+    assert r.status_code == 422, r.text
+
+
 def test_crear_reserva_admin_con_promo_sin_stock_es_best_effort(client_con_db, setup):
     """La promo es BEST-EFFORT también desde el admin (mismo núcleo
     `_crear_pedido_estudio` que el flujo público) — a diferencia de un suelto
@@ -546,6 +560,26 @@ def test_editar_reserva_reprograma_y_revalida(client_con_db, setup):
     finally:
         conn.close()
     assert pedido["fecha_desde"].isoformat().startswith("2030-05-11T14:00")
+
+
+def test_editar_reserva_rechaza_espacio_monto_negativo(client_con_db, setup):
+    """Mismo chequeo que en la creación (ver
+    `test_crear_reserva_admin_rechaza_espacio_monto_negativo`), del lado edición."""
+    r = client_con_db.post(
+        "/api/admin/estudio/reservas",
+        json={
+            "fecha": "2030-05-26", "start": "10:00", "horas": 2,
+            "cliente_nombre": "Reserva admin test — editar espacio negativo",
+        },
+    )
+    assert r.status_code == 201, r.text
+    pedido_id = r.json()["id"]
+
+    r2 = client_con_db.patch(
+        f"/api/admin/estudio/reservas/{pedido_id}",
+        json={"espacio_monto": -500},
+    )
+    assert r2.status_code == 422, r2.text
 
 
 def test_editar_reserva_agrega_suelto(client_con_db, setup):

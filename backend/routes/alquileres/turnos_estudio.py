@@ -26,6 +26,7 @@ from routes.alquileres.modelos import (
     _validar_descuento_manual_monto,
     _validar_descuento_manual_tipo,
     _validar_descuento_pct,
+    _validar_espacio_monto,
 )
 from services.alquileres.queries.detalle import _get_alquiler_detail
 from services.estudio.commands.reserva import (
@@ -47,6 +48,11 @@ class TurnoEstudioCreate(BaseModel):
     sueltos: list[SueltoItem] = []
     espacio_monto: Optional[int] = None
 
+    @field_validator("espacio_monto")
+    @classmethod
+    def _v_espacio_monto(cls, v):
+        return _validar_espacio_monto(v)
+
 
 class TurnoEstudioUpdate(BaseModel):
     fecha: Optional[str] = None
@@ -64,6 +70,11 @@ class TurnoEstudioUpdate(BaseModel):
     descuento_pct: Optional[float] = None
     descuento_manual_tipo: Optional[str] = None
     descuento_manual_monto: Optional[int] = None
+
+    @field_validator("espacio_monto")
+    @classmethod
+    def _v_espacio_monto(cls, v):
+        return _validar_espacio_monto(v)
 
     @field_validator("descuento_pct")
     @classmethod

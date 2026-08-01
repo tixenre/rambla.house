@@ -68,6 +68,7 @@ from routes.alquileres.modelos import (
     _validar_descuento_manual_monto,
     _validar_descuento_manual_tipo,
     _validar_descuento_pct,
+    _validar_espacio_monto,
 )
 from services.estudio.commands.promo import crear_promo as _crear_promo
 
@@ -1739,6 +1740,11 @@ class EstudioReservaAdminCreate(BaseModel):
     # este body se ignoran) para que nunca puedan desincronizarse.
     pedido_principal_id: Optional[int] = None
 
+    @field_validator("espacio_monto")
+    @classmethod
+    def _v_espacio_monto(cls, v):
+        return _validar_espacio_monto(v)
+
 
 def _resolver_pedido_principal(conn, pedido_principal_id: int):
     """Valida el pedido a vincular y devuelve su contacto — el turno hereda
@@ -1824,6 +1830,11 @@ class EstudioReservaAdminUpdate(BaseModel):
     descuento_pct: Optional[float] = None
     descuento_manual_tipo: Optional[str] = None
     descuento_manual_monto: Optional[int] = None
+
+    @field_validator("espacio_monto")
+    @classmethod
+    def _v_espacio_monto(cls, v):
+        return _validar_espacio_monto(v)
 
     @field_validator("descuento_pct")
     @classmethod

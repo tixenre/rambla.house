@@ -166,6 +166,18 @@ def test_post_400_si_el_pedido_no_es_diaria(client_con_db, setup):
     assert r.status_code == 400
 
 
+def test_post_422_si_espacio_monto_es_negativo(client_con_db, setup):
+    """Hallazgo de auditoría: un `espacio_monto` negativo no se chequeaba —
+    restaría del `monto_total` del pedido contenedor en vez de sumar. Mismo
+    validador (`_validar_espacio_monto`) que el turno STANDALONE
+    (`test_estudio_admin_reservas_db.py::test_crear_reserva_admin_rechaza_espacio_monto_negativo`)."""
+    r = client_con_db.post(
+        f"/api/alquileres/{PEDIDO_ID}/turnos-estudio",
+        json={"fecha": "2033-04-11", "start": "14:00", "horas": 2, "espacio_monto": -1},
+    )
+    assert r.status_code == 422, r.text
+
+
 def test_patch_reprograma_y_aplica_descuento(client_con_db, setup):
     r = client_con_db.post(
         f"/api/alquileres/{PEDIDO_ID}/turnos-estudio",
@@ -187,6 +199,20 @@ def test_patch_reprograma_y_aplica_descuento(client_con_db, setup):
     assert float(turno["descuento_pct"]) == 10.0
     assert turno["monto_total"] == pytest.approx(18000, abs=1)  # 20000 × 0.9
     assert pedido["monto_total"] == pytest.approx(30000 + 18000, abs=1)
+
+
+def test_patch_422_si_espacio_monto_es_negativo(client_con_db, setup):
+    r = client_con_db.post(
+        f"/api/alquileres/{PEDIDO_ID}/turnos-estudio",
+        json={"fecha": "2033-04-11", "start": "14:00", "horas": 2, "espacio_monto": 20000},
+    )
+    turno_id = r.json()["turnos_estudio_embebidos"][0]["id"]
+
+    r2 = client_con_db.patch(
+        f"/api/alquileres/{PEDIDO_ID}/turnos-estudio/{turno_id}",
+        json={"espacio_monto": -500},
+    )
+    assert r2.status_code == 422, r2.text
 
 
 def test_patch_404_si_el_turno_no_pertenece_a_ese_pedido(client_con_db, setup):
@@ -231,6 +257,55 @@ def test_delete_404_si_el_turno_no_pertenece_a_ese_pedido(client_con_db, setup):
     # Sigue existiendo — el guard rechazó ANTES de borrar.
     r3 = client_con_db.get(f"/api/alquileres/{PEDIDO_ID}")
     assert len(r3.json()["turnos_estudio_embebidos"]) == 1
+
+
+def test_delete_409_si_dejaria_el_pedido_sobrepagado(client_con_db, setup):
+    """Hallazgo de auditoría: `eliminar_turno_embebido` borraba el turno sin
+    mirar si el pedido ya tenía plata cobrada por encima de lo que quedaría —
+    mismo espíritu que el gate de "plata cobrada" del mecanismo VIEJO
+    (turno vinculado), adaptado (acá no hay `monto_pagado` propio del turno)."""
+    r = client_con_db.post(
+        f"/api/alquileres/{PEDIDO_ID}/turnos-estudio",
+        json={"fecha": "2033-04-11", "start": "14:00", "horas": 2, "espacio_monto": 15000},
+    )
+    turno_id = r.json()["turnos_estudio_embebidos"][0]["id"]
+    assert r.json()["monto_total"] == 30000 + 15000
+
+    # Se cobran 40000: más que los 30000 que quedarían al sacar el turno
+    # (30000 + 15000 − 15000), pero menos que el total actual (45000).
+    rp = client_con_db.post(
+        f"/api/alquileres/{PEDIDO_ID}/pagos",
+        json={"monto": 40000},
+    )
+    assert rp.status_code == 201, rp.text
+
+    r2 = client_con_db.delete(f"/api/alquileres/{PEDIDO_ID}/turnos-estudio/{turno_id}")
+    assert r2.status_code == 409, r2.text
+
+    # No se borró nada: ni el turno ni sus ítems.
+    r3 = client_con_db.get(f"/api/alquileres/{PEDIDO_ID}")
+    assert len(r3.json()["turnos_estudio_embebidos"]) == 1
+
+
+def test_delete_permite_si_el_pago_no_supera_el_nuevo_total(client_con_db, setup):
+    """Control: el mismo escenario, pero con un pago que SÍ entra dentro de lo
+    que quedaría tras sacar el turno — no debe bloquearse."""
+    r = client_con_db.post(
+        f"/api/alquileres/{PEDIDO_ID}/turnos-estudio",
+        json={"fecha": "2033-04-11", "start": "14:00", "horas": 2, "espacio_monto": 15000},
+    )
+    turno_id = r.json()["turnos_estudio_embebidos"][0]["id"]
+
+    # Se cobran 20000: entra sin problema en los 30000 que quedarían.
+    rp = client_con_db.post(
+        f"/api/alquileres/{PEDIDO_ID}/pagos",
+        json={"monto": 20000},
+    )
+    assert rp.status_code == 201, rp.text
+
+    r2 = client_con_db.delete(f"/api/alquileres/{PEDIDO_ID}/turnos-estudio/{turno_id}")
+    assert r2.status_code == 200, r2.text
+    assert r2.json()["monto_total"] == 30000
 
 
 def test_multi_turno_en_el_mismo_pedido(client_con_db, setup):
