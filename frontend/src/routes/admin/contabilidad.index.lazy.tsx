@@ -130,6 +130,14 @@ function ReconciliacionPanel() {
     problemas.push(
       `${r.movimientos_cuenta_inactiva.cantidad} movimiento(s) en cuentas dadas de baja`,
     );
+  // Este chequeo BAJA el semáforo, así que tiene que poder explicarse: sin esta
+  // línea la caja se pintaba roja con la lista vacía.
+  if (r.devengado_sin_cuenta && r.devengado_sin_cuenta.cantidad > 0)
+    problemas.push(
+      `${formatARS(r.devengado_sin_cuenta.monto)} devengados para ` +
+        `${r.devengado_sin_cuenta.beneficiarios.map((b) => b.beneficiario).join(", ")} — ` +
+        `no tienen caja donde verse (revisá el modelo de comisiones o creá la cuenta)`,
+    );
   if (!r.reporte.ok) {
     const sl = r.reporte.pagados_sin_ledger;
     const sp = r.reporte.sobrepagados;

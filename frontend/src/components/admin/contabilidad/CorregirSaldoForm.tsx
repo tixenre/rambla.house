@@ -94,6 +94,8 @@ export function CorregirSaldoForm({ onCreated }: { onCreated: () => void }) {
         <Field label="Monto">
           <Input
             type="number"
+            step="1"
+            min="1"
             value={monto}
             onChange={(e) => setMonto(e.target.value)}
             className="w-32 text-right tabular-nums"

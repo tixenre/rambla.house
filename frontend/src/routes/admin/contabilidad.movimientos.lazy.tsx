@@ -9,7 +9,7 @@
  * borra: anular deja el registro tachado con su motivo.
  */
 import { createLazyFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Wallet } from "lucide-react";
 import { toast } from "sonner";
@@ -32,8 +32,6 @@ import { EmptyState } from "@/design-system/composites/EmptyState";
 import { formatMoney, formatFechaDisplay } from "@/lib/format";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Badge } from "@/design-system/ui/badge";
-import { Button } from "@/design-system/ui/button";
-import { Input } from "@/design-system/ui/input";
 import { TipoMovimientoBadge, TIPO_MOVIMIENTO_META } from "@/components/admin/badges";
 import { cn } from "@/lib/utils";
 

@@ -74,6 +74,18 @@ class TestClasificarFlujo:
     def test_mover_plata_entre_dos_cajas_propias_no_es_reparto(self):
         assert _clasificar(80_000, origen=5, destino=3) is None
 
+    def test_una_caja_generica_cuenta_como_rental(self):
+        """La MISMA operación económica tiene que dar el mismo resultado salga de
+        la caja que salga. Antes `Fondo Rental → Caja Estudio` era reparto pero
+        `Efectivo → Caja Estudio` no, mientras `Efectivo → Caja Pablo` sí (la rama
+        de la cuenta corriente asumía Rental del otro lado) — tres resultados para
+        dos operaciones iguales. Hallazgo del supervisor."""
+        assert _clasificar(120_000, origen=5, destino=6) == ("Rental", "Estudio")
+        assert _clasificar(120_000, origen=3, destino=6) == ("Rental", "Estudio")
+        assert _clasificar(70_000, origen=3, destino=1) == ("Rental", "Pablo")
+        # Y la vuelta, que antes tampoco contaba.
+        assert _clasificar(50_000, origen=6, destino=3) == ("Estudio", "Rental")
+
     def test_aporte_a_una_caja_generica_no_es_reparto(self):
         assert _clasificar(20_000, destino=3) is None
 

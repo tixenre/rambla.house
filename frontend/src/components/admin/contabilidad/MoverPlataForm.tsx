@@ -116,6 +116,16 @@ export function MoverPlataForm({
 
   const campos = camposVisibles(quePaso);
   const cambioDivisa = esCambioDeDivisa(respuestas);
+
+  // La cuenta corriente de un socio (`tipo === "socio"`) NO es plata real, así que
+  // el backend BLOQUEA `retiro`/`aporte` contra ella (`_validar_cuentas_y_categoria`,
+  // MEMORIA 2026-07-02). Sacarla del selector en esos dos casos evita ofrecer una
+  // combinación que termina en un 400 cuyo mensaje habla de "gasto, transferencia o
+  // ajuste" — justo las palabras que este form esconde. Para todo lo demás (un gasto
+  // que pagó el socio con su plata, un reparto) la cuenta sigue disponible.
+  const sinCC = cuentas.filter((c) => c.tipo !== "socio");
+  const cuentasOrigen = quePaso === "pague" && esDelSocio ? sinCC : cuentas;
+  const cuentasDestino = quePaso === "entro" ? sinCC : cuentas;
   // A diferencia del form viejo, las cuentas destino NO se filtran por moneda: si
   // el admin elige dos monedas distintas, eso ES un cambio de divisa y el form se
   // adapta solo. Antes tenía que saber de antemano que existía esa categoría y
@@ -200,6 +210,8 @@ export function MoverPlataForm({
         <Field label={cambioDivisa ? "Monto que sale" : "Monto"}>
           <Input
             type="number"
+            step="1"
+            min="1"
             value={monto}
             onChange={(e) => setMonto(e.target.value)}
             className="w-32 text-right tabular-nums"
@@ -208,12 +220,12 @@ export function MoverPlataForm({
 
         {campos.origen && (
           <Field label={quePaso === "pague" ? "Sale de" : "De qué cuenta"}>
-            <CuentaSelect cuentas={cuentas} value={origen} onChange={setOrigen} />
+            <CuentaSelect cuentas={cuentasOrigen} value={origen} onChange={setOrigen} />
           </Field>
         )}
         {campos.destino && (
           <Field label={quePaso === "entro" ? "Entra a" : "A qué cuenta"}>
-            <CuentaSelect cuentas={cuentas} value={destino} onChange={setDestino} />
+            <CuentaSelect cuentas={cuentasDestino} value={destino} onChange={setDestino} />
           </Field>
         )}
 
@@ -281,17 +293,42 @@ export function MoverPlataForm({
 
       {/* La distinción gasto-vs-retiro, que antes eran dos palabras técnicas
           distintas en la fila de tipos. Es la única diferencia real entre las dos
-          (el P&L cuenta `gasto` y no cuenta `retiro`), así que se pregunta así. */}
+          (el P&L cuenta `gasto` y no cuenta `retiro`), así que se pregunta así.
+
+          El label NO dice "se lo llevó un socio", aunque el `retiro` nació para
+          eso: un `retiro` baja el cash y NO mueve la deuda de nadie, así que
+          cargar ahí la plata que se llevó un socio la deja sin registrar en su
+          cuenta — el mismo hecho cargado como "Repartimos" sí se la ajusta. Dos
+          entradas del mismo form con contabilidades opuestas era justo la
+          confusión que esto vino a matar (hallazgo del supervisor). */}
       {quePaso === "pague" && (
-        <label className="flex min-h-11 items-center gap-2 text-sm">
-          <Checkbox checked={esDelSocio} onCheckedChange={(v) => setEsDelSocio(v === true)} />
-          <span>
-            Se lo llevó un socio para él — no es un gasto del negocio
-            <span className="block text-xs text-muted-foreground">
-              Marcado, no cuenta en la ganancia del mes.
+        <div className="space-y-1">
+          <label className="flex min-h-11 items-center gap-2 text-sm">
+            <Checkbox
+              checked={esDelSocio}
+              onCheckedChange={(v) => {
+                setEsDelSocio(v === true);
+                // Un `retiro` no puede salir de la cuenta corriente de un socio
+                // (el backend lo bloquea): si había una elegida, se limpia en vez
+                // de quedar en un estado que el submit va a rechazar.
+                if (v === true && cuentas.find((c) => String(c.id) === origen)?.tipo === "socio")
+                  setOrigen("");
+              }}
+            />
+            <span>
+              No es un gasto del negocio
+              <span className="block text-xs text-muted-foreground">
+                Marcado, no cuenta en la ganancia del mes.
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
+          {esDelSocio && (
+            <p className="pl-6 text-xs text-muted-foreground">
+              Ojo: esto baja la caja y no le queda registrado a nadie. Si la plata se la llevó un
+              socio, cargala como <strong>Repartimos</strong> para que le ajuste la cuenta.
+            </p>
+          )}
+        </div>
       )}
 
       {cambioDivisa && (

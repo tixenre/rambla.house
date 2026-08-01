@@ -176,14 +176,21 @@ export function derivarMovimiento(r: RespuestasMoverPlata): Derivado {
       throw new MoverPlataInvalido(
         "Para cambiar de moneda necesito la cotización o el monto en la otra moneda.",
       );
+    // Se manda UNO SOLO de los dos, nunca los dos juntos. `derivar_cambio_divisa`
+    // (backend) acepta 2 de 3 y deriva el que falte, pero NO cruza los que le
+    // llegan: mandando monto+cotización contradictorios guardaba
+    // "140.000 ARS ↔ 999 USD @ 1400" sin chistar. Los montos son lo que de verdad
+    // mueve plata (la cotización queda informativa), así que si hay monto de
+    // destino gana ese y la cotización se deriva de él.
+    const porMonto = r.montoDestino != null && r.montoDestino > 0;
     return {
       kind: "cambio_divisa",
       body: {
         cuenta_origen_id: r.cuentaOrigenId,
         cuenta_destino_id: r.cuentaDestinoId,
         monto_origen: r.monto,
-        monto_destino: r.montoDestino ?? null,
-        cotizacion: r.cotizacion ?? null,
+        monto_destino: porMonto ? r.montoDestino : null,
+        cotizacion: porMonto ? null : (r.cotizacion ?? null),
         fecha: r.fecha || null,
         nota: r.nota || null,
       },

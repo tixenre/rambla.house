@@ -60,6 +60,16 @@ def _resumen_html(data: dict) -> str:
             f"<li><strong>Movimientos a cuenta inactiva:</strong> "
             f"{contable['movimientos_cuenta_inactiva']['cantidad']}</li>"
         )
+    # Este chequeo BAJA el semáforo (`reconciliacion.py`), así que tiene que salir
+    # nombrado en el mail — si no, la alerta llega sin decir qué pasó.
+    sin_cuenta = contable.get("devengado_sin_cuenta") or {}
+    if sin_cuenta.get("cantidad"):
+        quienes = ", ".join(b["beneficiario"] for b in sin_cuenta.get("beneficiarios") or [])
+        filas.append(
+            f"<li><strong>Devengado sin caja donde verse:</strong> "
+            f"${sin_cuenta.get('monto', 0):,} para {quienes} — revisar el modelo de "
+            f"comisiones o crear la cuenta</li>"
+        )
 
     if not filas:
         filas = ["<li>El detalle no trae ítems positivos — revisar el dashboard admin.</li>"]

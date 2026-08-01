@@ -58,8 +58,7 @@ posterior, después de que el candado cruzado haya estado verde contra datos rea
 """
 
 from collections import defaultdict
-from datetime import date
-
+from database import now_ar
 from reportes.liquidacion import LIQUIDACION_INICIO
 
 from contabilidad.constants import PARTES, SOCIOS_HUMANOS
@@ -86,20 +85,32 @@ def clasificar_flujo(mov: dict, parte_por_cuenta: dict, cc_por_cuenta: dict):
     `parte_por_cuenta`: {cuenta_id: parte|None}. `cc_por_cuenta`: {cuenta_id: bool}
     (si esa cuenta es la cuenta corriente de un socio humano).
 
-    Las 4 ramas, en orden:
+    **Una caja GENÉRICA (Efectivo, Banco — sin `socio`) cuenta como "Rental".** Es
+    plata del negocio, y "Rental" es la parte que representa al negocio de alquiler
+    (mismo criterio que el fallback de `parte_de_cuenta` para un `tipo='fondo'` sin
+    socio). Sin esto el clasificador daba dos resultados para la MISMA operación
+    económica: `Fondo Rental → Caja Estudio` contaba como reparto, pero
+    `Efectivo → Caja Estudio` no — mientras que `Efectivo → Caja Pablo` sí, porque
+    la rama de la cuenta corriente asumía "Rental" del otro lado. Con el fallback
+    las tres se comportan igual (hallazgo del supervisor, verificado en vivo).
+
+    Ojo: el fallback NO convierte en reparto lo que no lo es, porque la rama 1 exige
+    DOS puntas y partes DISTINTAS: un gasto desde Efectivo (sin destino) o una
+    transferencia Efectivo→Banco (las dos "Rental") siguen sin mover nada.
+
+    Las ramas, en orden:
       1. Las dos puntas son partes distintas → reparto directo (incluye el saldado de
          una rendición y el "Me pagó / Le cargué" de la ficha del socio).
-      2. Sale de la CC de un socio → el socio le está devolviendo/adelantando plata al
-         negocio (rinde, o paga un gasto de Rental con la suya). Su CC no tiene caja:
-         si sale plata de ahí, es contra el negocio.
-      3. Entra a la CC de un socio → el negocio le puso plata (le compró algo, le
-         adelantó): sube su deuda.
+      2. Sale de la CC de un socio, sin destino → el socio le está devolviendo o
+         adelantando plata al negocio (paga un gasto de Rental con la suya). Su CC no
+         tiene caja: si sale plata de ahí, es contra el negocio.
+      3. Entra a la CC de un socio, sin origen → el negocio le puso plata.
       4. Lo demás NO es reparto — es plata del negocio moviéndose puertas adentro.
     """
     o = mov.get("cuenta_origen_id")
     d = mov.get("cuenta_destino_id")
-    po = parte_por_cuenta.get(o) if o else None
-    pd = parte_por_cuenta.get(d) if d else None
+    po = (parte_por_cuenta.get(o) or "Rental") if o else None
+    pd = (parte_por_cuenta.get(d) or "Rental") if d else None
 
     if po and pd and po != pd:
         return (po, pd)
@@ -219,7 +230,9 @@ def posiciones(conn) -> dict:
     from contabilidad.queries.saldos import ingresos_derivados, movimientos_planos
     from reportes.cierres import liquidar_rango
 
-    hoy = date.today().isoformat()
+    # `now_ar()` y no `date.today()`: la hora del server puede estar en UTC y
+    # adelantar el día (MEMORIA 2026-06-30, `services/fechas.py`).
+    hoy = now_ar().date().isoformat()
     devengado = {
         k: int(v)
         for k, v in liquidar_rango(conn, LIQUIDACION_INICIO, hoy)["resumen"][
@@ -254,21 +267,30 @@ def posiciones(conn) -> dict:
         if c.get("socio") in SOCIOS_HUMANOS and c.get("activa")
     }
 
-    flujo = flujos_netos(
-        movimientos_planos(conn), parte_por_cuenta, cc_por_cuenta, moneda_por_cuenta
-    )
+    movs = movimientos_planos(conn)
+    flujo = flujos_netos(movs, parte_por_cuenta, cc_por_cuenta, moneda_por_cuenta)
     partes = calcular_posiciones(devengado, cobrado, flujo, arranques)
     pendiente = {p["parte"]: p["pendiente"] for p in partes}
 
     # Quién tiene cash de verdad para pagar. La CC de un socio NO es plata (su
     # dinero está en un banco propio, fuera del sistema) → queda en 0 y el greedy
     # la deja para el final.
-    from contabilidad.queries.saldos import saldos
+    #
+    # Se calcula con `calcular_saldos` (la función PURA) sobre los datos que esta
+    # función YA trajo, en vez de llamar a `saldos(conn)`: ese wrapper invoca
+    # `partes_socios()`, que corre una liquidación COMPLETA más — y acá no hace
+    # falta, porque el saldo de una CAJA no resta `su_parte` (por eso `partes={}`).
+    # Llamarlo costaba una liquidación entera de gusto en cada carga de la pantalla,
+    # y `reconciliar()` —que ya llama a `saldos()` por su cuenta— pagaba el doble.
+    from contabilidad.queries.saldos import calcular_saldos
 
+    activas = [c for c in cuentas if c.get("activa")]
     liquidez: dict = {}
-    for f in saldos(conn)["cajas"]:
+    for f in calcular_saldos(activas, movs, cobrado, {}):
+        if f["es_cuenta_corriente"] or (f.get("moneda") or "ARS") != "ARS":
+            continue
         parte = parte_de_cuenta(f.get("socio"), f.get("tipo"), f.get("nombre"))
-        if parte and (f.get("moneda") or "ARS") == "ARS":
+        if parte:
             liquidez[parte] = liquidez.get(parte, 0) + int(f["saldo"])
 
     return {

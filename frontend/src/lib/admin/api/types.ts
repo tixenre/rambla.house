@@ -671,6 +671,26 @@ export interface ReconciliacionContable {
   saldos_negativos: { cantidad: number; cuentas: { cuenta: string; saldo: number }[] };
   pagos_sin_socio: { cantidad: number; monto: number };
   movimientos_cuenta_inactiva: { cantidad: number };
+  /** Devengado que cae en un beneficiario sin caja donde verse. Baja el semáforo. */
+  devengado_sin_cuenta?: {
+    cantidad: number;
+    monto: number;
+    beneficiarios: { beneficiario: string; monto: number }[];
+  };
+  /** Las dos lecturas de quién-le-debe-a-quién no coinciden. Informativo por ahora
+   *  (ver el comentario en `queries/reconciliacion.py`). */
+  cc_vs_posicion_divergente?: {
+    cantidad: number;
+    partes: {
+      parte: string;
+      cuenta_corriente: number;
+      posicion: number;
+      diferencia: number;
+    }[];
+    informativo?: boolean;
+  };
+  /** Plata cobrada de pedidos que todavía no cerraron. Contexto, no problema. */
+  float_sin_saldar?: number;
   reporte: {
     ok: boolean;
     pagados_sin_ledger?: { cantidad: number; ids: number[] } | null;

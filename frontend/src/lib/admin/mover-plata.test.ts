@@ -84,6 +84,25 @@ test("moví entre monedas distintas → cambio de divisa, sin que el usuario lo 
   assert.equal(d.body.monto_origen, 50_000);
 });
 
+test("cambio de divisa NUNCA manda cotización y monto juntos (podrían contradecirse)", () => {
+  // El backend acepta 2 de 3 y deriva el que falta, pero no cruza los que le
+  // llegan: mandando los dos guardaba "140.000 ARS ↔ 999 USD @ 1400" sin chistar.
+  const conAmbos = r({
+    quePaso: "movi",
+    cuentaOrigenId: 3,
+    cuentaDestinoId: 9,
+    monedaOrigen: "ARS",
+    monedaDestino: "USD",
+    cotizacion: 1400,
+    montoDestino: 999,
+  });
+  const d = derivarMovimiento(conAmbos);
+  assert.equal(d.kind, "cambio_divisa");
+  if (d.kind !== "cambio_divisa") throw new Error("inalcanzable");
+  assert.equal(d.body.monto_destino, 999, "el monto manda");
+  assert.equal(d.body.cotizacion, null, "la cotización se deriva, no se impone");
+});
+
 test("cambio de divisa sin cotización ni monto destino → error claro, no un request roto", () => {
   assert.throws(
     () =>
