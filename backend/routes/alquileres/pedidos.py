@@ -9,10 +9,30 @@ router compartido del paquete `routes.alquileres`.
 Incluye también el disparador on-demand de recordatorios de retiro (mudado de
 `disponibilidad.py`, issue #1254 — no tenía relación temática con disponibilidad;
 es un trigger admin sobre el ciclo de vida del pedido, calza acá).
+
+**Reintento ante deadlock** (`_reintentar_ante_deadlock`, mismo patrón que el
+homónimo de `routes/alquileres/turnos_estudio.py` y que `create_pedido_retry` —
+`services/alquileres/commands/creacion.py`): `_apply_pedido_datos`/
+`_apply_pedido_items`/`_delete_pedido` toman `FOR UPDATE` sobre `alquileres`
+como PRIMER statement — si eso pide su lock justo en la ventana en que un turno
+del Estudio EMBEBIDO del MISMO pedido ya insertó sus propios ítems (KEY SHARE
+implícito vía FK) pero todavía no llegó a su propio upgrade
+(`_recalcular_total_pedido`, al final de `agregar_turno_embebido`/
+`editar_turno_embebido`), las dos transacciones quedan en espera circular
+(hallazgo de auditoría — misma clase que el turno-vs-turno ya cubierto en
+`turnos_estudio.py`, acá asimétrico: lock-primero vs. insertar-primero). Es un
+escenario realista, no exótico — "Alquiler de equipos"/"datos" (este módulo) y
+"Turnos del Estudio" autoguardan de forma independiente en la MISMA página del
+pedido. Sin esto, `DeadlockDetected` sube crudo como 500. Agotados los
+intentos → 503, nunca 500. Duplicado a propósito (no extraído a un helper
+compartido) — mismo criterio que `create_pedido_retry`: cada endpoint-module
+tiene su propia copia; se reconsidera si esto llega a una 3ª ubicación real.
 """
 import logging
+import time
 from typing import Optional
 
+import psycopg.errors
 from fastapi import Request, HTTPException, Query, BackgroundTasks
 
 from database import get_db, row_to_dict
@@ -45,6 +65,27 @@ from services.alquileres.commands.pedido import _delete_pedido
 from services.comunicacion import notificar_pedido
 
 logger = logging.getLogger(__name__)
+
+
+def _reintentar_ante_deadlock(intento, intentos: int = 5):
+    """Reintenta `intento()` (una llamada que abre su propia conexión/
+    transacción de punta a punta) ante un deadlock transitorio de Postgres —
+    mismos intentos/backoff que `create_pedido_retry` y el homónimo de
+    `turnos_estudio.py` (ver docstring del módulo). `intento` debe ser
+    idempotente en caso de fallo (rollback antes de propagar, como ya hacen
+    los endpoints de acá)."""
+    for i in range(intentos):
+        try:
+            return intento()
+        except psycopg.errors.DeadlockDetected:
+            if i == intentos - 1:
+                logger.warning("Pedido: deadlock persistente tras %d intentos → 503", intentos)
+                raise HTTPException(
+                    503, "Hay mucha demanda sobre este pedido en este momento. "
+                         "Reintentá en unos segundos.")
+            time.sleep(0.04 * (i + 1))  # backoff corto; el scheduling rompe el ciclo
+    # Inalcanzable con intentos >= 1 (la última vuelta siempre retorna o tira 503).
+    raise HTTPException(503, "No se pudo completar la operación")
 
 
 SORT_COLS = {
@@ -229,14 +270,21 @@ def get_pedido(id: int, request: Request):
 def delete_pedido(id: int, request: Request):
     """Elimina un pedido (o un turno del Estudio vinculado). Ver `_delete_pedido`."""
     require_admin(request)
-    with get_db() as conn:
-        try:
-            _delete_pedido(conn, id)
-            conn.commit()
-        except Exception:
-            logger.error("Error eliminando pedido %s", id, exc_info=True)
-            conn.rollback()
-            raise
+
+    def _intento():
+        with get_db() as conn:
+            try:
+                _delete_pedido(conn, id)
+                conn.commit()
+            except psycopg.errors.DeadlockDetected:
+                conn.rollback()
+                raise
+            except Exception:
+                logger.error("Error eliminando pedido %s", id, exc_info=True)
+                conn.rollback()
+                raise
+
+    _reintentar_ante_deadlock(_intento)
 
 
 @router.patch("/alquileres/{id}")
@@ -289,47 +337,61 @@ def update_pedido(id: int, data: PedidoEstado, request: Request, background: Bac
 @limiter.limit(ADMIN_WRITE_LIMIT)
 def update_pedido_datos(id: int, data: PedidoDatos, request: Request):
     require_admin(request)
-    with get_db() as conn:
-        try:
-            pedido = _apply_pedido_datos(conn, id, data, es_admin=True)
-            conn.commit()
-            return pedido
-        except Exception:
-            logger.error("Error actualizando datos del pedido %s", id, exc_info=True)
-            conn.rollback()
-            raise
+
+    def _intento():
+        with get_db() as conn:
+            try:
+                pedido = _apply_pedido_datos(conn, id, data, es_admin=True)
+                conn.commit()
+                return pedido
+            except psycopg.errors.DeadlockDetected:
+                conn.rollback()
+                raise
+            except Exception:
+                logger.error("Error actualizando datos del pedido %s", id, exc_info=True)
+                conn.rollback()
+                raise
+
+    return _reintentar_ante_deadlock(_intento)
 
 
 @router.put("/alquileres/{id}/items")
 @limiter.limit(ADMIN_WRITE_LIMIT)
 def update_alquiler_items(id: int, data: PedidoItemUpdate, request: Request):
     require_admin(request)
-    with get_db() as conn:
-        try:
-            pedido = _apply_pedido_items(conn, id, data.items)
 
-            # Si el pedido está en estado que reserva stock, validar después de
-            # aplicar los nuevos items. Sin esto el admin podía sumar cantidades
-            # que excedieran el stock disponible y crear doble booking silencioso.
-            # `ESTADOS_QUE_RESERVAN` es el mismo set que usa el grafo de
-            # transiciones (`transiciones.py`) — una sola fuente.
-            p = conn.execute(
-                "SELECT estado, fecha_desde, fecha_hasta FROM alquileres WHERE id=%s", (id,)
-            ).fetchone()
-            if (
-                p["estado"] in ESTADOS_QUE_RESERVAN
-                and p["fecha_desde"] and p["fecha_hasta"]
-            ):
-                problemas = _check_stock(conn, id, p["fecha_desde"], p["fecha_hasta"])
-                if problemas:
-                    raise HTTPException(409, "Sin stock: " + "; ".join(problemas))
+    def _intento():
+        with get_db() as conn:
+            try:
+                pedido = _apply_pedido_items(conn, id, data.items)
 
-            conn.commit()
-            return pedido
-        except Exception:
-            logger.error("Error actualizando items del pedido %s", id, exc_info=True)
-            conn.rollback()
-            raise
+                # Si el pedido está en estado que reserva stock, validar después de
+                # aplicar los nuevos items. Sin esto el admin podía sumar cantidades
+                # que excedieran el stock disponible y crear doble booking silencioso.
+                # `ESTADOS_QUE_RESERVAN` es el mismo set que usa el grafo de
+                # transiciones (`transiciones.py`) — una sola fuente.
+                p = conn.execute(
+                    "SELECT estado, fecha_desde, fecha_hasta FROM alquileres WHERE id=%s", (id,)
+                ).fetchone()
+                if (
+                    p["estado"] in ESTADOS_QUE_RESERVAN
+                    and p["fecha_desde"] and p["fecha_hasta"]
+                ):
+                    problemas = _check_stock(conn, id, p["fecha_desde"], p["fecha_hasta"])
+                    if problemas:
+                        raise HTTPException(409, "Sin stock: " + "; ".join(problemas))
+
+                conn.commit()
+                return pedido
+            except psycopg.errors.DeadlockDetected:
+                conn.rollback()
+                raise
+            except Exception:
+                logger.error("Error actualizando items del pedido %s", id, exc_info=True)
+                conn.rollback()
+                raise
+
+    return _reintentar_ante_deadlock(_intento)
 
 
 @router.post("/admin/recordatorios/retiro/run")
