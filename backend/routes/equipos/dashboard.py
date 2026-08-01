@@ -31,7 +31,14 @@ def admin_dashboard_uso(request: Request, dias_sin_uso: int = 90):
                 COUNT(DISTINCT p.id) AS cant_pedidos,
                 SUM(
                     COALESCE(pi.precio_jornada, 0) * COALESCE(pi.cantidad, 1)
-                    * GREATEST(1, (p.fecha_hasta::date - p.fecha_desde::date))::INTEGER
+                    -- `cobro_modo='fijo'` (líneas personalizadas, combos, turno del
+                    -- Estudio EMBEBIDO #1308) ya cobra el monto único — multiplicarlo
+                    -- por los días DEL PEDIDO (container, puede no tener nada que ver
+                    -- con la duración real de esa línea) inflaba el revenue atribuido.
+                    * CASE WHEN pi.cobro_modo = 'jornada'
+                           THEN GREATEST(1, (p.fecha_hasta::date - p.fecha_desde::date))
+                           ELSE 1
+                      END::INTEGER
                 ) AS revenue_total
             FROM equipos e
             JOIN alquiler_items pi ON pi.equipo_id = e.id
@@ -65,14 +72,25 @@ def admin_dashboard_uso(request: Request, dias_sin_uso: int = 90):
                 COUNT(DISTINCT p.id) AS cant_pedidos,
                 SUM(
                     COALESCE(pi.precio_jornada, 0) * COALESCE(pi.cantidad, 1)
-                    * GREATEST(1, (p.fecha_hasta::date - p.fecha_desde::date))::INTEGER
+                    -- `cobro_modo='fijo'` (líneas personalizadas, combos, turno del
+                    -- Estudio EMBEBIDO #1308) ya cobra el monto único — multiplicarlo
+                    -- por los días DEL PEDIDO (container, puede no tener nada que ver
+                    -- con la duración real de esa línea) inflaba el revenue atribuido.
+                    * CASE WHEN pi.cobro_modo = 'jornada'
+                           THEN GREATEST(1, (p.fecha_hasta::date - p.fecha_desde::date))
+                           ELSE 1
+                      END::INTEGER
                 ) AS revenue_total
             FROM categorias cat
             JOIN equipo_categorias ec ON ec.categoria_id = cat.id
             JOIN alquiler_items pi ON pi.equipo_id = ec.equipo_id
             JOIN alquileres p ON p.id = pi.pedido_id
             JOIN equipos e ON e.id = ec.equipo_id
-            WHERE e.eliminado_at IS NULL
+            -- `es_recurso_interno = FALSE` (hallazgo de auditoría, #1308): sin
+            -- esto, si el centinela del Estudio ("Estudio (espacio)") alguna vez
+            -- tuviera una categoría asignada, su revenue inflaría esa categoría
+            -- — mismo filtro que ya usan top_alquilados/sin_uso/totales acá.
+            WHERE e.eliminado_at IS NULL AND e.es_recurso_interno = FALSE
             GROUP BY cat.id, cat.nombre
             ORDER BY revenue_total DESC NULLS LAST
             LIMIT 10
@@ -86,7 +104,14 @@ def admin_dashboard_uso(request: Request, dias_sin_uso: int = 90):
                 COUNT(DISTINCT p.id) AS total_pedidos,
                 SUM(
                     COALESCE(pi.precio_jornada, 0) * COALESCE(pi.cantidad, 1)
-                    * GREATEST(1, (p.fecha_hasta::date - p.fecha_desde::date))::INTEGER
+                    -- `cobro_modo='fijo'` (líneas personalizadas, combos, turno del
+                    -- Estudio EMBEBIDO #1308) ya cobra el monto único — multiplicarlo
+                    -- por los días DEL PEDIDO (container, puede no tener nada que ver
+                    -- con la duración real de esa línea) inflaba el revenue atribuido.
+                    * CASE WHEN pi.cobro_modo = 'jornada'
+                           THEN GREATEST(1, (p.fecha_hasta::date - p.fecha_desde::date))
+                           ELSE 1
+                      END::INTEGER
                 ) AS revenue_total
             FROM equipos e
             LEFT JOIN alquiler_items pi ON pi.equipo_id = e.id

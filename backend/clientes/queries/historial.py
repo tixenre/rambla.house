@@ -18,19 +18,26 @@ def resumen(conn, cliente_id: int) -> list[dict]:
     consolidar, ocultar la fila haría que el "total gastado" de la ficha
     quedara por debajo de lo que el cliente realmente pagó.
 
-    `turnos_estudio` deja ver cuántos turnos aporta la fila, para que el
-    combinado no parezca un número sin explicación.
+    `turnos_estudio` deja ver cuántos turnos aporta la fila (suma VINCULADOS +
+    EMBEBIDOS, #1308 rediseño "turno como ítem" — antes solo contaba
+    vinculados, mostrando 0 para un pedido cuyo turno es embebido). Un turno
+    EMBEBIDO no suma plata acá (a diferencia del vinculado): su monto YA está
+    adentro de `p.monto_total`/`p.monto_pagado` — sumarlo de nuevo duplicaría.
     """
     rows = conn.execute(
         f"""
         SELECT p.id, p.numero_pedido, p.estado, p.fecha_desde, p.fecha_hasta,
                p.monto_total + COALESCE(t.total_turnos, 0)   AS monto_total,
                p.monto_pagado + COALESCE(t.pagado_turnos, 0) AS monto_pagado,
-               COALESCE(t.cant_turnos, 0)                    AS turnos_estudio,
+               COALESCE(t.cant_turnos, 0) + COALESCE(te.cant_embebidos, 0) AS turnos_estudio,
                p.descuento_pct, p.created_at,
                STRING_AGG(e.nombre, ' · ') AS equipos
         FROM alquileres p
-        LEFT JOIN alquiler_items pi ON pi.pedido_id = p.id
+        -- `turno_estudio_id IS NULL`: el centinela/sueltos/pintura de un turno
+        -- del Estudio EMBEBIDO no son equipo que este cliente "alquiló" en el
+        -- sentido de este resumen — se usan enteros adentro del Estudio
+        -- (mismo criterio que Contrato/Detalle de seguro/Checklist de retiro).
+        LEFT JOIN alquiler_items pi ON pi.pedido_id = p.id AND pi.turno_estudio_id IS NULL
         LEFT JOIN equipos e ON e.id = pi.equipo_id
         LEFT JOIN (
             SELECT pedido_principal_id AS principal_id,
@@ -41,10 +48,15 @@ def resumen(conn, cliente_id: int) -> list[dict]:
             WHERE {TURNO_VINCULADO_SQL} AND estado <> 'cancelado'
             GROUP BY pedido_principal_id
         ) t ON t.principal_id = p.id
+        LEFT JOIN (
+            SELECT pedido_id, COUNT(*) AS cant_embebidos
+            FROM alquiler_turnos_estudio
+            GROUP BY pedido_id
+        ) te ON te.pedido_id = p.id
         WHERE p.cliente_id = %s AND p.{SIN_PRINCIPAL_SQL}
         GROUP BY p.id, p.numero_pedido, p.estado, p.fecha_desde, p.fecha_hasta,
                  p.monto_total, p.monto_pagado, p.descuento_pct, p.created_at,
-                 t.cant_turnos, t.total_turnos, t.pagado_turnos
+                 t.cant_turnos, t.total_turnos, t.pagado_turnos, te.cant_embebidos
         ORDER BY p.created_at DESC NULLS LAST, p.numero_pedido DESC
         """,
         (cliente_id,),
