@@ -846,7 +846,13 @@ def _contrato_html(pedido, mostrar_locador=True, fonts_ligeras=False, locador_ov
     loc_telefono = (locador_override or {}).get("telefono") or OWNER_TELEFONO
     loc_email = (locador_override or {}).get("email") or OWNER_EMAIL
 
-    items = pedido.get("items", [])
+    # `turno_estudio_id` (#1308 rediseño "turno como ítem"): el centinela/
+    # sueltos/pintura de un turno del Estudio EMBEBIDO se usan ENTERO adentro
+    # del Estudio — nunca salen con el cliente — así que no pertenecen al
+    # cronograma de EQUIPOS A ALQUILAR de un contrato de locación (hallazgo de
+    # auditoría; antes el espacio del Estudio se declaraba como si fuera un
+    # ítem más, con su "valor de reposición").
+    items = [it for it in pedido.get("items", []) if not it.get("turno_estudio_id")]
     j = _jornadas(pedido)
     rows, i = [], 1
     for it in items:

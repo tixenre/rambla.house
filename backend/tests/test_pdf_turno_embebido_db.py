@@ -9,6 +9,12 @@ Verifica el camino completo DB → `_get_alquiler_items` (JOIN a
 vía `GET /alquileres/{id}/remito?format=html` (el mismo preview que usa el
 front, sin pasar por Playwright).
 
+Suma (hallazgo de auditoría posterior, mismo pedido mixto): Detalle de
+seguro/Checklist de retiro/Contrato son el caso OPUESTO al Remito — describen
+equipo que sale del local, así que el turno embebido (que se usa entero
+adentro del Estudio) se EXCLUYE de los 3, en vez de mostrarse con su propia
+fecha/hora.
+
 OPT-IN y SEGURO POR DEFECTO (mismo gating que los demás *_db.py):
     DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test \
       RESERVAS_DB_TEST=1 SECRET_KEY=dev \
@@ -172,3 +178,28 @@ def test_remito_sin_turno_embebido_no_muestra_sub_linea(client_con_db, setup):
         conn.execute("DELETE FROM alquileres WHERE id = %s", (otro_id,))
         conn.commit()
         conn.close()
+
+
+# ── Detalle de seguro / Checklist de retiro / Contrato: el turno NUNCA sale ──
+#
+# Hallazgo de auditoría (#1308 rediseño "turno como ítem"): a diferencia del
+# Remito (arriba — el turno SÍ se lista, con su propia fecha/hora, porque el
+# Remito es "todo lo que compraste"), estos 3 documentos describen equipo que
+# sale físicamente del local — el centinela/sueltos/pintura de un turno
+# embebido se usan ENTERO adentro del Estudio, nunca viajan con el cliente, así
+# que no pertenecen a ellos. Antes de este fix, el centinela ("Estudio
+# (espacio)") aparecía como si fuera un equipo más a controlar/declarar/
+# alquilar. El equipo normal del pedido sigue apareciendo en los 3 — solo el
+# ítem con `turno_estudio_id` se excluye.
+@pytest.mark.parametrize("endpoint", ["detalle-seguro", "checklist-retiro", "contrato"])
+def test_documento_excluye_items_de_turno_embebido(client_con_db, setup, endpoint):
+    r = client_con_db.get(f"/api/alquileres/{PEDIDO_ID}/{endpoint}", params={"format": "html"})
+    assert r.status_code == 200, r.text
+    html = r.text
+    assert "Estudio (espacio)" not in html, (
+        f"{endpoint}: el centinela del turno embebido no debería listarse acá — "
+        f"se usa entero adentro del Estudio, nunca sale con el cliente"
+    )
+    assert "Cámara test PDF turno embebido" in html, (
+        f"{endpoint}: el equipo normal del pedido sí debería seguir apareciendo"
+    )
