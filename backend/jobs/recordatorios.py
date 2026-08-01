@@ -185,7 +185,17 @@ def enviar_recordatorios_retiro(
                 entry["status"] = "dry_run"
                 resumen["pedidos"].append(entry)
                 continue
-            p["items"] = _get_alquiler_items(conn, p["id"])
+            # `turno_estudio_id` (#1308 rediseño "turno como ítem"): el
+            # centinela/sueltos/pintura de un turno del Estudio EMBEBIDO se
+            # usan ENTERO adentro del Estudio — no hay nada que "traer" para
+            # ese retiro — así que no pertenecen a la lista de equipo del
+            # recordatorio de retiro (hallazgo de auditoría, mismo criterio
+            # que Contrato/Detalle de seguro/Checklist de retiro). Se excluyen
+            # ACÁ, antes de armar el contexto: así `pedido_email_context`
+            # (compartida con mails que SÍ deben listar el turno, como
+            # "pedido creado") no necesita saber de turnos.
+            items = _get_alquiler_items(conn, p["id"])
+            p["items"] = [it for it in items if not it.get("turno_estudio_id")]
             ctx = pedido_email_context(p)
             ctx["dias_antes"] = dias_antes  # el copy del recordatorio lo usa
             # Despacho plan A/B por la capa única de comunicación: intenta WhatsApp

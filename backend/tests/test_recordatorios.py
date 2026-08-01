@@ -179,6 +179,25 @@ class TestEnviar:
         rec.enviar_recordatorios_retiro(conn, hoy=HOY, corte_manana=12)
         assert conn.closed is False
 
+    def test_excluye_items_de_turno_embebido_del_listado_a_traer(self, capture_send, monkeypatch):
+        """Hallazgo de auditoría (#1308 rediseño "turno como ítem"): el centinela/
+        sueltos de un turno del Estudio EMBEBIDO se usan ENTERO adentro del
+        Estudio — no hay nada que "traer" para ese retiro — así que no deben
+        aparecer en `items_text`/`items_html` del recordatorio, a diferencia del
+        equipo normal del mismo pedido."""
+        monkeypatch.setattr(
+            rec, "_get_alquiler_items",
+            lambda conn, pedido_id: [
+                {"nombre": "Cámara normal", "cantidad": 1, "turno_estudio_id": None},
+                {"nombre": "Estudio (espacio)", "cantidad": 1, "turno_estudio_id": 501},
+            ],
+        )
+        conn = FakeJobConn([_pedido()])
+        rec.enviar_recordatorios_retiro(conn, hoy=HOY, corte_manana=12)
+        ctx = capture_send[0][3]
+        assert "Cámara normal" in ctx["items_text"]
+        assert "Estudio (espacio)" not in ctx["items_text"]
+
 
 # ── Job: dry_run ─────────────────────────────────────────────────────────────
 
