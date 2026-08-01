@@ -610,7 +610,13 @@ function PreviewPane({ id, onOpen }: { id: number | null; onOpen: (id: number) =
   const total = combinado.totalCombinado;
   const saldo = combinado.restaCombinado;
   const jornadas = p.cantidad_jornadas ?? 1;
-  const nItems = p.items?.length ?? 0;
+  // El centinela/sueltos/pintura de un turno del Estudio EMBEBIDO (#1308) no
+  // son "equipos" en el sentido de esta sección — se usan enteros adentro del
+  // Estudio, no son equipo que sale con el cliente (mismo criterio que
+  // Contrato/Detalle de seguro/Checklist de retiro). Sin este filtro, un
+  // pedido mixto mostraba "Estudio (espacio)" como si fuera un equipo más.
+  const itemsEquipos = (p.items ?? []).filter((it) => it.turno_estudio_id == null);
+  const nItems = itemsEquipos.length;
   const fuente = fuenteLabel(p.fuente);
 
   // Próximo paso del flujo (compartido con el editor).
@@ -752,7 +758,7 @@ function PreviewPane({ id, onOpen }: { id: number | null; onOpen: (id: number) =
               <span className="t-eyebrow">precio / jornada</span>
             </div>
             <ul className="divide-y hairline">
-              {(p.items ?? []).map((it) => (
+              {itemsEquipos.map((it) => (
                 <li key={it.id} className="flex items-center gap-3 px-4 py-2.5">
                   <EquipoThumb
                     src={it.foto_url}
