@@ -123,6 +123,22 @@ class TestPosiciones:
         assert despues["Tincho"] == 0
         assert despues["Rental"] == antes["Rental"] + 110_500
 
+    def test_un_movimiento_en_dolares_no_ensucia_la_posicion_en_pesos(self):
+        """La posición está en PESOS (`devengado` sale de la liquidación y
+        `cobrado` de `alquiler_pagos`, los dos ARS). Sin el filtro de moneda, una
+        transferencia de 500 dólares entre dos cuentas de partes sumaba 500 a la
+        posición en pesos — unidades mezcladas, en silencio. Hoy no hay cuentas
+        USD de una parte, pero `parte_de_cuenta` mapea cualquier `tipo='fondo'` a
+        Rental, así que alcanza con crear un fondo en dólares."""
+        movs = [_mov(500, origen=5, destino=6)]
+        monedas = {5: "USD", 6: "USD", 1: "ARS", 2: "ARS", 3: "ARS"}
+        assert flujos_netos(movs, PARTE_POR_CUENTA, CC_POR_CUENTA, monedas) == {}
+        # Las mismas cuentas en pesos SÍ cuentan.
+        assert flujos_netos(movs, PARTE_POR_CUENTA, CC_POR_CUENTA, {5: "ARS", 6: "ARS"}) == {
+            "Rental": -500,
+            "Estudio": 500,
+        }
+
     def test_el_arranque_del_socio_es_deuda(self):
         partes = {p["parte"]: p for p in calcular_posiciones(
             devengado={}, cobrado={}, flujo_neto={}, arranques={"Pablo": 601_000})}

@@ -110,10 +110,25 @@ def clasificar_flujo(mov: dict, parte_por_cuenta: dict, cc_por_cuenta: dict):
     return None
 
 
-def flujos_netos(movimientos: list[dict], parte_por_cuenta: dict, cc_por_cuenta: dict):
-    """PURA. Neto por parte de los movimientos que SON reparto (positivo = recibió)."""
+def flujos_netos(movimientos: list[dict], parte_por_cuenta: dict, cc_por_cuenta: dict,
+                 moneda_por_cuenta: dict | None = None):
+    """PURA. Neto por parte de los movimientos que SON reparto (positivo = recibió).
+
+    `moneda_por_cuenta` (opcional, {cuenta_id: 'ARS'|'USD'}): descarta los
+    movimientos que tocan una cuenta que NO es en pesos. **La posición está en
+    pesos** (`devengado` sale de la liquidación y `cobrado` de `alquiler_pagos`,
+    los dos ARS), así que sumarle el `monto` de un movimiento en dólares mezclaría
+    unidades — 500 dólares contarían como 500 pesos. Hoy no hay ninguna cuenta en
+    USD vinculada a una parte, pero `parte_de_cuenta` mapea CUALQUIER `tipo='fondo'`
+    a "Rental": el día que se cree un fondo en dólares, sin este filtro la posición
+    de Rental se ensuciaría en silencio. Sin el mapa, no filtra (compatibilidad con
+    los tests puros)."""
     neto: dict = defaultdict(int)
     for m in movimientos:
+        if moneda_por_cuenta is not None:
+            tocadas = [m.get("cuenta_origen_id"), m.get("cuenta_destino_id")]
+            if any(c and moneda_por_cuenta.get(c, "ARS") != "ARS" for c in tocadas):
+                continue
         par = clasificar_flujo(m, parte_por_cuenta, cc_por_cuenta)
         if not par:
             continue
@@ -221,16 +236,27 @@ def posiciones(conn) -> dict:
         for c in cuentas
     }
     cc_por_cuenta = {c["id"]: c.get("socio") in SOCIOS_HUMANOS for c in cuentas}
+    moneda_por_cuenta = {c["id"]: (c.get("moneda") or "ARS") for c in cuentas}
     # El arranque (`saldo_inicial`) es una DEUDA pre-sistema solo para un socio
     # humano. Para una caja real es "cuánto cash había el día 1" — un concepto de
     # caja, no de posición: sumarlo acá arruinaría los dos números.
+    #
+    # **Solo cuentas ACTIVAS**, aunque el mapa de arriba incluya las inactivas: la
+    # cuenta corriente (`calcular_saldos` vía `saldos()`) solo mira activas, y un
+    # dict comprehension sobre las dos habría dejado que una Caja Tincho vieja,
+    # dada de baja con otro arranque, pisara en silencio a la vigente — rompiendo
+    # la identidad `posicion == −saldo_cc` sin que nada avisara. El índice único
+    # parcial `idx_cuentas_socio` garantiza una sola cuenta activa por socio, así
+    # que acá no hay ambigüedad.
     arranques = {
         c["socio"]: int(c.get("saldo_inicial") or 0)
         for c in cuentas
-        if c.get("socio") in SOCIOS_HUMANOS
+        if c.get("socio") in SOCIOS_HUMANOS and c.get("activa")
     }
 
-    flujo = flujos_netos(movimientos_planos(conn), parte_por_cuenta, cc_por_cuenta)
+    flujo = flujos_netos(
+        movimientos_planos(conn), parte_por_cuenta, cc_por_cuenta, moneda_por_cuenta
+    )
     partes = calcular_posiciones(devengado, cobrado, flujo, arranques)
     pendiente = {p["parte"]: p["pendiente"] for p in partes}
 
