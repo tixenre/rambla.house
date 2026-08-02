@@ -249,7 +249,9 @@ class MovimientoUpdate(BaseModel):
 
 
 class AnularBody(BaseModel):
-    motivo: str = Field(max_length=500)
+    # Opcional (2026-08): borrar un movimiento propio no exige justificarlo —
+    # ver `contabilidad/commands/movimientos.py::anular_movimiento`.
+    motivo: str | None = Field(default=None, max_length=500)
 
 
 class CambioDivisaCreate(BaseModel):

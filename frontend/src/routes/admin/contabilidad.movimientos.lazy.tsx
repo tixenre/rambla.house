@@ -5,8 +5,10 @@
  * entre cajas, retiros y aportes de socios. Los cobros de pedidos aparecen como
  * una línea mensual read-only (derivan de los pagos de alquiler, no se cargan a
  * mano) que se DESPLIEGA para ver los pagos individuales del mes inline — misma
- * fuente única que /admin/pagos (el "ver ledger completo"). La plata nunca se
- * borra: anular deja el registro tachado con su motivo.
+ * fuente única que /admin/pagos (el "ver ledger completo"). Cada movimiento se
+ * puede editar (incluida la fecha) y borrar sin justificar — son los asientos
+ * propios del dueño (2026-08). Por debajo el borrado sigue siendo soft-delete,
+ * invisible desde acá: `listar_movimientos` no devuelve los anulados.
  */
 import { createLazyFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
@@ -24,6 +26,7 @@ import {
 import { MoverPlataForm } from "@/components/admin/contabilidad/MoverPlataForm";
 import { CorregirSaldoForm } from "@/components/admin/contabilidad/CorregirSaldoForm";
 import { CuentaSelect, Field } from "@/components/admin/contabilidad/fields";
+import { useConfirm } from "@/components/admin/useConfirm";
 import { AdminPage } from "@/components/admin/AdminPage";
 import { AdminTable, type Column } from "@/components/admin/AdminTable";
 import { QueryState } from "@/components/admin/QueryState";
@@ -32,6 +35,9 @@ import { EmptyState } from "@/design-system/composites/EmptyState";
 import { formatMoney, formatFechaDisplay } from "@/lib/format";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Badge } from "@/design-system/ui/badge";
+import { Button } from "@/design-system/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/design-system/ui/dialog";
+import { Input } from "@/design-system/ui/input";
 import { TipoMovimientoBadge, TIPO_MOVIMIENTO_META } from "@/components/admin/badges";
 import { cn } from "@/lib/utils";
 
@@ -226,7 +232,7 @@ function MovimientosPage() {
       header: "Acciones",
       cell: (f) =>
         f.kind === "mov" ? (
-          <AnularMovimiento mov={f.mov} onChanged={invalidar} />
+          <AccionesMovimiento mov={f.mov} onChanged={invalidar} />
         ) : (
           <span className="text-xs text-muted-foreground">automático</span>
         ),
@@ -401,29 +407,217 @@ function CobroDetalle({ mes }: { mes: string }) {
   );
 }
 
-function AnularMovimiento({ mov, onChanged }: { mov: Movimiento; onChanged: () => void }) {
-  const anular = useMutation({
-    mutationFn: (motivo: string) => adminApi.anularMovimiento(mov.id, motivo),
+/** Editar / Borrar de una fila. Los cobros de alquiler no pasan por acá (son
+ *  derivados, read-only). */
+function AccionesMovimiento({ mov, onChanged }: { mov: Movimiento; onChanged: () => void }) {
+  const confirm = useConfirm();
+  const [editando, setEditando] = useState(false);
+
+  const borrar = useMutation({
+    // Sin motivo: son los asientos propios del dueño y pedir una justificación
+    // escrita para corregir un tipeo era fricción sin contraparte (2026-08).
+    mutationFn: () => adminApi.anularMovimiento(mov.id),
     onSuccess: () => {
-      toast.success("Movimiento anulado");
+      toast.success("Movimiento borrado");
       onChanged();
     },
-    onError: (e) => toast.error("No se pudo anular", { description: (e as Error).message }),
+    onError: (e) => toast.error("No se pudo borrar", { description: (e as Error).message }),
   });
 
   if (mov.anulado) return null;
 
   return (
-    <button
-      type="button"
-      onClick={() => {
-        const motivo = window.prompt("Motivo de la anulación:");
-        if (motivo && motivo.trim()) anular.mutate(motivo.trim());
-      }}
-      disabled={anular.isPending}
-      className="text-xs text-muted-foreground hover:text-destructive underline"
-    >
-      Anular
-    </button>
+    <div className="flex items-center justify-end gap-2">
+      <button
+        type="button"
+        onClick={() => setEditando(true)}
+        className="text-xs text-ink underline decoration-amber/60 underline-offset-2 hover:decoration-amber"
+      >
+        Editar
+      </button>
+      <button
+        type="button"
+        onClick={async () => {
+          const ok = await confirm({
+            title: "¿Borrar este movimiento?",
+            description: `${descMovimiento(mov)} · ${formatMoney(mov.monto, mov.moneda)}. Deja de contar para los saldos.`,
+            confirmLabel: "Borrar",
+            danger: true,
+          });
+          if (ok) borrar.mutate();
+        }}
+        disabled={borrar.isPending}
+        className="text-xs text-muted-foreground hover:text-destructive underline"
+      >
+        Borrar
+      </button>
+      {editando && (
+        <EditarMovimientoDialog
+          mov={mov}
+          onClose={() => setEditando(false)}
+          onSaved={() => {
+            setEditando(false);
+            onChanged();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/** Edición de un movimiento ya cargado. El `tipo` NO se puede cambiar (pasar de
+ *  gasto a transferencia es otro movimiento: se borra y se rehace) — el backend
+ *  tampoco lo acepta (`_CAMPOS_EDITABLES`). El endpoint ya existía desde el
+ *  arranque del módulo; lo que faltaba era esta pantalla. */
+function EditarMovimientoDialog({
+  mov,
+  onClose,
+  onSaved,
+}: {
+  mov: Movimiento;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [monto, setMonto] = useState(String(mov.monto));
+  const [fecha, setFecha] = useState((mov.fecha ?? "").slice(0, 10));
+  const [origen, setOrigen] = useState(mov.cuenta_origen_id ? String(mov.cuenta_origen_id) : "");
+  const [destino, setDestino] = useState(
+    mov.cuenta_destino_id ? String(mov.cuenta_destino_id) : "",
+  );
+  const [categoria, setCategoria] = useState(mov.categoria_id ? String(mov.categoria_id) : "");
+  const [metodo, setMetodo] = useState(mov.metodo ?? "");
+  const [nota, setNota] = useState(mov.nota ?? "");
+  const [beneficiario, setBeneficiario] = useState(mov.beneficiario ?? "");
+
+  const cuentasQ = useQuery({
+    queryKey: ["admin", "contabilidad", "cuentas-list"],
+    queryFn: () => adminApi.listCuentas(),
+  });
+  const catsQ = useQuery({
+    queryKey: ["admin", "contabilidad", "categorias"],
+    queryFn: () => adminApi.listGastoCategorias(),
+  });
+  const cuentas = cuentasQ.data?.cuentas ?? [];
+
+  const guardar = useMutation({
+    mutationFn: () =>
+      adminApi.updateMovimiento(mov.id, {
+        monto: Number(monto) || 0,
+        fecha: fecha || null,
+        cuenta_origen_id: origen ? Number(origen) : null,
+        cuenta_destino_id: destino ? Number(destino) : null,
+        categoria_id: categoria ? Number(categoria) : null,
+        metodo: metodo || null,
+        nota: nota || null,
+        beneficiario: beneficiario || null,
+      }),
+    onSuccess: () => {
+      toast.success("Movimiento actualizado");
+      onSaved();
+    },
+    onError: (e) => toast.error("No se pudo guardar", { description: (e as Error).message }),
+  });
+
+  return (
+    <Dialog open onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="max-w-2xl">
+        <DialogHeader>
+          <DialogTitle>
+            Editar movimiento · <span className="capitalize">{mov.tipo}</span>
+          </DialogTitle>
+        </DialogHeader>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!(Number(monto) > 0)) return toast.error("Poné un monto mayor a cero.");
+            guardar.mutate();
+          }}
+          className="space-y-3"
+        >
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Monto">
+              <Input
+                type="number"
+                step="1"
+                min="1"
+                value={monto}
+                onChange={(e) => setMonto(e.target.value)}
+                className="w-32 text-right tabular-nums"
+              />
+            </Field>
+            <Field label="Fecha">
+              <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+            </Field>
+            {mov.cuenta_origen_id != null && (
+              <Field label="Sale de">
+                <CuentaSelect cuentas={cuentas} value={origen} onChange={setOrigen} />
+              </Field>
+            )}
+            {mov.cuenta_destino_id != null && (
+              <Field label="Entra a">
+                <CuentaSelect cuentas={cuentas} value={destino} onChange={setDestino} />
+              </Field>
+            )}
+          </div>
+
+          <div className="flex flex-wrap items-end gap-3">
+            {mov.tipo === "gasto" && (
+              <Field label="¿De qué es?">
+                <select
+                  value={categoria}
+                  onChange={(e) => setCategoria(e.target.value)}
+                  className="h-9 rounded-md border hairline bg-surface-elevated px-2 text-sm"
+                >
+                  <option value="">Elegir…</option>
+                  {(catsQ.data?.categorias ?? []).map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nombre}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            <Field label="Método">
+              <select
+                value={metodo}
+                onChange={(e) => setMetodo(e.target.value)}
+                className="h-9 rounded-md border hairline bg-surface-elevated px-2 text-sm capitalize"
+              >
+                <option value="">—</option>
+                <option value="transferencia">transferencia</option>
+                <option value="efectivo">efectivo</option>
+              </select>
+            </Field>
+            {mov.tipo === "gasto" && (
+              <Field label="Beneficiario">
+                <Input
+                  value={beneficiario}
+                  onChange={(e) => setBeneficiario(e.target.value)}
+                  className="w-48"
+                />
+              </Field>
+            )}
+          </div>
+
+          <Field label="Nota">
+            <Input value={nota} onChange={(e) => setNota(e.target.value)} className="w-full" />
+          </Field>
+
+          <div className="flex items-center justify-end gap-2 pt-1">
+            <Button type="button" variant="outline" onClick={onClose}>
+              Cancelar
+            </Button>
+            <Button
+              type="submit"
+              variant="primary"
+              disabled={guardar.isPending}
+              loading={guardar.isPending}
+            >
+              Guardar
+            </Button>
+          </div>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

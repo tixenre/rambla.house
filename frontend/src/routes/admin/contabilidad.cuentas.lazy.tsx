@@ -88,7 +88,6 @@ function CuentasPage() {
                   <tr className="border-b hairline text-left text-xs uppercase tracking-wider text-muted-foreground">
                     <th className="px-3 py-2 font-medium">Caja</th>
                     <th className="px-3 py-2 font-medium">Tipo</th>
-                    <th className="px-3 py-2 font-medium text-right">Saldo inicial</th>
                     <th className="px-3 py-2 font-medium text-right">Saldo actual</th>
                     <th className="px-3 py-2 font-medium text-right">Acciones</th>
                   </tr>
@@ -103,7 +102,7 @@ function CuentasPage() {
                     .sort(([a], [b]) => (a === "ARS" ? -1 : b === "ARS" ? 1 : a.localeCompare(b)))
                     .map(([moneda, total]) => (
                       <tr key={moneda} className="border-t hairline">
-                        <td className="px-3 py-2 font-medium" colSpan={3}>
+                        <td className="px-3 py-2 font-medium" colSpan={2}>
                           Total disponible {moneda !== "ARS" ? `(${moneda})` : ""}
                         </td>
                         <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">
@@ -259,20 +258,17 @@ function CajaRow({ cuenta, onChanged }: { cuenta: CuentaSaldo; onChanged: () => 
   const confirm = useConfirm();
   const [editando, setEditando] = useState(false);
   const [nombre, setNombre] = useState(cuenta.nombre);
-  const [valor, setValor] = useState(String(cuenta.saldo_inicial));
 
   const cerrar = () => {
     setEditando(false);
     setNombre(cuenta.nombre);
-    setValor(String(cuenta.saldo_inicial));
   };
 
+  // Solo el nombre: el saldo inicial fue del arranque del sistema (migración) y
+  // ya no se muestra ni se edita — para corregir el saldo de una caja se usa
+  // "Corregir un saldo a mano" (un `ajuste`, que queda registrado).
   const guardar = useMutation({
-    mutationFn: () =>
-      adminApi.updateCuenta(cuenta.id, {
-        nombre: nombre.trim(),
-        saldo_inicial: Number(valor) || 0,
-      }),
+    mutationFn: () => adminApi.updateCuenta(cuenta.id, { nombre: nombre.trim() }),
     onSuccess: () => {
       setEditando(false);
       toast.success("Cuenta actualizada");
@@ -306,20 +302,6 @@ function CajaRow({ cuenta, onChanged }: { cuenta: CuentaSaldo; onChanged: () => 
         <Badge variant="secondary" className="capitalize">
           {cuenta.tipo}
         </Badge>
-      </td>
-      <td className="px-3 py-2 text-right">
-        {editando ? (
-          <Input
-            type="number"
-            value={valor}
-            onChange={(e) => setValor(e.target.value)}
-            className="w-28 text-right tabular-nums"
-          />
-        ) : (
-          <span className="font-mono tabular-nums">
-            {formatMoney(cuenta.saldo_inicial, cuenta.moneda)}
-          </span>
-        )}
       </td>
       <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">
         {formatMoney(cuenta.saldo, cuenta.moneda)}
@@ -385,19 +367,15 @@ function NuevaCuentaForm({ onCreated }: { onCreated: () => void }) {
   const [nombre, setNombre] = useState("");
   const [tipo, setTipo] = useState<TipoCuenta>("caja");
   const [moneda, setMoneda] = useState("ARS");
-  const [saldoInicial, setSaldoInicial] = useState("0");
 
   const crear = useMutation({
     mutationFn: () =>
-      adminApi.createCuenta({
-        nombre: nombre.trim(),
-        tipo,
-        moneda,
-        saldo_inicial: Number(saldoInicial) || 0,
-      }),
+      // Sin `saldo_inicial`: nace en 0. El saldo inicial fue del arranque del
+      // sistema (migración) y se retiró — si la caja ya tiene plata, se carga
+      // con "Corregir un saldo a mano" (queda registrado como un movimiento).
+      adminApi.createCuenta({ nombre: nombre.trim(), tipo, moneda }),
     onSuccess: () => {
       setNombre("");
-      setSaldoInicial("0");
       setTipo("caja");
       setMoneda("ARS");
       toast.success("Cuenta creada");
@@ -451,15 +429,6 @@ function NuevaCuentaForm({ onCreated }: { onCreated: () => void }) {
             <option value="ARS">Pesos (ARS)</option>
             <option value="USD">Dólares (USD)</option>
           </select>
-        </label>
-        <label className="space-y-1">
-          <span className="block t-eyebrow">Saldo inicial</span>
-          <Input
-            type="number"
-            value={saldoInicial}
-            onChange={(e) => setSaldoInicial(e.target.value)}
-            className="w-32 text-right tabular-nums"
-          />
         </label>
         <Button type="submit" variant="primary" disabled={crear.isPending || !nombre.trim()}>
           {crear.isPending ? "Creando…" : "Crear"}
