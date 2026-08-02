@@ -18,10 +18,12 @@ import { AdminPage } from "@/components/admin/AdminPage";
 import { TableSkeleton } from "@/components/admin/skeletons";
 import { ErrorState } from "@/components/admin/ErrorState";
 import { useConfirm } from "@/components/admin/useConfirm";
+import { MoverPlataForm } from "@/components/admin/contabilidad/MoverPlataForm";
 import { formatMoney } from "@/lib/format";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Badge } from "@/design-system/ui/badge";
 import { Button } from "@/design-system/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/design-system/ui/dialog";
 import { Input } from "@/design-system/ui/input";
 import { Pill, type PillTone } from "@/design-system/ui/Pill";
 import { cn } from "@/lib/utils";
@@ -64,7 +66,7 @@ function CuentasPage() {
             <div className="t-eyebrow">Socios · Cuenta corriente</div>
             <div className="grid gap-3 sm:grid-cols-2">
               {socios.map((s) => (
-                <SocioCard key={s.id} socio={s} cajas={cajas} onChanged={invalidar} />
+                <SocioCard key={s.id} socio={s} onChanged={invalidar} />
               ))}
             </div>
             <p className="text-xs text-muted-foreground">
@@ -122,57 +124,10 @@ function CuentasPage() {
   );
 }
 
-function SocioCard({
-  socio,
-  cajas,
-  onChanged,
-}: {
-  socio: CuentaSaldo;
-  cajas: CuentaSaldo[];
-  onChanged: () => void;
-}) {
+function SocioCard({ socio, onChanged }: { socio: CuentaSaldo; onChanged: () => void }) {
   const [editando, setEditando] = useState(false);
   const [arranque, setArranque] = useState(String(socio.saldo_inicial));
-
-  // Cajas de la misma moneda que el socio (la transferencia no mezcla monedas).
-  const cajasMov = cajas.filter((c) => c.moneda === socio.moneda);
   const [movAbierto, setMovAbierto] = useState(false);
-  const [dir, setDir] = useState<"pago" | "cargo">("pago");
-  const [montoMov, setMontoMov] = useState("");
-  const [cajaId, setCajaId] = useState<number | "">("");
-  const [notaMov, setNotaMov] = useState("");
-
-  const cerrarMov = () => {
-    setMovAbierto(false);
-    setMontoMov("");
-    setCajaId("");
-    setNotaMov("");
-    setDir("pago");
-  };
-
-  const registrarMov = useMutation({
-    mutationFn: () => {
-      const monto = Number(montoMov) || 0;
-      const caja = Number(cajaId);
-      // pago/rindió: el socio entrega → sale de su cuenta, entra a la caja (baja deuda).
-      // cargo: Rental puso por él → sale de la caja, entra a su cuenta (sube deuda).
-      const origen = dir === "pago" ? socio.id : caja;
-      const destino = dir === "pago" ? caja : socio.id;
-      return adminApi.createMovimiento({
-        tipo: "transferencia",
-        monto,
-        cuenta_origen_id: origen,
-        cuenta_destino_id: destino,
-        nota: notaMov.trim() || null,
-      });
-    },
-    onSuccess: () => {
-      cerrarMov();
-      toast.success(dir === "pago" ? "Pago registrado" : "Cargo registrado");
-      onChanged();
-    },
-    onError: (e) => toast.error("No se pudo registrar", { description: (e as Error).message }),
-  });
 
   const guardar = useMutation({
     mutationFn: () => adminApi.updateCuenta(socio.id, { saldo_inicial: Number(arranque) || 0 }),
@@ -253,7 +208,7 @@ function SocioCard({
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => setMovAbierto((v) => !v)}
+            onClick={() => setMovAbierto(true)}
             className="text-xs text-ink underline hover:text-ink"
           >
             Registrar movimiento
@@ -269,72 +224,33 @@ function SocioCard({
         </div>
       )}
 
-      {movAbierto && (
-        <div className="pt-2 mt-1 border-t hairline space-y-2">
-          <div className="flex gap-1">
-            {(["pago", "cargo"] as const).map((d) => (
-              <button
-                key={d}
-                type="button"
-                onClick={() => setDir(d)}
-                className={cn(
-                  "flex-1 rounded-md border px-2 py-1.5 text-xs font-medium transition",
-                  dir === d
-                    ? "border-ink bg-ink text-background"
-                    : "border-muted-foreground/30 text-muted-foreground hover:border-ink",
-                )}
-              >
-                {d === "pago" ? "Me pagó / rindió" : "Le cargué"}
-              </button>
-            ))}
-          </div>
-          <p className="text-xs text-muted-foreground">
-            {dir === "pago"
-              ? `${socio.nombre} entrega plata → baja su deuda y entra a la caja.`
-              : `Rental puso plata por ${socio.nombre} (ej. le compró algo) → sube su deuda y sale de la caja.`}
-          </p>
-          <div className="flex flex-wrap items-center gap-2">
-            <Input
-              type="number"
-              value={montoMov}
-              onChange={(e) => setMontoMov(e.target.value)}
-              placeholder="Monto"
-              className="w-28 text-right tabular-nums"
+      {/* Un socio rindiendo (o Rental cargándole algo) ES un reparto: la misma
+          operación que "Repartimos" en Movimientos. Antes había acá un formulario
+          propio —toggle "Me pagó / Le cargué", monto, caja, nota— que posteaba
+          exactamente el mismo `transferencia`, con menos campos (sin fecha, método,
+          beneficiario ni comprobante). Ahora se abre el form único, precargado con
+          el socio de un lado; darlo vuelta es cambiar los dos selectores.
+
+          Montado CONDICIONALMENTE, no solo `open`: `inicial` alimenta los valores
+          iniciales de estado, así que un componente que sobrevive entre aperturas
+          se quedaría con el socio anterior. */}
+      <Dialog open={movAbierto} onOpenChange={setMovAbierto}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Mover plata · {socio.nombre}</DialogTitle>
+          </DialogHeader>
+          {movAbierto && (
+            <MoverPlataForm
+              chrome="plain"
+              inicial={{ quePaso: "reparto", cuentaOrigenId: socio.id }}
+              onCreated={() => {
+                setMovAbierto(false);
+                onChanged();
+              }}
             />
-            <select
-              value={cajaId}
-              onChange={(e) => setCajaId(e.target.value ? Number(e.target.value) : "")}
-              className="h-8 rounded-md border hairline bg-surface-elevated px-2 text-sm"
-            >
-              <option value="">{dir === "pago" ? "¿A qué caja?" : "¿De qué caja?"}</option>
-              {cajasMov.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre}
-                </option>
-              ))}
-            </select>
-          </div>
-          <Input
-            value={notaMov}
-            onChange={(e) => setNotaMov(e.target.value)}
-            placeholder="Nota (ej. adaptador de lente)"
-          />
-          <div className="flex items-center gap-1">
-            <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              onClick={() => registrarMov.mutate()}
-              disabled={registrarMov.isPending || !(Number(montoMov) > 0) || !cajaId}
-            >
-              Registrar
-            </Button>
-            <Button type="button" variant="outline" size="sm" onClick={cerrarMov}>
-              Cancelar
-            </Button>
-          </div>
-        </div>
-      )}
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

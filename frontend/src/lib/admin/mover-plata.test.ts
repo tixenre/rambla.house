@@ -124,6 +124,43 @@ test("repartimos → transferencia (para el libro es lo mismo que mover entre cu
   assert.equal(b.tipo, "transferencia");
 });
 
+test("repartimos entre monedas distintas → cambio de divisa, no un 400 del backend", () => {
+  // El form de la ficha del socio se protegía filtrando las cajas por moneda; al
+  // colapsarlo sobre este form ese filtro no existe, así que la rama tiene que
+  // cubrir "reparto" igual que "movi" — si no, un socio que rinde en dólares
+  // arma una `transferencia` que el backend rechaza.
+  const resp = r({
+    quePaso: "reparto",
+    cuentaOrigenId: 5,
+    cuentaDestinoId: 9,
+    monedaOrigen: "ARS",
+    monedaDestino: "USD",
+    cotizacion: 1400,
+  });
+  assert.equal(esCambioDeDivisa(resp), true);
+  const d = derivarMovimiento(resp);
+  assert.equal(d.kind, "cambio_divisa");
+  if (d.kind !== "cambio_divisa") throw new Error("inalcanzable");
+  assert.equal(d.body.cotizacion, 1400);
+  assert.equal(d.body.cuenta_origen_id, 5);
+  assert.equal(d.body.cuenta_destino_id, 9);
+});
+
+test("un reparto de la misma moneda NO se confunde con un cambio de divisa", () => {
+  assert.equal(
+    esCambioDeDivisa(
+      r({
+        quePaso: "reparto",
+        cuentaOrigenId: 5,
+        cuentaDestinoId: 1,
+        monedaOrigen: "ARS",
+        monedaDestino: "ARS",
+      }),
+    ),
+    false,
+  );
+});
+
 test("NINGUNA respuesta produce un ajuste", () => {
   // `ajuste` es la puerta de "el modelo no captura la realidad" y vive aparte,
   // con fricción. Si alguna rama empieza a producirlo, este candado se rompe.
@@ -185,6 +222,12 @@ test("camposVisibles espeja el árbol (el componente no lo repite)", () => {
     beneficiario: false,
   });
   assert.deepEqual(camposVisibles("movi"), {
+    origen: true,
+    destino: true,
+    categoria: false,
+    beneficiario: false,
+  });
+  assert.deepEqual(camposVisibles("reparto"), {
     origen: true,
     destino: true,
     categoria: false,

@@ -79,10 +79,21 @@ export function camposVisibles(quePaso: QuePaso) {
 
 /** ¿Las dos cuentas elegidas son de monedas distintas? Entonces NO es una
  *  transferencia (el backend las rechaza: no hay conversión automática) sino un
- *  cambio de divisa. El usuario nunca elige eso — se deduce. */
+ *  cambio de divisa. El usuario nunca elige eso — se deduce.
+ *
+ *  Vale para las DOS respuestas que mueven plata entre dos cuentas ("movi" y
+ *  "reparto"): un socio también puede rendir en dólares. Sin esto, un reparto
+ *  ARS↔USD salía como `transferencia` y moría en un 400 del backend
+ *  ("No se puede transferir entre cuentas de distinta moneda"). Es seguro por
+ *  debajo: `crear_cambio_divisa` genera dos `ajuste`, y `ajuste` SÍ está
+ *  permitido contra la cuenta corriente de un socio — lo bloqueado ahí es
+ *  `retiro`/`aporte` (MEMORIA 2026-07-02). */
 export function esCambioDeDivisa(r: RespuestasMoverPlata): boolean {
   return Boolean(
-    r.quePaso === "movi" && r.monedaOrigen && r.monedaDestino && r.monedaOrigen !== r.monedaDestino,
+    (r.quePaso === "movi" || r.quePaso === "reparto") &&
+    r.monedaOrigen &&
+    r.monedaDestino &&
+    r.monedaOrigen !== r.monedaDestino,
   );
 }
 
@@ -98,11 +109,22 @@ export class MoverPlataInvalido extends Error {}
  * | Entró      | —                          | `aporte`                     |
  * | Moví       | misma moneda               | `transferencia`              |
  * | Moví       | distinta moneda            | `cambio_divisa` (2 `ajuste`) |
- * | Repartimos | —                          | `transferencia`              |
+ * | Repartimos | misma moneda               | `transferencia`              |
+ * | Repartimos | distinta moneda            | `cambio_divisa` (2 `ajuste`) |
  *
  * "Repartimos" y "Moví" producen el MISMO tipo a propósito: para el libro son la
  * misma operación. Se preguntan distinto porque para el dueño no lo son, y porque
- * el reparto llega precargado desde la sugerencia de la Rendición.
+ * el reparto llega precargado desde la ficha del socio (`inicial`).
+ *
+ * ⚠️ Un "Repartimos" cargado acá NO queda marcado `es_rendicion` — esa marca solo
+ * la pone `POST /rendicion/{mes}/saldar`, que a cambio resuelve las cuentas solo y
+ * no deja elegir la caja. **No es un número mal:** la posición ACUMULADA
+ * (`contabilidad/queries/posiciones.py::clasificar_flujo`) no mira `es_rendicion` a
+ * propósito, justamente para contar estos repartos; lo único que no los ve es la
+ * lista mensual "Movimientos de rendición". Exponer `es_rendicion` en
+ * `MovimientoCreate` sería peor: `ya_transferido` mapea cuenta→parte y devuelve
+ * `None` para una caja genérica, así que marcar "Tincho → Efectivo" restaría de
+ * Tincho sin sumarle a nadie y dejaría la vista mensual asimétrica.
  *
  * Tira `MoverPlataInvalido` con un mensaje en castellano si falta algo. El backend
  * revalida todo igual (`validar_estructura_movimiento` + `_validar_cuentas_y_categoria`):

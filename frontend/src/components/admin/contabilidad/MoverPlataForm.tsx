@@ -7,237 +7,81 @@
  * dueño ya sabe —qué pasó, de dónde salió, a dónde fue— y el `tipo` lo deriva
  * `lib/admin/mover-plata.ts` (puro, con su tabla de verdad testeada).
  *
- * Este componente SOLO pinta y junta respuestas. Toda la lógica de derivación vive
- * en el módulo puro para poder testearla sin montar React — el riesgo real del
- * cambio es derivar un tipo con la semántica de P&L equivocada.
+ * Este archivo es SOLO layout. El estado (los 13 campos, las listas, el envío)
+ * vive en `useMoverPlata.ts`; la derivación del `tipo`, en el módulo puro.
  *
  * El backend no se toca: `crear_movimiento`/`crear_cambio_divisa` siguen siendo la
  * única puerta, con todas sus validaciones. Esto es la entrada, no el libro.
  */
-import { useMemo, useState } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
-import { toast } from "sonner";
-
 import { Button } from "@/design-system/ui/button";
 import { Checkbox } from "@/design-system/ui/checkbox";
 import { Input } from "@/design-system/ui/input";
 import { CuentaSelect, Field } from "@/components/admin/contabilidad/fields";
-import { adminApi, type Cuenta } from "@/lib/admin/api";
-import {
-  camposVisibles,
-  derivarMovimiento,
-  esCambioDeDivisa,
-  MoverPlataInvalido,
-  QUE_PASO,
-  type QuePaso,
-  type RespuestasMoverPlata,
-} from "@/lib/admin/mover-plata";
+import { useMoverPlata } from "@/components/admin/contabilidad/useMoverPlata";
+import { QUE_PASO, type QuePaso, type RespuestasMoverPlata } from "@/lib/admin/mover-plata";
 import { cn } from "@/lib/utils";
 
 export function MoverPlataForm({
   onCreated,
-  /** Precarga para el atajo desde Rendición ("Registrar la transferencia"). */
+  /** Precarga el form desde el contexto que lo abre — hoy, la ficha de un socio
+   *  en Cuentas ("Repartimos" + el socio ya puesto de un lado). Solo alimenta los
+   *  valores iniciales: quien lo monte para dos entidades distintas tiene que
+   *  montarlo condicionalmente (o darle `key`) para que la precarga se refresque. */
   inicial,
+  /** `"card"` = suelto en una página (borde + título). `"plain"` = adentro de un
+   *  Dialog, que ya pone su propio marco. */
+  chrome = "card",
 }: {
   onCreated: () => void;
   inicial?: Partial<RespuestasMoverPlata>;
+  chrome?: "card" | "plain";
 }) {
-  const [quePaso, setQuePaso] = useState<QuePaso>(inicial?.quePaso ?? "pague");
-  const [monto, setMonto] = useState(inicial?.monto ? String(inicial.monto) : "");
-  const [origen, setOrigen] = useState(
-    inicial?.cuentaOrigenId ? String(inicial.cuentaOrigenId) : "",
-  );
-  const [destino, setDestino] = useState(
-    inicial?.cuentaDestinoId ? String(inicial.cuentaDestinoId) : "",
-  );
-  const [categoria, setCategoria] = useState("");
-  const [esDelSocio, setEsDelSocio] = useState(false);
-  const [cotizacion, setCotizacion] = useState("");
-  const [montoDestino, setMontoDestino] = useState("");
-  const [metodo, setMetodo] = useState("");
-  const [fecha, setFecha] = useState("");
-  const [nota, setNota] = useState("");
-  const [beneficiario, setBeneficiario] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-
-  const cuentasQ = useQuery({
-    queryKey: ["admin", "contabilidad", "cuentas-list"],
-    queryFn: () => adminApi.listCuentas(),
-  });
-  const catsQ = useQuery({
-    queryKey: ["admin", "contabilidad", "categorias"],
-    queryFn: () => adminApi.listGastoCategorias(),
-  });
-  const benQ = useQuery({
-    queryKey: ["admin", "contabilidad", "beneficiarios"],
-    queryFn: () => adminApi.listBeneficiarios(),
-  });
-
-  const cuentas: Cuenta[] = cuentasQ.data?.cuentas ?? [];
-  const categorias = catsQ.data?.categorias ?? [];
-  const beneficiarios = benQ.data?.beneficiarios ?? [];
-
-  const monedaDe = (id: string) => cuentas.find((c) => String(c.id) === id)?.moneda ?? null;
-
-  const respuestas: RespuestasMoverPlata = useMemo(
-    () => ({
-      quePaso,
-      monto: Number(monto) || 0,
-      cuentaOrigenId: origen ? Number(origen) : null,
-      cuentaDestinoId: destino ? Number(destino) : null,
-      categoriaId: categoria ? Number(categoria) : null,
-      esDelSocio,
-      monedaOrigen: monedaDe(origen),
-      monedaDestino: monedaDe(destino),
-      cotizacion: cotizacion ? Number(cotizacion) : null,
-      montoDestino: montoDestino ? Number(montoDestino) : null,
-      metodo: metodo || null,
-      fecha: fecha || null,
-      nota: nota || null,
-      beneficiario: beneficiario || null,
-    }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `monedaDe` deriva de `cuentas`, ya en deps
-    [
-      quePaso,
-      monto,
-      origen,
-      destino,
-      categoria,
-      esDelSocio,
-      cotizacion,
-      montoDestino,
-      metodo,
-      fecha,
-      nota,
-      beneficiario,
-      cuentas,
-    ],
-  );
-
-  const campos = camposVisibles(quePaso);
-  const cambioDivisa = esCambioDeDivisa(respuestas);
-
-  // La cuenta corriente de un socio (`tipo === "socio"`) NO es plata real, así que
-  // el backend BLOQUEA `retiro`/`aporte` contra ella (`_validar_cuentas_y_categoria`,
-  // MEMORIA 2026-07-02). Sacarla del selector en esos dos casos evita ofrecer una
-  // combinación que termina en un 400 cuyo mensaje habla de "gasto, transferencia o
-  // ajuste" — justo las palabras que este form esconde. Para todo lo demás (un gasto
-  // que pagó el socio con su plata, un reparto) la cuenta sigue disponible.
-  const sinCC = cuentas.filter((c) => c.tipo !== "socio");
-  const cuentasOrigen = quePaso === "pague" && esDelSocio ? sinCC : cuentas;
-  const cuentasDestino = quePaso === "entro" ? sinCC : cuentas;
-  // A diferencia del form viejo, las cuentas destino NO se filtran por moneda: si
-  // el admin elige dos monedas distintas, eso ES un cambio de divisa y el form se
-  // adapta solo. Antes tenía que saber de antemano que existía esa categoría y
-  // cambiar de pantalla.
-  const reset = () => {
-    setMonto("");
-    setOrigen("");
-    setDestino("");
-    setCategoria("");
-    setEsDelSocio(false);
-    setCotizacion("");
-    setMontoDestino("");
-    setMetodo("");
-    setFecha("");
-    setNota("");
-    setBeneficiario("");
-    setFile(null);
-  };
-
-  const crear = useMutation({
-    mutationFn: async () => {
-      const d = derivarMovimiento(respuestas);
-      if (d.kind === "cambio_divisa") return adminApi.createCambioDivisa(d.body);
-      const mov = await adminApi.createMovimiento(d.body);
-      if (file) await adminApi.uploadComprobante(mov.id, file);
-      return mov;
-    },
-    onSuccess: () => {
-      reset();
-      toast.success("Movimiento registrado");
-      onCreated();
-    },
-    onError: (e) => toast.error("No se pudo registrar", { description: (e as Error).message }),
-  });
+  const f = useMoverPlata({ inicial, onCreated });
 
   return (
     <form
       onSubmit={(e) => {
         e.preventDefault();
-        // La validación en castellano vive en el módulo puro: se corre acá para
-        // avisar antes de mandar un request que ya sabemos que falla.
-        try {
-          derivarMovimiento(respuestas);
-        } catch (err) {
-          if (err instanceof MoverPlataInvalido) return toast.error(err.message);
-          throw err;
-        }
-        crear.mutate();
+        f.enviar();
       }}
-      className="rounded-lg border hairline p-4 space-y-3"
+      className={cn("space-y-3", chrome === "card" && "rounded-lg border hairline p-4")}
     >
-      <div className="t-eyebrow">Mover plata</div>
+      {chrome === "card" && <div className="t-eyebrow">Mover plata</div>}
 
-      {/* La única pregunta de arranque, en castellano. */}
-      <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-4">
-        {QUE_PASO.map((q) => (
-          <button
-            key={q.key}
-            type="button"
-            onClick={() => setQuePaso(q.key)}
-            className={cn(
-              "min-h-11 rounded-md border px-3 py-2 text-left transition",
-              quePaso === q.key
-                ? "border-ink bg-ink text-background"
-                : "border-muted-foreground/30 hover:border-ink",
-            )}
-          >
-            <span className="block text-sm font-medium">{q.label}</span>
-            <span
-              className={cn(
-                "block text-xs",
-                quePaso === q.key ? "text-background/70" : "text-muted-foreground",
-              )}
-            >
-              {q.sub}
-            </span>
-          </button>
-        ))}
-      </div>
+      <QuePasoPicker value={f.quePaso} onChange={f.setQuePaso} />
 
       <div className="flex flex-wrap items-end gap-3">
-        <Field label={cambioDivisa ? "Monto que sale" : "Monto"}>
+        <Field label={f.cambioDivisa ? "Monto que sale" : "Monto"}>
           <Input
             type="number"
             step="1"
             min="1"
-            value={monto}
-            onChange={(e) => setMonto(e.target.value)}
+            value={f.monto}
+            onChange={(e) => f.setMonto(e.target.value)}
             className="w-32 text-right tabular-nums"
           />
         </Field>
 
-        {campos.origen && (
-          <Field label={quePaso === "pague" ? "Sale de" : "De qué cuenta"}>
-            <CuentaSelect cuentas={cuentasOrigen} value={origen} onChange={setOrigen} />
+        {f.campos.origen && (
+          <Field label={f.quePaso === "pague" ? "Sale de" : "De qué cuenta"}>
+            <CuentaSelect cuentas={f.cuentasOrigen} value={f.origen} onChange={f.setOrigen} />
           </Field>
         )}
-        {campos.destino && (
-          <Field label={quePaso === "entro" ? "Entra a" : "A qué cuenta"}>
-            <CuentaSelect cuentas={cuentasDestino} value={destino} onChange={setDestino} />
+        {f.campos.destino && (
+          <Field label={f.quePaso === "entro" ? "Entra a" : "A qué cuenta"}>
+            <CuentaSelect cuentas={f.cuentasDestino} value={f.destino} onChange={f.setDestino} />
           </Field>
         )}
 
-        {campos.categoria && !esDelSocio && (
+        {f.campos.categoria && !f.esDelSocio && (
           <Field label="¿De qué es?">
             <select
-              value={categoria}
-              onChange={(e) => setCategoria(e.target.value)}
+              value={f.categoria}
+              onChange={(e) => f.setCategoria(e.target.value)}
               className="h-9 rounded-md border hairline bg-surface-elevated px-2 text-sm"
             >
               <option value="">Elegir…</option>
-              {categorias.map((c) => (
+              {f.categorias.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.nombre}
                 </option>
@@ -250,13 +94,13 @@ export function MoverPlataForm({
             `derivar_cambio_divisa`). El form viejo hacía elegir entre dos modos —
             "tengo la cotización" / "tengo los dos montos"— antes de escribir nada;
             acá se completa el que se tenga a mano. */}
-        {cambioDivisa && (
+        {f.cambioDivisa && (
           <>
             <Field label="Cotización (pesos por dólar)">
               <Input
                 type="number"
-                value={cotizacion}
-                onChange={(e) => setCotizacion(e.target.value)}
+                value={f.cotizacion}
+                onChange={(e) => f.setCotizacion(e.target.value)}
                 className="w-32 text-right tabular-nums"
                 placeholder="Ej. 1400"
               />
@@ -264,8 +108,8 @@ export function MoverPlataForm({
             <Field label="…o monto que entra">
               <Input
                 type="number"
-                value={montoDestino}
-                onChange={(e) => setMontoDestino(e.target.value)}
+                value={f.montoDestino}
+                onChange={(e) => f.setMontoDestino(e.target.value)}
                 className="w-32 text-right tabular-nums"
                 placeholder="En la otra moneda"
               />
@@ -273,11 +117,11 @@ export function MoverPlataForm({
           </>
         )}
 
-        {!cambioDivisa && (
+        {!f.cambioDivisa && (
           <Field label="Método">
             <select
-              value={metodo}
-              onChange={(e) => setMetodo(e.target.value)}
+              value={f.metodo}
+              onChange={(e) => f.setMetodo(e.target.value)}
               className="h-9 rounded-md border hairline bg-surface-elevated px-2 text-sm capitalize"
             >
               <option value="">—</option>
@@ -287,7 +131,7 @@ export function MoverPlataForm({
           </Field>
         )}
         <Field label="Fecha">
-          <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
+          <Input type="date" value={f.fecha} onChange={(e) => f.setFecha(e.target.value)} />
         </Field>
       </div>
 
@@ -301,19 +145,12 @@ export function MoverPlataForm({
           cuenta — el mismo hecho cargado como "Repartimos" sí se la ajusta. Dos
           entradas del mismo form con contabilidades opuestas era justo la
           confusión que esto vino a matar (hallazgo del supervisor). */}
-      {quePaso === "pague" && (
+      {f.quePaso === "pague" && (
         <div className="space-y-1">
           <label className="flex min-h-11 items-center gap-2 text-sm">
             <Checkbox
-              checked={esDelSocio}
-              onCheckedChange={(v) => {
-                setEsDelSocio(v === true);
-                // Un `retiro` no puede salir de la cuenta corriente de un socio
-                // (el backend lo bloquea): si había una elegida, se limpia en vez
-                // de quedar en un estado que el submit va a rechazar.
-                if (v === true && cuentas.find((c) => String(c.id) === origen)?.tipo === "socio")
-                  setOrigen("");
-              }}
+              checked={f.esDelSocio}
+              onCheckedChange={(v) => f.marcarEsDelSocio(v === true)}
             />
             <span>
               No es un gasto del negocio
@@ -322,7 +159,7 @@ export function MoverPlataForm({
               </span>
             </span>
           </label>
-          {esDelSocio && (
+          {f.esDelSocio && (
             <p className="pl-6 text-xs text-muted-foreground">
               Ojo: esto baja la caja y no le queda registrado a nadie. Si la plata se la llevó un
               socio, cargala como <strong>Repartimos</strong> para que le ajuste la cuenta.
@@ -331,7 +168,7 @@ export function MoverPlataForm({
         </div>
       )}
 
-      {cambioDivisa && (
+      {f.cambioDivisa && (
         <p className="text-xs text-muted-foreground">
           Las dos cuentas son de monedas distintas, así que esto se registra como un cambio de
           divisa (dos asientos atados, uno por caja).
@@ -339,17 +176,17 @@ export function MoverPlataForm({
       )}
 
       <div className="flex flex-wrap items-end gap-3">
-        {campos.beneficiario && (
+        {f.campos.beneficiario && (
           <Field label="Beneficiario (opcional)">
             <Input
-              value={beneficiario}
-              onChange={(e) => setBeneficiario(e.target.value)}
+              value={f.beneficiario}
+              onChange={(e) => f.setBeneficiario(e.target.value)}
               list="benef-list"
               placeholder="Ej. Jimena (CM)"
               className="w-56"
             />
             <datalist id="benef-list">
-              {beneficiarios.map((b) => (
+              {f.beneficiarios.map((b) => (
                 <option key={b} value={b} />
               ))}
             </datalist>
@@ -357,32 +194,59 @@ export function MoverPlataForm({
         )}
         <Field label="Nota (opcional)">
           <Input
-            value={nota}
-            onChange={(e) => setNota(e.target.value)}
+            value={f.nota}
+            onChange={(e) => f.setNota(e.target.value)}
             placeholder="Ej. factura 0001-…"
             className="w-64"
           />
         </Field>
-        {!cambioDivisa && (
+        {!f.cambioDivisa && (
           <Field label="Comprobante (opcional)">
             {/* eslint-disable-next-line no-restricted-syntax -- input file: no hay componente DS */}
             <input
               type="file"
               accept="application/pdf,image/*"
-              onChange={(e) => setFile(e.target.files?.[0] ?? null)}
+              onChange={(e) => f.setFile(e.target.files?.[0] ?? null)}
               className="text-xs"
             />
           </Field>
         )}
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={crear.isPending}
-          loading={crear.isPending}
-        >
-          {crear.isPending ? "Guardando…" : "Registrar"}
+        <Button type="submit" variant="primary" disabled={f.enviando} loading={f.enviando}>
+          {f.enviando ? "Guardando…" : "Registrar"}
         </Button>
       </div>
     </form>
+  );
+}
+
+/** La única pregunta de arranque, en castellano. Las 4 opciones y su copy viven
+ *  en `QUE_PASO` (módulo puro) — acá solo se pintan. */
+function QuePasoPicker({ value, onChange }: { value: QuePaso; onChange: (q: QuePaso) => void }) {
+  return (
+    <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-4">
+      {QUE_PASO.map((q) => (
+        <button
+          key={q.key}
+          type="button"
+          onClick={() => onChange(q.key)}
+          className={cn(
+            "min-h-11 rounded-md border px-3 py-2 text-left transition",
+            value === q.key
+              ? "border-ink bg-ink text-background"
+              : "border-muted-foreground/30 hover:border-ink",
+          )}
+        >
+          <span className="block text-sm font-medium">{q.label}</span>
+          <span
+            className={cn(
+              "block text-xs",
+              value === q.key ? "text-background/70" : "text-muted-foreground",
+            )}
+          >
+            {q.sub}
+          </span>
+        </button>
+      ))}
+    </div>
   );
 }
