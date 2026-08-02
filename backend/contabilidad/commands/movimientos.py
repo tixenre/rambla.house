@@ -182,6 +182,35 @@ def _exigir_mes_abierto(conn, fecha) -> None:
         )
 
 
+def _es_reparto_entre_partes(conn, cuenta_origen_id, cuenta_destino_id) -> bool:
+    """¿Esta transferencia mueve plata ENTRE DOS PARTES de la rendición (Pablo/
+    Tincho/Rental/Estudio)? Misma condición que `queries/posiciones.py::
+    clasificar_flujo` rama 1 (las dos puntas resuelven a una parte, y son
+    DISTINTAS) — reimplementada con una query puntual a las dos cuentas en vez
+    de traer el mapa completo, porque acá solo hace falta resolver dos ids.
+
+    Una caja genérica (Efectivo, Banco — sin `socio`) no mapea a ninguna parte,
+    así que un movimiento puertas adentro del negocio (Efectivo→Banco, un gasto,
+    un aporte) nunca da `True` acá — solo dispara cuando de verdad hay una parte
+    de cada lado."""
+    if not (cuenta_origen_id and cuenta_destino_id):
+        return False
+    from contabilidad.queries.posiciones import parte_de_cuenta
+
+    rows = conn.execute(
+        "SELECT id, socio, tipo, nombre FROM cuentas WHERE id IN (%s, %s)",
+        (cuenta_origen_id, cuenta_destino_id),
+    ).fetchall()
+    info = {r["id"]: r for r in rows}
+    if cuenta_origen_id not in info or cuenta_destino_id not in info:
+        return False
+    po = parte_de_cuenta(info[cuenta_origen_id]["socio"], info[cuenta_origen_id]["tipo"],
+                         info[cuenta_origen_id]["nombre"])
+    pd = parte_de_cuenta(info[cuenta_destino_id]["socio"], info[cuenta_destino_id]["tipo"],
+                         info[cuenta_destino_id]["nombre"])
+    return bool(po and pd and po != pd)
+
+
 def crear_movimiento(conn, *, tipo, monto, cuenta_origen_id=None, cuenta_destino_id=None,
                      categoria_id=None, metodo=None, fecha=None, nota=None, beneficiario=None,
                      por=None, es_rendicion=False, rendicion_mes=None, cotizacion=None,
@@ -191,12 +220,26 @@ def crear_movimiento(conn, *, tipo, monto, cuenta_origen_id=None, cuenta_destino
     rendición entre socios (lo usa `commands/rendicion.py::saldar`, no la UI
     general). `cotizacion`/`movimiento_par_id` los usa `crear_cambio_divisa`
     (no se exponen en el form general de movimientos). Devuelve el movimiento
-    con nombres resueltos."""
+    con nombres resueltos.
+
+    Si el caller NO marcó `es_rendicion` explícitamente, se AUTO-DETECTA: una
+    `transferencia` (u otro tipo con las dos cuentas puestas) entre dos partes
+    distintas ES un reparto por definición — la cuenta corriente de un socio no
+    tiene otro motivo para que le muevan plata. Sin esto, un "Repartimos" cargado
+    desde el form general (o el viejo "Me pagó / Le cargué" de la ficha del
+    socio) quedaba invisible para `queries/rendicion.py::ya_transferido` (que
+    filtra por `es_rendicion`), aunque la posición ACUMULADA sí lo contara bien
+    (`clasificar_flujo` no mira esa marca) — dos vistas de acuerdo en el número
+    pero en desacuerdo en qué movimientos lo explican."""
     monto = int(monto or 0)
     validar_estructura_movimiento(tipo, monto, cuenta_origen_id, cuenta_destino_id, categoria_id)
     _validar_metodo(metodo)
     _exigir_mes_abierto(conn, fecha)
     _validar_cuentas_y_categoria(conn, tipo, cuenta_origen_id, cuenta_destino_id, categoria_id)
+
+    if not es_rendicion and _es_reparto_entre_partes(conn, cuenta_origen_id, cuenta_destino_id):
+        es_rendicion = True
+        rendicion_mes = rendicion_mes or _mes_de_fecha(fecha)
 
     beneficiario = (beneficiario or "").strip() or None
     cur = conn.execute(

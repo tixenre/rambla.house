@@ -44,10 +44,13 @@ línea: **la cuenta corriente de un socio humano no tiene caja, así que TODO lo
 toca es un reparto con el negocio; una caja real solo reparte cuando del otro lado
 hay otra parte.**
 
-Efecto lateral valioso: el clasificador NO mira `es_rendicion`, así que también toma
-los repartos cargados desde el botón "Me pagó / Le cargué" de la ficha del socio
-(`contabilidad.cuentas.lazy.tsx`), que crea una `transferencia` SIN esa marca y por
-eso era invisible para `ya_transferido`.
+Efecto lateral valioso: el clasificador NO mira `es_rendicion` — defensa en
+profundidad, no la única red. `crear_movimiento` (2026-08) ya auto-detecta y marca
+`es_rendicion` cuando las dos cuentas resuelven a partes distintas
+(`_es_reparto_entre_partes`, misma condición que la rama 1 de acá), así que un
+reparto cargado desde el form general queda visible también para
+`ya_transferido`/la lista mensual — pero si algún camino viejo lo dejara sin
+marcar, la posición acumulada lo sigue contando bien igual.
 
 ## Alcance
 

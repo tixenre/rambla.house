@@ -104,9 +104,14 @@ Reglas que NO se rompen:
   debe a los demás** (la parte de cada uno es un % de lo FACTURADO, no de lo que sobra tras los
   gastos). Por eso el flujo se clasifica (`clasificar_flujo`): **la cuenta corriente de un socio
   humano no tiene caja, así que todo lo que la toca es un reparto con el negocio; una caja real solo
-  reparte cuando del otro lado hay otra parte.** El clasificador **no mira `es_rendicion`** — a
-  propósito: así también toma los repartos cargados desde "Me pagó / Le cargué" de la ficha del
-  socio, que crean una `transferencia` sin esa marca y por eso eran invisibles para `ya_transferido`.
+  reparte cuando del otro lado hay otra parte.** El clasificador **no mira `es_rendicion`** —
+  defensa en profundidad: la posición acumulada cuenta bien un reparto aunque, por lo que sea, no
+  haya quedado marcado. `crear_movimiento` (2026-08) **auto-detecta y marca `es_rendicion`** cuando
+  el caller no lo pidió explícito y las dos cuentas resuelven a partes DISTINTAS
+  (`_es_reparto_entre_partes`, misma condición que la rama 1 de `clasificar_flujo`) — así un
+  "Repartimos" del form general o un "Me pagó / Le cargué" de la ficha del socio quedan visibles
+  para `ya_transferido`/la lista mensual "Movimientos de rendición", sin que el caller tenga que
+  saber que esa marca existe.
 - **Una caja real tiene DOS números y los dos son verdad:** su `saldo` (cash, tiene que cuadrar con
   el banco — **no se le resta su parte**) y su `pendiente` en `posiciones` (cuánto de eso es suyo).
   El crédito del Estudio contra Rental vive ahí; antes no existía en ninguna vista de saldos.
