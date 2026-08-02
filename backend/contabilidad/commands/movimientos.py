@@ -184,15 +184,28 @@ def _exigir_mes_abierto(conn, fecha) -> None:
 
 def _es_reparto_entre_partes(conn, cuenta_origen_id, cuenta_destino_id) -> bool:
     """¿Esta transferencia mueve plata ENTRE DOS PARTES de la rendición (Pablo/
-    Tincho/Rental/Estudio)? Misma condición que `queries/posiciones.py::
-    clasificar_flujo` rama 1 (las dos puntas resuelven a una parte, y son
-    DISTINTAS) — reimplementada con una query puntual a las dos cuentas en vez
-    de traer el mapa completo, porque acá solo hace falta resolver dos ids.
+    Tincho/Rental/Estudio)? Las dos puntas tienen que resolver a una parte por su
+    columna `socio` (o ser el Fondo Rental), y ser DISTINTAS.
 
-    Una caja genérica (Efectivo, Banco — sin `socio`) no mapea a ninguna parte,
-    así que un movimiento puertas adentro del negocio (Efectivo→Banco, un gasto,
-    un aporte) nunca da `True` acá — solo dispara cuando de verdad hay una parte
-    de cada lado."""
+    ⚠️ **A propósito es MÁS ANGOSTA que `queries/posiciones.py::clasificar_flujo`
+    rama 1, y NO hay que "alinearlas".** El clasificador hace caer una caja
+    genérica (Efectivo, Banco — sin `socio`) a "Rental"; acá NO, porque los dos
+    consumidores tienen requisitos opuestos:
+
+    - `clasificar_flujo` alimenta la posición ACUMULADA, que suma y resta por
+      parte: contar `Efectivo → Caja Pablo` como "Rental → Pablo" es correcto y
+      necesario (si no, ese reparto se perdería).
+    - Esta marca alimenta `queries/rendicion.py::ya_transferido`, que mapea cada
+      punta con `parte_de_cuenta` **sin fallback** y saltea la que da `None`.
+      Marcar `Efectivo → Caja Pablo` le SUMARÍA a Pablo sin restarle a Rental →
+      la rendición del mes dejaría de cerrar en cero.
+
+    El costo aceptado de esa asimetría: un reparto pagado desde Efectivo/Banco no
+    aparece en la lista mensual "Movimientos de rendición" (sí está bien contado
+    en la vista acumulada, que es la que decide). Cerrarlo de verdad requiere que
+    `ya_transferido` sepa resolver una caja genérica, no ensanchar esto.
+
+    Candado: `test_reparto_desde_caja_generica_no_se_marca` (Postgres real)."""
     if not (cuenta_origen_id and cuenta_destino_id):
         return False
     from contabilidad.queries.posiciones import parte_de_cuenta

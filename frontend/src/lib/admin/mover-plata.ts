@@ -116,15 +116,17 @@ export class MoverPlataInvalido extends Error {}
  * misma operación. Se preguntan distinto porque para el dueño no lo son, y porque
  * el reparto llega precargado desde la ficha del socio (`inicial`).
  *
- * ⚠️ Un "Repartimos" cargado acá NO queda marcado `es_rendicion` — esa marca solo
- * la pone `POST /rendicion/{mes}/saldar`, que a cambio resuelve las cuentas solo y
- * no deja elegir la caja. **No es un número mal:** la posición ACUMULADA
- * (`contabilidad/queries/posiciones.py::clasificar_flujo`) no mira `es_rendicion` a
- * propósito, justamente para contar estos repartos; lo único que no los ve es la
- * lista mensual "Movimientos de rendición". Exponer `es_rendicion` en
- * `MovimientoCreate` sería peor: `ya_transferido` mapea cuenta→parte y devuelve
- * `None` para una caja genérica, así que marcar "Tincho → Efectivo" restaría de
- * Tincho sin sumarle a nadie y dejaría la vista mensual asimétrica.
+ * El front NO manda `es_rendicion`: lo decide el backend solo. `crear_movimiento`
+ * marca el movimiento como reparto cuando las dos cuentas son partes distintas
+ * (`_es_reparto_entre_partes`), así que un "Repartimos" entre Caja Tincho y Fondo
+ * Rental aparece en la lista mensual "Movimientos de rendición" igual que un
+ * saldado hecho desde la pantalla de Rendición.
+ *
+ * ⚠️ Excepción conocida: si el reparto sale de una caja GENÉRICA (Efectivo, Banco)
+ * no se marca — `ya_transferido` no sabe resolver esas cuentas a una parte, y
+ * marcarlo dejaría la rendición del mes sin cerrar en cero. Esa plata sí está bien
+ * contada en la posición acumulada, que es la que decide. Detalle completo en el
+ * docstring de `_es_reparto_entre_partes` (backend).
  *
  * Tira `MoverPlataInvalido` con un mensaje en castellano si falta algo. El backend
  * revalida todo igual (`validar_estructura_movimiento` + `_validar_cuentas_y_categoria`):

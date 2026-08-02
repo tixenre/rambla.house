@@ -213,6 +213,42 @@ def test_transferencia_entre_partes_se_auto_marca_es_rendicion(conn):
     assert mov["rendicion_mes"] == mes_actual_ar()
 
 
+def test_reparto_desde_caja_generica_no_se_marca(conn):
+    # Efectivo → Caja Tincho ES un reparto para la posición ACUMULADA (el
+    # clasificador hace caer una caja genérica a "Rental"), pero acá NO se marca
+    # `es_rendicion` a propósito: `ya_transferido` mapea cada punta SIN fallback y
+    # saltea la que da None, así que marcarlo le sumaría a Tincho sin restarle a
+    # Rental y la rendición del mes dejaría de cerrar en cero.
+    #
+    # Este test fija esa asimetría para que nadie "alinee" las dos condiciones
+    # creyendo que es una inconsistencia (hallazgo del supervisor: el comentario
+    # viejo decía que eran la misma condición, y no lo son).
+    from contabilidad.commands.movimientos import crear_movimiento
+    from contabilidad.queries.posiciones import clasificar_flujo, parte_de_cuenta
+
+    efectivo, tincho = _cuenta_id(conn, "Efectivo"), _cuenta_id(conn, "Caja Tincho")
+
+    mov = crear_movimiento(
+        conn, tipo="transferencia", monto=30000,
+        cuenta_origen_id=efectivo, cuenta_destino_id=tincho, por="test",
+    )
+    assert mov["es_rendicion"] is False, "marcarlo rompería el cierre en cero del mes"
+
+    # Pero la posición acumulada SÍ lo cuenta — las dos cosas a la vez son correctas.
+    filas = conn.execute(
+        "SELECT id, socio, tipo, nombre FROM cuentas WHERE id IN (%s, %s)",
+        (efectivo, tincho),
+    ).fetchall()
+    parte_por_cuenta = {
+        r["id"]: parte_de_cuenta(r["socio"], r["tipo"], r["nombre"]) for r in filas
+    }
+    cc_por_cuenta = {efectivo: False, tincho: True}
+    assert clasificar_flujo(
+        {"monto": 30000, "cuenta_origen_id": efectivo, "cuenta_destino_id": tincho},
+        parte_por_cuenta, cc_por_cuenta,
+    ) == ("Rental", "Tincho")
+
+
 def test_transferencia_entre_dos_cajas_propias_no_se_marca(conn):
     # Efectivo y Banco son las dos "Rental" (ninguna representa a otra parte):
     # mover plata entre ellas es puertas adentro del negocio, no un reparto.

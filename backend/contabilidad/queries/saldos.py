@@ -197,6 +197,12 @@ def saldos(conn, as_of: str | None = None) -> dict:
                             # tiene su propio fallback para inactivas/inexistentes
         "cajas": cajas,
         "socios": socios,
+        # El devengado CRUDO por beneficiario, tal como lo devolvió la liquidación —
+        # incluye nombres que no son una parte (un dueño de equipos tercero), que las
+        # filas de arriba no pueden mostrar porque no tienen cuenta. Se expone para
+        # que un consumidor que ya llamó a `saldos()` no tenga que correr una segunda
+        # liquidación completa para verlo (`reconciliacion.py::devengado_sin_cuenta`).
+        "partes": partes,
         "totales": totales,
         "total_disponible": totales.get("ARS", 0),  # ARS (compat); USD va en `totales`
         "as_of": as_of or now_ar().date().isoformat(),

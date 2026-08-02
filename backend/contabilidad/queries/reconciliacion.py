@@ -4,9 +4,13 @@ Chequeos de integridad que verifican que la plata del módulo cuadre. Devuelve
 `{ok: bool, ...}`; cada chequeo lista lo que encontró. Read-only.
 """
 
+import logging
+
 from reportes.liquidacion import LIQUIDACION_INICIO
 
 from contabilidad.constants import COBRADORES
+
+logger = logging.getLogger(__name__)
 
 
 def reconciliar(conn) -> dict:
@@ -56,12 +60,15 @@ def reconciliar(conn) -> dict:
     #    no la sugiere la rendición, y nadie se entera. Es el "pendiente conocido"
     #    que quedó anotado al construir el motor (DECISIONES 2026-06-07) y hasta
     #    ahora no tenía red.
+    #    El devengado sale de `s["partes"]` (lo que `saldos()` YA calculó arriba), no
+    #    de un `partes_socios(conn)` propio: era una liquidación COMPLETA de todo el
+    #    historial corrida de nuevo para obtener exactamente el mismo dict, en la
+    #    función que se dispara al abrir `/admin/contabilidad`.
     from contabilidad.queries.rendicion import cuenta_de_parte
-    from contabilidad.queries.saldos import partes_socios
 
     huerfanos = [
         {"beneficiario": b, "monto": int(m)}
-        for b, m in sorted(partes_socios(conn).items())
+        for b, m in sorted((s.get("partes") or {}).items())
         if int(m) != 0 and cuenta_de_parte(conn, b) is None
     ]
     out["devengado_sin_cuenta"] = {
@@ -82,21 +89,30 @@ def reconciliar(conn) -> dict:
     #    visible esa clase de divergencia, que hasta ahora no tenía red: el semáforo
     #    de saldos negativos corre SOLO sobre cajas y saltea las cuentas corrientes
     #    a propósito.
+    #    Degrada en vez de tumbar el panel (mismo criterio que el #6 de abajo): este
+    #    chequeo es INFORMATIVO, así que si `posiciones()` llegara a fallar, lo
+    #    correcto es perder la nota — no devolver un 500 y dejar al dueño sin ver los
+    #    chequeos que SÍ bajan el semáforo.
     from contabilidad.queries.posiciones import posiciones
 
-    pos = posiciones(conn)
-    pendiente_por_parte = {p["parte"]: p["pendiente"] for p in pos["partes"]}
     divergentes = []
-    for c in s["socios"]:
-        pend = pendiente_por_parte.get(c["socio"])
-        if pend is None:
-            continue
-        dif = int(c["saldo"]) + int(pend)
-        if dif != 0:
-            divergentes.append({
-                "parte": c["socio"], "cuenta_corriente": int(c["saldo"]),
-                "posicion": int(pend), "diferencia": dif,
-            })
+    float_sin_saldar = 0
+    try:
+        pos = posiciones(conn)
+        pendiente_por_parte = {p["parte"]: p["pendiente"] for p in pos["partes"]}
+        float_sin_saldar = pos["float_sin_saldar"]
+        for c in s["socios"]:
+            pend = pendiente_por_parte.get(c["socio"])
+            if pend is None:
+                continue
+            dif = int(c["saldo"]) + int(pend)
+            if dif != 0:
+                divergentes.append({
+                    "parte": c["socio"], "cuenta_corriente": int(c["saldo"]),
+                    "posicion": int(pend), "diferencia": dif,
+                })
+    except Exception:
+        logger.exception("cc_vs_posicion_divergente falló — se omite la nota")
     #    INFORMATIVO: no baja el semáforo todavía. Dos motivos concretos, no
     #    prudencia genérica: (a) la divergencia `liquidar` vs `liquidar_rango` es
     #    conocida y esperada mientras las dos fórmulas convivan — ponerla en rojo
@@ -107,7 +123,7 @@ def reconciliar(conn) -> dict:
     out["cc_vs_posicion_divergente"] = {
         "cantidad": len(divergentes), "partes": divergentes, "informativo": True,
     }
-    out["float_sin_saldar"] = pos["float_sin_saldar"]
+    out["float_sin_saldar"] = float_sin_saldar
 
     # 6. Hereda el semáforo del reporte (pagos marcados sin ledger, sobrepagos),
     #    que afectan los ingresos derivados del módulo.
