@@ -753,8 +753,14 @@ def agregar_turno_embebido(
         conn, pedido_id, estudio["equipo_id"], espacio_monto_final, turno_estudio_id=turno_id,
     )
 
-    from services.alquileres.commands.items import _recalcular_total_pedido
+    from services.alquileres.commands.items import (
+        _recalcular_total_pedido,
+        sincronizar_fechas_con_turnos,
+    )
     _recalcular_total_pedido(conn, pedido_id)
+    # Un pedido cuyo único contenido es este turno no tiene ventana de retiro de
+    # equipos: sus fechas se derivan del turno. No-op si tiene equipos propios.
+    sincronizar_fechas_con_turnos(conn, pedido_id)
 
     return turno_id, promo_advertencia
 
@@ -922,8 +928,14 @@ def editar_turno_embebido(
         ),
     )
 
-    from services.alquileres.commands.items import _recalcular_total_pedido
+    from services.alquileres.commands.items import (
+        _recalcular_total_pedido,
+        sincronizar_fechas_con_turnos,
+    )
     _recalcular_total_pedido(conn, pedido_id)
+    # Un pedido cuyo único contenido es este turno no tiene ventana de retiro de
+    # equipos: sus fechas se derivan del turno. No-op si tiene equipos propios.
+    sincronizar_fechas_con_turnos(conn, pedido_id)
 
     return promo_advertencia
 
@@ -977,5 +989,11 @@ def eliminar_turno_embebido(conn, turno_id: int) -> None:
 
     conn.execute("DELETE FROM alquiler_turnos_estudio WHERE id = %s", (turno_id,))
 
-    from services.alquileres.commands.items import _recalcular_total_pedido
+    from services.alquileres.commands.items import (
+        _recalcular_total_pedido,
+        sincronizar_fechas_con_turnos,
+    )
     _recalcular_total_pedido(conn, pedido_id)
+    # Un pedido cuyo único contenido es este turno no tiene ventana de retiro de
+    # equipos: sus fechas se derivan del turno. No-op si tiene equipos propios.
+    sincronizar_fechas_con_turnos(conn, pedido_id)
