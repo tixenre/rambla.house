@@ -503,7 +503,13 @@ function EditarMovimientoDialog({
     mutationFn: () =>
       adminApi.updateMovimiento(mov.id, {
         monto: Number(monto) || 0,
-        fecha: fecha || null,
+        // `fecha` se OMITE si el campo quedó vacío, no se manda `null`: la
+        // columna es NOT NULL, así que `SET fecha = NULL` reventaba con un 500
+        // (`map_pg_errors` no cubre ese caso) — vaciar el input con el mouse y
+        // guardar alcanzaba para dispararlo. El backend trata un campo ausente
+        // como "no tocar" (`_CAMPOS_EDITABLES` + `exclude_unset`), que además
+        // es lo que uno espera al no haber elegido una fecha nueva.
+        ...(fecha ? { fecha } : {}),
         cuenta_origen_id: origen ? Number(origen) : null,
         cuenta_destino_id: destino ? Number(destino) : null,
         categoria_id: categoria ? Number(categoria) : null,
@@ -602,6 +608,18 @@ function EditarMovimientoDialog({
           <Field label="Nota">
             <Input value={nota} onChange={(e) => setNota(e.target.value)} className="w-full" />
           </Field>
+
+          {/* Un cambio de divisa son DOS `ajuste` atados por `movimiento_par_id`
+              (uno por caja). Editar una sola pata deja pesos y dólares que no se
+              corresponden y la cotización guardada pasa a ser mentira — el
+              backend no los sincroniza. Avisar es lo barato y honesto; ligarlos
+              de verdad es otra decisión (hallazgo del supervisor). */}
+          {mov.movimiento_par_id != null && (
+            <p className="text-xs text-muted-foreground">
+              Ojo: esto es una de las dos patas de un cambio de divisa. Si le cambiás el monto, la
+              otra pata no se ajusta sola y la cotización guardada deja de cerrar.
+            </p>
+          )}
 
           <div className="flex items-center justify-end gap-2 pt-1">
             <Button type="button" variant="outline" onClick={onClose}>

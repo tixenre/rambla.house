@@ -53,8 +53,14 @@ Reglas que NO se rompen:
 - **Los ingresos por alquiler DERIVAN de `alquiler_pagos`** (única fuente del cobro): el saldo de la
   caja de un cobrador se calcula sumando sus pagos por `destinatario`. **Nunca** recargar un movimiento
   por un cobro de cliente → cero doble-contabilización por construcción.
-- **La plata no se borra:** anular un movimiento es **soft-delete con motivo** (deja de contar para los
-  saldos pero queda trazable). Auditoría `created_by/updated_by/anulado_por`. **`alquiler_pagos`
+- **La plata no se borra:** anular un movimiento es **soft-delete** (deja de contar para los saldos
+  pero queda trazable). Auditoría `created_by/updated_by/anulado_por`. **El `motivo` es OPCIONAL
+  desde 2026-08** (decisión del dueño, confirmada tras nombrarle la regla anterior): el libro de
+  `movimientos` son sus propios asientos y exigir una justificación escrita para corregir un tipeo
+  propio era fricción sin contraparte — el riesgo que el motivo mitigaba (otra persona ensuciando el
+  libro) no existe con un solo operador. Lo que NO cambió: sigue siendo soft-delete (es lo que
+  permite reconstruir si el banco no cuadra), sigue pasando por `_exigir_mes_abierto`, y de cara a
+  la UI la fila desaparece (`listar_movimientos` excluye anulados por default). **`alquiler_pagos`
   espeja el mismo patrón** (`created_by`/`anulado`/`anulado_por`/`anulado_at`/`anulado_motivo`,
   2026-07-02): anular un pago es `POST .../anular` con motivo, nunca `DELETE`; los 7 SELECT que suman
   `alquiler_pagos` (incluido `SALDADO_CTE` de `reportes/liquidacion.py`) filtran `NOT anulado`.
