@@ -34,7 +34,9 @@ logger = logging.getLogger(__name__)
 
 
 class AnularPagoBody(BaseModel):
-    motivo: str = Field(max_length=500)
+    # Opcional (2026-08): mismo criterio que `anular_movimiento` — ver el
+    # docstring de `anular_pago` más abajo.
+    motivo: str | None = Field(default=None, max_length=500)
 
 
 # ── Registro de pagos ────────────────────────────────────────────────────────
@@ -103,16 +105,20 @@ def agregar_pago_combinado(id: int, data: PagoCombinadoCreate, request: Request)
 @limiter.limit(ADMIN_WRITE_LIMIT)
 @map_pg_errors
 def anular_pago(id: int, pago_id: int, data: AnularPagoBody, request: Request):
-    """Anula una entrada de pago (soft-delete con motivo) y recalcula monto_pagado.
+    """Anula una entrada de pago (soft-delete) y recalcula monto_pagado.
 
-    Reemplaza el viejo `DELETE` (hard-delete, sin motivo, sin actor) — auditoría
-    2026-07-02 (#1184): esta tabla alimenta todo el motor contable y no
-    respetaba "la plata no se borra" que `movimientos` sí respeta. Mismo patrón
-    que `anular_movimiento`. Ver `_anular_pago`."""
+    Reemplaza el viejo `DELETE` (hard-delete, sin actor) — auditoría 2026-07-02
+    (#1184): esta tabla alimenta todo el motor contable y no respetaba "la plata
+    no se borra" que `movimientos` sí respeta.
+
+    **El motivo es OPCIONAL desde 2026-08**, igual que en `anular_movimiento`
+    (mismo pedido del dueño, extendido acá porque anular un pago es el mismo
+    acto: deshacer una carga propia). Lo que importa se conserva igual — sigue
+    siendo soft-delete, y `anulado_por`/`anulado_at` siguen registrando quién y
+    cuándo: lo único que se saca es la obligación de escribir prosa para
+    corregir un tipeo. Ver `_anular_pago`."""
     admin = require_admin(request)
-    motivo = (data.motivo or "").strip()
-    if not motivo:
-        raise HTTPException(400, "Para anular un pago hay que indicar un motivo.")
+    motivo = (data.motivo or "").strip() or None
     with get_db() as conn:
         try:
             pedido = _anular_pago(conn, id, pago_id, motivo, admin.get("email"))

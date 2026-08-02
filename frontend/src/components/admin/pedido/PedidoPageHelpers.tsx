@@ -154,20 +154,23 @@ export function PagoRow({
           <AlertDialogHeader>
             <AlertDialogTitle>Anular pago de {formatARS(pago.monto)}</AlertDialogTitle>
             <AlertDialogDescription>
-              Queda tachado en el ledger con el motivo — la plata no se borra, se marca anulada.
+              Deja de contar para el saldo del pedido. Queda tachado en el ledger.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {/* El motivo es OPCIONAL (2026-08, mismo criterio que los movimientos
+              de Finanzas): anular un pago es deshacer una carga propia, y exigir
+              prosa para corregir un tipeo era fricción sin contraparte. Se deja
+              el campo para cuando SÍ valga la pena dejar dicho por qué. */}
           <Input
             autoFocus
             value={motivo}
             onChange={(e) => setMotivo(e.target.value)}
-            placeholder="Motivo de la anulación…"
-            aria-label="Motivo de la anulación"
+            placeholder="Motivo (opcional)…"
+            aria-label="Motivo de la anulación (opcional)"
           />
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction
-              disabled={!motivo.trim()}
               onClick={() => delMut.mutate(motivo.trim())}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
