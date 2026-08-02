@@ -129,17 +129,43 @@ def _pedido_principal_liviano(conn, pedido_principal_id: int) -> dict | None:
     return row_to_dict(row) if row else None
 
 
-def _tiene_turno_vinculado_activo(conn, pedido_id: int) -> bool:
-    """¿`pedido_id` tiene al menos un turno del Estudio vinculado (#1308) que
-    no esté cancelado? Fuente ÚNICA de esta pregunta — antes se respondía con
-    la MISMA query inline en 3 lugares (`_puede_quedar_sin_items` en
-    `commands/items.py`, y las dos gates de `cambiar_estado` en
-    `commands/transiciones.py`, que directamente no la respondían y solo
-    miraban `alquiler_items` — el hallazgo real: un pedido "2 horas de
-    estudio y nada más" no podía salir de `borrador` porque esas dos gates
-    nunca contemplaban el turno vinculado, #1313/#1314-adjacent)."""
-    return bool(conn.execute(
+def _tiene_turno_estudio_activo(conn, pedido_id: int) -> bool:
+    """¿`pedido_id` tiene al menos un turno del Estudio activo, **por
+    CUALQUIERA de los dos mecanismos**? Fuente ÚNICA de esta pregunta — antes
+    se respondía con la MISMA query inline en 3 lugares
+    (`_puede_quedar_sin_items` en `commands/items.py`, y las dos gates de
+    `cambiar_estado` en `commands/transiciones.py`, que directamente no la
+    respondían y solo miraban `alquiler_items` — el hallazgo real: un pedido
+    "2 horas de estudio y nada más" no podía salir de `borrador` porque esas
+    dos gates nunca contemplaban el turno, #1313/#1314-adjacent).
+
+    Los DOS mecanismos, porque conviven:
+
+    1. **VINCULADO** (el viejo): una fila `alquileres` aparte apuntando acá con
+       `pedido_principal_id`. Tiene `estado` propio → un turno cancelado ya no
+       es contenido.
+    2. **EMBEBIDO** (#1308 Fase 4, el actual): una fila
+       `alquiler_turnos_estudio` + sus `alquiler_items`. No tiene `estado`
+       —sacarlo es un DELETE con cascade— así que existir ES estar activo.
+
+    El (2) faltaba (bug real, encontrado arreglando las fechas derivadas del
+    pedido #454): el rediseño de la Fase 4 movió el mecanismo por default a
+    embebido pero no arrastró este helper, así que `_puede_quedar_sin_items`
+    rechazaba con "Debe tener al menos un ítem" al admin que sacaba el último
+    equipo de un pedido cuyo contenido real era un turno embebido. (Las dos
+    gates de `cambiar_estado` no llegaban a romperse por esto: su `tiene_items`
+    consulta `alquiler_items` SIN filtrar `turno_estudio_id`, así que los ítems
+    del turno embebido ya las satisfacían — igual pasan por acá ahora, que
+    responde la pregunta de verdad en vez de depender de esa coincidencia.)
+    """
+    vinculado = conn.execute(
         "SELECT 1 FROM alquileres WHERE pedido_principal_id = %s AND estado <> 'cancelado' LIMIT 1",
+        (pedido_id,),
+    ).fetchone()
+    if vinculado:
+        return True
+    return bool(conn.execute(
+        "SELECT 1 FROM alquiler_turnos_estudio WHERE pedido_id = %s LIMIT 1",
         (pedido_id,),
     ).fetchone())
 

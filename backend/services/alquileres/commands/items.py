@@ -31,7 +31,7 @@ from tipos_pedido import es_pedido_estudio, es_pedido_derivado, es_pedido_taller
 from services.alquileres.queries.detalle import (
     _es_historico,
     _get_alquiler_detail,
-    _tiene_turno_vinculado_activo,
+    _tiene_turno_estudio_activo,
 )
 from services.alquileres.queries.cotizacion import (
     _cliente_es_dueno_de_perfil_fiscal,
@@ -184,6 +184,71 @@ def _recalcular_total_pedido(conn, id: int) -> None:
         "descuento_cliente_pct=%s WHERE id=%s",
         (total_desglose["neto"], descuento_jornadas_pct, descuento_cliente_pct, id),
     )
+
+
+def sincronizar_fechas_con_turnos(conn, id: int) -> bool:
+    """Deriva `fecha_desde`/`fecha_hasta` del pedido de sus turnos del Estudio
+    EMBEBIDOS, pero SOLO si el pedido no tiene ítems propios. Devuelve `True`
+    si las tocó.
+
+    El problema que resuelve (bug real, pedido #454): un pedido cargado a mano
+    cuyo único contenido es un turno del Estudio se quedaba con el rango de
+    fechas que puso el ALTA por default (hoy → mañana), porque las fechas de un
+    pedido son la ventana de retiro/devolución de los EQUIPOS y el turno guarda
+    las suyas aparte (`alquiler_turnos_estudio`). Con cero equipos esa ventana
+    no representa nada: no hay nada que retirar ni devolver. El turno era del
+    24/07 y el pedido decía 1-2 de agosto, así que Estadísticas lo contaba en
+    agosto (agrupa por `to_char(fecha_desde,'YYYY-MM')`), el calendario y
+    "salen hoy"/"devuelven hoy" lo ubicaban en el día equivocado, y la card de
+    Fechas mostraba un rango inventado.
+
+    **Solo cuando NO hay ítems propios.** Si el pedido tiene equipos, su ventana
+    de retiro/devolución es real y MANDA — un equipo se retira y se devuelve, un
+    turno no. Misma condición que el contador "Equipos · N" de la pantalla:
+    ítems con `turno_estudio_id IS NULL` (las líneas del turno —centinela, promo,
+    sueltos, pintura— llevan el id de su turno y no cuentan).
+
+    No es lo mismo que `finanzas_flujo.pedido.expandir_periodo_turnos_embebidos`,
+    que ESTIRA el rango para cubrir los turnos y corre solo al facturar (para el
+    período declarado del comprobante), sin tocar la base. Acá se PERSISTE, y
+    solo en el caso donde el rango de equipos no existe.
+
+    No-op para pedidos DERIVADOS (estudio/estudio_fijo/taller): su rango es
+    CONTABLE, no un evento real (MEMORIA 2026-07-28) — no se toca. De todos
+    modos un turno embebido solo puede colgar de un `tipo='diaria'`.
+    """
+    p = conn.execute(
+        "SELECT id, tipo, fecha_desde, fecha_hasta FROM alquileres WHERE id=%s FOR UPDATE", (id,)
+    ).fetchone()
+    if not p or es_pedido_derivado(p):
+        return False
+
+    propios = conn.execute(
+        "SELECT 1 FROM alquiler_items WHERE pedido_id=%s AND turno_estudio_id IS NULL LIMIT 1",
+        (id,),
+    ).fetchone()
+    if propios:
+        return False
+
+    rango = conn.execute(
+        "SELECT MIN(fecha_desde) AS desde, MAX(fecha_hasta) AS hasta "
+        "FROM alquiler_turnos_estudio WHERE pedido_id=%s",
+        (id,),
+    ).fetchone()
+    # Sin turnos no hay de dónde derivar (ej. se borró el último): se dejan las
+    # fechas como estaban en vez de vaciarlas — `ESTADOS_REQUIEREN_FECHAS` las
+    # necesita, y un pedido sin fechas es peor que uno con fechas viejas.
+    if not rango or not rango["desde"]:
+        return False
+
+    if p["fecha_desde"] == rango["desde"] and p["fecha_hasta"] == rango["hasta"]:
+        return False
+    conn.execute(
+        "UPDATE alquileres SET fecha_desde=%s, fecha_hasta=%s, "
+        "updated_at=CURRENT_TIMESTAMP WHERE id=%s",
+        (rango["desde"], rango["hasta"], id),
+    )
+    return True
 
 
 def propagar_descuento_a_presupuestos(conn, cliente_id: int) -> int:
@@ -438,7 +503,7 @@ def _puede_quedar_sin_items(conn, p) -> bool:
         return True
     # Mismo filtro que usan el pago combinado (`pagos.py`) y la factura
     # combinada (`finanzas_flujo.pedido`): un turno cancelado ya no es contenido.
-    return _tiene_turno_vinculado_activo(conn, p["id"])
+    return _tiene_turno_estudio_activo(conn, p["id"])
 
 
 def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
@@ -612,5 +677,12 @@ def _apply_pedido_items(conn, id: int, items: list["PedidoItem"]) -> dict:
         "descuento_cliente_pct=%s WHERE id=%s",
         (monto_total, descuento_jornadas_pct, descuento_cliente_pct, id),
     )
+
+    # Caso simétrico al de las 3 mutaciones de turno embebido: si este reemplazo
+    # dejó al pedido SIN equipos propios y solo con turnos, la ventana de
+    # retiro/devolución ya no representa nada → las fechas se derivan del turno.
+    # No-op en el caso normal (con equipos) y en pedidos derivados. Va ANTES del
+    # detalle para que la respuesta ya traiga las fechas nuevas.
+    sincronizar_fechas_con_turnos(conn, id)
 
     return _get_alquiler_detail(conn, id)

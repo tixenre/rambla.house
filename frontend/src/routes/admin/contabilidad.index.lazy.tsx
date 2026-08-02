@@ -234,9 +234,6 @@ function CajaCard({ cuenta }: { cuenta: CuentaSaldo }) {
         {formatMoney(cuenta.saldo, cuenta.moneda)}
       </div>
       <dl className="text-xs text-muted-foreground space-y-0.5">
-        {cuenta.saldo_inicial !== 0 && (
-          <Row label="Saldo inicial" value={formatMoney(cuenta.saldo_inicial, cuenta.moneda)} />
-        )}
         {cuenta.ingresos_alquiler !== 0 && (
           <Row
             label="Cobros de alquiler"

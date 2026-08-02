@@ -49,7 +49,7 @@ from database import to_datetime
 from reservas import validar_stock as _check_stock
 from tipos_pedido import es_pedido_estudio, es_pedido_taller
 from services.alquileres.commands.items import _lock_equipos_por_id
-from services.alquileres.queries.detalle import _tiene_turno_vinculado_activo, _tiene_saldo_pendiente
+from services.alquileres.queries.detalle import _tiene_turno_estudio_activo, _tiene_saldo_pendiente
 
 # Estados que reservan stock activamente — entrar a uno de estos desde uno que
 # NO reserva exige re-validar stock (ver `_requiere_revalidar_stock`).
@@ -294,7 +294,7 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
         # `alquiler_items` y bloqueaba para siempre un pedido sin equipos
         # propios, sin importar el turno (hallazgo de auditoría, #1313/#1314;
         # mismo criterio que `_puede_quedar_sin_items`, commands/items.py).
-        if not tiene_items and not _tiene_turno_vinculado_activo(conn, pedido_id):
+        if not tiene_items and not _tiene_turno_estudio_activo(conn, pedido_id):
             raise HTTPException(
                 400,
                 "Agregá al menos un equipo (o un turno del Estudio) antes de sacarlo de borrador.",
@@ -323,7 +323,7 @@ def cambiar_estado(conn, pedido_id: int, estado_nuevo: str, *, es_admin: bool, a
         tiene_items = conn.execute(
             "SELECT 1 FROM alquiler_items WHERE pedido_id=%s", (pedido_id,)
         ).fetchone()
-        if not tiene_items and not _tiene_turno_vinculado_activo(conn, pedido_id):
+        if not tiene_items and not _tiene_turno_estudio_activo(conn, pedido_id):
             errores.append("El pedido no tiene equipos cargados ni un turno del Estudio.")
         # El escape hatch manual de `finalizado` (punto 1 del docstring) es
         # SOLO para un pedido sin nada por cobrar — `_maybe_finalizar` ya

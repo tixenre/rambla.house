@@ -79,8 +79,12 @@ export const contabilidadMethods = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     }),
-  anularMovimiento: (id: number, motivo: string) =>
-    authedPostJson<Movimiento>(`/api/admin/contabilidad/movimientos/${id}/anular`, { motivo }),
+  /** Borra un movimiento (deja de contar y desaparece de la lista). El `motivo`
+   *  es opcional — ver `contabilidad/commands/movimientos.py::anular_movimiento`. */
+  anularMovimiento: (id: number, motivo?: string) =>
+    authedPostJson<Movimiento>(`/api/admin/contabilidad/movimientos/${id}/anular`, {
+      motivo: motivo ?? null,
+    }),
   uploadComprobante: async (id: number, file: File): Promise<{ comprobante_url: string }> => {
     const fd = new FormData();
     fd.append("file", file);

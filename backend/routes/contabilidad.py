@@ -249,7 +249,9 @@ class MovimientoUpdate(BaseModel):
 
 
 class AnularBody(BaseModel):
-    motivo: str = Field(max_length=500)
+    # Opcional (2026-08): borrar un movimiento propio no exige justificarlo —
+    # ver `contabilidad/commands/movimientos.py::anular_movimiento`.
+    motivo: str | None = Field(default=None, max_length=500)
 
 
 class CambioDivisaCreate(BaseModel):
@@ -379,7 +381,9 @@ def patch_movimiento(request: Request, mov_id: int, body: MovimientoUpdate):
 @limiter.limit(ADMIN_WRITE_LIMIT)
 @map_pg_errors
 def anular_mov(request: Request, mov_id: int, body: AnularBody):
-    """Soft-delete con motivo: la plata nunca se borra, queda anulada y trazable."""
+    """Borra un movimiento. Soft-delete por debajo (queda trazable para poder
+    reconstruir), pero desaparece de la lista y de los saldos. El `motivo` es
+    OPCIONAL desde 2026-08 — ver `commands/movimientos.py::anular_movimiento`."""
     admin = require_admin(request)
     with get_db() as conn:
         try:

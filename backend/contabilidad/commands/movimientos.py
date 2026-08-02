@@ -448,12 +448,22 @@ def actualizar_comprobante(conn, mov_id: int, *, key: str, por=None) -> dict:
     return obtener_movimiento(conn, mov_id)
 
 
-def anular_movimiento(conn, mov_id: int, *, motivo, por=None) -> dict:
-    """Soft-delete: marca el movimiento como anulado (la plata nunca se borra).
-    Exige un motivo. Un movimiento anulado deja de contar para los saldos."""
-    motivo = (motivo or "").strip()
-    if not motivo:
-        raise ValueError("Para anular un movimiento hay que indicar un motivo.")
+def anular_movimiento(conn, mov_id: int, *, motivo=None, por=None) -> dict:
+    """Borra un movimiento: deja de contar para los saldos y desaparece de la
+    lista (`listar_movimientos` excluye anulados por default).
+
+    **El motivo es OPCIONAL** (decisión del dueño, 2026-08): estos son sus
+    propios asientos, cargados a mano por él; exigir una justificación escrita
+    para corregir un tipeo era fricción sin contraparte — el riesgo que el
+    motivo mitigaba (otra persona ensuciando el libro) no existe acá.
+
+    Sigue siendo soft-delete por debajo, y eso NO es una concesión a medias: es
+    lo que permite reconstruir si algún día el banco no cuadra. De cara al
+    dueño la fila desapareció; la marca vive solo en la base. Sigue pasando por
+    `_exigir_mes_abierto`: un mes ya cerrado no cambia de contenido después de
+    sacada la foto (si no, el snapshot del cierre dejaría de describir lo que
+    hay)."""
+    motivo = (motivo or "").strip() or None
     actual = obtener_movimiento(conn, mov_id)
     if not actual:
         raise ValueError("El movimiento no existe.")
