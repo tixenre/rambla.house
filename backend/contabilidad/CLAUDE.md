@@ -62,7 +62,9 @@ Reglas que NO se rompen:
   permite reconstruir si el banco no cuadra), sigue pasando por `_exigir_mes_abierto`, y de cara a
   la UI la fila desaparece (`listar_movimientos` excluye anulados por default). **`alquiler_pagos`
   espeja el mismo patrón** (`created_by`/`anulado`/`anulado_por`/`anulado_at`/`anulado_motivo`,
-  2026-07-02): anular un pago es `POST .../anular` con motivo, nunca `DELETE`; los 7 SELECT que suman
+  2026-07-02): anular un pago es `POST .../anular`, nunca `DELETE` — su `motivo` también pasó a
+  OPCIONAL en 2026-08, por el mismo criterio y en el mismo acto que el de un movimiento (arriba);
+  los 7 SELECT que suman
   `alquiler_pagos` (incluido `SALDADO_CTE` de `reportes/liquidacion.py`) filtran `NOT anulado`.
 - **`editar_movimiento` revalida lo mismo que `crear_movimiento`** (existencia/actividad de cuenta,
   misma moneda origen↔destino, categoría activa) vía el helper compartido

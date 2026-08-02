@@ -194,8 +194,12 @@ def _agregar_pago_combinado(conn, id: int, data, admin_email: str) -> dict:
     return resp
 
 
-def _anular_pago(conn, id: int, pago_id: int, motivo: str, admin_email: str) -> dict:
+def _anular_pago(conn, id: int, pago_id: int, motivo: str | None, admin_email: str) -> dict:
     """Lógica de `anular_pago`, sin FastAPI/decorators — ver `_agregar_pago`.
+
+    `motivo` puede ser `None` (opcional desde 2026-08, mismo criterio que
+    `anular_movimiento`): la columna es nullable y ningún consumidor lo asume
+    presente. `anulado_por`/`anulado_at` se siguen guardando siempre.
 
     `FOR UPDATE`: mismo motivo que `_agregar_pago` — serializa contra
     cualquier otro escritor de `monto_pagado` del mismo pedido (agregar/anular
