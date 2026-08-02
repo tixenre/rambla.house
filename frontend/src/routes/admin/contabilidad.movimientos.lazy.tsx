@@ -9,7 +9,7 @@
  * borra: anular deja el registro tachado con su motivo.
  */
 import { createLazyFileRoute, Link } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Wallet } from "lucide-react";
 import { toast } from "sonner";
@@ -20,10 +20,9 @@ import {
   type CobroMensual,
   type Cuenta,
   type Movimiento,
-  type MovimientoInput,
-  type TipoMovimiento,
 } from "@/lib/admin/api";
-import { CambioDivisaForm } from "@/components/admin/contabilidad/CambioDivisaForm";
+import { MoverPlataForm } from "@/components/admin/contabilidad/MoverPlataForm";
+import { CorregirSaldoForm } from "@/components/admin/contabilidad/CorregirSaldoForm";
 import { CuentaSelect, Field } from "@/components/admin/contabilidad/fields";
 import { AdminPage } from "@/components/admin/AdminPage";
 import { AdminTable, type Column } from "@/components/admin/AdminTable";
@@ -33,8 +32,6 @@ import { EmptyState } from "@/design-system/composites/EmptyState";
 import { formatMoney, formatFechaDisplay } from "@/lib/format";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 import { Badge } from "@/design-system/ui/badge";
-import { Button } from "@/design-system/ui/button";
-import { Input } from "@/design-system/ui/input";
 import { TipoMovimientoBadge, TIPO_MOVIMIENTO_META } from "@/components/admin/badges";
 import { cn } from "@/lib/utils";
 
@@ -56,7 +53,7 @@ function descMovimiento(m: Movimiento): string {
       return `Aporte a ${d}`;
     default: {
       // Cambio de divisa: cada pata es un `ajuste` con una sola cuenta y
-      // `cotizacion` seteada (ver CambioDivisaForm / commands/movimientos.py).
+      // `cotizacion` seteada (ver mover-plata.ts / commands/movimientos.py).
       if (m.cotizacion != null) {
         const cta = o !== "—" ? o : d;
         return `Cambio de divisa · ${o !== "—" ? "sale de" : "entra a"} ${cta} (cotización ${m.cotizacion})`;
@@ -107,7 +104,6 @@ function MovimientosPage() {
   const [tipoFiltro, setTipoFiltro] = useState<string>("");
   const [beneficiarioFiltro, setBeneficiarioFiltro] = useState<string>("");
   const [cuentaFiltro, setCuentaFiltro] = useState<string>("");
-  const [modoRegistro, setModoRegistro] = useState<"movimiento" | "cambio_divisa">("movimiento");
   // Mes del cobro expandido (muestra los pagos individuales inline). Uno a la vez.
   const [expandedMes, setExpandedMes] = useState<string | null>(null);
 
@@ -246,33 +242,14 @@ function MovimientosPage() {
       backTo={{ to: "/admin/contabilidad", label: "Tablero" }}
     >
       <div className="space-y-6">
-        <div className="flex flex-wrap gap-1">
-          {(
-            [
-              ["movimiento", "Nuevo movimiento"],
-              ["cambio_divisa", "Cambio de divisa"],
-            ] as const
-          ).map(([val, lbl]) => (
-            <button
-              key={val}
-              type="button"
-              onClick={() => setModoRegistro(val)}
-              className={cn(
-                "rounded-md border px-2.5 py-1.5 text-xs font-medium transition",
-                modoRegistro === val
-                  ? "border-ink bg-ink text-background"
-                  : "border-muted-foreground/30 text-muted-foreground hover:border-ink hover:text-ink",
-              )}
-            >
-              {lbl}
-            </button>
-          ))}
-        </div>
-        {modoRegistro === "movimiento" ? (
-          <NuevoMovimientoForm onCreated={invalidar} />
-        ) : (
-          <CambioDivisaForm onCreated={invalidar} />
-        )}
+        {/* Una sola entrada. Antes había que elegir modo (movimiento / cambio de
+            divisa) y después uno de 5 tipos contables — 6 decisiones de vocabulario
+            antes de cargar un peso. `MoverPlataForm` pregunta qué pasó y deriva el
+            tipo solo (`lib/admin/mover-plata.ts`). El `ajuste` queda aparte y
+            colapsado, con nota obligatoria: es la puerta de "el modelo no captura
+            la realidad", no una opción más. */}
+        <MoverPlataForm onCreated={invalidar} />
+        <CorregirSaldoForm onCreated={invalidar} />
 
         {/* Filtro por tipo + cuenta */}
         <div className="flex flex-wrap items-end gap-3">
@@ -448,216 +425,5 @@ function AnularMovimiento({ mov, onChanged }: { mov: Movimiento; onChanged: () =
     >
       Anular
     </button>
-  );
-}
-
-function NuevoMovimientoForm({ onCreated }: { onCreated: () => void }) {
-  const [tipo, setTipo] = useState<TipoMovimiento>("gasto");
-  const [monto, setMonto] = useState("");
-  const [origen, setOrigen] = useState("");
-  const [destino, setDestino] = useState("");
-  const [categoria, setCategoria] = useState("");
-  const [metodo, setMetodo] = useState("");
-  const [fecha, setFecha] = useState("");
-  const [nota, setNota] = useState("");
-  const [beneficiario, setBeneficiario] = useState("");
-  const [file, setFile] = useState<File | null>(null);
-
-  const cuentasQ = useQuery({
-    queryKey: ["admin", "contabilidad", "cuentas-list"],
-    queryFn: () => adminApi.listCuentas(),
-  });
-  const catsQ = useQuery({
-    queryKey: ["admin", "contabilidad", "categorias"],
-    queryFn: () => adminApi.listGastoCategorias(),
-  });
-  const benQ = useQuery({
-    queryKey: ["admin", "contabilidad", "beneficiarios"],
-    queryFn: () => adminApi.listBeneficiarios(),
-  });
-
-  const cuentas: Cuenta[] = cuentasQ.data?.cuentas ?? [];
-  const categorias = catsQ.data?.categorias ?? [];
-  const beneficiarios = benQ.data?.beneficiarios ?? [];
-
-  // Una transferencia/ajuste no cruza monedas: el destino se limita a la moneda
-  // del origen elegido (el backend igual lo valida).
-  const monedaOrigen = cuentas.find((c) => String(c.id) === origen)?.moneda;
-  const cuentasDestino = monedaOrigen ? cuentas.filter((c) => c.moneda === monedaOrigen) : cuentas;
-
-  const muestra = useMemo(
-    () => ({
-      origen:
-        tipo === "gasto" || tipo === "transferencia" || tipo === "retiro" || tipo === "ajuste",
-      destino: tipo === "transferencia" || tipo === "aporte" || tipo === "ajuste",
-      categoria: tipo === "gasto",
-    }),
-    [tipo],
-  );
-
-  const reset = () => {
-    setMonto("");
-    setOrigen("");
-    setDestino("");
-    setCategoria("");
-    setMetodo("");
-    setFecha("");
-    setNota("");
-    setBeneficiario("");
-    setFile(null);
-  };
-
-  const crear = useMutation({
-    mutationFn: async () => {
-      const body: MovimientoInput = {
-        tipo,
-        monto: Number(monto) || 0,
-        cuenta_origen_id: muestra.origen && origen ? Number(origen) : null,
-        cuenta_destino_id: muestra.destino && destino ? Number(destino) : null,
-        categoria_id: muestra.categoria && categoria ? Number(categoria) : null,
-        metodo: metodo || null,
-        fecha: fecha || null,
-        nota: nota || null,
-        beneficiario: beneficiario || null,
-      };
-      const mov = await adminApi.createMovimiento(body);
-      if (file) await adminApi.uploadComprobante(mov.id, file);
-      return mov;
-    },
-    onSuccess: () => {
-      reset();
-      toast.success("Movimiento registrado");
-      onCreated();
-    },
-    onError: (e) => toast.error("No se pudo registrar", { description: (e as Error).message }),
-  });
-
-  return (
-    <form
-      onSubmit={(e) => {
-        e.preventDefault();
-        if (!(Number(monto) > 0)) {
-          toast.error("Poné un monto mayor a cero");
-          return;
-        }
-        crear.mutate();
-      }}
-      className="rounded-lg border hairline p-4 space-y-3"
-    >
-      <div className="t-eyebrow">Nuevo movimiento</div>
-
-      {/* Tipo */}
-      <div className="flex flex-wrap gap-1">
-        {TIPOS_MOVIMIENTO.map((t) => (
-          <button
-            key={t}
-            type="button"
-            onClick={() => setTipo(t)}
-            className={cn(
-              "rounded-md border px-2.5 py-1.5 text-xs font-medium transition",
-              tipo === t
-                ? "border-ink bg-ink text-background"
-                : "border-muted-foreground/30 text-muted-foreground hover:border-ink hover:text-ink",
-            )}
-          >
-            {TIPO_MOVIMIENTO_META[t].label}
-          </button>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap items-end gap-3">
-        <Field label="Monto">
-          <Input
-            type="number"
-            value={monto}
-            onChange={(e) => setMonto(e.target.value)}
-            className="w-32 text-right tabular-nums"
-          />
-        </Field>
-
-        {muestra.origen && (
-          <Field label={tipo === "retiro" ? "Saca de" : "Sale de"}>
-            <CuentaSelect cuentas={cuentas} value={origen} onChange={setOrigen} />
-          </Field>
-        )}
-        {muestra.destino && (
-          <Field label="Entra a">
-            <CuentaSelect cuentas={cuentasDestino} value={destino} onChange={setDestino} />
-          </Field>
-        )}
-        {muestra.categoria && (
-          <Field label="Categoría">
-            <select
-              value={categoria}
-              onChange={(e) => setCategoria(e.target.value)}
-              className="h-9 rounded-md border hairline bg-surface-elevated px-2 text-sm"
-            >
-              <option value="">Elegir…</option>
-              {categorias.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.nombre}
-                </option>
-              ))}
-            </select>
-          </Field>
-        )}
-        <Field label="Método">
-          <select
-            value={metodo}
-            onChange={(e) => setMetodo(e.target.value)}
-            className="h-9 rounded-md border hairline bg-surface-elevated px-2 text-sm capitalize"
-          >
-            <option value="">—</option>
-            <option value="transferencia">transferencia</option>
-            <option value="efectivo">efectivo</option>
-          </select>
-        </Field>
-        <Field label="Fecha">
-          <Input type="date" value={fecha} onChange={(e) => setFecha(e.target.value)} />
-        </Field>
-      </div>
-
-      <div className="flex flex-wrap items-end gap-3">
-        <Field label="Beneficiario (opcional)">
-          <Input
-            value={beneficiario}
-            onChange={(e) => setBeneficiario(e.target.value)}
-            list="benef-list"
-            placeholder="Ej. Jimena (CM)"
-            className="w-56"
-          />
-          <datalist id="benef-list">
-            {beneficiarios.map((b) => (
-              <option key={b} value={b} />
-            ))}
-          </datalist>
-        </Field>
-        <Field label="Nota (opcional)">
-          <Input
-            value={nota}
-            onChange={(e) => setNota(e.target.value)}
-            placeholder="Ej. factura 0001-…"
-            className="w-64"
-          />
-        </Field>
-        <Field label="Comprobante (opcional)">
-          {/* eslint-disable-next-line no-restricted-syntax -- input file: no hay componente DS */}
-          <input
-            type="file"
-            accept="application/pdf,image/*"
-            onChange={(e) => setFile(e.target.files?.[0] ?? null)}
-            className="text-xs"
-          />
-        </Field>
-        <Button
-          type="submit"
-          variant="primary"
-          disabled={crear.isPending}
-          loading={crear.isPending}
-        >
-          {crear.isPending ? "Guardando…" : "Registrar"}
-        </Button>
-      </div>
-    </form>
   );
 }

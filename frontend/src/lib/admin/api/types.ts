@@ -671,6 +671,26 @@ export interface ReconciliacionContable {
   saldos_negativos: { cantidad: number; cuentas: { cuenta: string; saldo: number }[] };
   pagos_sin_socio: { cantidad: number; monto: number };
   movimientos_cuenta_inactiva: { cantidad: number };
+  /** Devengado que cae en un beneficiario sin caja donde verse. Baja el semáforo. */
+  devengado_sin_cuenta?: {
+    cantidad: number;
+    monto: number;
+    beneficiarios: { beneficiario: string; monto: number }[];
+  };
+  /** Las dos lecturas de quién-le-debe-a-quién no coinciden. Informativo por ahora
+   *  (ver el comentario en `queries/reconciliacion.py`). */
+  cc_vs_posicion_divergente?: {
+    cantidad: number;
+    partes: {
+      parte: string;
+      cuenta_corriente: number;
+      posicion: number;
+      diferencia: number;
+    }[];
+    informativo?: boolean;
+  };
+  /** Plata cobrada de pedidos que todavía no cerraron. Contexto, no problema. */
+  float_sin_saldar?: number;
   reporte: {
     ok: boolean;
     pagados_sin_ledger?: { cantidad: number; ids: number[] } | null;
@@ -694,6 +714,28 @@ export interface RendicionData {
   cuadra: boolean;
   advertencias: string[];
   movimientos: RendicionMovimiento[];
+}
+/** Posición ACUMULADA de una parte (todo desde el clean start, no un mes suelto).
+ *  `pendiente > 0` → le falta recibir · `< 0` → tiene de más. Para un socio humano
+ *  es el mismo número que su cuenta corriente, con el signo al revés. */
+export interface PosicionParte {
+  parte: string;
+  le_corresponde: number;
+  cobro: number;
+  arranque: number;
+  repartido: number;
+  pendiente: number;
+}
+export interface PosicionesData {
+  partes: PosicionParte[];
+  sugeridos: SugeridoRendicion[];
+  /** Cash real por parte (la CC de un socio no es plata → 0). Ordena quién paga
+   *  primero en `sugeridos`. */
+  liquidez: Record<string, number>;
+  /** Plata cobrada de pedidos que todavía no se terminaron de cobrar: está adentro
+   *  de la posición pero su devengado no existe aún. */
+  float_sin_saldar: number;
+  as_of: string;
 }
 export interface CuentaInput {
   nombre: string;

@@ -195,6 +195,75 @@ def test_transferencia_mueve_plata_entre_cuentas(conn):
     assert _saldo(conn, "Fondo Rental") - base_fondo == 60000
 
 
+def test_transferencia_entre_partes_se_auto_marca_es_rendicion(conn):
+    # Sin que el caller pida `es_rendicion`, una transferencia entre dos partes
+    # distintas (Tincho↔Fondo Rental) queda marcada sola — así aparece en
+    # `ya_transferido`/"Movimientos de rendición" igual que un saldado explícito
+    # de `saldar()`, sin que el form general tenga que saber que esa marca existe.
+    from contabilidad.commands.movimientos import crear_movimiento
+    from services.fechas import mes_actual_ar
+
+    mov = crear_movimiento(
+        conn, tipo="transferencia", monto=45000,
+        cuenta_origen_id=_cuenta_id(conn, "Caja Tincho"),
+        cuenta_destino_id=_cuenta_id(conn, "Fondo Rental"),
+        por="test",
+    )
+    assert mov["es_rendicion"] is True
+    assert mov["rendicion_mes"] == mes_actual_ar()
+
+
+def test_reparto_desde_caja_generica_no_se_marca(conn):
+    # Efectivo → Caja Tincho ES un reparto para la posición ACUMULADA (el
+    # clasificador hace caer una caja genérica a "Rental"), pero acá NO se marca
+    # `es_rendicion` a propósito: `ya_transferido` mapea cada punta SIN fallback y
+    # saltea la que da None, así que marcarlo le sumaría a Tincho sin restarle a
+    # Rental y la rendición del mes dejaría de cerrar en cero.
+    #
+    # Este test fija esa asimetría para que nadie "alinee" las dos condiciones
+    # creyendo que es una inconsistencia (hallazgo del supervisor: el comentario
+    # viejo decía que eran la misma condición, y no lo son).
+    from contabilidad.commands.movimientos import crear_movimiento
+    from contabilidad.queries.posiciones import clasificar_flujo, parte_de_cuenta
+
+    efectivo, tincho = _cuenta_id(conn, "Efectivo"), _cuenta_id(conn, "Caja Tincho")
+
+    mov = crear_movimiento(
+        conn, tipo="transferencia", monto=30000,
+        cuenta_origen_id=efectivo, cuenta_destino_id=tincho, por="test",
+    )
+    assert mov["es_rendicion"] is False, "marcarlo rompería el cierre en cero del mes"
+
+    # Pero la posición acumulada SÍ lo cuenta — las dos cosas a la vez son correctas.
+    filas = conn.execute(
+        "SELECT id, socio, tipo, nombre FROM cuentas WHERE id IN (%s, %s)",
+        (efectivo, tincho),
+    ).fetchall()
+    parte_por_cuenta = {
+        r["id"]: parte_de_cuenta(r["socio"], r["tipo"], r["nombre"]) for r in filas
+    }
+    cc_por_cuenta = {efectivo: False, tincho: True}
+    assert clasificar_flujo(
+        {"monto": 30000, "cuenta_origen_id": efectivo, "cuenta_destino_id": tincho},
+        parte_por_cuenta, cc_por_cuenta,
+    ) == ("Rental", "Tincho")
+
+
+def test_transferencia_entre_dos_cajas_propias_no_se_marca(conn):
+    # Efectivo y Banco son las dos "Rental" (ninguna representa a otra parte):
+    # mover plata entre ellas es puertas adentro del negocio, no un reparto.
+    from contabilidad.commands.movimientos import crear_movimiento
+
+    mov = crear_movimiento(
+        conn, tipo="transferencia", monto=20000,
+        cuenta_origen_id=_cuenta_id(conn, "Efectivo"),
+        cuenta_destino_id=_cuenta_id(conn, "Banco"),
+        por="test",
+    )
+    assert mov["es_rendicion"] is False
+    assert mov["rendicion_mes"] is None
+
+
 def test_saldo_iguala_la_derivacion(conn):
     # Invariante: el saldo de una caja de socio (sin movimientos que la toquen)
     # == sus ingresos derivados (+ su saldo inicial, que es 0 en el seed).

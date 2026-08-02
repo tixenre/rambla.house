@@ -55,7 +55,8 @@ debe depender de un route).
 | ¿Hay stock/está disponible? | `backend/reservas/` | motor sagrado | gate único `create_pedido_retry` |
 | ¿Qué % de lo facturado es de Rental vs. de un dueño de equipo? | `backend/reportes/liquidacion.py` + `comisiones.py` | `liquidar`, `repartir` | `contabilidad` (`partes_socios`, llama literal a `liquidar`), reporte mensual |
 | ¿A qué economía pertenece la plata de un pedido del Estudio? | `equipos.dueno` (por ítem) + `contabilidad.constants.{COBRADORES,PARTES}` | centinela `dueno='Estudio'`, promo `dueno='Rental'`, suelto → su dueño real | `liquidar`/`filas_atribucion` (genérico, sin caso especial), `pyl.ganancia_neta` (`parte_estudio`), rendición (netting a 4 partes) |
-| ¿Cuánta plata tiene Rental en sus cajas / cuánto le debe cada socio? | `backend/contabilidad/` | `queries/saldos.py::calcular_saldos` | tablero, reporte mensual |
+| ¿Cuánta plata tiene Rental en sus cajas / cuánto le debe cada socio? | `backend/contabilidad/` | `queries/saldos.py::calcular_saldos` | tablero, reporte mensual, ficha de cuentas |
+| ¿Quién le debe a quién entre las 4 partes, AL DÍA DE HOY? | `backend/contabilidad/` | `queries/posiciones.py::calcular_posiciones` (+ `clasificar_flujo`) | pantalla de Rendición ("Al día de hoy"), transferencias sugeridas, chequeo `cc_vs_posicion_divergente` |
 | ¿La factura discrimina IVA correctamente? | `backend/services/facturacion/` (`docs/SISTEMA_FACTURACION.md`) | `arca_fe/comprobante.py` | deriva de `monto_total`/`iva_monto` ya persistidos — **no recalcula** |
 | ¿Qué ve el cliente en pantalla? | — | — | **nunca calcula**: solo renderiza lo que el backend ya resolvió (regla dura, `MEMORIA.md` 2026-06-29) — con **una excepción confirmada**, ver Hallazgos |
 
@@ -71,6 +72,15 @@ debe depender de un route).
 - **`backend/reportes/`** (`CLAUDE.md` propio) — liquidación (reparto de comisiones por dueño de
   equipo) + su propio cierre mensual (`liquidacion_cierres`, **distinto** del cierre de
   `contabilidad`) + reconciliación (semáforo, ver abajo).
+- **`backend/contabilidad/queries/posiciones.py`** — la lectura ÚNICA y ACUMULADA de "quién le debe
+  a quién" entre las 4 partes. **Dos lecturas conviven y hay que saber cuál mirar:** ésta (acumulada,
+  desde el clean start — la que decide si mover plata) y `queries/rendicion.py` (la foto de UN mes,
+  que arranca de cero cada vez porque `ya_transferido` filtra por `rendicion_mes`). Pueden apuntar en
+  direcciones opuestas y las dos estar bien en su marco; **manda la acumulada**. Para un socio humano
+  vale `posicion == −saldo_cc` (el mismo número de `calcular_saldos`, con el signo al revés), con una
+  tolerancia de unos pesos por redondeo multi-mes: `partes_socios` usa `liquidar` en vivo y
+  `posiciones` usa `liquidar_rango` (que respeta los cierres) — divergencia conocida, vigilada por el
+  chequeo informativo `cc_vs_posicion_divergente` de `queries/reconciliacion.py`.
 - **`backend/contabilidad/`** (`CLAUDE.md` propio) — la plata interna: cajas, cuenta corriente de
   socios, movimientos, P&L, su propio cierre mensual (`movimientos` bloqueados). **Consume**
   `reportes.liquidacion.liquidar()` para `partes_socios` — no recalcula el reparto. Desde #1283

@@ -34,8 +34,8 @@ DB). El SQL solo trae filas planas.
 """
 
 from collections import defaultdict
-from datetime import date
 
+from database import now_ar
 from reportes.liquidacion import LIQUIDACION_INICIO
 
 from contabilidad.constants import SOCIOS_HUMANOS
@@ -47,7 +47,12 @@ def partes_socios(conn) -> dict[str, int]:
     saldados. Es lo que se le RESTA a la deuda de su cuenta corriente."""
     from reportes.liquidacion import liquidar
 
-    data = liquidar(conn, LIQUIDACION_INICIO, date.today().isoformat())
+    # `now_ar()` y no `date.today()`: el server puede estar en UTC, que va
+    # ADELANTE de Argentina — cerca de la tarde/noche ya sería "mañana" en UTC,
+    # así que el corte "hasta hoy" incluiría un día que en Argentina no pasó
+    # todavía (MEMORIA 2026-06-30, `services/fechas.py`). `posiciones.py` ya usa
+    # `now_ar()` para este mismo corte; acá había quedado la variante vieja.
+    data = liquidar(conn, LIQUIDACION_INICIO, now_ar().date().isoformat())
     return {k: int(v) for k, v in data["resumen"]["por_beneficiario"].items()}
 
 
@@ -192,9 +197,15 @@ def saldos(conn, as_of: str | None = None) -> dict:
                             # tiene su propio fallback para inactivas/inexistentes
         "cajas": cajas,
         "socios": socios,
+        # El devengado CRUDO por beneficiario, tal como lo devolvió la liquidación —
+        # incluye nombres que no son una parte (un dueño de equipos tercero), que las
+        # filas de arriba no pueden mostrar porque no tienen cuenta. Se expone para
+        # que un consumidor que ya llamó a `saldos()` no tenga que correr una segunda
+        # liquidación completa para verlo (`reconciliacion.py::devengado_sin_cuenta`).
+        "partes": partes,
         "totales": totales,
         "total_disponible": totales.get("ARS", 0),  # ARS (compat); USD va en `totales`
-        "as_of": as_of or date.today().isoformat(),
+        "as_of": as_of or now_ar().date().isoformat(),
     }
 
 

@@ -25,7 +25,10 @@ contabilidad/
     saldos.py                   # partes_socios, ingresos_derivados, movimientos_planos,
                                  # calcular_saldos (PURA), saldos, saldo_de_cuenta
     rendicion.py                  # _netting (PURA), cobrado_por_socio, ya_transferido,
-                                   # cuenta_de_parte, rendicion
+                                   # cuenta_de_parte, rendicion — la foto de UN MES
+    posiciones.py                  # parte_de_cuenta, clasificar_flujo (PURA),
+                                    # flujos_netos (PURA), sugerir_transferencias (PURA),
+                                    # calcular_posiciones (PURA), posiciones — el ACUMULADO
     pyl.py                         # ingresos_devengados, ganancia_neta
     reconciliacion.py                # reconciliar
     reporte_mensual.py                 # reporte_mensual
@@ -88,6 +91,30 @@ Reglas que NO se rompen:
   siguen permitidos** (`saldar()` los necesita); **`gasto` está PERMITIDO a propósito** — "el socio
   pagó un gasto de Rental con su plata": un solo movimiento cuenta en el P&L categorizado (
   `gastos_por_categoria` no filtra por tipo de cuenta origen) y a la vez baja su deuda.
+- **"Quién le debe a quién" tiene DOS lecturas, y hay que saber cuál mirar.** `queries/rendicion.py`
+  es la foto de **UN MES** (`ya_transferido` filtra `rendicion_mes` → **arranca de cero cada mes por
+  construcción**: un reparto parcial de julio es invisible en agosto). `queries/posiciones.py` es el
+  **ACUMULADO** desde el clean start — la que dice si mover plata tiene sentido. Pueden apuntar en
+  direcciones opuestas y las dos estar bien en su marco (agosto 2026: el mes decía "Rental → Tincho
+  $110.500" mientras el acumulado decía que Tincho debía $734.088). **La acumulada manda para
+  decidir.** Para un socio humano vale `posicion == −saldo_cc` (misma cantidad, signo opuesto) — lo
+  fija el candado `test_contabilidad_posiciones.py::test_posicion_de_socio_es_el_negativo_de_su_cc`.
+- **La posición NO es `saldo − su_parte`.** El saldo de una caja se mueve por cosas que no son un
+  reparto: si Rental paga un gasto con la plata del Fondo, su cash baja pero **no cambia lo que le
+  debe a los demás** (la parte de cada uno es un % de lo FACTURADO, no de lo que sobra tras los
+  gastos). Por eso el flujo se clasifica (`clasificar_flujo`): **la cuenta corriente de un socio
+  humano no tiene caja, así que todo lo que la toca es un reparto con el negocio; una caja real solo
+  reparte cuando del otro lado hay otra parte.** El clasificador **no mira `es_rendicion`** —
+  defensa en profundidad: la posición acumulada cuenta bien un reparto aunque, por lo que sea, no
+  haya quedado marcado. `crear_movimiento` (2026-08) **auto-detecta y marca `es_rendicion`** cuando
+  el caller no lo pidió explícito y las dos cuentas resuelven a partes DISTINTAS
+  (`_es_reparto_entre_partes`, misma condición que la rama 1 de `clasificar_flujo`) — así un
+  "Repartimos" del form general o un "Me pagó / Le cargué" de la ficha del socio quedan visibles
+  para `ya_transferido`/la lista mensual "Movimientos de rendición", sin que el caller tenga que
+  saber que esa marca existe.
+- **Una caja real tiene DOS números y los dos son verdad:** su `saldo` (cash, tiene que cuadrar con
+  el banco — **no se le resta su parte**) y su `pendiente` en `posiciones` (cuánto de eso es suyo).
+  El crédito del Estudio contra Rental vive ahí; antes no existía en ninguna vista de saldos.
 - **Candado de mes cerrado:** crear/editar/anular/`actualizar_comprobante` pasa por el motor
   (`_exigir_mes_abierto`) — un endpoint que escriba `movimientos` por fuera se saltearía el candado
   (era el bug de `subir_comprobante`, corregido 2026-07-02). La rendición reusa `SALDADO_CTE` (mismo

@@ -130,6 +130,14 @@ function ReconciliacionPanel() {
     problemas.push(
       `${r.movimientos_cuenta_inactiva.cantidad} movimiento(s) en cuentas dadas de baja`,
     );
+  // Este chequeo BAJA el semáforo, así que tiene que poder explicarse: sin esta
+  // línea la caja se pintaba roja con la lista vacía.
+  if (r.devengado_sin_cuenta && r.devengado_sin_cuenta.cantidad > 0)
+    problemas.push(
+      `${formatARS(r.devengado_sin_cuenta.monto)} devengados para ` +
+        `${r.devengado_sin_cuenta.beneficiarios.map((b) => b.beneficiario).join(", ")} — ` +
+        `no tienen caja donde verse (revisá el modelo de comisiones o creá la cuenta)`,
+    );
   if (!r.reporte.ok) {
     const sl = r.reporte.pagados_sin_ledger;
     const sp = r.reporte.sobrepagados;
@@ -147,6 +155,13 @@ function ReconciliacionPanel() {
       problemas.push("el reporte de liquidación tiene observaciones — revisalas en Liquidación");
   }
 
+  // Informativo, NO baja el semáforo (a diferencia de los `problemas` de arriba):
+  // la divergencia `liquidar` vs `liquidar_rango` es conocida y esperada mientras
+  // las dos fórmulas convivan (`contabilidad/CLAUDE.md`). Sin esto, el número que
+  // ya calcula `reconciliar()` no se veía en ningún lado — nadie se enteraba salvo
+  // greppeando la API.
+  const divergencias = r.cc_vs_posicion_divergente?.partes ?? [];
+
   return (
     <div
       className={`rounded-lg border p-4 ${
@@ -162,6 +177,13 @@ function ReconciliacionPanel() {
             <li key={i}>{p}</li>
           ))}
         </ul>
+      )}
+      {divergencias.length > 0 && (
+        <p className="mt-2 text-xs text-muted-foreground">
+          Nota: {divergencias.map((d) => `${d.parte} ${formatARS(d.diferencia)}`).join(", ")} de
+          diferencia entre cuenta corriente y posición acumulada — esperado mientras un mes cerrado
+          use la foto congelada y la cuenta corriente recalcule en vivo; no afecta este semáforo.
+        </p>
       )}
     </div>
   );

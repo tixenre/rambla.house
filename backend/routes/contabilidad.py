@@ -38,6 +38,7 @@ from contabilidad.queries.movimientos import (
 from contabilidad.queries.tablero import tablero as _tablero
 from contabilidad.queries.pyl import ganancia_neta
 from contabilidad.queries.rendicion import rendicion as _rendicion
+from contabilidad.queries.posiciones import posiciones as _posiciones
 from contabilidad.commands.rendicion import saldar as _saldar
 from contabilidad.commands.cierres import cerrar_mes as _cerrar_mes, reabrir_mes as _reabrir_mes
 from contabilidad.queries.reconciliacion import reconciliar as _reconciliar
@@ -500,6 +501,17 @@ def get_rendicion(request: Request, mes: str):
             return _rendicion(conn, mes)
         except ValueError as e:
             raise HTTPException(400, str(e))
+
+
+@router.get("/admin/contabilidad/posiciones")
+def get_posiciones(request: Request):
+    """Posición ACUMULADA de las 4 partes al día de hoy: cuánto le falta recibir o
+    cuánto tiene de más cada una, sumando todo desde el clean start. Es la lectura
+    que dice si mover plata tiene sentido — a diferencia de `/rendicion/{mes}`, que
+    es la foto de UN mes y arranca de cero cada vez."""
+    require_admin(request)
+    with get_db() as conn:
+        return _posiciones(conn)
 
 
 @router.post("/admin/contabilidad/rendicion/{mes}/saldar")
