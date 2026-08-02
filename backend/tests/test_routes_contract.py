@@ -132,7 +132,11 @@ _TODOS = _PROTEGIDOS + _PUBLICOS
 _VALIDA_ANTES_DEL_GUARD = {
     ("PATCH", "/api/alquileres/1"),
     ("POST", "/api/alquileres/1/pagos"),
-    ("POST", "/api/alquileres/1/pagos/1/anular"),
+    # `POST /api/alquileres/1/pagos/1/anular` ya NO va acá: estaba porque un body
+    # sin `motivo` daba 422 antes de llegar al guard, y el motivo pasó a ser
+    # OPCIONAL (2026-08) — con body vacío ahora sí se ejerce `require_admin`.
+    # Dejarlo en la lista habría apagado en silencio la prueba de "un logueado
+    # que no es admin no puede anular un cobro" (hallazgo del supervisor).
     ("POST", "/api/admin/descuentos-jornada"),
     ("GET", "/api/descuentos-jornada/interpolar"),  # jornadas: list[int] = Query(...) obligatorio
     ("PUT", "/api/alquileres/1/items"),

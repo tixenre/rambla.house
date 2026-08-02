@@ -151,9 +151,12 @@ export const pedidosMethods = {
     const qs = sp.toString();
     return authedJson<PagosLogResp>(`/api/admin/pagos${qs ? `?${qs}` : ""}`);
   },
-  /** Anula un pago (soft-delete con motivo) — reemplaza el viejo DELETE real. */
-  anularPago: (id: number, pagoId: number, motivo: string) =>
-    authedPostJson<Pedido>(`/api/alquileres/${id}/pagos/${pagoId}/anular`, { motivo }),
+  /** Anula un pago (soft-delete) — reemplaza el viejo DELETE real. El `motivo`
+   *  es opcional desde 2026-08, igual que en los movimientos de Finanzas. */
+  anularPago: (id: number, pagoId: number, motivo?: string) =>
+    authedPostJson<Pedido>(`/api/alquileres/${id}/pagos/${pagoId}/anular`, {
+      motivo: motivo || null,
+    }),
 
   // clientes
   listClientes: (params: { q?: string; per_page?: number } = {}) => {

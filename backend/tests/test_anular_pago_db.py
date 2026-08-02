@@ -153,6 +153,34 @@ def test_anular_resta_el_monto_del_pago_del_total_pagado(client_con_db, setup):
     assert pago["anulado_motivo"] == "Cheque rechazado"
 
 
+def test_anular_sin_motivo_funciona_y_conserva_la_trazabilidad(client_con_db, setup):
+    """El motivo es OPCIONAL desde 2026-08 (pedido del dueño: anular un pago es
+    deshacer una carga propia, y exigir prosa para corregir un tipeo era fricción
+    sin contraparte). Lo que importa se conserva: sigue siendo soft-delete y
+    `anulado_por`/`anulado_at` siguen diciendo quién y cuándo."""
+    from database import get_db
+
+    client_con_db.post(f"/api/alquileres/{PEDIDO_A_ID}/pagos", json={"monto": 10000})
+    pago_id = client_con_db.get(f"/api/alquileres/{PEDIDO_A_ID}/pagos").json()[0]["id"]
+
+    # Sin `motivo` en el body — antes esto daba 400.
+    r = client_con_db.post(f"/api/alquileres/{PEDIDO_A_ID}/pagos/{pago_id}/anular", json={})
+    assert r.status_code == 200, r.text
+
+    conn = get_db()
+    try:
+        pedido = _fila_pedido(conn, PEDIDO_A_ID)
+        pago = _fila_pago(conn, pago_id)
+    finally:
+        conn.close()
+
+    assert pedido["monto_pagado"] == 0
+    assert pago["anulado"] is True
+    assert pago["anulado_motivo"] is None
+    assert pago["anulado_por"] is not None, "quién lo anuló se sigue registrando"
+    assert pago["anulado_at"] is not None, "cuándo se anuló se sigue registrando"
+
+
 def test_anular_un_pago_ya_anulado_da_404(client_con_db, setup):
     from database import get_db
 
