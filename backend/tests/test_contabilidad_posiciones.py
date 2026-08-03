@@ -283,3 +283,21 @@ class TestSugerirTransferencias:
         pend = {"Rental": -150, "Pablo": 100, "Tincho": 50, "Estudio": 0}
         sug = sugerir_transferencias(pend)
         assert sum(s["monto"] for s in sug) == sum(v for v in pend.values() if v > 0)
+
+    def test_un_socio_excluido_nunca_paga_aunque_su_numero_de_negativo(self):
+        """Decisión del dueño (2026-08-03): la deuda de un socio se salda sola con
+        su parte — no se le sugieren pagos cash (su negativo incluye el arranque,
+        deuda histórica, no plata en la mano). Sí puede RECIBIR. Si tras excluirlo
+        no alcanza el cash de las cajas reales, la parte que espera queda sin
+        sugerencia (mejor que un botón que le pide plata a un socio)."""
+        pend = {"Tincho": -623_588, "Rental": -50_000, "Estudio": 120_000}
+        sug = sugerir_transferencias(pend, {"Rental": 50_000},
+                                     excluir_pagadores=("Pablo", "Tincho"))
+        assert all(s["de"] not in ("Pablo", "Tincho") for s in sug)
+        assert sug == [{"de": "Rental", "a": "Estudio", "monto": 50_000}]
+
+        # Como receptor sigue entrando: Rental → Tincho se sugiere igual.
+        sug2 = sugerir_transferencias({"Rental": -30_000, "Tincho": 30_000},
+                                      {"Rental": 100_000},
+                                      excluir_pagadores=("Pablo", "Tincho"))
+        assert sug2 == [{"de": "Rental", "a": "Tincho", "monto": 30_000}]

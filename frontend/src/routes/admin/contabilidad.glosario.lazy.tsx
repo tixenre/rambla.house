@@ -64,7 +64,7 @@ const TERMINOS: Item[] = [
   },
   {
     t: "Rendición",
-    d: "Distinto de Liquidación: acá no importa quién generó la plata, sino quién la cobró de verdad (Pablo, Tincho, Rental o Estudio) contra quién le correspondía — y qué transferencia falta para que las 4 partes queden en cero. Tiene su propia pantalla (Finanzas → Rendición) con un botón para marcar cada transferencia como hecha.",
+    d: "Distinto de Liquidación: acá no importa quién generó la plata, sino quién la cobró de verdad (Pablo, Tincho, Rental o Estudio) contra quién le correspondía — y qué transferencia falta para que las 4 partes queden en cero. Vive en la pantalla Finanzas, sección «Para repartir hoy»: solo cuenta pedidos ya cerrados (lo cobrado de pedidos en curso se reparte cuando cierren) y cada transferencia sugerida se registra con su botón.",
   },
   {
     t: "Ganancia neta del mes",

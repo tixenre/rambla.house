@@ -19,6 +19,12 @@ import { SegmentedControl } from "@/design-system/ui/segmented-control";
 import { adminApi, METODOS_PAGO, type SugeridoRendicion } from "@/lib/admin/api";
 import { formatARS } from "@/lib/format";
 
+/** Hoy en la zona horaria LOCAL del admin (YYYY-MM-DD). `toISOString()` daba la
+ *  fecha UTC: cargada de ~21:00 en adelante (hora argentina) proponía la de
+ *  mañana, y en el borde de mes el movimiento caía al registro del mes
+ *  siguiente. `en-CA` formatea YYYY-MM-DD sin armar el string a mano. */
+const hoyLocal = () => new Date().toLocaleDateString("en-CA");
+
 export function SaldarDialog({
   sugerido,
   onOpenChange,
@@ -30,14 +36,14 @@ export function SaldarDialog({
 }) {
   const [monto, setMonto] = useState(String(sugerido.monto));
   const [metodo, setMetodo] = useState<string>("transferencia");
-  const [fecha, setFecha] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [fecha, setFecha] = useState<string>(hoyLocal);
   const [nota, setNota] = useState("");
 
   // El `rendicion_mes` del movimiento sale de la FECHA en que la plata se movió,
   // no del mes que el admin esté mirando: la sugerencia es acumulada, así que
   // "qué mes estoy viendo" no dice nada sobre cuándo se hizo la transferencia.
   // Así el movimiento aparece en el registro del mes correcto.
-  const mesDelMovimiento = (fecha || new Date().toISOString().slice(0, 10)).slice(0, 7);
+  const mesDelMovimiento = (fecha || hoyLocal()).slice(0, 7);
 
   const saldar = useMutation({
     mutationFn: () =>

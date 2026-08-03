@@ -107,6 +107,14 @@ Reglas que NO se rompen:
   $110.500" mientras el acumulado decía que Tincho debía $734.088). **La acumulada manda para
   decidir.** Para un socio humano vale `posicion == −saldo_cc` (misma cantidad, signo opuesto) — lo
   fija el candado `test_contabilidad_posiciones.py::test_posicion_de_socio_es_el_negativo_de_su_cc`.
+  Desde 2026-08 la acumulada además **parte el número en dos lecturas por parte**: `repartible`
+  (solo pedidos CERRADOS, vía `cobrado_por_socio`/`SALDADO_CTE` — el número para DECIDIR un reparto)
+  y `en_curso` (cobros de pedidos abiertos, que se reparten recién cuando el pedido cierre);
+  identidad `pendiente == repartible − en_curso`. **Las transferencias sugeridas salen de
+  `repartible`, no de `pendiente`** (sugerir mover el float de un pedido abierto sería repartir
+  plata que no devengó — incidente 2026-08-03), y **un socio humano nunca aparece como pagador
+  sugerido** (`excluir_pagadores=SOCIOS_HUMANOS`): su deuda se salda sola con su parte, no se le
+  pide cash (decisión del dueño). Como receptor sí entra.
 - **La posición NO es `saldo − su_parte`.** El saldo de una caja se mueve por cosas que no son un
   reparto: si Rental paga un gasto con la plata del Fondo, su cash baja pero **no cambia lo que le
   debe a los demás** (la parte de cada uno es un % de lo FACTURADO, no de lo que sobra tras los

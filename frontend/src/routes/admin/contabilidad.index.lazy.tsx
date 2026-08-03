@@ -123,14 +123,20 @@ function FinanzasPage() {
                 subtitle="Solo cuenta la plata de pedidos ya cerrados. Lo cobrado de pedidos en curso se reparte cuando cierren."
                 icon={Scale}
               >
-                {pos.sugeridos.length === 0 ? (
+                {/* El estado "Al día" se decide por si ALGUIEN espera cobrar, no
+                    por si hay sugerencias: un socio nunca aparece como pagador
+                    sugerido (su deuda se salda sola), así que puede haber una
+                    parte esperando sin ninguna transferencia sugerible. Ahí las
+                    tarjetas se muestran igual — esconderlas diría "al día"
+                    cuando no lo está. */}
+                {!alguienEspera ? (
                   <EmptyState
                     icon={<Scale className="h-6 w-6" />}
                     title="Al día — nada para repartir hoy"
                     sub={
                       enCursoTotal > 0
                         ? `Hay ${formatARS(enCursoTotal)} cobrados de pedidos que todavía no cerraron — se reparten cuando cierren.`
-                        : "Las 4 partes están en cero entre ellas."
+                        : "Ninguna parte espera cobrar nada."
                     }
                   />
                 ) : (
@@ -145,6 +151,13 @@ function FinanzasPage() {
                         Para que quede repartido. Cada botón registra una transferencia REAL en el
                         libro — usalo cuando la plata se movió de verdad.
                       </p>
+                      {pos.sugeridos.length === 0 && (
+                        <p className="text-sm text-muted-foreground">
+                          Sin transferencias para sugerir: la plata que falta no está hoy en una
+                          caja del negocio (la deuda de un socio se salda sola con su parte, no se
+                          le pide cash).
+                        </p>
+                      )}
                       {pos.sugeridos.map((s, i) => (
                         <div
                           key={i}
