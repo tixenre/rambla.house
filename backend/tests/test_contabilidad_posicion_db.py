@@ -254,6 +254,36 @@ def test_float_de_pedidos_a_medio_cobrar_se_reporta(conn):
     assert posiciones(conn)["float_sin_saldar"] - antes == 30_000
 
 
+def test_la_sena_de_un_pedido_abierto_va_a_en_curso_no_a_repartible(conn):
+    """El escenario EXACTO del incidente 2026-08-03: Rental cobra una seña de un
+    pedido que todavía no cerró. La tarjeta decía "tiene de más" (pendiente) y el
+    dueño lo leyó como deuda — pero esa plata no se reparte hasta que el pedido
+    cierre. `repartible` no se mueve; `en_curso` la nombra; los `sugeridos` NO
+    proponen transferirla."""
+    from contabilidad.queries.posiciones import posiciones
+
+    antes = {p["parte"]: p for p in posiciones(conn)["partes"]}
+
+    _pedido_saldado(conn, ped=PED_TINCHO, equipo=EQ_TINCHO, dueno="Tincho",
+                    monto=100_000, cobro="Rental", nombre_eq="Equipo de Tincho",
+                    pagado=30_000)  # seña: el pedido queda ABIERTO
+
+    pos = posiciones(conn)
+    despues = {p["parte"]: p for p in pos["partes"]}
+
+    r_antes, r_despues = antes["Rental"], despues["Rental"]
+    assert r_despues["en_curso"] - r_antes["en_curso"] == 30_000, \
+        "la seña tiene que aparecer como 'en curso'"
+    assert r_despues["repartible"] == r_antes["repartible"], \
+        "la seña NO mueve lo repartible: el pedido no cerró, nada devengó"
+    assert r_despues["pendiente"] - r_antes["pendiente"] == -30_000, \
+        "el acumulado total sí la cuenta (identidad pendiente == repartible − en_curso)"
+    # Y ninguna transferencia sugerida intenta repartir la seña: Tincho (el dueño
+    # del equipo) todavía no devengó nada de este pedido.
+    for s in pos["sugeridos"]:
+        assert not (s["de"] == "Rental" and s["a"] == "Tincho" and s["monto"] >= 30_000), s
+
+
 def test_reconciliacion_caza_devengado_sin_cuenta(conn):
     """Un beneficiario del modelo de comisiones que no tiene caja donde verse: su
     plata se devenga contra nadie. Es el "pendiente conocido" que quedó anotado al
