@@ -394,6 +394,9 @@ function MesAMesTabla({
     const [yy, mm] = mes.split("-").map(Number);
     return new Intl.DateTimeFormat("es-AR", { month: "short" }).format(new Date(yy, mm - 1, 1));
   };
+  // Más reciente primero — el backend/CSV siguen cronológicos (ascendente,
+  // la convención contable), esto es solo la lectura de la tabla en pantalla.
+  const mesesDesc = [...meses].sort((a, b) => b.mes.localeCompare(a.mes));
   return (
     <div className="overflow-x-auto">
       {/* eslint-disable-next-line no-restricted-syntax -- tabla mes-a-mes con columnas dinámicas por beneficiario; AdminTable es de columnas fijas */}
@@ -410,7 +413,7 @@ function MesAMesTabla({
           </tr>
         </thead>
         <tbody>
-          {meses.map((mes) => (
+          {mesesDesc.map((mes) => (
             <tr key={mes.mes} className="border-t hairline">
               <td className="py-1.5 text-ink capitalize">{fmtMes(mes.mes)}</td>
               {beneficiarios.map((b) => (
