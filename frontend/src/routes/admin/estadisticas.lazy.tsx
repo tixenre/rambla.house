@@ -26,6 +26,7 @@ import { AdminPage } from "@/components/admin/AdminPage";
 import { BarChart, RankList } from "@/components/admin/LiquidacionReporte";
 import { Section } from "@/design-system/composites/Section";
 import { StatCard } from "@/design-system/composites/StatCard";
+import { SegmentedControl } from "@/design-system/ui/segmented-control";
 import { CardGridSkeleton, TableSkeleton } from "@/components/admin/skeletons";
 import { ErrorState } from "@/components/admin/ErrorState";
 
@@ -33,14 +34,33 @@ export const Route = createLazyFileRoute("/admin/estadisticas")({
   component: EstadisticasPage,
 });
 
+type Modo = "nominal" | "ajustado";
+
+// "2026-06" → "junio de 2026". Mismo patrón local que ya usan
+// contabilidad.movimientos/rendicion/estudio.lazy.tsx (sin extraerlo a un
+// helper compartido — es un one-liner, no vale la indirección).
+function mesLargo(mes: string): string {
+  return new Date(`${mes}-01T00:00:00`).toLocaleDateString("es-AR", {
+    month: "long",
+    year: "numeric",
+  });
+}
+
 function EstadisticasPage() {
   useDocumentTitle("Estadísticas · Back Office");
+  const [modo, setModo] = useState<Modo>("nominal");
   const statsQ = useQuery({
     queryKey: ["admin", "estadisticas"],
     queryFn: () => adminApi.getEstadisticas(),
   });
 
   const data = statsQ.data;
+  const ajustado = modo === "ajustado";
+  // Elige nominal o ajustado según el toggle — el backend ya manda los dos
+  // números resueltos (`services/ipc.py`, ajuste EN ORIGEN); el front solo
+  // elige cuál mostrar, nunca calcula el ajuste (MEMORIA 2026-06-29 — "el
+  // front no calcula plata", generalizado acá al ajuste por inflación).
+  const val = (nominal: number, ajustadoVal: number) => (ajustado ? ajustadoVal : nominal);
 
   return (
     <AdminPage
@@ -48,9 +68,28 @@ function EstadisticasPage() {
       description="Métricas del negocio. El reporte de liquidación ahora vive en Finanzas."
     >
       <div className="space-y-6">
-        <p className="text-xs text-muted-foreground">
-          Solo se contabilizan pedidos confirmados, retirados y finalizados.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <p className="text-xs text-muted-foreground">
+            Solo se contabilizan pedidos confirmados, retirados y finalizados.
+          </p>
+          <div className="flex items-center gap-2">
+            {ajustado && data?.ipc.mes_referencia && (
+              <span className="text-2xs font-mono uppercase tracking-[0.1em] text-muted-foreground">
+                pesos de {mesLargo(data.ipc.mes_referencia)}
+              </span>
+            )}
+            <SegmentedControl
+              variant="pill"
+              ariaLabel="Pesos nominales o ajustados por IPC"
+              value={modo}
+              onChange={(v) => setModo(v as Modo)}
+              options={[
+                { value: "nominal", label: "Pesos" },
+                { value: "ajustado", label: "Ajustado por IPC" },
+              ]}
+            />
+          </div>
+        </div>
 
         {statsQ.isLoading && <CardGridSkeleton count={4} className="md:grid-cols-4" />}
         {statsQ.error && <ErrorState error={statsQ.error} onRetry={statsQ.refetch} />}
@@ -62,7 +101,7 @@ function EstadisticasPage() {
               <StatCard
                 icon={DollarSign}
                 label="Facturado total"
-                value={fmtArs(data.totales.total_ars)}
+                value={fmtArs(val(data.totales.total_ars, data.totales.total_ars_ajustado))}
               />
               <StatCard
                 icon={Calendar}
@@ -78,16 +117,24 @@ function EstadisticasPage() {
                 icon={TrendingUp}
                 label="Mejor mes"
                 value={data.mejor_peor_mes.mejor_mes ?? "—"}
-                meta={fmtArs(data.mejor_peor_mes.mejor_total)}
+                meta={fmtArs(
+                  val(
+                    data.mejor_peor_mes.mejor_total ?? 0,
+                    data.mejor_peor_mes.mejor_total_ajustado ?? 0,
+                  ),
+                )}
               />
             </div>
 
             {/* KPIs derivados: ticket promedio + LTV. Calculados en frontend
-            porque ya tenemos todos los totales — no hace falta backend. */}
+            porque ya tenemos todos los totales — no hace falta backend (son un
+            cociente de dos números que el backend YA resolvió, no una regla de
+            precio/descuento/IVA nueva). */}
             {(() => {
               const t = data.totales;
-              const ticket = t.total_pedidos ? Math.round(t.total_ars / t.total_pedidos) : 0;
-              const ltv = t.total_clientes ? Math.round(t.total_ars / t.total_clientes) : 0;
+              const totalMostrado = val(t.total_ars, t.total_ars_ajustado);
+              const ticket = t.total_pedidos ? Math.round(totalMostrado / t.total_pedidos) : 0;
+              const ltv = t.total_clientes ? Math.round(totalMostrado / t.total_clientes) : 0;
               const pedidosPorCliente = t.total_clientes
                 ? (t.total_pedidos / t.total_clientes).toFixed(1)
                 : "0";
@@ -124,33 +171,41 @@ function EstadisticasPage() {
                     .reverse()
                     .map((m) => ({
                       label: m.mes,
-                      value: Number(m.total_ars) || 0,
+                      value: Number(val(m.total_ars, m.total_ars_ajustado)) || 0,
                     }))}
                 />
               </Section>
 
-              {/* Crecimiento */}
+              {/* Crecimiento — en modo ajustado usa crecimiento_pct_ajustado,
+                  que puede diferir MUCHO del nominal (un mes puede crecer en
+                  pesos corrientes y caer en términos reales: eso es lo que
+                  este toggle existe para mostrar). */}
               <Section title="Crecimiento mes a mes" subtitle="% vs mes anterior">
                 <div className="space-y-1.5">
-                  {data.crecimiento.slice(0, 8).map((c) => (
-                    <div key={c.mes} className="flex items-center justify-between text-sm">
-                      <span className="font-mono text-xs text-muted-foreground">{c.mes}</span>
-                      <span className="tabular-nums text-ink">{fmtArs(c.total_ars)}</span>
-                      <span
-                        className={`inline-flex items-center gap-1 font-mono text-xs tabular-nums w-20 justify-end ${
-                          c.crecimiento_pct >= 0 ? "text-verde-ink" : "text-destructive"
-                        }`}
-                      >
-                        {c.crecimiento_pct >= 0 ? (
-                          <TrendingUp className="h-3 w-3" />
-                        ) : (
-                          <TrendingDown className="h-3 w-3" />
-                        )}
-                        {c.crecimiento_pct >= 0 ? "+" : ""}
-                        {c.crecimiento_pct}%
-                      </span>
-                    </div>
-                  ))}
+                  {data.crecimiento.slice(0, 8).map((c) => {
+                    const pct = val(c.crecimiento_pct, c.crecimiento_pct_ajustado);
+                    return (
+                      <div key={c.mes} className="flex items-center justify-between text-sm">
+                        <span className="font-mono text-xs text-muted-foreground">{c.mes}</span>
+                        <span className="tabular-nums text-ink">
+                          {fmtArs(val(c.total_ars, c.total_ars_ajustado))}
+                        </span>
+                        <span
+                          className={`inline-flex items-center gap-1 font-mono text-xs tabular-nums w-20 justify-end ${
+                            pct >= 0 ? "text-verde-ink" : "text-destructive"
+                          }`}
+                        >
+                          {pct >= 0 ? (
+                            <TrendingUp className="h-3 w-3" />
+                          ) : (
+                            <TrendingDown className="h-3 w-3" />
+                          )}
+                          {pct >= 0 ? "+" : ""}
+                          {pct}%
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
               </Section>
 
@@ -160,7 +215,7 @@ function EstadisticasPage() {
                   items={data.top_equipos.map((e) => ({
                     primary: e.equipo,
                     secondary: `${e.veces}× alquilado`,
-                    value: fmtArs(e.total_ars),
+                    value: fmtArs(val(e.total_ars, e.total_ars_ajustado)),
                   }))}
                   icon={Package}
                 />
@@ -169,11 +224,18 @@ function EstadisticasPage() {
               {/* Top equipos por rentabilidad neta (ingreso − costo de compra)
                   — pedido del dueño: un equipo caro puede facturar más y
                   rentabilizar menos que uno barato. Solo cuenta equipos con
-                  `costo_compra` cargado (se completa en la ficha del equipo). */}
+                  `costo_compra` cargado (se completa en la ficha del equipo).
+                  SIN toggle de IPC a propósito: `costo_compra` es un
+                  desembolso puntual, no una serie mensual — ajustarlo
+                  necesitaría además la fecha de compra, otra pregunta. */}
               {data.top_equipos_rentabilidad.length > 0 && (
                 <Section
                   title="Top equipos por rentabilidad neta"
-                  subtitle="Ingreso menos costo de compra — solo equipos con el costo cargado"
+                  subtitle={
+                    ajustado
+                      ? "Ingreso menos costo de compra — siempre en pesos nominales"
+                      : "Ingreso menos costo de compra — solo equipos con el costo cargado"
+                  }
                 >
                   <RankList
                     items={data.top_equipos_rentabilidad.map((e) => ({
@@ -192,7 +254,7 @@ function EstadisticasPage() {
                   items={data.top_clientes.map((c) => ({
                     primary: c.cliente,
                     secondary: `${c.pedidos} pedidos`,
-                    value: fmtArs(c.total_ars),
+                    value: fmtArs(val(c.total_ars, c.total_ars_ajustado)),
                   }))}
                   icon={Users}
                 />
@@ -221,7 +283,7 @@ function EstadisticasPage() {
                   items={data.clientes_recurrentes.map((c) => ({
                     primary: c.cliente,
                     secondary: `${c.veces_alquiladas}× alquilado`,
-                    value: fmtArs(c.total_ars),
+                    value: fmtArs(val(c.total_ars, c.total_ars_ajustado)),
                   }))}
                   icon={Users}
                 />
@@ -233,7 +295,7 @@ function EstadisticasPage() {
                   items={data.por_dueno.map((d) => ({
                     primary: d.dueno,
                     secondary: `${d.items} ítems`,
-                    value: fmtArs(d.total_ars),
+                    value: fmtArs(val(d.total_ars, d.total_ars_ajustado)),
                   }))}
                   icon={Package}
                 />
@@ -248,12 +310,15 @@ function EstadisticasPage() {
               >
                 <RankList
                   items={(() => {
-                    const total = data.gastos_por_categoria.reduce((acc, g) => acc + g.monto, 0);
-                    return data.gastos_por_categoria.map((g) => ({
+                    const montos = data.gastos_por_categoria.map((g) =>
+                      val(g.monto, g.monto_ajustado),
+                    );
+                    const total = montos.reduce((acc, m) => acc + m, 0);
+                    return data.gastos_por_categoria.map((g, i) => ({
                       primary: g.categoria,
                       secondary:
-                        total > 0 ? `${Math.round((g.monto / total) * 100)}% del total` : "",
-                      value: fmtArs(g.monto),
+                        total > 0 ? `${Math.round((montos[i] / total) * 100)}% del total` : "",
+                      value: fmtArs(montos[i]),
                     }));
                   })()}
                   icon={Wallet}
@@ -284,7 +349,10 @@ function EstadisticasPage() {
                 <StatCard
                   icon={DollarSign}
                   label="Facturado"
-                  value={fmtArs(data.estudio.totales.total_ars ?? 0)}
+                  value={fmtArs(
+                    val(data.estudio.totales.total_ars, data.estudio.totales.total_ars_ajustado) ??
+                      0,
+                  )}
                 />
               </div>
               <BarChart
@@ -293,7 +361,7 @@ function EstadisticasPage() {
                   .reverse()
                   .map((m) => ({
                     label: m.mes,
-                    value: Number(m.total_ars) || 0,
+                    value: Number(val(m.total_ars, m.total_ars_ajustado)) || 0,
                   }))}
               />
             </Section>

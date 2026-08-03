@@ -1065,14 +1065,24 @@ export type EstadisticasData = {
     total_pedidos: number;
     total_clientes: number;
     total_ars: number;
+    /** "Pesos de hoy" — cada pedido deflactado por SU PROPIO mes antes de
+     *  sumar (`services/ipc.py`), no el nominal multiplicado por un factor. */
+    total_ars_ajustado: number;
     desde: string | null;
     hasta: string | null;
   };
-  por_mes: { mes: string; pedidos: number; total_ars: number }[];
-  crecimiento: { mes: string; total_ars: number; crecimiento_pct: number }[];
+  por_mes: { mes: string; pedidos: number; total_ars: number; total_ars_ajustado: number }[];
+  crecimiento: {
+    mes: string;
+    total_ars: number;
+    total_ars_ajustado: number;
+    crecimiento_pct: number;
+    crecimiento_pct_ajustado: number;
+  }[];
   top_equipos: {
     equipo: string;
     total_ars: number;
+    total_ars_ajustado: number;
     veces: number;
     /** Costo de compra cargado a mano (`equipos.costo_compra`) — null si
      *  todavía no se cargó para este equipo. */
@@ -1081,7 +1091,9 @@ export type EstadisticasData = {
   /** Mismo universo que `top_equipos`, filtrado a los que YA tienen
    *  `costo_compra` cargado y ordenado por rentabilidad neta (ingreso −
    *  costo) en vez de ingreso bruto — un equipo caro puede facturar más y
-   *  rentabilizar menos que uno barato. */
+   *  rentabilizar menos que uno barato. Sin variante ajustada por IPC a
+   *  propósito: `costo_compra` es un desembolso puntual, no una serie
+   *  mensual — el toggle no aplica acá. */
   top_equipos_rentabilidad: {
     equipo: string;
     total_ars: number;
@@ -1089,19 +1101,31 @@ export type EstadisticasData = {
     costo_compra: number;
     rentabilidad_neta: number;
   }[];
-  top_clientes: { cliente: string; total_ars: number; pedidos: number }[];
-  clientes_recurrentes: { cliente: string; veces_alquiladas: number; total_ars: number }[];
+  top_clientes: {
+    cliente: string;
+    total_ars: number;
+    total_ars_ajustado: number;
+    pedidos: number;
+  }[];
+  clientes_recurrentes: {
+    cliente: string;
+    veces_alquiladas: number;
+    total_ars: number;
+    total_ars_ajustado: number;
+  }[];
   mejor_peor_mes: {
     mejor_mes: string | null;
     mejor_total: number | null;
+    mejor_total_ajustado: number | null;
     peor_mes: string | null;
     peor_total: number | null;
+    peor_total_ajustado: number | null;
   };
-  por_dueno: { dueno: string; total_ars: number; items: number }[];
+  por_dueno: { dueno: string; total_ars: number; total_ars_ajustado: number; items: number }[];
   favoritos_equipo?: { equipo: string; total_favoritos: number; clientes_unicos: number }[];
   /** Gastos internos (`backend/contabilidad`) agrupados por categoría —
    *  histórico completo, no solo Mantenimiento/Servicios. Más gastado primero. */
-  gastos_por_categoria: { categoria: string; monto: number }[];
+  gastos_por_categoria: { categoria: string; monto: number; monto_ajustado: number }[];
   /** Economía separada del Estudio (#1283 Fase 7) — turnos reales +
    *  meses de slot fijo, aparte de las tarjetas de rental de arriba. */
   estudio: {
@@ -1110,6 +1134,7 @@ export type EstadisticasData = {
       total_meses_slot_fijo: number;
       total_clientes: number;
       total_ars: number;
+      total_ars_ajustado: number;
       horas_vendidas: number;
     };
     por_mes: {
@@ -1117,9 +1142,13 @@ export type EstadisticasData = {
       turnos: number;
       meses_slot_fijo: number;
       total_ars: number;
+      total_ars_ajustado: number;
       horas_vendidas: number;
     }[];
   };
+  /** Metadata del ajuste por IPC — solo para el label del toggle ("pesos
+   *  ajustados a agosto 2026"), nunca para calcular nada en el front. */
+  ipc: { mes_referencia: string | null };
 };
 
 export type Cliente = {
