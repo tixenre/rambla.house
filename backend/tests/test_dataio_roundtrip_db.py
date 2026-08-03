@@ -44,6 +44,7 @@ pytestmark = [
 EID = 9_600_001
 MARCA = "MarcaRoundtripTest"
 SLUG = "marcaroundtriptest-rt900"
+COSTO_COMPRA = 850_000
 
 
 def _limpiar(conn):
@@ -61,8 +62,9 @@ def equipo_con_marca():
         _limpiar(conn)
         brand_id = conn.insert_returning("INSERT INTO marcas (nombre) VALUES (%s)", (MARCA,))
         conn.execute(
-            "INSERT INTO equipos (id, nombre, brand_id, modelo, cantidad, slug) VALUES (%s,%s,%s,%s,%s,%s)",
-            (EID, "Equipo Roundtrip", brand_id, "RT900", 2, SLUG),
+            "INSERT INTO equipos (id, nombre, brand_id, modelo, cantidad, slug, costo_compra) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s)",
+            (EID, "Equipo Roundtrip", brand_id, "RT900", 2, SLUG, COSTO_COMPRA),
         )
         conn.commit()
     finally:
@@ -114,12 +116,17 @@ def test_export_import_export_es_estable(equipo_con_marca):
         conn = get_db()
         try:
             row = conn.execute(
-                "SELECT nombre, modelo, cantidad FROM equipos WHERE slug = %s", (SLUG,)
+                "SELECT nombre, modelo, cantidad, costo_compra FROM equipos WHERE slug = %s", (SLUG,)
             ).fetchone()
             assert row is not None, "el import debe restaurar el equipo"
             assert row["nombre"] == "Equipo Roundtrip"
             assert row["modelo"] == "RT900"
             assert row["cantidad"] == 2
+            # costo_compra (rentabilidad neta de Estadísticas) tiene que
+            # sobrevivir el viaje export→import — no es obvio si no se prueba
+            # explícito (a diferencia de nombre/modelo/cantidad, es un campo
+            # nuevo que se puede perder en silencio si dataio no lo conoce).
+            assert row["costo_compra"] == COSTO_COMPRA
 
             # Segundo export idéntico al primero (export/import = inversos).
             with tempfile.TemporaryDirectory() as tmp2:

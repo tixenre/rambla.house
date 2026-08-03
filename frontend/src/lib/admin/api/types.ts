@@ -118,6 +118,10 @@ export type Equipo = {
   precio_usd: number | null;
   roi_pct: number | null;
   valor_reposicion: number | null;
+  /** Costo de compra del equipo, cargado a mano (ARS) — distinto de
+   *  `valor_reposicion` (estimación para seguros, en USD). Alimenta el
+   *  ranking "rentabilidad neta" de Estadísticas. null = no cargado. */
+  costo_compra: number | null;
   foto_url: string | null;
   fecha_compra: string | null;
   serie: string | null;
@@ -1066,7 +1070,25 @@ export type EstadisticasData = {
   };
   por_mes: { mes: string; pedidos: number; total_ars: number }[];
   crecimiento: { mes: string; total_ars: number; crecimiento_pct: number }[];
-  top_equipos: { equipo: string; total_ars: number; veces: number }[];
+  top_equipos: {
+    equipo: string;
+    total_ars: number;
+    veces: number;
+    /** Costo de compra cargado a mano (`equipos.costo_compra`) — null si
+     *  todavía no se cargó para este equipo. */
+    costo_compra: number | null;
+  }[];
+  /** Mismo universo que `top_equipos`, filtrado a los que YA tienen
+   *  `costo_compra` cargado y ordenado por rentabilidad neta (ingreso −
+   *  costo) en vez de ingreso bruto — un equipo caro puede facturar más y
+   *  rentabilizar menos que uno barato. */
+  top_equipos_rentabilidad: {
+    equipo: string;
+    total_ars: number;
+    veces: number;
+    costo_compra: number;
+    rentabilidad_neta: number;
+  }[];
   top_clientes: { cliente: string; total_ars: number; pedidos: number }[];
   clientes_recurrentes: { cliente: string; veces_alquiladas: number; total_ars: number }[];
   mejor_peor_mes: {

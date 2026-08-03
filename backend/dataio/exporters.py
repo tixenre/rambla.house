@@ -190,7 +190,7 @@ def export_equipos(conn) -> list[dict]:
     rows = conn.execute(f"""
         SELECT e.slug, e.nombre, {MARCA_SUBQUERY}, e.modelo, e.cantidad,
                e.precio_jornada, e.precio_jornada_manual, e.precio_usd,
-               e.roi_pct, e.valor_reposicion, e.foto_url, e.fecha_compra,
+               e.roi_pct, e.valor_reposicion, e.costo_compra, e.foto_url, e.fecha_compra,
                e.serie, e.bh_url, e.dueno, e.visible_catalogo, e.estado,
                e.ficha_completa, e.eliminado_at, e.nombre_publico_override,
                e.nombre_publico_revisado, e.relevancia_manual,
@@ -244,6 +244,7 @@ def export_equipos(conn) -> list[dict]:
                 precio_usd=r["precio_usd"],
                 roi_pct=r["roi_pct"],
                 valor_reposicion=r["valor_reposicion"],
+                costo_compra=r["costo_compra"],
                 foto_url=r["foto_url"],
                 fecha_compra=_to_iso(r["fecha_compra"]),
                 serie=r["serie"],

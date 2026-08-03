@@ -280,3 +280,108 @@ def test_estadisticas_incluye_gastos_por_categoria(conn):
     finally:
         _limpiar_gastos_categoria(conn)
         conn.commit()
+
+
+# ── `top_equipos_rentabilidad` (ingreso − costo_compra) — el escenario real
+# que motivó el pedido: un equipo caro puede facturar más que uno barato y
+# aun así ser MENOS rentable neto. `costo_compra` es nullable — un equipo sin
+# el dato cargado sigue en `top_equipos` (por ingreso) pero queda AFUERA de
+# `top_equipos_rentabilidad` (no hay con qué comparar su rentabilidad).
+E_CARA = 9_301_301
+E_BARATA = 9_301_302
+E_SIN_COSTO = 9_301_303
+P_CARA = 9_301_311
+P_BARATA = 9_301_312
+P_SIN_COSTO = 9_301_313
+PRECIO_CARA = 100_000
+COSTO_CARA = 90_000  # rentabilidad neta: 10_000
+PRECIO_BARATA = 60_000
+COSTO_BARATA = 20_000  # rentabilidad neta: 40_000 — MÁS que la cara, pese a facturar menos
+PRECIO_SIN_COSTO = 80_000
+
+
+def _limpiar_rentabilidad(conn):
+    conn.execute(
+        "DELETE FROM alquiler_items WHERE pedido_id IN (%s, %s, %s)",
+        (P_CARA, P_BARATA, P_SIN_COSTO),
+    )
+    conn.execute(
+        "DELETE FROM alquileres WHERE id IN (%s, %s, %s)", (P_CARA, P_BARATA, P_SIN_COSTO)
+    )
+    conn.execute(
+        "DELETE FROM equipos WHERE id IN (%s, %s, %s)", (E_CARA, E_BARATA, E_SIN_COSTO)
+    )
+
+
+def test_top_equipos_rentabilidad_descuenta_el_costo_de_compra(conn):
+    """El equipo CARO factura más pero es MENOS rentable neto que el barato
+    (mismo patrón que el pedido real: la cámara top-of-line vs. una más
+    barata) — el ranking por rentabilidad tiene que invertir el orden del
+    ranking por ingreso. El equipo sin costo_compra cargado sigue en
+    `top_equipos` pero desaparece de `top_equipos_rentabilidad`."""
+    from routes.estadisticas import compute_estadisticas
+
+    _limpiar_rentabilidad(conn)
+    conn.commit()
+    try:
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, dueno, precio_jornada, costo_compra) "
+            "VALUES (%s, %s, 1, 'Rental', %s, %s)",
+            (E_CARA, "Cámara top-of-line #rentabilidad", PRECIO_CARA, COSTO_CARA),
+        )
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, dueno, precio_jornada, costo_compra) "
+            "VALUES (%s, %s, 1, 'Rental', %s, %s)",
+            (E_BARATA, "Cámara económica #rentabilidad", PRECIO_BARATA, COSTO_BARATA),
+        )
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, dueno, precio_jornada, costo_compra) "
+            "VALUES (%s, %s, 1, 'Rental', %s, NULL)",
+            (E_SIN_COSTO, "Cámara sin costo cargado #rentabilidad", PRECIO_SIN_COSTO),
+        )
+        for pid, eid, precio in (
+            (P_CARA, E_CARA, PRECIO_CARA),
+            (P_BARATA, E_BARATA, PRECIO_BARATA),
+            (P_SIN_COSTO, E_SIN_COSTO, PRECIO_SIN_COSTO),
+        ):
+            conn.execute(
+                """INSERT INTO alquileres
+                       (id, cliente_nombre, estado, fecha_desde, fecha_hasta, monto_total)
+                   VALUES (%s, %s, 'finalizado', %s, %s, %s)""",
+                (pid, "Cliente #rentabilidad", f"{MES}-05T09:00:00", f"{MES}-06T09:00:00", precio),
+            )
+            conn.execute(
+                "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, subtotal) "
+                "VALUES (%s, %s, 1, %s, %s)",
+                (pid, eid, precio, precio),
+            )
+        conn.commit()
+
+        data = compute_estadisticas(conn)
+
+        por_nombre = {e["equipo"]: e for e in data["top_equipos_rentabilidad"]}
+        assert "Cámara top-of-line #rentabilidad" in por_nombre
+        assert "Cámara económica #rentabilidad" in por_nombre
+        # El sin-costo NO aparece acá — no hay con qué comparar.
+        assert "Cámara sin costo cargado #rentabilidad" not in por_nombre
+
+        cara = por_nombre["Cámara top-of-line #rentabilidad"]
+        barata = por_nombre["Cámara económica #rentabilidad"]
+        assert cara["rentabilidad_neta"] == PRECIO_CARA - COSTO_CARA
+        assert barata["rentabilidad_neta"] == PRECIO_BARATA - COSTO_BARATA
+        assert barata["rentabilidad_neta"] > cara["rentabilidad_neta"]
+
+        # El orden del ranking está invertido respecto al ingreso puro: la
+        # barata rentabiliza más pese a facturar menos.
+        nombres_por_rentabilidad = [e["equipo"] for e in data["top_equipos_rentabilidad"]]
+        assert nombres_por_rentabilidad.index(
+            "Cámara económica #rentabilidad"
+        ) < nombres_por_rentabilidad.index("Cámara top-of-line #rentabilidad")
+
+        # Pero el sin-costo SÍ sigue en `top_equipos` (por ingreso) — nullable
+        # no significa invisible en el resto de la pantalla.
+        nombres_top_equipos = [e["equipo"] for e in data["top_equipos"]]
+        assert "Cámara sin costo cargado #rentabilidad" in nombres_top_equipos
+    finally:
+        _limpiar_rentabilidad(conn)
+        conn.commit()

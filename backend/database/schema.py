@@ -177,6 +177,13 @@ def _init_db_schema(conn):
     # DROP viven en la migración d5a8f2c4b6e9 (corre una sola vez).
     conn.execute("ALTER TABLE equipos ADD COLUMN IF NOT EXISTS brand_id INTEGER REFERENCES marcas(id)")
 
+    # Migration: costo de COMPRA del equipo (no confundir con `valor_reposicion`,
+    # que es para seguros/remitos). Nullable a propósito — NULL = todavía no
+    # cargado (distinto de $0); habilita el ranking "rentabilidad neta" de
+    # Estadísticas (ingreso − costo), que solo cuenta los equipos con el dato
+    # cargado. Se carga a mano, sin fuente que lo derive.
+    conn.execute("ALTER TABLE equipos ADD COLUMN IF NOT EXISTS costo_compra INTEGER")
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS clientes (
             id                SERIAL PRIMARY KEY,

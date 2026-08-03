@@ -165,22 +165,49 @@ def compute_estadisticas(conn) -> dict:
     # que ya usa `routes/dashboard.py::equipos_afuera` para lo mismo. Los
     # SUELTOS de un turno embebido (equipos reales) NO se excluyen — su uso y
     # su prorrateo de plata son reales, quedan contados como cualquier ítem.
-    top_equipos = conn.execute(f"""
-        WITH {_PRORRATEO_CTE}
-        SELECT
-            e.nombre                       AS equipo,
-            SUM(p.monto_total * pi.subtotal::numeric / NULLIF(t.suma_items, 0)) AS total_ars,
-            COUNT(*)                       AS veces
-        FROM alquiler_items pi
-        JOIN alquileres p  ON p.id  = pi.pedido_id
-        JOIN equipos e  ON e.id  = pi.equipo_id
-        JOIN tot t ON t.pedido_id = p.id
-        WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
-          AND e.es_recurso_interno = FALSE
-        GROUP BY pi.equipo_id, e.nombre
-        ORDER BY total_ars DESC
-        LIMIT 15
-    """).fetchall()
+    # Sin LIMIT/ORDER BY acá: se derivan DOS rankings distintos de este mismo
+    # resultado en Python (por ingreso y por rentabilidad neta, ver abajo) —
+    # cortar u ordenar en SQL serviría solo a uno de los dos. `costo_compra`
+    # (MAX: mismo valor para todas las filas del grupo, es un atributo del
+    # equipo — la agregación es solo para que Postgres acepte la columna sin
+    # sumarla al GROUP BY) es NULL para un equipo sin el dato cargado.
+    _equipos_ingreso_y_costo = [
+        row_to_dict(r)
+        for r in conn.execute(f"""
+            WITH {_PRORRATEO_CTE}
+            SELECT
+                e.nombre                       AS equipo,
+                SUM(p.monto_total * pi.subtotal::numeric / NULLIF(t.suma_items, 0)) AS total_ars,
+                COUNT(*)                       AS veces,
+                MAX(e.costo_compra)            AS costo_compra
+            FROM alquiler_items pi
+            JOIN alquileres p  ON p.id  = pi.pedido_id
+            JOIN equipos e  ON e.id  = pi.equipo_id
+            JOIN tot t ON t.pedido_id = p.id
+            WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
+              AND e.es_recurso_interno = FALSE
+            GROUP BY pi.equipo_id, e.nombre
+        """).fetchall()
+    ]
+    top_equipos = sorted(
+        _equipos_ingreso_y_costo, key=lambda e: e["total_ars"] or 0, reverse=True
+    )[:15]
+
+    # Rentabilidad neta (ingreso − costo de compra) — pedido del dueño: un
+    # equipo puede facturar mucho y no ser el más rentable si costó caro
+    # comprarlo (ejemplo real: una cámara top-of-line vs. un equipo más
+    # barato con casi el mismo ingreso). Solo cuenta equipos CON el costo
+    # cargado — no hay forma de comparar rentabilidad sin ese dato, y
+    # mostrar un 0 inventado sería peor que no mostrar el equipo.
+    top_equipos_rentabilidad = sorted(
+        (
+            {**e, "rentabilidad_neta": (e["total_ars"] or 0) - e["costo_compra"]}
+            for e in _equipos_ingreso_y_costo
+            if e["costo_compra"] is not None
+        ),
+        key=lambda e: e["rentabilidad_neta"],
+        reverse=True,
+    )[:15]
 
     # ── Top clientes ──────────────────────────────────────────────────────────
     top_clientes = conn.execute(f"""
@@ -362,16 +389,17 @@ def compute_estadisticas(conn) -> dict:
     gastos_categoria = gastos_por_categoria(conn)
 
     return {
-        "totales":              row_to_dict(totales),
-        "por_mes":              [row_to_dict(r) for r in por_mes],
-        "crecimiento":          crecimiento,
-        "top_equipos":          [row_to_dict(r) for r in top_equipos],
-        "top_clientes":         [row_to_dict(r) for r in top_clientes],
-        "clientes_recurrentes": [row_to_dict(r) for r in clientes_recurrentes],
-        "mejor_peor_mes":       mejor_peor_mes,
-        "por_dueno":            [row_to_dict(r) for r in por_dueno],
-        "favoritos_equipo":     [row_to_dict(r) for r in favoritos_equipo],
-        "gastos_por_categoria": gastos_categoria,
+        "totales":                  row_to_dict(totales),
+        "por_mes":                  [row_to_dict(r) for r in por_mes],
+        "crecimiento":              crecimiento,
+        "top_equipos":              top_equipos,
+        "top_equipos_rentabilidad": top_equipos_rentabilidad,
+        "top_clientes":             [row_to_dict(r) for r in top_clientes],
+        "clientes_recurrentes":     [row_to_dict(r) for r in clientes_recurrentes],
+        "mejor_peor_mes":           mejor_peor_mes,
+        "por_dueno":                [row_to_dict(r) for r in por_dueno],
+        "favoritos_equipo":         [row_to_dict(r) for r in favoritos_equipo],
+        "gastos_por_categoria":     gastos_categoria,
         "estudio": {
             "totales": row_to_dict(estudio_totales),
             "por_mes": [row_to_dict(r) for r in estudio_por_mes],

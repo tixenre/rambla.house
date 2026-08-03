@@ -166,6 +166,26 @@ function EstadisticasPage() {
                 />
               </Section>
 
+              {/* Top equipos por rentabilidad neta (ingreso − costo de compra)
+                  — pedido del dueño: un equipo caro puede facturar más y
+                  rentabilizar menos que uno barato. Solo cuenta equipos con
+                  `costo_compra` cargado (se completa en la ficha del equipo). */}
+              {data.top_equipos_rentabilidad.length > 0 && (
+                <Section
+                  title="Top equipos por rentabilidad neta"
+                  subtitle="Ingreso menos costo de compra — solo equipos con el costo cargado"
+                >
+                  <RankList
+                    items={data.top_equipos_rentabilidad.map((e) => ({
+                      primary: e.equipo,
+                      secondary: `${e.veces}× · costo ${fmtArs(e.costo_compra)}`,
+                      value: fmtArs(e.rentabilidad_neta),
+                    }))}
+                    icon={Wallet}
+                  />
+                </Section>
+              )}
+
               {/* Top clientes */}
               <Section title="Top clientes" subtitle="Por facturación">
                 <RankList

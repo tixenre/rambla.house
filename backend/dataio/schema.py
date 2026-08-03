@@ -132,6 +132,7 @@ class Equipo(_Base):
     precio_usd: float | None = None
     roi_pct: float | None = None
     valor_reposicion: float | None = None
+    costo_compra: int | None = None
     foto_url: str | None = None
     fecha_compra: str | None = None
     serie: str | None = None
