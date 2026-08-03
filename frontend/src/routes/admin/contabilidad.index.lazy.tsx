@@ -1,113 +1,291 @@
 /**
- * contabilidad.index.lazy.tsx — Tablero financiero (#809, Fase 1).
+ * contabilidad.index.lazy.tsx — Finanzas: la pantalla única de la plata (#809).
  *
- * Muestra la "plata disponible ahora": total + desglose por caja. Los ingresos
- * por alquiler ya vienen DERIVADOS de los cobros (alquiler_pagos) — no se carga
- * nada a mano. En fases siguientes se suman ganancia neta del mes y rendición.
+ * Funde el Tablero, Cuentas y Rendición en una sola página (decisión del dueño,
+ * 2026-08-03: tres pantallas con fragmentos solapados no se podían leer). Cuatro
+ * bloques, en orden de decisión:
+ *
+ * 1. **KPIs** — cuánta plata hay y cómo vino el mes.
+ * 2. **Para repartir hoy** — SOLO pedidos ya cerrados (`repartible`). Lo cobrado
+ *    de pedidos en curso se nombra aparte y no genera sugerencias: repartirlo
+ *    sería adelantar plata que todavía no devengó (el incidente del 2026-08-03,
+ *    "Rental tiene de más $1.647.753" que era float + arranques). Si no hay
+ *    nada que mover, la sección lo dice y no muestra números que confundan.
+ * 3. **Socios** — la deuda de cada uno (cuenta corriente). Se salda sola con su
+ *    parte de lo que se alquila; no se sugieren pagos cash.
+ * 4. **Cajas** — la plata real del negocio, editable + alta de cuentas.
+ *
+ * El bloque mensual "Lo que se generó en {mes}" murió con la página de
+ * Rendición (arrancaba de cero cada mes y sugería lo contrario que el
+ * acumulado); el endpoint `GET /rendicion/{mes}` sigue vivo en el backend.
  */
-import { createLazyFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
+import { createLazyFileRoute } from "@tanstack/react-router";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowRight, Scale, Users, Wallet } from "lucide-react";
 
-import { adminApi, type CuentaSaldo } from "@/lib/admin/api";
+import { adminApi, type PosicionParte, type SugeridoRendicion } from "@/lib/admin/api";
 import { AdminPage } from "@/components/admin/AdminPage";
-import { CardGridSkeleton } from "@/components/admin/skeletons";
+import { CardGridSkeleton, TableSkeleton } from "@/components/admin/skeletons";
 import { ErrorState } from "@/components/admin/ErrorState";
+import { QueryState } from "@/components/admin/QueryState";
+import { CajaRow } from "@/components/admin/contabilidad/CajaRow";
+import { NuevaCuentaForm } from "@/components/admin/contabilidad/NuevaCuentaForm";
+import { SaldarDialog } from "@/components/admin/contabilidad/SaldarDialog";
+import { SocioCard } from "@/components/admin/contabilidad/SocioCard";
 import { formatARS, formatMoney } from "@/lib/format";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { Badge } from "@/design-system/ui/badge";
+import { EmptyState } from "@/design-system/composites/EmptyState";
+import { Section } from "@/design-system/composites/Section";
 import { Button } from "@/design-system/ui/button";
+import { cn } from "@/lib/utils";
 
 export const Route = createLazyFileRoute("/admin/contabilidad/")({
-  component: ContabilidadTablero,
+  component: FinanzasPage,
 });
 
-function ContabilidadTablero() {
+function FinanzasPage() {
   useDocumentTitle("Finanzas · Back Office");
+  const qc = useQueryClient();
+  const [saldarSugerido, setSaldarSugerido] = useState<SugeridoRendicion | null>(null);
 
-  const q = useQuery({
+  const tableroQ = useQuery({
     queryKey: ["admin", "contabilidad", "tablero"],
     queryFn: () => adminApi.getTablero(),
   });
 
-  const data = q.data;
+  // Query propia (no bloquea los KPIs): la posición acumulada recorre todos los
+  // meses desde el clean start, así que es más cara que los saldos.
+  const posicionesQ = useQuery({
+    queryKey: ["admin", "contabilidad", "posiciones"],
+    queryFn: () => adminApi.getPosiciones(),
+  });
+
+  const invalidar = () => qc.invalidateQueries({ queryKey: ["admin", "contabilidad"] });
+
+  const data = tableroQ.data;
+  const socios = data?.disponible.socios ?? [];
+  const cajas = data?.disponible.cajas ?? [];
 
   return (
     <AdminPage
-      title="Tablero"
-      maxW="list"
-      description="Cuánta plata hay y dónde. Los cobros de clientes ya entran solos a la caja de quien los cobró."
-      actions={
-        <Button asChild variant="outline" className="shrink-0">
-          <Link to="/admin/contabilidad/cuentas">Administrar cuentas</Link>
-        </Button>
-      }
+      title="Finanzas"
+      maxW="detail"
+      description="Toda la plata en una pantalla: cuánto hay, qué se reparte hoy, cómo está cada socio y las cajas."
     >
       <div className="space-y-6">
-        {q.isLoading && <CardGridSkeleton count={4} />}
-        {q.isError && <ErrorState error={q.error} onRetry={q.refetch} />}
+        {tableroQ.isLoading && <CardGridSkeleton count={4} />}
+        {tableroQ.isError && <ErrorState error={tableroQ.error} onRetry={tableroQ.refetch} />}
 
+        {/* 1 · KPIs: disponible · ganancia del mes */}
         {data && (
-          <>
-            {/* KPIs: disponible · ganancia del mes (la rendición vive en la cuenta corriente) */}
-            <div className="grid gap-3 sm:grid-cols-2">
-              <div className="card-elevated p-5">
-                <div className="t-eyebrow">Plata disponible</div>
-                <div className="font-mono text-3xl font-semibold tabular-nums text-ink mt-1">
-                  {formatMoney(data.disponible.totales.ARS ?? 0, "ARS")}
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="card-elevated p-5">
+              <div className="t-eyebrow">Plata disponible</div>
+              <div className="font-mono text-3xl font-semibold tabular-nums text-ink mt-1">
+                {formatMoney(data.disponible.totales.ARS ?? 0, "ARS")}
+              </div>
+              {(data.disponible.totales.USD ?? 0) !== 0 && (
+                <div className="font-mono text-lg font-semibold tabular-nums text-ink">
+                  {formatMoney(data.disponible.totales.USD, "USD")}
                 </div>
-                {(data.disponible.totales.USD ?? 0) !== 0 && (
-                  <div className="font-mono text-lg font-semibold tabular-nums text-ink">
-                    {formatMoney(data.disponible.totales.USD, "USD")}
-                  </div>
+              )}
+              <div className="text-xs text-muted-foreground mt-1">
+                Suma de las cajas · al {data.disponible.as_of}
+              </div>
+            </div>
+
+            <div className="card-elevated p-5">
+              <div className="t-eyebrow">Ganancia neta · {data.ganancia_mes.mes}</div>
+              <div
+                className={`font-mono text-3xl font-semibold tabular-nums mt-1 ${
+                  data.ganancia_mes.neta >= 0 ? "text-ink" : "text-destructive"
+                }`}
+              >
+                {formatARS(data.ganancia_mes.neta)}
+              </div>
+              <div className="text-xs text-muted-foreground mt-1">
+                Ingresos {formatARS(data.ganancia_mes.ingresos)} − gastos{" "}
+                {formatARS(data.ganancia_mes.gastos)}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 2 · Para repartir hoy — el acumulado de pedidos CERRADOS. */}
+        <QueryState query={posicionesQ} skeleton={<TableSkeleton rows={1} cols={4} />}>
+          {(pos) => {
+            const enCursoTotal = pos.partes.reduce((acc, p) => acc + (p.en_curso ?? 0), 0);
+            const alguienEspera = pos.partes.some((p) => p.repartible > 0);
+            return (
+              <Section
+                title="Para repartir hoy"
+                subtitle="Solo cuenta la plata de pedidos ya cerrados. Lo cobrado de pedidos en curso se reparte cuando cierren."
+                icon={Scale}
+              >
+                {pos.sugeridos.length === 0 ? (
+                  <EmptyState
+                    icon={<Scale className="h-6 w-6" />}
+                    title="Al día — nada para repartir hoy"
+                    sub={
+                      enCursoTotal > 0
+                        ? `Hay ${formatARS(enCursoTotal)} cobrados de pedidos que todavía no cerraron — se reparten cuando cierren.`
+                        : "Las 4 partes están en cero entre ellas."
+                    }
+                  />
+                ) : (
+                  <>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                      {pos.partes.map((p) => (
+                        <PosicionCard key={p.parte} parte={p} alguienEspera={alguienEspera} />
+                      ))}
+                    </div>
+                    <div className="mt-4 space-y-2 border-t hairline pt-4">
+                      <p className="text-xs text-muted-foreground">
+                        Para que quede repartido. Cada botón registra una transferencia REAL en el
+                        libro — usalo cuando la plata se movió de verdad.
+                      </p>
+                      {pos.sugeridos.map((s, i) => (
+                        <div
+                          key={i}
+                          className="flex flex-wrap items-center gap-3 rounded-md border hairline px-3 py-2.5"
+                        >
+                          <span className="font-medium text-ink">{s.de}</span>
+                          <ArrowRight className="h-3.5 w-3.5 text-muted-foreground" />
+                          <span className="font-medium text-ink">{s.a}</span>
+                          <span className="ml-auto font-mono text-sm tabular-nums text-ink">
+                            {formatARS(s.monto)}
+                          </span>
+                          <Button variant="outline" size="sm" onClick={() => setSaldarSugerido(s)}>
+                            Registrar la transferencia
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                    {enCursoTotal > 0 && (
+                      <p className="mt-3 text-xs text-muted-foreground">
+                        Aparte hay {formatARS(enCursoTotal)} cobrados de pedidos que todavía no
+                        cerraron — se reparten cuando cierren.
+                      </p>
+                    )}
+                  </>
                 )}
-                <div className="text-xs text-muted-foreground mt-1">
-                  Suma de las cajas · al {data.disponible.as_of}
-                </div>
-              </div>
+              </Section>
+            );
+          }}
+        </QueryState>
 
-              <div className="card-elevated p-5">
-                <div className="t-eyebrow">Ganancia neta · {data.ganancia_mes.mes}</div>
-                <div
-                  className={`font-mono text-3xl font-semibold tabular-nums mt-1 ${
-                    data.ganancia_mes.neta >= 0 ? "text-ink" : "text-destructive"
-                  }`}
-                >
-                  {formatARS(data.ganancia_mes.neta)}
-                </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  Ingresos {formatARS(data.ganancia_mes.ingresos)} − gastos{" "}
-                  {formatARS(data.ganancia_mes.gastos)}
-                </div>
-              </div>
+        {/* 3 · Socios — deuda que se salda sola con su parte. */}
+        {socios.length > 0 && (
+          <Section
+            title="Socios"
+            subtitle="La deuda de cada uno se salda sola con su parte de lo que se alquila — no hace falta transferir."
+            icon={Users}
+          >
+            <div className="grid gap-3 sm:grid-cols-2">
+              {socios.map((s) => (
+                <SocioCard key={s.id} socio={s} onChanged={invalidar} />
+              ))}
             </div>
+            <p className="mt-3 text-xs text-muted-foreground">
+              El <strong>arranque</strong> es lo que cobró antes del sistema. Se va saldando con{" "}
+              <strong>su parte</strong> de lo que se alquila: cuando llega a cero están a mano, y si
+              se da vuelta, Rental le debe a él.
+            </p>
+          </Section>
+        )}
 
-            {/* Socios · Cuenta corriente */}
-            {(data.disponible.socios?.length ?? 0) > 0 && (
-              <div>
-                <div className="t-eyebrow mb-2">Socios · Cuenta corriente</div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {data.disponible.socios.map((s) => (
-                    <SocioCard key={s.id} socio={s} />
+        {/* 4 · Cajas — plata real, editable. */}
+        {data && (
+          <Section title="Cajas" subtitle="La plata real del negocio y dónde está." icon={Wallet}>
+            <div className="overflow-x-auto rounded-lg border hairline">
+              {/* eslint-disable-next-line no-restricted-syntax -- tabla de edición inline (CajaRow con estado propio + totales en tfoot), no es tabla de display; AdminTable no aplica */}
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b hairline text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <th className="px-3 py-2 font-medium">Caja</th>
+                    <th className="px-3 py-2 font-medium">Tipo</th>
+                    <th className="px-3 py-2 font-medium text-right">Saldo actual</th>
+                    <th className="px-3 py-2 font-medium text-right">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {cajas.map((c) => (
+                    <CajaRow key={c.id} cuenta={c} onChanged={invalidar} />
                   ))}
-                </div>
-              </div>
-            )}
-
-            {/* Por caja */}
-            <div>
-              <div className="t-eyebrow mb-2">Por caja</div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {data.disponible.cajas.map((c) => (
-                  <CajaCard key={c.id} cuenta={c} />
-                ))}
-              </div>
+                </tbody>
+                <tfoot>
+                  {Object.entries(data.disponible.totales)
+                    .sort(([a], [b]) => (a === "ARS" ? -1 : b === "ARS" ? 1 : a.localeCompare(b)))
+                    .map(([moneda, total]) => (
+                      <tr key={moneda} className="border-t hairline">
+                        <td className="px-3 py-2 font-medium" colSpan={2}>
+                          Total disponible {moneda !== "ARS" ? `(${moneda})` : ""}
+                        </td>
+                        <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">
+                          {formatMoney(total, moneda)}
+                        </td>
+                        <td />
+                      </tr>
+                    ))}
+                </tfoot>
+              </table>
             </div>
-          </>
+            <div className="mt-3">
+              <NuevaCuentaForm onCreated={invalidar} />
+            </div>
+          </Section>
         )}
 
         <ReconciliacionPanel />
       </div>
+
+      {saldarSugerido && (
+        <SaldarDialog
+          sugerido={saldarSugerido}
+          onOpenChange={(open) => !open && setSaldarSugerido(null)}
+          onSaldado={() => {
+            invalidar();
+            setSaldarSugerido(null);
+          }}
+        />
+      )}
     </AdminPage>
+  );
+}
+
+/** La posición REPARTIBLE de una parte (solo pedidos cerrados). Solo se muestra
+ *  cuando hay transferencias sugeridas — si no hay nada que mover, la sección
+ *  entera lo dice con un estado vacío en vez de 4 tarjetas de números. */
+function PosicionCard({ parte, alguienEspera }: { parte: PosicionParte; alguienEspera: boolean }) {
+  const r = parte.repartible;
+  const espera = r > 0;
+  // "Retiene" solo si alguien del otro lado espera esa plata: un negativo sin
+  // receptor (ej. el espejo de la deuda de los socios) no es algo a resolver
+  // moviendo cash — se salda solo con su parte (sección Socios).
+  const retiene = r < 0 && alguienEspera;
+  const tono = espera
+    ? "border-amber/50 bg-amber/10"
+    : retiene
+      ? "border-amber/40 bg-amber/5"
+      : "hairline bg-surface";
+
+  return (
+    <div className={cn("rounded-lg border p-3.5", tono)}>
+      <div className="t-eyebrow">{parte.parte}</div>
+      <div className="mt-1.5 font-mono text-xl font-semibold tabular-nums text-ink">
+        {formatARS(Math.abs(r))}
+      </div>
+      <div className="text-sm text-muted-foreground">
+        {espera ? "le falta recibir" : retiene ? "retiene plata de otros" : "al día"}
+      </div>
+      <div className="mt-2 border-t hairline pt-1.5 font-mono text-xs tabular-nums text-muted-foreground">
+        le corresponde {formatARS(parte.le_corresponde)} · cobró {formatARS(parte.cobro_cerrados)}
+        {parte.arranque !== 0 && <> · arranque {formatARS(parte.arranque)}</>}
+        {parte.repartido !== 0 && <> · repartido {formatARS(parte.repartido)}</>}
+        {parte.en_curso !== 0 && <> · en curso {formatARS(parte.en_curso)}</>}
+      </div>
+    </div>
   );
 }
 
@@ -185,77 +363,6 @@ function ReconciliacionPanel() {
           use la foto congelada y la cuenta corriente recalcule en vivo; no afecta este semáforo.
         </p>
       )}
-    </div>
-  );
-}
-
-function SocioCard({ socio }: { socio: CuentaSaldo }) {
-  const abs = Math.abs(socio.saldo);
-  const frase =
-    socio.estado === "deudor"
-      ? `${socio.nombre} le debe a Rental`
-      : socio.estado === "acreedor"
-        ? `Rental le debe a ${socio.nombre}`
-        : "A mano";
-  const color =
-    socio.estado === "deudor"
-      ? "text-destructive"
-      : socio.estado === "acreedor"
-        ? "text-verde-ink"
-        : "text-ink";
-  const tag =
-    socio.estado === "deudor" ? "Deudor" : socio.estado === "acreedor" ? "Acreedor" : "Saldado";
-  return (
-    <div className="rounded-lg border hairline p-4 space-y-1">
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-medium text-ink">{socio.nombre}</span>
-        <span className="font-mono text-2xs uppercase tracking-wider text-muted-foreground">
-          {tag}
-        </span>
-      </div>
-      <div className={`font-mono text-2xl font-semibold tabular-nums ${color}`}>
-        {formatMoney(abs, socio.moneda)}
-      </div>
-      <div className="text-xs text-muted-foreground">{frase}</div>
-    </div>
-  );
-}
-
-function CajaCard({ cuenta }: { cuenta: CuentaSaldo }) {
-  return (
-    <div className="rounded-lg border hairline p-4 space-y-2">
-      <div className="flex items-center justify-between gap-2">
-        <span className="font-medium text-ink">{cuenta.nombre}</span>
-        <Badge variant="secondary" className="capitalize">
-          {cuenta.tipo}
-        </Badge>
-      </div>
-      <div className="font-mono text-2xl font-semibold tabular-nums text-ink">
-        {formatMoney(cuenta.saldo, cuenta.moneda)}
-      </div>
-      <dl className="text-xs text-muted-foreground space-y-0.5">
-        {cuenta.ingresos_alquiler !== 0 && (
-          <Row
-            label="Cobros de alquiler"
-            value={formatMoney(cuenta.ingresos_alquiler, cuenta.moneda)}
-          />
-        )}
-        {cuenta.entradas !== 0 && (
-          <Row label="Entradas" value={formatMoney(cuenta.entradas, cuenta.moneda)} />
-        )}
-        {cuenta.egresos !== 0 && (
-          <Row label="Salidas" value={`− ${formatMoney(cuenta.egresos, cuenta.moneda)}`} />
-        )}
-      </dl>
-    </div>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between gap-2">
-      <dt>{label}</dt>
-      <dd className="font-mono tabular-nums">{value}</dd>
     </div>
   );
 }

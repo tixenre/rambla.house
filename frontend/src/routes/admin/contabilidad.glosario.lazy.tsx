@@ -119,7 +119,7 @@ function GlosarioPage() {
       title="Glosario"
       maxW="form"
       description="Qué significa cada término y qué hace cada acción. Para releer y sacarse dudas."
-      backTo={{ to: "/admin/contabilidad", label: "Tablero" }}
+      backTo={{ to: "/admin/contabilidad", label: "Finanzas" }}
     >
       <div className="space-y-8">
         <Bloque titulo="Términos" items={TERMINOS} />

@@ -30,6 +30,12 @@ vive la acción. Para un socio humano vale la identidad **`posicion == −saldo_
 distintos que hay que mantener sincronizados a mano: es el mismo número. Lo fija
 `test_contabilidad_posiciones.py::test_posicion_de_socio_es_el_negativo_de_su_cc`.
 
+Esa posición ACUMULADA se parte además en dos lecturas por parte (2026-08-03):
+**`repartible`** (solo pedidos CERRADOS — el número para decidir un reparto; las
+transferencias sugeridas salen de acá) y **`en_curso`** (cobros de pedidos abiertos,
+que no se reparten hasta que cierren). Identidad: `pendiente == repartible − en_curso`.
+Ver `calcular_posiciones`.
+
 ## Por qué NO alcanza con `saldo − su_parte`
 
 Porque el saldo de una caja se mueve por cosas que NO son un reparto. Si Rental paga
@@ -190,31 +196,51 @@ def sugerir_transferencias(pendiente: dict, liquidez: dict | None = None) -> lis
 
 
 def calcular_posiciones(devengado: dict, cobrado: dict, flujo_neto: dict,
-                        arranques: dict) -> list[dict]:
+                        arranques: dict, cobrado_cerrados: dict | None = None) -> list[dict]:
     """PURA. La posición acumulada de cada parte + las transferencias que la cierran.
 
     `devengado`: {parte: monto} de la liquidación (lo que le CORRESPONDE).
     `cobrado`:   {parte: monto} de `alquiler_pagos` (lo que agarró de los clientes).
     `flujo_neto`:{parte: monto} de `flujos_netos` (positivo = recibió en repartos).
-    `arranques`: {parte: monto} — SOLO socios humanos (ver `posiciones`)."""
-    pendiente = {
-        p: int(devengado.get(p, 0))
-        - int(cobrado.get(p, 0))
-        - int(arranques.get(p, 0))
-        - int(flujo_neto.get(p, 0))
-        for p in PARTES
-    }
-    partes = [
-        {
+    `arranques`: {parte: monto} — SOLO socios humanos (ver `posiciones`).
+    `cobrado_cerrados` (opcional): {parte: monto} — SOLO los pagos de pedidos ya
+      SALDADOS. Parte el número en dos lecturas por parte:
+
+        repartible = devengado − cobrado_cerrados − arranque − flujo   (misma
+                     convención de signo que `pendiente`: > 0 le falta recibir)
+        en_curso   = cobrado − cobrado_cerrados   (cobros de pedidos ABIERTOS —
+                     plata en la mano de la parte que TODAVÍA no se reparte,
+                     porque su devengado no existe hasta que el pedido cierre)
+
+      Nace del incidente 2026-08-03: la tarjeta de Rental decía "tiene de más
+      $1.647.753" y el dueño lo leyó como deuda — eran $1.165.237 de float de
+      pedidos abiertos + el espejo de los arranques de los socios. El número
+      grande para DECIDIR un reparto es `repartible`; `pendiente` sigue siendo
+      el acumulado total (identidad: `pendiente == repartible − en_curso`).
+
+      Sin el argumento (los tests puros viejos, o un caller que no distingue),
+      `cobrado_cerrados = cobrado` → `en_curso = 0` y `repartible == pendiente`
+      — exactamente el comportamiento anterior."""
+    if cobrado_cerrados is None:
+        cobrado_cerrados = cobrado
+    partes = []
+    for p in PARTES:
+        dev = int(devengado.get(p, 0))
+        cob = int(cobrado.get(p, 0))
+        cerr = int(cobrado_cerrados.get(p, 0))
+        arr = int(arranques.get(p, 0))
+        flujo = int(flujo_neto.get(p, 0))
+        partes.append({
             "parte": p,
-            "le_corresponde": int(devengado.get(p, 0)),
-            "cobro": int(cobrado.get(p, 0)),
-            "arranque": int(arranques.get(p, 0)),
-            "repartido": int(flujo_neto.get(p, 0)),
-            "pendiente": pendiente[p],
-        }
-        for p in PARTES
-    ]
+            "le_corresponde": dev,
+            "cobro": cob,
+            "cobro_cerrados": cerr,
+            "arranque": arr,
+            "repartido": flujo,
+            "pendiente": dev - cob - arr - flujo,
+            "repartible": dev - cerr - arr - flujo,
+            "en_curso": cob - cerr,
+        })
     return partes
 
 
@@ -270,10 +296,24 @@ def posiciones(conn) -> dict:
         if c.get("socio") in SOCIOS_HUMANOS and c.get("activa")
     }
 
+    # Cobros de pedidos YA SALDADOS — mismo universo (`SALDADO_CTE`) que el
+    # devengado de arriba, así `repartible` compara peras con peras. Import
+    # DIFERIDO a propósito: `queries/rendicion.py` importa de ESTE módulo a
+    # nivel módulo (`sugerir_transferencias`/`parte_de_cuenta`) — un import de
+    # módulo acá cerraría un ciclo.
+    from contabilidad.queries.rendicion import cobrado_por_socio
+
+    cob_cerrados_raw = cobrado_por_socio(conn, LIQUIDACION_INICIO, hoy)
+    cobrado_cerrados = {p: int(cob_cerrados_raw.get(p, 0)) for p in PARTES}
+
     movs = movimientos_planos(conn)
     flujo = flujos_netos(movs, parte_por_cuenta, cc_por_cuenta, moneda_por_cuenta)
-    partes = calcular_posiciones(devengado, cobrado, flujo, arranques)
-    pendiente = {p["parte"]: p["pendiente"] for p in partes}
+    partes = calcular_posiciones(devengado, cobrado, flujo, arranques,
+                                 cobrado_cerrados=cobrado_cerrados)
+    # Las transferencias sugeridas salen de `repartible` (solo pedidos cerrados),
+    # NO de `pendiente`: sugerir mover el float de un pedido abierto sería
+    # repartir plata que todavía no devengó (incidente 2026-08-03).
+    repartible = {p["parte"]: p["repartible"] for p in partes}
 
     # Quién tiene cash de verdad para pagar. La CC de un socio NO es plata (su
     # dinero está en un banco propio, fuera del sistema) → queda en 0 y el greedy
@@ -298,7 +338,7 @@ def posiciones(conn) -> dict:
 
     return {
         "partes": partes,
-        "sugeridos": sugerir_transferencias(pendiente, liquidez),
+        "sugeridos": sugerir_transferencias(repartible, liquidez),
         "liquidez": liquidez,
         "float_sin_saldar": _float_sin_saldar(conn),
         "as_of": hoy,

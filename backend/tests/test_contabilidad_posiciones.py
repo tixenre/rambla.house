@@ -95,6 +95,54 @@ class TestClasificarFlujo:
         assert _clasificar(100, destino=3) is None
 
 
+class TestRepartibleVsEnCurso:
+    """La partición de la posición en `repartible` (pedidos cerrados — el número
+    para decidir) y `en_curso` (float de pedidos abiertos). Nace del incidente
+    2026-08-03: Rental mostraba "tiene de más $1.647.753" y el dueño lo leyó como
+    deuda, cuando $1.165.237 eran señas de pedidos que todavía no cerraron."""
+
+    def test_la_sena_de_un_pedido_abierto_no_entra_en_repartible(self):
+        # Rental cobró 500.000: 300.000 de pedidos cerrados (devengado ya existe)
+        # y 200.000 de señas de pedidos abiertos (devengado NO existe todavía).
+        partes = {
+            p["parte"]: p
+            for p in calcular_posiciones(
+                devengado={"Rental": 300_000}, cobrado={"Rental": 500_000},
+                flujo_neto={}, arranques={},
+                cobrado_cerrados={"Rental": 300_000},
+            )
+        }
+        r = partes["Rental"]
+        assert r["repartible"] == 0, "los pedidos cerrados están saldados: nada que repartir"
+        assert r["en_curso"] == 200_000, "las señas quedan aparte, esperando que cierren"
+        assert r["pendiente"] == -200_000  # el acumulado total no cambia de significado
+
+    def test_identidad_pendiente_es_repartible_menos_en_curso(self):
+        partes = calcular_posiciones(
+            devengado={"Rental": 1_024_076, "Tincho": 430_562, "Pablo": 426_604,
+                       "Estudio": 1_800_000},
+            cobrado={"Rental": 2_901_829, "Tincho": 24_650, "Pablo": 120_000,
+                     "Estudio": 1_800_000},
+            flujo_neto={"Rental": -230_000, "Tincho": 230_000},
+            arranques={"Tincho": 910_000, "Pablo": 601_000},
+            cobrado_cerrados={"Rental": 1_736_592, "Tincho": 24_650, "Pablo": 120_000,
+                              "Estudio": 1_800_000},
+        )
+        for p in partes:
+            assert p["pendiente"] == p["repartible"] - p["en_curso"], p["parte"]
+
+    def test_sin_cobrado_cerrados_es_el_comportamiento_de_siempre(self):
+        # Compat: los callers que no distinguen (o los tests viejos) obtienen
+        # en_curso=0 y repartible==pendiente — nada cambia para ellos.
+        partes = calcular_posiciones(
+            devengado={"Rental": 100}, cobrado={"Rental": 300},
+            flujo_neto={}, arranques={},
+        )
+        r = {p["parte"]: p for p in partes}["Rental"]
+        assert r["en_curso"] == 0
+        assert r["repartible"] == r["pendiente"] == -200
+
+
 class TestPosiciones:
     def test_el_credito_del_estudio_contra_rental_existe(self):
         # El caso que motivó la iniciativa: al Estudio le corresponden $120.000 que

@@ -717,14 +717,25 @@ export interface RendicionData {
 }
 /** Posición ACUMULADA de una parte (todo desde el clean start, no un mes suelto).
  *  `pendiente > 0` → le falta recibir · `< 0` → tiene de más. Para un socio humano
- *  es el mismo número que su cuenta corriente, con el signo al revés. */
+ *  es el mismo número que su cuenta corriente, con el signo al revés.
+ *
+ *  Desde 2026-08 el número se parte en dos lecturas (identidad:
+ *  `pendiente == repartible − en_curso`):
+ *  - `repartible`: solo pedidos CERRADOS — el número para decidir un reparto
+ *    (los `sugeridos` salen de acá).
+ *  - `en_curso`: señas/cobros de pedidos que todavía no cerraron — se reparten
+ *    recién cuando el pedido cierre. */
 export interface PosicionParte {
   parte: string;
   le_corresponde: number;
   cobro: number;
+  /** Cobros SOLO de pedidos ya saldados (subconjunto de `cobro`). */
+  cobro_cerrados: number;
   arranque: number;
   repartido: number;
   pendiente: number;
+  repartible: number;
+  en_curso: number;
 }
 export interface PosicionesData {
   partes: PosicionParte[];
