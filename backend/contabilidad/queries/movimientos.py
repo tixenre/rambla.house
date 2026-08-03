@@ -63,19 +63,38 @@ def obtener_movimiento(conn, mov_id: int) -> dict | None:
     return row_to_dict(row) if row else None
 
 
-def gastos_por_categoria(conn, desde=None, hasta=None) -> list[dict]:
+def gastos_por_categoria(conn, desde=None, hasta=None, incluir_ajustado=False) -> list[dict]:
     """Σ de gastos en PESOS (no anulados) agrupados por categoría, en la ventana.
     Para el tablero / P&L (que es en ARS). Filtra por la moneda de la caja de
     origen: un gasto pagado desde una caja USD NO se suma al P&L en pesos (no se
-    mezclan monedas). Más gastado primero."""
+    mezclan monedas). Más gastado primero.
+
+    `incluir_ajustado=True` (Estadísticas, toggle de IPC) suma `monto_ajustado`:
+    cada gasto deflactado por el mes en que se pagó (`services/ipc.py::IPC_FACTOR_CTE`,
+    "pesos de hoy"), EN ORIGEN antes de sumar por categoría — no post-suma. Aditivo:
+    los callers existentes (P&L/tablero) no lo piden y no cambian."""
     from database import row_to_dict
-    sql = """
-        SELECT gc.nombre AS categoria, COALESCE(SUM(m.monto), 0) AS monto
-        FROM movimientos m
-        JOIN gasto_categorias gc ON gc.id = m.categoria_id
-        JOIN cuentas co ON co.id = m.cuenta_origen_id
-        WHERE m.tipo = 'gasto' AND m.anulado = FALSE AND co.moneda = 'ARS'
-    """
+    if incluir_ajustado:
+        from services.ipc import IPC_FACTOR_CTE
+
+        sql = f"""
+            WITH {IPC_FACTOR_CTE}
+            SELECT gc.nombre AS categoria, COALESCE(SUM(m.monto), 0) AS monto,
+                   COALESCE(SUM(m.monto * COALESCE(ipf.factor, 1)), 0) AS monto_ajustado
+            FROM movimientos m
+            JOIN gasto_categorias gc ON gc.id = m.categoria_id
+            JOIN cuentas co ON co.id = m.cuenta_origen_id
+            LEFT JOIN ipc_factor ipf ON ipf.mes = to_char(m.fecha, 'YYYY-MM')
+            WHERE m.tipo = 'gasto' AND m.anulado = FALSE AND co.moneda = 'ARS'
+        """
+    else:
+        sql = """
+            SELECT gc.nombre AS categoria, COALESCE(SUM(m.monto), 0) AS monto
+            FROM movimientos m
+            JOIN gasto_categorias gc ON gc.id = m.categoria_id
+            JOIN cuentas co ON co.id = m.cuenta_origen_id
+            WHERE m.tipo = 'gasto' AND m.anulado = FALSE AND co.moneda = 'ARS'
+        """
     params: list = []
     if desde:
         sql += " AND m.fecha >= %s::date"

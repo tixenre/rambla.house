@@ -385,3 +385,103 @@ def test_top_equipos_rentabilidad_descuenta_el_costo_de_compra(conn):
     finally:
         _limpiar_rentabilidad(conn)
         conn.commit()
+
+
+# ── Toggle de IPC — el candado central: "ajustar en origen" (cada pedido
+# deflactado por SU PROPIO mes antes de sumar) tiene que dar un número distinto
+# de "ajustar post-suma" (un solo factor aplicado al total ya sumado), que es
+# matemáticamente incorrecto cuando el total mezcla meses con inflación distinta.
+# Meses ficticios propios (1899-*, no chocan con `MES="2026-04"` de arriba ni con
+# los `1900-*` de `test_ipc_db.py`).
+MES_A = "1899-11"  # más viejo → factor 2× (índice 100 vs 200 del mes de referencia)
+MES_B = "1899-12"  # el mes de referencia de este fixture → factor 1×
+E_IPC = 9_301_401
+P_IPC_A = 9_301_411
+P_IPC_B = 9_301_412
+MONTO_IPC = 10_000
+
+
+def _limpiar_ipc(conn):
+    conn.execute("DELETE FROM alquiler_items WHERE pedido_id IN (%s, %s)", (P_IPC_A, P_IPC_B))
+    conn.execute("DELETE FROM alquileres WHERE id IN (%s, %s)", (P_IPC_A, P_IPC_B))
+    conn.execute("DELETE FROM equipos WHERE id = %s", (E_IPC,))
+    conn.execute("DELETE FROM ipc_series WHERE mes IN (%s, %s)", (MES_A, MES_B))
+
+
+def test_ajuste_ipc_es_en_origen_no_post_suma(conn):
+    """Dos pedidos de $10.000 cada uno, uno en MES_A (índice 100) y otro en
+    MES_B (índice 200 — el más reciente, factor 1×). Nominal: $20.000 parejo,
+    0% de crecimiento. Ajustado EN ORIGEN: MES_A se dobla (factor 2×) antes de
+    sumar → $30.000, y el crecimiento mes a mes da -50% (la plata de MES_A
+    valía el doble en términos reales) — la caída real que el toggle existe
+    para mostrar, invisible en el nominal. Si alguien "simplificara" el ajuste
+    a post-suma (un factor sobre el total ya sumado), este test lo cacha:
+    post-suma con el factor del mes más reciente (1×) daría $20.000, igual al
+    nominal — sin diferencia ninguna, ocultando la caída real."""
+    from routes.estadisticas import compute_estadisticas
+
+    _limpiar_ipc(conn)
+    conn.commit()
+    try:
+        conn.execute(
+            "INSERT INTO ipc_series (mes, indice) VALUES (%s, 100), (%s, 200)",
+            (MES_A, MES_B),
+        )
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, dueno, precio_jornada) "
+            "VALUES (%s, %s, 1, 'Rental', %s)",
+            (E_IPC, "Cámara test #ipc-toggle", MONTO_IPC),
+        )
+        for pid, mes in ((P_IPC_A, MES_A), (P_IPC_B, MES_B)):
+            conn.execute(
+                """INSERT INTO alquileres
+                       (id, cliente_nombre, estado, fecha_desde, fecha_hasta, monto_total)
+                   VALUES (%s, %s, 'finalizado', %s, %s, %s)""",
+                (pid, "Cliente #ipc-toggle", f"{mes}-05T09:00:00", f"{mes}-06T09:00:00", MONTO_IPC),
+            )
+            conn.execute(
+                "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, subtotal) "
+                "VALUES (%s, %s, 1, %s, %s)",
+                (pid, E_IPC, MONTO_IPC, MONTO_IPC),
+            )
+        conn.commit()
+
+        data = compute_estadisticas(conn)
+
+        fila_a = next(m for m in data["por_mes"] if m["mes"] == MES_A)
+        fila_b = next(m for m in data["por_mes"] if m["mes"] == MES_B)
+        assert fila_a["total_ars"] == MONTO_IPC
+        assert fila_a["total_ars_ajustado"] == MONTO_IPC * 2  # factor 200/100
+        assert fila_b["total_ars"] == MONTO_IPC
+        assert fila_b["total_ars_ajustado"] == MONTO_IPC * 1  # el más reciente, factor 1
+
+        # Crecimiento MES_A → MES_B: nominal parejo (0%), ajustado -50% (cayó
+        # en términos reales). El ajuste "en origen" es lo único que muestra esto.
+        crec_b = next(c for c in data["crecimiento"] if c["mes"] == MES_B)
+        assert crec_b["crecimiento_pct"] == 0
+        assert crec_b["crecimiento_pct_ajustado"] == -50.0
+
+        # ── El candado explícito: ajustar EN ORIGEN ≠ ajustar POST-SUMA. ──────
+        total_nominal = fila_a["total_ars"] + fila_b["total_ars"]
+        total_ajustado_en_origen = fila_a["total_ars_ajustado"] + fila_b["total_ars_ajustado"]
+        # Post-suma con el factor del mes más reciente (1×, MES_B): 20.000×1 =
+        # 20.000 — igual al nominal, sin corregir nada. El ajuste real (en
+        # origen) tiene que ser DISTINTO de eso.
+        total_post_suma_equivocado = total_nominal * 1
+        assert total_ajustado_en_origen == 30_000
+        assert total_ajustado_en_origen != total_post_suma_equivocado
+
+        # ── Metadata + otras secciones traen la variante ajustada ────────────
+        assert data["ipc"]["mes_referencia"] is not None
+        assert all("monto_ajustado" in g for g in data["gastos_por_categoria"])
+        assert all("total_ars_ajustado" in c for c in data["top_clientes"])
+        assert all("total_ars_ajustado" in d for d in data["por_dueno"])
+        # `top_equipos_rentabilidad` NO lleva una rentabilidad ajustada (fuera
+        # de alcance a propósito — costo_compra es un desembolso puntual, no
+        # una serie mensual; ver docstring de `compute_estadisticas`).
+        assert all(
+            "rentabilidad_neta_ajustada" not in e for e in data["top_equipos_rentabilidad"]
+        )
+    finally:
+        _limpiar_ipc(conn)
+        conn.commit()
