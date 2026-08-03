@@ -106,10 +106,10 @@ def get_estadisticas(request: Request):
 
 
 @router.get("/estadisticas/actividad-calendario")
-def get_actividad_calendario(request: Request, anio: int | None = None):
+def get_actividad_calendario(request: Request, anio: int | None = None, todos: bool = False):
     require_admin(request)
     with get_db() as conn:
-        return compute_actividad_calendario(conn, anio)
+        return compute_actividad_calendario(conn, anio, todos)
 
 
 def compute_estadisticas(conn) -> dict:
@@ -504,7 +504,7 @@ def _tier(valor: int, p25: float, p50: float, p75: float) -> int:
     return 4
 
 
-def compute_actividad_calendario(conn, anio: int | None = None) -> dict:
+def compute_actividad_calendario(conn, anio: int | None = None, todos: bool = False) -> dict:
     """Heatmap de actividad estilo GitHub/Apple Fitness: por cada día del año
     pedido, cuántos pedidos de RENTAL (no Estudio/Talleres — misma economía
     separada que el resto de esta página) tenían equipo AFUERA ese día
@@ -515,12 +515,19 @@ def compute_actividad_calendario(conn, anio: int | None = None) -> dict:
     Estadísticas (negocio devengado y cerrado, MEMORIA 2026-07-04).
 
     Los tiers de color (0-4) se calculan con los percentiles 25/50/75 de los
-    DÍAS CON ACTIVIDAD de ESE MISMO AÑO — no un umbral fijo ni compartido
-    entre años. Así un pedido gigante puntual no aplasta la variación del
-    resto del año, y un año más chico (negocio recién arrancado) no queda
-    todo gris solo por compararse contra un año con más volumen total. Esta
-    es la "normalización" que importa acá — la lista de años NO se colapsa
-    en un patrón promedio (eso perdería el historial real).
+    DÍAS CON ACTIVIDAD de CADA AÑO POR SEPARADO — no un umbral fijo ni
+    compartido entre años (ni siquiera en modo `todos`, ver abajo). Así un
+    pedido gigante puntual no aplasta la variación del resto del año, y un
+    año más chico (negocio recién arrancado) no queda todo gris solo por
+    compararse contra un año con más volumen total. Esta es la
+    "normalización" que importa acá — la lista de años NO se colapsa en un
+    patrón promedio (eso perdería el historial real).
+
+    `todos=True` ignora `anio` y devuelve TODO el historial en una sola
+    respuesta (`dias` abarca todos los años en `anios_disponibles`), para el
+    view apilado "Todos los años" — sigue bucketizando cada año por separado
+    (agrupa las filas por año ANTES de calcular percentiles) para no repetir
+    la distorsión que el diseño per-año ya evita.
     """
     anios_rows = conn.execute(f"""
         SELECT DISTINCT EXTRACT(YEAR FROM fecha_desde)::int AS anio
@@ -530,17 +537,23 @@ def compute_actividad_calendario(conn, anio: int | None = None) -> dict:
     """).fetchall()
     anios_disponibles = [r["anio"] for r in anios_rows]
 
-    anio_actual = anio or (anios_disponibles[-1] if anios_disponibles else now_ar().year)
-    desde = f"{anio_actual}-01-01"
-    hasta = f"{anio_actual}-12-31"
+    if todos:
+        if not anios_disponibles:
+            return {"anio": None, "anios_disponibles": [], "dias": []}
+        anio_actual = None
+        desde = f"{anios_disponibles[0]}-01-01"
+        hasta = f"{anios_disponibles[-1]}-12-31"
+    else:
+        anio_actual = anio or (anios_disponibles[-1] if anios_disponibles else now_ar().year)
+        desde = f"{anio_actual}-01-01"
+        hasta = f"{anio_actual}-12-31"
 
-    # `generate_series` expande cada pedido a sus días reales dentro del año
-    # pedido (GREATEST/LEAST recorta a la ventana); un pedido de 5 días
-    # "enciende" 5 celdas, no solo la de inicio. El WHERE de rango es
-    # redundante con el recorte (un pedido totalmente afuera del año genera
-    # una serie vacía) pero deja que Postgres descarte esas filas ANTES de
-    # evaluar la función de la LATERAL — más barato a medida que crece el
-    # historial multi-año.
+    # `generate_series` expande cada pedido a sus días reales dentro de la
+    # ventana pedida (GREATEST/LEAST recorta); un pedido de 5 días "enciende"
+    # 5 celdas, no solo la de inicio. El WHERE de rango es redundante con el
+    # recorte (un pedido totalmente afuera de la ventana genera una serie
+    # vacía) pero deja que Postgres descarte esas filas ANTES de evaluar la
+    # función de la LATERAL — más barato a medida que crece el historial.
     rows = conn.execute(f"""
         SELECT dia::date AS dia, COUNT(*) AS pedidos_activos
         FROM alquileres p
@@ -556,17 +569,24 @@ def compute_actividad_calendario(conn, anio: int | None = None) -> dict:
         ORDER BY dia::date
     """, (desde, hasta, hasta, desde)).fetchall()
 
-    valores = [r["pedidos_activos"] for r in rows]
-    p25, p50, p75 = _tiers_percentiles(valores)
+    # Agrupa por año ANTES de bucketizar — en modo single-year es un solo
+    # grupo (comportamiento sin cambios); en modo `todos` son N grupos, cada
+    # uno con sus propios percentiles.
+    filas_por_anio: dict[int, list] = {}
+    for r in rows:
+        filas_por_anio.setdefault(r["dia"].year, []).append(r)
 
-    dias = [
-        {
-            "dia": r["dia"].isoformat(),
-            "pedidos_activos": r["pedidos_activos"],
-            "tier": _tier(r["pedidos_activos"], p25, p50, p75),
-        }
-        for r in rows
-    ]
+    dias = []
+    for filas in filas_por_anio.values():
+        valores = [f["pedidos_activos"] for f in filas]
+        p25, p50, p75 = _tiers_percentiles(valores)
+        for f in filas:
+            dias.append({
+                "dia": f["dia"].isoformat(),
+                "pedidos_activos": f["pedidos_activos"],
+                "tier": _tier(f["pedidos_activos"], p25, p50, p75),
+            })
+    dias.sort(key=lambda d: d["dia"])
 
     return {
         "anio": anio_actual,

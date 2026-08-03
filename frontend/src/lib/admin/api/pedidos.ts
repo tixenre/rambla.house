@@ -279,10 +279,15 @@ export const pedidosMethods = {
 
   // estadísticas
   getEstadisticas: () => authedJson<EstadisticasData>("/api/estadisticas"),
-  getActividadCalendario: (anio?: number) =>
-    authedJson<ActividadCalendarioData>(
-      `/api/estadisticas/actividad-calendario${anio ? `?anio=${anio}` : ""}`,
-    ),
+  getActividadCalendario: (anio?: number, todos?: boolean) => {
+    const sp = new URLSearchParams();
+    if (todos) sp.set("todos", "true");
+    else if (anio) sp.set("anio", String(anio));
+    const qs = sp.toString();
+    return authedJson<ActividadCalendarioData>(
+      `/api/estadisticas/actividad-calendario${qs ? `?${qs}` : ""}`,
+    );
+  },
 
   // analítica de búsquedas del catálogo público
   getBusquedas: (dias?: number) =>

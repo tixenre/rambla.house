@@ -1158,8 +1158,12 @@ export type EstadisticasData = {
  *  con los percentiles del propio año (`routes/estadisticas.py`) — el front
  *  solo mapea tier → color, no recalcula la escala. */
 export type ActividadCalendarioData = {
-  anio: number;
+  /** `null` en modo `todos` (el view apilado no tiene un único año). */
+  anio: number | null;
   anios_disponibles: number[];
+  /** En modo `todos` abarca TODOS los años de `anios_disponibles` — el front
+   *  agrupa por año (prefijo de `dia`) para apilar una grilla por año. Los
+   *  tiers vienen bucketizados POR AÑO por separado, incluso acá. */
   dias: { dia: string; pedidos_activos: number; tier: 0 | 1 | 2 | 3 | 4 }[];
 };
 

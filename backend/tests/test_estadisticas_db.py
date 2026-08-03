@@ -548,6 +548,97 @@ def test_actividad_calendario_tiers_por_percentil_del_propio_anio(conn):
         conn.commit()
 
 
+# ── Modo `todos=True` (view "Todos los años" apilado): candado central — los
+# tiers se calculan POR AÑO incluso adentro de una sola respuesta, para que un
+# año chico (negocio recién arrancado) no quede aplastado por uno con más
+# volumen total. Años ficticios propios 1896/1897 (no chocan con `ANIO_CAL`
+# ni con los demás fixtures de este archivo).
+E_CAL_TODOS = 9_301_601
+ANIO_CHICO = 1896  # negocio chico: máximo 2 pedidos/día
+ANIO_GRANDE = 1897  # negocio grande: máximo 10 pedidos/día
+IDS_CAL_TODOS = list(range(9_301_611, 9_301_625))
+
+
+def _limpiar_calendario_todos(conn):
+    conn.execute("DELETE FROM alquiler_items WHERE pedido_id = ANY(%s)", (IDS_CAL_TODOS,))
+    conn.execute("DELETE FROM alquileres WHERE id = ANY(%s)", (IDS_CAL_TODOS,))
+    conn.execute("DELETE FROM equipos WHERE id = %s", (E_CAL_TODOS,))
+
+
+def test_actividad_calendario_todos_bucketiza_tiers_por_anio_no_global(conn):
+    """El view apilado (`todos=True`) tiene que preservar la misma garantía
+    que el modo single-year: un año chico no queda todo gris solo por
+    compararse contra uno con más volumen. Simula un año con máximo 2
+    pedidos/día (negocio chico) y otro con máximo 10 (negocio grande) — el
+    día "flojo" del año chico (1 pedido) tiene que quedar en un tier
+    razonable DENTRO de su propio año, no aplastado a 0/1 por comparación
+    con los 10 pedidos/día del año grande."""
+    from routes.estadisticas import compute_actividad_calendario
+
+    _limpiar_calendario_todos(conn)
+    conn.commit()
+    try:
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, dueno, precio_jornada) "
+            "VALUES (%s, %s, 20, 'Rental', 1000)",
+            (E_CAL_TODOS, "Cámara test #calendario-todos"),
+        )
+        dia_chico_bajo = f"{ANIO_CHICO}-05-01"  # 1 pedido
+        dia_chico_alto = f"{ANIO_CHICO}-05-02"  # 2 pedidos
+        dia_grande_bajo = f"{ANIO_GRANDE}-05-01"  # 1 pedido
+        dia_grande_alto = f"{ANIO_GRANDE}-05-02"  # 10 pedidos
+
+        pid = iter(IDS_CAL_TODOS)
+
+        def _insertar_pedido(dia):
+            p = next(pid)
+            conn.execute(
+                """INSERT INTO alquileres (id, cliente_nombre, estado, fecha_desde, fecha_hasta, monto_total)
+                   VALUES (%s, 'C', 'finalizado', %s, %s, 1000)""",
+                (p, f"{dia}T09:00:00", f"{dia}T09:00:00"),
+            )
+            conn.execute(
+                "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, subtotal) "
+                "VALUES (%s, %s, 1, 1000, 1000)",
+                (p, E_CAL_TODOS),
+            )
+
+        _insertar_pedido(dia_chico_bajo)
+        for _ in range(2):
+            _insertar_pedido(dia_chico_alto)
+        _insertar_pedido(dia_grande_bajo)
+        for _ in range(10):
+            _insertar_pedido(dia_grande_alto)
+        conn.commit()
+
+        data = compute_actividad_calendario(conn, todos=True)
+
+        assert data["anio"] is None
+        assert ANIO_CHICO in data["anios_disponibles"]
+        assert ANIO_GRANDE in data["anios_disponibles"]
+
+        por_dia = {d["dia"]: d for d in data["dias"]}
+        assert por_dia[dia_chico_bajo]["pedidos_activos"] == 1
+        assert por_dia[dia_chico_alto]["pedidos_activos"] == 2
+        assert por_dia[dia_grande_bajo]["pedidos_activos"] == 1
+        assert por_dia[dia_grande_alto]["pedidos_activos"] == 10
+
+        # El candado: el día más flojo del año CHICO (1 pedido, la mitad de
+        # su propio máximo de 2) tiene que quedar en un tier intermedio —
+        # NO en el tier más bajo (0/1), que es lo que pasaría si se
+        # comparara contra el máximo GLOBAL de 10 en vez del de su año.
+        assert por_dia[dia_chico_bajo]["tier"] >= 2
+        # Y el día más flojo del año GRANDE (1 de 10) SÍ tiene que quedar
+        # bajo, relativo a su propio año.
+        assert por_dia[dia_grande_bajo]["tier"] < por_dia[dia_grande_alto]["tier"]
+        # Cada año tiene su propio pico en el tier más alto.
+        assert por_dia[dia_chico_alto]["tier"] == 4
+        assert por_dia[dia_grande_alto]["tier"] == 4
+    finally:
+        _limpiar_calendario_todos(conn)
+        conn.commit()
+
+
 # ── Toggle de IPC — el candado central: "ajustar en origen" (cada pedido
 # deflactado por SU PROPIO mes antes de sumar) tiene que dar un número distinto
 # de "ajustar post-suma" (un solo factor aplicado al total ya sumado), que es

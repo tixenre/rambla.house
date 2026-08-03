@@ -30,6 +30,7 @@ const TIER_BG: Record<number, string> = {
 };
 
 type Celda = { dia: string; pedidosActivos: number; tier: number } | null;
+type PorDiaMap = Map<string, { pedidos_activos: number; tier: number }>;
 
 // Evita Date#toISOString: convierte a UTC y en UTC-3 corre la medianoche
 // local al día anterior — acá solo importan fechas de calendario, sin hora.
@@ -40,10 +41,7 @@ function isoLocal(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function buildSemanas(
-  anio: number,
-  porDia: Map<string, { pedidos_activos: number; tier: number }>,
-): Celda[][] {
+function buildSemanas(anio: number, porDia: PorDiaMap): Celda[][] {
   const primerDia = new Date(anio, 0, 1);
   const ultimoDia = new Date(anio, 11, 31);
   const offsetInicio = (primerDia.getDay() + 6) % 7; // getDay(): 0=domingo → acá 0=lunes
@@ -90,25 +88,79 @@ function fmtDiaLargo(iso: string): string {
   });
 }
 
+// Una grilla de un único año (weekday labels + semanas) — la unidad que se
+// muestra sola en modo "un año" o apilada N veces en modo "Todos".
+function GrillaAnio({
+  anio,
+  porDia,
+  mostrarAnio,
+}: {
+  anio: number;
+  porDia: PorDiaMap;
+  mostrarAnio?: boolean;
+}) {
+  const semanas = useMemo(() => buildSemanas(anio, porDia), [anio, porDia]);
+  const labels = useMemo(() => mesLabels(semanas), [semanas]);
+
+  return (
+    <div>
+      {mostrarAnio && <div className="text-xs font-semibold text-ink mb-1">{anio}</div>}
+      <div className="inline-flex gap-[3px]">
+        <div className="flex flex-col gap-[3px] mr-1 pt-[18px]">
+          {DIAS_SEMANA.map((d, i) => (
+            <div key={i} className="h-[11px] w-4 text-3xs leading-[11px] text-muted-foreground">
+              {/* Lun/Miér/Vie (no cada fila) — mismo criterio que GitHub,
+                  anclado al lunes (la primera fila visible). */}
+              {i === 0 || i === 2 || i === 4 ? d : ""}
+            </div>
+          ))}
+        </div>
+        {semanas.map((semana, wi) => (
+          <div key={wi} className="flex flex-col gap-[3px]">
+            <div className="h-[14px] text-3xs leading-[14px] text-muted-foreground whitespace-nowrap">
+              {labels[wi] ?? ""}
+            </div>
+            {semana.map((celda, di) =>
+              celda ? (
+                <div
+                  key={di}
+                  title={`${fmtDiaLargo(celda.dia)}: ${celda.pedidosActivos} pedido${celda.pedidosActivos === 1 ? "" : "s"} con equipo afuera`}
+                  className={cn("h-[11px] w-[11px] rounded-[2px]", TIER_BG[celda.tier])}
+                />
+              ) : (
+                <div key={di} className="h-[11px] w-[11px]" />
+              ),
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function CalendarioActividad({
   data,
   loading,
-  onAnioChange,
+  modo,
+  anioSeleccionado,
+  onSeleccionarAnio,
+  onSeleccionarTodos,
 }: {
   data: ActividadCalendarioData | undefined;
   loading?: boolean;
-  onAnioChange: (anio: number) => void;
+  modo: "anio" | "todos";
+  anioSeleccionado: number | undefined;
+  onSeleccionarAnio: (anio: number) => void;
+  onSeleccionarTodos: () => void;
 }) {
   const porDia = useMemo(() => {
-    const m = new Map<string, { pedidos_activos: number; tier: number }>();
+    const m: PorDiaMap = new Map();
     for (const d of data?.dias ?? []) m.set(d.dia, d);
     return m;
   }, [data]);
 
-  const anio = data?.anio ?? new Date().getFullYear();
-  const semanas = useMemo(() => buildSemanas(anio, porDia), [anio, porDia]);
-  const labels = useMemo(() => mesLabels(semanas), [semanas]);
   const anios = data?.anios_disponibles ?? [];
+  const anio = data?.anio ?? anioSeleccionado ?? new Date().getFullYear();
 
   return (
     <div>
@@ -121,15 +173,28 @@ export function CalendarioActividad({
             {anios.map((a) => (
               <button
                 key={a}
-                onClick={() => onAnioChange(a)}
+                onClick={() => onSeleccionarAnio(a)}
                 className={cn(
                   "rounded-full px-3 py-1 text-xs font-medium border hairline transition",
-                  a === anio ? "bg-ink text-background" : "text-muted-foreground hover:text-ink",
+                  modo === "anio" && a === anio
+                    ? "bg-ink text-background"
+                    : "text-muted-foreground hover:text-ink",
                 )}
               >
                 {a}
               </button>
             ))}
+            <button
+              onClick={onSeleccionarTodos}
+              className={cn(
+                "rounded-full px-3 py-1 text-xs font-medium border hairline transition",
+                modo === "todos"
+                  ? "bg-ink text-background"
+                  : "text-muted-foreground hover:text-ink",
+              )}
+            >
+              Todos
+            </button>
           </div>
         )}
       </div>
@@ -138,35 +203,15 @@ export function CalendarioActividad({
         <div className="h-32 animate-pulse rounded-lg bg-muted" />
       ) : (
         <div className="overflow-x-auto">
-          <div className="inline-flex gap-[3px]">
-            <div className="flex flex-col gap-[3px] mr-1 pt-[18px]">
-              {DIAS_SEMANA.map((d, i) => (
-                <div key={i} className="h-[11px] w-4 text-3xs leading-[11px] text-muted-foreground">
-                  {/* Lun/Miér/Vie (no cada fila) — mismo criterio que GitHub,
-                      anclado al lunes (la primera fila visible). */}
-                  {i === 0 || i === 2 || i === 4 ? d : ""}
-                </div>
+          {modo === "todos" ? (
+            <div className="space-y-4">
+              {anios.map((a) => (
+                <GrillaAnio key={a} anio={a} porDia={porDia} mostrarAnio />
               ))}
             </div>
-            {semanas.map((semana, wi) => (
-              <div key={wi} className="flex flex-col gap-[3px]">
-                <div className="h-[14px] text-3xs leading-[14px] text-muted-foreground whitespace-nowrap">
-                  {labels[wi] ?? ""}
-                </div>
-                {semana.map((celda, di) =>
-                  celda ? (
-                    <div
-                      key={di}
-                      title={`${fmtDiaLargo(celda.dia)}: ${celda.pedidosActivos} pedido${celda.pedidosActivos === 1 ? "" : "s"} con equipo afuera`}
-                      className={cn("h-[11px] w-[11px] rounded-[2px]", TIER_BG[celda.tier])}
-                    />
-                  ) : (
-                    <div key={di} className="h-[11px] w-[11px]" />
-                  ),
-                )}
-              </div>
-            ))}
-          </div>
+          ) : (
+            <GrillaAnio anio={anio} porDia={porDia} />
+          )}
           <div className="flex items-center justify-end gap-1 mt-2">
             <span className="text-3xs text-muted-foreground">Menos</span>
             {[0, 1, 2, 3, 4].map((t) => (

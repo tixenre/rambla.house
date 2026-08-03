@@ -56,13 +56,21 @@ function EstadisticasPage() {
   });
 
   // Calendario de actividad: query propia (no parte de `statsQ`) porque tiene
-  // su propio eje — el año — y cambiarlo no debe refetchear el resto de la
-  // página. `anioCal=undefined` en la primera carga → el backend elige el año
-  // más reciente con datos (mismo criterio "último año" que un selector vacío).
+  // su propio eje — año o "todos" — y cambiarlo no debe refetchear el resto
+  // de la página. `anioCal=undefined` en la primera carga → el backend elige
+  // el año más reciente con datos (mismo criterio "último año" que un
+  // selector vacío). `modoCalendario="todos"` ignora `anioCal` y apila TODOS
+  // los años en una sola respuesta (ver CalendarioActividad).
+  const [modoCalendario, setModoCalendario] = useState<"anio" | "todos">("anio");
   const [anioCal, setAnioCal] = useState<number | undefined>(undefined);
   const calQ = useQuery({
-    queryKey: ["admin", "estadisticas", "actividad-calendario", anioCal ?? "ultimo"],
-    queryFn: () => adminApi.getActividadCalendario(anioCal),
+    queryKey: [
+      "admin",
+      "estadisticas",
+      "actividad-calendario",
+      modoCalendario === "todos" ? "todos" : (anioCal ?? "ultimo"),
+    ],
+    queryFn: () => adminApi.getActividadCalendario(anioCal, modoCalendario === "todos"),
   });
 
   const data = statsQ.data;
@@ -384,7 +392,13 @@ function EstadisticasPage() {
               <CalendarioActividad
                 data={calQ.data}
                 loading={calQ.isLoading}
-                onAnioChange={setAnioCal}
+                modo={modoCalendario}
+                anioSeleccionado={anioCal}
+                onSeleccionarAnio={(a) => {
+                  setModoCalendario("anio");
+                  setAnioCal(a);
+                }}
+                onSeleccionarTodos={() => setModoCalendario("todos")}
               />
             </Section>
           </>
