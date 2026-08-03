@@ -14,6 +14,7 @@ import type {
   CobroModo,
   CalendarioPedido,
   EstadisticasData,
+  ActividadCalendarioData,
   BusquedasData,
   LiquidacionData,
   ReconciliacionData,
@@ -278,6 +279,10 @@ export const pedidosMethods = {
 
   // estadísticas
   getEstadisticas: () => authedJson<EstadisticasData>("/api/estadisticas"),
+  getActividadCalendario: (anio?: number) =>
+    authedJson<ActividadCalendarioData>(
+      `/api/estadisticas/actividad-calendario${anio ? `?anio=${anio}` : ""}`,
+    ),
 
   // analítica de búsquedas del catálogo público
   getBusquedas: (dias?: number) =>

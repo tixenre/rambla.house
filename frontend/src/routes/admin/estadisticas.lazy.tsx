@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { fmtArs } from "@/lib/format";
 import { AdminPage } from "@/components/admin/AdminPage";
 import { BarChart, RankList } from "@/components/admin/LiquidacionReporte";
+import { CalendarioActividad } from "@/components/admin/CalendarioActividad";
 import { Section } from "@/design-system/composites/Section";
 import { StatCard } from "@/design-system/composites/StatCard";
 import { SegmentedControl } from "@/design-system/ui/segmented-control";
@@ -52,6 +53,16 @@ function EstadisticasPage() {
   const statsQ = useQuery({
     queryKey: ["admin", "estadisticas"],
     queryFn: () => adminApi.getEstadisticas(),
+  });
+
+  // Calendario de actividad: query propia (no parte de `statsQ`) porque tiene
+  // su propio eje — el año — y cambiarlo no debe refetchear el resto de la
+  // página. `anioCal=undefined` en la primera carga → el backend elige el año
+  // más reciente con datos (mismo criterio "último año" que un selector vacío).
+  const [anioCal, setAnioCal] = useState<number | undefined>(undefined);
+  const calQ = useQuery({
+    queryKey: ["admin", "estadisticas", "actividad-calendario", anioCal ?? "ultimo"],
+    queryFn: () => adminApi.getActividadCalendario(anioCal),
   });
 
   const data = statsQ.data;
@@ -363,6 +374,17 @@ function EstadisticasPage() {
                     label: m.mes,
                     value: Number(val(m.total_ars, m.total_ars_ajustado)) || 0,
                   }))}
+              />
+            </Section>
+
+            {/* Calendario de actividad — heatmap estilo GitHub/Apple Fitness.
+                Métrica = pedidos con equipo AFUERA ese día (no solo el día de
+                retiro), mismo universo rental-only que el resto de la página. */}
+            <Section title="Actividad" subtitle="Calendario de días con equipo afuera">
+              <CalendarioActividad
+                data={calQ.data}
+                loading={calQ.isLoading}
+                onAnioChange={setAnioCal}
               />
             </Section>
           </>

@@ -1151,6 +1151,18 @@ export type EstadisticasData = {
   ipc: { mes_referencia: string | null };
 };
 
+/** Heatmap de actividad estilo GitHub/Apple Fitness — un día por celda, un
+ *  año por grilla. `pedidos_activos` = cuántos pedidos de rental (no Estudio/
+ *  Talleres) tenían equipo AFUERA ese día (fecha_desde <= día <= fecha_hasta),
+ *  no solo el día de retiro. `tier` (0-4) ya viene bucketizado por el backend
+ *  con los percentiles del propio año (`routes/estadisticas.py`) — el front
+ *  solo mapea tier → color, no recalcula la escala. */
+export type ActividadCalendarioData = {
+  anio: number;
+  anios_disponibles: number[];
+  dias: { dia: string; pedidos_activos: number; tier: 0 | 1 | 2 | 3 | 4 }[];
+};
+
 export type Cliente = {
   id: number;
   nombre: string;

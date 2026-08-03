@@ -3,8 +3,10 @@ routes/estadisticas.py — Análisis y estadísticas de alquileres.
 Lee directo de pedidos + alquiler_items + equipos. Sin tablas intermedias.
 """
 
+import statistics
+
 from fastapi import APIRouter, Request
-from database import get_db, row_to_dict
+from database import get_db, now_ar, row_to_dict
 from auth.guards import require_admin
 from tipos_pedido import TIPOS_DERIVADOS_SQL, TIPOS_ESTUDIO_SQL
 from contabilidad.queries.movimientos import gastos_por_categoria
@@ -101,6 +103,13 @@ def get_estadisticas(request: Request):
     require_admin(request)
     with get_db() as conn:
         return compute_estadisticas(conn)
+
+
+@router.get("/estadisticas/actividad-calendario")
+def get_actividad_calendario(request: Request, anio: int | None = None):
+    require_admin(request)
+    with get_db() as conn:
+        return compute_actividad_calendario(conn, anio)
 
 
 def compute_estadisticas(conn) -> dict:
@@ -467,4 +476,100 @@ def compute_estadisticas(conn) -> dict:
         # toggle ("pesos ajustados a agosto 2026") — nunca para calcular nada
         # (el front no calcula plata, MEMORIA 2026-06-29).
         "ipc": {"mes_referencia": mes_referencia(conn)},
+    }
+
+
+def _tiers_percentiles(valores_no_cero: list[int]) -> tuple[float, float, float]:
+    """Percentiles 25/50/75 de una lista de valores >0, para bucketizar un
+    heatmap en 4 tiers. Robusto a poca data (negocio recién arrancado, o un
+    año con pocos días de actividad): con <4 puntos, `statistics.quantiles`
+    no da percentiles significativos, así que se cae a un split lineal
+    simple sobre el máximo — sigue siendo monótono, solo menos fino."""
+    if len(valores_no_cero) < 4:
+        m = max(valores_no_cero) if valores_no_cero else 1
+        return (m * 0.25, m * 0.5, m * 0.75)
+    q = statistics.quantiles(valores_no_cero, n=4)
+    return (q[0], q[1], q[2])
+
+
+def _tier(valor: int, p25: float, p50: float, p75: float) -> int:
+    if valor <= 0:
+        return 0
+    if valor <= p25:
+        return 1
+    if valor <= p50:
+        return 2
+    if valor <= p75:
+        return 3
+    return 4
+
+
+def compute_actividad_calendario(conn, anio: int | None = None) -> dict:
+    """Heatmap de actividad estilo GitHub/Apple Fitness: por cada día del año
+    pedido, cuántos pedidos de RENTAL (no Estudio/Talleres — misma economía
+    separada que el resto de esta página) tenían equipo AFUERA ese día
+    (`fecha_desde <= día <= fecha_hasta`) — no solo el día de retiro. Es la
+    métrica operativa real ("hubo actividad ese día"), más útil que contar
+    solo pickups: revela patrones de fin de semana/temporada y carga real de
+    depósito. Mismo universo `estado='finalizado'` que el resto de
+    Estadísticas (negocio devengado y cerrado, MEMORIA 2026-07-04).
+
+    Los tiers de color (0-4) se calculan con los percentiles 25/50/75 de los
+    DÍAS CON ACTIVIDAD de ESE MISMO AÑO — no un umbral fijo ni compartido
+    entre años. Así un pedido gigante puntual no aplasta la variación del
+    resto del año, y un año más chico (negocio recién arrancado) no queda
+    todo gris solo por compararse contra un año con más volumen total. Esta
+    es la "normalización" que importa acá — la lista de años NO se colapsa
+    en un patrón promedio (eso perdería el historial real).
+    """
+    anios_rows = conn.execute(f"""
+        SELECT DISTINCT EXTRACT(YEAR FROM fecha_desde)::int AS anio
+        FROM alquileres
+        WHERE estado = 'finalizado' AND tipo NOT IN {TIPOS_DERIVADOS_SQL}
+        ORDER BY anio
+    """).fetchall()
+    anios_disponibles = [r["anio"] for r in anios_rows]
+
+    anio_actual = anio or (anios_disponibles[-1] if anios_disponibles else now_ar().year)
+    desde = f"{anio_actual}-01-01"
+    hasta = f"{anio_actual}-12-31"
+
+    # `generate_series` expande cada pedido a sus días reales dentro del año
+    # pedido (GREATEST/LEAST recorta a la ventana); un pedido de 5 días
+    # "enciende" 5 celdas, no solo la de inicio. El WHERE de rango es
+    # redundante con el recorte (un pedido totalmente afuera del año genera
+    # una serie vacía) pero deja que Postgres descarte esas filas ANTES de
+    # evaluar la función de la LATERAL — más barato a medida que crece el
+    # historial multi-año.
+    rows = conn.execute(f"""
+        SELECT dia::date AS dia, COUNT(*) AS pedidos_activos
+        FROM alquileres p
+        CROSS JOIN LATERAL generate_series(
+            GREATEST(p.fecha_desde::date, %s::date),
+            LEAST(p.fecha_hasta::date, %s::date),
+            '1 day'::interval
+        ) AS dia
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
+          AND p.fecha_desde::date <= %s::date
+          AND p.fecha_hasta::date >= %s::date
+        GROUP BY dia::date
+        ORDER BY dia::date
+    """, (desde, hasta, hasta, desde)).fetchall()
+
+    valores = [r["pedidos_activos"] for r in rows]
+    p25, p50, p75 = _tiers_percentiles(valores)
+
+    dias = [
+        {
+            "dia": r["dia"].isoformat(),
+            "pedidos_activos": r["pedidos_activos"],
+            "tier": _tier(r["pedidos_activos"], p25, p50, p75),
+        }
+        for r in rows
+    ]
+
+    return {
+        "anio": anio_actual,
+        "anios_disponibles": anios_disponibles,
+        "dias": dias,
     }

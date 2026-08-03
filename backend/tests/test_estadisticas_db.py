@@ -387,6 +387,167 @@ def test_top_equipos_rentabilidad_descuenta_el_costo_de_compra(conn):
         conn.commit()
 
 
+# ── Calendario de actividad (heatmap estilo GitHub/Apple Fitness) — un pedido
+# de N días "enciende" N celdas (equipo AFUERA ese día), no solo el día de
+# inicio; excluye Estudio/Talleres y pedidos no-finalizado (mismo universo que
+# el resto de la página); los tiers de color vienen de percentiles del propio
+# año. Año ficticio propio 1898 (no choca con `MES="2026-04"` de arriba ni con
+# `1899-11/12` del fixture de IPC, aunque cada test limpia lo suyo).
+ANIO_CAL = 1898
+E_CAL = 9_301_501
+P_CAL_LARGO = 9_301_511  # 3 días: 1898-04-10 → 1898-04-12
+P_CAL_CORTO_A = 9_301_512  # 1 día: 1898-04-20
+P_CAL_CORTO_B = 9_301_513  # 1 día: 1898-04-20 (mismo día que el anterior → 2 activos)
+P_CAL_NO_FINALIZADO = 9_301_514  # confirmado, no debe contar
+P_CAL_ESTUDIO = 9_301_515  # tipo='estudio', no debe contar
+IDS_CAL = [P_CAL_LARGO, P_CAL_CORTO_A, P_CAL_CORTO_B, P_CAL_NO_FINALIZADO, P_CAL_ESTUDIO]
+
+
+def _limpiar_calendario(conn):
+    conn.execute("DELETE FROM alquiler_items WHERE pedido_id = ANY(%s)", (IDS_CAL,))
+    conn.execute("DELETE FROM alquileres WHERE id = ANY(%s)", (IDS_CAL,))
+    conn.execute("DELETE FROM equipos WHERE id = %s", (E_CAL,))
+
+
+def test_actividad_calendario_enciende_todos_los_dias_del_pedido(conn):
+    """Un pedido de 3 días (fecha_desde=10, fecha_hasta=12) tiene que aparecer
+    en LAS 3 celdas del heatmap con equipo afuera, no solo en el día 10 (el
+    día de retiro) — es la diferencia central entre "día de pickup" y "día con
+    actividad", que es la métrica que este heatmap muestra."""
+    from routes.estadisticas import compute_actividad_calendario
+
+    _limpiar_calendario(conn)
+    conn.commit()
+    try:
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, dueno, precio_jornada) "
+            "VALUES (%s, %s, 1, 'Rental', 1000)",
+            (E_CAL, "Cámara test #calendario"),
+        )
+        conn.execute(
+            """INSERT INTO alquileres (id, cliente_nombre, estado, fecha_desde, fecha_hasta, monto_total)
+               VALUES (%s, 'Cliente calendario', 'finalizado', %s, %s, 3000)""",
+            (P_CAL_LARGO, f"{ANIO_CAL}-04-10T09:00:00", f"{ANIO_CAL}-04-12T09:00:00"),
+        )
+        conn.execute(
+            "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, subtotal) "
+            "VALUES (%s, %s, 1, 1000, 3000)",
+            (P_CAL_LARGO, E_CAL),
+        )
+        conn.commit()
+
+        data = compute_actividad_calendario(conn, ANIO_CAL)
+
+        por_dia = {d["dia"]: d for d in data["dias"]}
+        for dia in (f"{ANIO_CAL}-04-10", f"{ANIO_CAL}-04-11", f"{ANIO_CAL}-04-12"):
+            assert dia in por_dia, (dia, data["dias"])
+            assert por_dia[dia]["pedidos_activos"] == 1
+        assert f"{ANIO_CAL}-04-13" not in por_dia
+        assert f"{ANIO_CAL}-04-09" not in por_dia
+    finally:
+        _limpiar_calendario(conn)
+        conn.commit()
+
+
+def test_actividad_calendario_excluye_no_finalizado_y_estudio(conn):
+    """Un pedido `confirmado` y uno `tipo='estudio'` (finalizado) NO deben
+    sumar al conteo del día — mismo universo (`estado='finalizado'` +
+    `tipo NOT IN TIPOS_DERIVADOS_SQL`) que el resto de Estadísticas."""
+    from routes.estadisticas import compute_actividad_calendario
+
+    _limpiar_calendario(conn)
+    conn.commit()
+    try:
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, dueno, precio_jornada) "
+            "VALUES (%s, %s, 1, 'Rental', 1000)",
+            (E_CAL, "Cámara test #calendario-excl"),
+        )
+        dia_test = f"{ANIO_CAL}-04-15"
+        conn.execute(
+            """INSERT INTO alquileres (id, cliente_nombre, estado, tipo, fecha_desde, fecha_hasta, monto_total)
+               VALUES (%s, 'C', 'confirmado', 'diaria', %s, %s, 1000)""",
+            (P_CAL_NO_FINALIZADO, f"{dia_test}T09:00:00", f"{dia_test}T09:00:00"),
+        )
+        conn.execute(
+            "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, subtotal) "
+            "VALUES (%s, %s, 1, 1000, 1000)",
+            (P_CAL_NO_FINALIZADO, E_CAL),
+        )
+        conn.execute(
+            """INSERT INTO alquileres (id, cliente_nombre, estado, tipo, fecha_desde, fecha_hasta, monto_total)
+               VALUES (%s, 'C', 'finalizado', 'estudio', %s, %s, 1000)""",
+            (P_CAL_ESTUDIO, f"{dia_test}T09:00:00", f"{dia_test}T09:00:00"),
+        )
+        conn.execute(
+            "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, subtotal) "
+            "VALUES (%s, %s, 1, 1000, 1000)",
+            (P_CAL_ESTUDIO, E_CAL),
+        )
+        conn.commit()
+
+        data = compute_actividad_calendario(conn, ANIO_CAL)
+
+        por_dia = {d["dia"]: d for d in data["dias"]}
+        assert dia_test not in por_dia, por_dia.get(dia_test)
+    finally:
+        _limpiar_calendario(conn)
+        conn.commit()
+
+
+def test_actividad_calendario_tiers_por_percentil_del_propio_anio(conn):
+    """Dos pedidos el mismo día (2 activos) vs. uno solo otro día (1 activo)
+    tienen que quedar en tiers DISTINTOS — el día con más actividad, en un
+    tier más alto. Confirma que el bucketing usa la distribución real del
+    año, no un umbral fijo."""
+    from routes.estadisticas import compute_actividad_calendario
+
+    _limpiar_calendario(conn)
+    conn.commit()
+    try:
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, dueno, precio_jornada) "
+            "VALUES (%s, %s, 2, 'Rental', 1000)",
+            (E_CAL, "Cámara test #calendario-tiers"),
+        )
+        dia_bajo = f"{ANIO_CAL}-04-20"
+        dia_alto = f"{ANIO_CAL}-04-21"
+        # 1 pedido en dia_bajo, 2 pedidos en dia_alto.
+        conn.execute(
+            """INSERT INTO alquileres (id, cliente_nombre, estado, fecha_desde, fecha_hasta, monto_total)
+               VALUES (%s, 'C', 'finalizado', %s, %s, 1000)""",
+            (P_CAL_CORTO_A, f"{dia_bajo}T09:00:00", f"{dia_bajo}T09:00:00"),
+        )
+        conn.execute(
+            "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, subtotal) "
+            "VALUES (%s, %s, 1, 1000, 1000)",
+            (P_CAL_CORTO_A, E_CAL),
+        )
+        for pid in (P_CAL_CORTO_B, P_CAL_LARGO):
+            conn.execute(
+                """INSERT INTO alquileres (id, cliente_nombre, estado, fecha_desde, fecha_hasta, monto_total)
+                   VALUES (%s, 'C', 'finalizado', %s, %s, 1000)""",
+                (pid, f"{dia_alto}T09:00:00", f"{dia_alto}T09:00:00"),
+            )
+            conn.execute(
+                "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, subtotal) "
+                "VALUES (%s, %s, 1, 1000, 1000)",
+                (pid, E_CAL),
+            )
+        conn.commit()
+
+        data = compute_actividad_calendario(conn, ANIO_CAL)
+
+        por_dia = {d["dia"]: d for d in data["dias"]}
+        assert por_dia[dia_bajo]["pedidos_activos"] == 1
+        assert por_dia[dia_alto]["pedidos_activos"] == 2
+        assert por_dia[dia_alto]["tier"] > por_dia[dia_bajo]["tier"]
+        assert ANIO_CAL in data["anios_disponibles"]
+    finally:
+        _limpiar_calendario(conn)
+        conn.commit()
+
+
 # ── Toggle de IPC — el candado central: "ajustar en origen" (cada pedido
 # deflactado por SU PROPIO mes antes de sumar) tiene que dar un número distinto
 # de "ajustar post-suma" (un solo factor aplicado al total ya sumado), que es
