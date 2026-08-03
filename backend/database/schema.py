@@ -2694,4 +2694,16 @@ def _init_db_schema(conn):
         "CREATE INDEX IF NOT EXISTS idx_pedidos_principal ON alquileres(pedido_principal_id)"
     )
 
+    # ── Serie de IPC (INDEC) para ajustar Estadísticas por inflación ────────
+    # Cache local de la API pública de INDEC; se refresca 1×/día desde el
+    # scheduler in-process (jobs/ipc.py). `mes` es 'YYYY-MM'. Esquema en dos
+    # capas (MEMORIA 2026-06-03): también en la migración ipcseries.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ipc_series (
+            mes           VARCHAR(7) PRIMARY KEY,
+            indice        NUMERIC(14,4) NOT NULL,
+            actualizado_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+
     conn.commit()

@@ -77,6 +77,7 @@ def _loop() -> None:
     from jobs.comunicacion_alertas import chequear_fallas_y_alertar
     from jobs.purgar_logs_comunicacion import purgar_logs_comunicacion_viejos
     from jobs.reconciliacion import chequear_reconciliacion_y_alertar
+    from jobs.ipc import actualizar_ipc_job
 
     ultima_manana = None      # recordatorios de retiro, pasada de la mañana
     ultima_vispera = None     # recordatorios de retiro, pasada de la víspera
@@ -88,6 +89,7 @@ def _loop() -> None:
     ultima_alerta_comunicacion = None  # alerta de fallas de comunicación (independiente)
     ultima_purga_logs_comunicacion = None  # retención de emails_log/whatsapp_log (independiente)
     ultima_reconciliacion = None  # alerta de reconciliación de plata (#1184 Fase 2 — dormida hasta ahora)
+    ultima_actualizacion_ipc = None  # refresh de la serie de IPC/INDEC (Estadísticas ajustadas)
     while True:
         ahora = now_ar()
         try:
@@ -187,6 +189,17 @@ def _loop() -> None:
                 chequear_reconciliacion_y_alertar()
         except Exception:
             logger.exception("Falló la alerta de reconciliación de plata")
+        try:
+            # Refresh de IPC (INDEC) para Estadísticas ajustadas por inflación:
+            # 1×/día, independiente de los demás. INDEC publica 1×/mes — sobra
+            # de margen, pero re-traer la serie completa es barato e idempotente
+            # (upsert con guard IS DISTINCT FROM), así que no hace falta un gate
+            # más fino.
+            if ahora.date() != ultima_actualizacion_ipc:
+                ultima_actualizacion_ipc = ahora.date()
+                actualizar_ipc_job()
+        except Exception:
+            logger.exception("Falló el refresh de la serie de IPC")
         time.sleep(_CHECK_EVERY_S)
 
 
