@@ -16,6 +16,7 @@ from database import get_db, now_ar, row_to_dict, to_datetime
 from rate_limit import limiter, ADMIN_WRITE_LIMIT, ADMIN_UPLOAD_LIMIT, CLIENTE_WRITE_LIMIT
 from clientes.queries.identidad import nombre_completo_cliente
 from reservas import ESTADOS_RESERVADO
+from reservas.estados import ESTADOS_EN_CALENDARIO  # display: ver su docstring
 from routes.alquileres import (
     _enriquecer_pedidos_con_cliente,
     _get_alquiler_detail,
@@ -1511,7 +1512,16 @@ def agenda_estudio(request: Request, desde: str = Query(...), hasta: str = Query
     rediseño "turno como ítem") + slots fijos recurrentes (expandidos a fechas
     concretas) + talleres. Solo lectura — no toca disponibilidad de ningún
     equipo, es la vista de "qué ocupa el ESPACIO" (mismas fuentes que
-    _estudio_disponible)."""
+    _estudio_disponible).
+
+    Filtra por `ESTADOS_EN_CALENDARIO`, no por `ESTADOS_RESERVADO`: un turno ya
+    **devuelto o finalizado** ocupó el espacio igual y tiene que seguir
+    viéndose (bug real 2026-08-02 — un mes pasado aparecía vacío, con solo los
+    talleres, que nunca filtraron por estado; el calendario general del
+    Dashboard sí los mostraba, así que las dos vistas se contradecían). Ojo:
+    esta agenda NO decide disponibilidad — de eso se ocupan
+    `_estudio_disponible`/`_centinela_libre`, que siguen con la lista estricta
+    del gate."""
     require_admin(request)
     try:
         desde_d = datetime.strptime(desde, "%Y-%m-%d").date()
@@ -1528,7 +1538,7 @@ def agenda_estudio(request: Request, desde: str = Query(...), hasta: str = Query
             f"""
             SELECT id, numero_pedido, cliente_nombre, fecha_desde, fecha_hasta, estado
             FROM alquileres
-            WHERE tipo = 'estudio' AND estado IN {ESTADOS_RESERVADO}
+            WHERE tipo = 'estudio' AND estado IN {ESTADOS_EN_CALENDARIO}
               AND fecha_desde < %s AND fecha_hasta > %s
             ORDER BY fecha_desde
             """,
@@ -1557,7 +1567,7 @@ def agenda_estudio(request: Request, desde: str = Query(...), hasta: str = Query
                    ate.fecha_desde, ate.fecha_hasta
             FROM alquiler_turnos_estudio ate
             JOIN alquileres a ON a.id = ate.pedido_id
-            WHERE a.estado IN {ESTADOS_RESERVADO}
+            WHERE a.estado IN {ESTADOS_EN_CALENDARIO}
               AND ate.fecha_desde < %s AND ate.fecha_hasta > %s
             ORDER BY ate.fecha_desde
             """,
