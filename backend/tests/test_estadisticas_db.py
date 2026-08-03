@@ -228,3 +228,55 @@ def test_estadisticas_excluye_confirmado_y_retirado(conn):
     finally:
         _limpiar2(conn)
         conn.commit()
+
+
+# ── `gastos_por_categoria` (motor único `contabilidad`, reusado tal cual — sin
+# fecha, histórico completo, mismo criterio que el resto de esta función).
+CUENTA_ID_GASTOS = 9_301_201
+MONTO_GASTO_TEST = 12_345
+
+
+def _limpiar_gastos_categoria(conn):
+    conn.execute("DELETE FROM movimientos WHERE cuenta_origen_id = %s", (CUENTA_ID_GASTOS,))
+    conn.execute("DELETE FROM cuentas WHERE id = %s", (CUENTA_ID_GASTOS,))
+
+
+def test_estadisticas_incluye_gastos_por_categoria(conn):
+    """`compute_estadisticas` expone `gastos_por_categoria` reusando tal cual
+    `contabilidad.queries.movimientos.gastos_por_categoria` — un gasto nuevo en
+    una categoría existente ('Mantenimiento') tiene que sumar ahí."""
+    from routes.estadisticas import compute_estadisticas
+
+    _limpiar_gastos_categoria(conn)
+    conn.commit()
+    try:
+        cat_id = conn.execute(
+            "SELECT id FROM gasto_categorias WHERE nombre = 'Mantenimiento'"
+        ).fetchone()[0]
+
+        antes = compute_estadisticas(conn)
+        monto_antes = next(
+            (g["monto"] for g in antes["gastos_por_categoria"] if g["categoria"] == "Mantenimiento"),
+            0,
+        )
+
+        conn.execute(
+            "INSERT INTO cuentas (id, nombre, tipo, moneda) VALUES (%s, %s, 'caja', 'ARS')",
+            (CUENTA_ID_GASTOS, "Caja test #estadisticas-gastos"),
+        )
+        conn.execute(
+            "INSERT INTO movimientos (tipo, monto, cuenta_origen_id, categoria_id, fecha) "
+            "VALUES ('gasto', %s, %s, %s, CURRENT_DATE)",
+            (MONTO_GASTO_TEST, CUENTA_ID_GASTOS, cat_id),
+        )
+        conn.commit()
+
+        despues = compute_estadisticas(conn)
+        monto_despues = next(
+            (g["monto"] for g in despues["gastos_por_categoria"] if g["categoria"] == "Mantenimiento"),
+            0,
+        )
+        assert monto_despues - monto_antes == MONTO_GASTO_TEST
+    finally:
+        _limpiar_gastos_categoria(conn)
+        conn.commit()

@@ -15,6 +15,7 @@ import {
   SearchX,
   Clapperboard,
   Clock,
+  Wallet,
 } from "lucide-react";
 
 import { adminApi } from "@/lib/admin/api";
@@ -215,6 +216,27 @@ function EstadisticasPage() {
                     value: fmtArs(d.total_ars),
                   }))}
                   icon={Package}
+                />
+              </Section>
+
+              {/* Gastos por categoría — Mantenimiento/Servicios/etc, histórico
+                  completo (backend/contabilidad, motor único de la plata "de
+                  adentro"; ya alimenta el P&L mensual, acá se reusa tal cual). */}
+              <Section
+                title="Gastos por categoría"
+                subtitle="Mantenimiento, servicios y el resto — histórico completo"
+              >
+                <RankList
+                  items={(() => {
+                    const total = data.gastos_por_categoria.reduce((acc, g) => acc + g.monto, 0);
+                    return data.gastos_por_categoria.map((g) => ({
+                      primary: g.categoria,
+                      secondary:
+                        total > 0 ? `${Math.round((g.monto / total) * 100)}% del total` : "",
+                      value: fmtArs(g.monto),
+                    }));
+                  })()}
+                  icon={Wallet}
                 />
               </Section>
             </div>

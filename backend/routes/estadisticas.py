@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request
 from database import get_db, row_to_dict
 from auth.guards import require_admin
 from tipos_pedido import TIPOS_DERIVADOS_SQL, TIPOS_ESTUDIO_SQL
+from contabilidad.queries.movimientos import gastos_por_categoria
 
 router = APIRouter()
 
@@ -353,6 +354,13 @@ def compute_estadisticas(conn) -> dict:
         FROM eventos_estudio
     """).fetchone()
 
+    # ── Gastos por categoría (histórico completo, motor único: `contabilidad`) ──
+    # Reusa tal cual `gastos_por_categoria` de `contabilidad/queries/movimientos.py`
+    # (la misma función que ya alimenta el P&L mensual) sin fecha → todo el
+    # historial, mismo criterio que el resto de esta función. Cero SQL nuevo:
+    # el gasto interno del negocio es plata "de adentro", vive en ese paquete.
+    gastos_categoria = gastos_por_categoria(conn)
+
     return {
         "totales":              row_to_dict(totales),
         "por_mes":              [row_to_dict(r) for r in por_mes],
@@ -363,6 +371,7 @@ def compute_estadisticas(conn) -> dict:
         "mejor_peor_mes":       mejor_peor_mes,
         "por_dueno":            [row_to_dict(r) for r in por_dueno],
         "favoritos_equipo":     [row_to_dict(r) for r in favoritos_equipo],
+        "gastos_por_categoria": gastos_categoria,
         "estudio": {
             "totales": row_to_dict(estudio_totales),
             "por_mes": [row_to_dict(r) for r in estudio_por_mes],

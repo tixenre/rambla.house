@@ -1077,6 +1077,9 @@ export type EstadisticasData = {
   };
   por_dueno: { dueno: string; total_ars: number; items: number }[];
   favoritos_equipo?: { equipo: string; total_favoritos: number; clientes_unicos: number }[];
+  /** Gastos internos (`backend/contabilidad`) agrupados por categoría —
+   *  histórico completo, no solo Mantenimiento/Servicios. Más gastado primero. */
+  gastos_por_categoria: { categoria: string; monto: number }[];
   /** Economía separada del Estudio (#1283 Fase 7) — turnos reales +
    *  meses de slot fijo, aparte de las tarjetas de rental de arriba. */
   estudio: {
