@@ -15,7 +15,6 @@ from auth.guards import require_admin
 from database import get_db, now_ar, row_to_dict, to_datetime
 from rate_limit import limiter, ADMIN_WRITE_LIMIT, ADMIN_UPLOAD_LIMIT, CLIENTE_WRITE_LIMIT
 from clientes.queries.identidad import nombre_completo_cliente
-from reservas import ESTADOS_RESERVADO
 from reservas.estados import ESTADOS_EN_CALENDARIO  # display: ver su docstring
 from routes.alquileres import (
     _enriquecer_pedidos_con_cliente,
