@@ -3,19 +3,26 @@
  *
  * Extraído de la pantalla de Estadísticas para vivir en Finanzas (su lugar: es
  * plata). Mantiene TODAS sus features: navegación por mes, día a día, mes a mes,
- * resumen por dueño, cierre/reapertura de mes (#721), reconciliación, export CSV
- * y enviar por mail. Los primitivos de presentación (`BarChart`/`RankList`/`fmtArs`)
- * se exportan para reusarlos donde haga falta (ej. el Resumen de Estadísticas) —
- * única fuente, sin duplicar. `Kpi`/`Section` migraron a composites del DS
- * (`StatCard`/`Section`).
+ * resumen por dueño, cierre/reapertura de mes (#721), reconciliación, export CSV,
+ * enviar por mail y un resumen general histórico (los mismos 4 KPIs del mail,
+ * `ResumenGeneralHistorico`) con link a Estadísticas. Los primitivos de
+ * presentación (`BarChart`/`RankList`/`fmtArs`) se exportan para reusarlos donde
+ * haga falta (ej. el Resumen de Estadísticas) — única fuente, sin duplicar.
+ * `Kpi`/`Section` migraron a composites del DS (`StatCard`/`Section`).
  */
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import {
   DollarSign,
   Wallet,
   Package,
   Receipt,
+  Users,
+  TrendingUp,
+  TrendingDown,
+  Minus,
+  ArrowRight,
   ChevronLeft,
   ChevronRight,
   Lock,
@@ -45,6 +52,7 @@ import {
 import { useConfirm } from "@/components/admin/useConfirm";
 import { Section } from "@/design-system/composites/Section";
 import { StatCard } from "@/design-system/composites/StatCard";
+import { CardGridSkeleton } from "@/components/admin/skeletons";
 
 export function LiquidacionReporte() {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -378,6 +386,8 @@ export function LiquidacionReporte() {
           )}
         </div>
       </div>
+
+      <ResumenGeneralHistorico />
     </div>
   );
 }
@@ -429,6 +439,123 @@ function MesAMesTabla({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** "2026-06" → "junio de 2026" — espejo de `backend/pdf.py::_rep_mes_largo`. Mismo
+ *  patrón ya duplicado en contabilidad.movimientos/rendicion/estudio.lazy.tsx; se
+ *  llama `mesLargo` (no `mesLabel`, ya tomado dentro de `LiquidacionReporte()` para
+ *  el mes navegado — dos cosas distintas no deben compartir nombre). */
+function mesLargo(mes: string): string {
+  return new Date(`${mes}-01T00:00:00`).toLocaleDateString("es-AR", {
+    month: "long",
+    year: "numeric",
+  });
+}
+
+/**
+ * ResumenGeneralHistorico — los mismos 4 KPIs del "Resumen general" que ya se
+ * mandan en el mail/PDF (`backend/pdf.py::_resumen_general_html`), nativos acá +
+ * un link a Estadísticas para el resto (barras "Ingresos por dueño", top equipos,
+ * etc. — eso NO se duplica). Reusa `GET /api/estadisticas`
+ * (`compute_estadisticas`), la MISMA fuente que ya usa `/admin/estadisticas` — sin
+ * parámetro de fecha, a propósito: es histórico completo, no el mes que se está
+ * viendo arriba (documentado en `backend/reportes/CLAUDE.md`). Por eso vive en su
+ * PROPIO query, desacoplado de `mesQ`/`anioQ`/`recon` — si este falla, el resto de
+ * la página sigue andando igual.
+ *
+ * A propósito NO se parece a la fila "Total {mes}" de más arriba (que sí cambia
+ * al navegar de mes): wrapper `Section` con borde propio, subtítulo explícito, y
+ * ubicada al final de la página — la fila de arriba no tiene ninguna de las tres
+ * señales, para que las dos nunca se confundan.
+ */
+function ResumenGeneralHistorico() {
+  const statsQ = useQuery({
+    queryKey: ["admin", "estadisticas"],
+    queryFn: () => adminApi.getEstadisticas(),
+  });
+  const data = statsQ.data;
+
+  const totales = data?.totales;
+  const totalPedidos = totales?.total_pedidos ?? 0;
+  const totalClientes = totales?.total_clientes ?? 0;
+  const totalArs = totales?.total_ars ?? 0;
+  const promedio = totalPedidos ? totalArs / totalPedidos : 0;
+  const ratio = totalClientes ? Math.round((totalPedidos / totalClientes) * 10) / 10 : 0;
+
+  const crecimiento = data?.crecimiento ?? [];
+  const crecPct = crecimiento[0]?.crecimiento_pct ?? 0;
+  const crecMesAnterior = crecimiento.length > 1 ? crecimiento[1]?.mes : undefined;
+  const crecMeta = crecMesAnterior ? `vs ${mesLargo(crecMesAnterior)}` : "sin mes previo";
+  // 3 ramas (no 2) — espejo del mail: "0%" queda neutro, sin signo ni color. Es
+  // A PROPÓSITO distinto de la sección "Crecimiento mes a mes" de Estadísticas
+  // (que usa `>= 0`) — acá el criterio de verificación es calzar con el mail.
+  const CrecIcon = crecPct > 0 ? TrendingUp : crecPct < 0 ? TrendingDown : Minus;
+  const crecClase = crecPct > 0 ? "text-verde-ink" : crecPct < 0 ? "text-destructive" : undefined;
+
+  return (
+    <Section
+      title="Resumen general"
+      subtitle="Contexto histórico de pedidos finalizados — no cambia al navegar el mes de arriba."
+      actions={
+        <Link
+          to="/admin/estadisticas"
+          className="inline-flex shrink-0 items-center gap-1.5 font-sans text-sm text-muted-foreground transition hover:text-ink"
+        >
+          {/* Prefijo se esconde en mobile — a 375px "Resumen general" (el título,
+              `truncate flex-1` en el header de `Section`) y el link completo
+              compiten por espacio y el título se corta ("Resumen gen…"),
+              detectado probando en 375px. Acortar el link (en vez de tocar el
+              header compartido de `Section`, usado en toda la app) resuelve sin
+              blast radius. */}
+          <span className="hidden sm:inline">Ver todo en </span>Estadísticas{" "}
+          <ArrowRight className="h-3.5 w-3.5" />
+        </Link>
+      }
+    >
+      {statsQ.isLoading ? (
+        <CardGridSkeleton count={4} className="md:grid-cols-4" />
+      ) : statsQ.error ? (
+        <p className="text-sm text-muted-foreground">
+          No se pudo cargar el resumen histórico.{" "}
+          <button
+            type="button"
+            onClick={() => statsQ.refetch()}
+            className="underline hover:text-ink"
+          >
+            Reintentar
+          </button>
+        </p>
+      ) : data ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <StatCard
+            icon={DollarSign}
+            label="Facturado neto"
+            value={fmtArs(totalArs)}
+            meta="ingreso finalizado"
+          />
+          <StatCard
+            icon={Receipt}
+            label="Pedidos"
+            value={String(totalPedidos)}
+            meta={`${fmtArs(promedio)} promedio`}
+          />
+          <StatCard
+            icon={Users}
+            label="Clientes"
+            value={String(totalClientes)}
+            meta={`${ratio} pedidos c/u`}
+          />
+          <StatCard
+            icon={CrecIcon}
+            label="Crecimiento"
+            value={`${crecPct > 0 ? "+" : ""}${crecPct}%`}
+            valueClassName={crecClase}
+            meta={crecMeta}
+          />
+        </div>
+      ) : null}
+    </Section>
   );
 }
 
