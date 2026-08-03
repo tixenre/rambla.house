@@ -5,12 +5,15 @@
  * sus movimientos + cobros mensuales vía `/movimientos?cuenta_id=`, y su fila
  * de la rendición mensual vía `/rendicion/{mes}`) en una vista dedicada — no
  * hay lógica nueva, todo sale de los mismos motores que ya alimentan
- * Cuentas/Movimientos/Rendición. El registro/anulación de movimientos sigue
- * viviendo en Movimientos (una sola forma de escribir plata); acá es lectura.
+ * Cuentas/Movimientos/Rendición. El ALTA de un movimiento sigue viviendo en
+ * Movimientos (una sola forma de escribir plata); acá se puede EDITAR o BORRAR
+ * un movimiento manual de esta caja sin salir de la pantalla (2026-08-02,
+ * pedido del dueño) — reusando el mismo `AccionesMovimiento` de esa página,
+ * no una copia.
  */
 import { createLazyFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Banknote, Clapperboard, ChevronDown, Clock, Wallet } from "lucide-react";
 
 import { AdminPage } from "@/components/admin/AdminPage";
@@ -23,6 +26,8 @@ import { StatCard } from "@/design-system/composites/StatCard";
 import { Button } from "@/design-system/ui/button";
 import { Input } from "@/design-system/ui/input";
 import { TipoMovimientoBadge } from "@/components/admin/badges";
+import { AccionesMovimiento } from "@/components/admin/contabilidad/MovimientoAcciones";
+import { descMovimiento } from "@/lib/admin/movimiento-texto";
 import { adminApi, type CobroMensual, type Movimiento } from "@/lib/admin/api";
 import { formatARS, formatMoney, formatFechaDisplay } from "@/lib/format";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
@@ -53,24 +58,14 @@ type Fila =
   | { kind: "mov"; fecha: string; mov: Movimiento }
   | { kind: "cobro"; fecha: string; cobro: CobroMensual };
 
-function descMovimiento(m: Movimiento): string {
-  const o = m.cuenta_origen_nombre ?? "—";
-  const d = m.cuenta_destino_nombre ?? "—";
-  switch (m.tipo) {
-    case "gasto":
-      return `${m.categoria_nombre ?? "Sin categoría"} · sale de ${o}`;
-    case "transferencia":
-      return `${o} → ${d}`;
-    case "aporte":
-      return `Aporte a ${d}`;
-    default:
-      return [o !== "—" ? o : null, d !== "—" ? d : null].filter(Boolean).join(" → ") || "Ajuste";
-  }
-}
-
 function CajaEstudioPage() {
   useDocumentTitle("Caja Estudio · Finanzas");
+  const qc = useQueryClient();
   const [mes, setMes] = useState(mesActual());
+  // Editar/borrar un movimiento cambia saldos, KPIs y la fila del mes: se
+  // invalida el árbol de contabilidad entero, igual que la página de
+  // Movimientos (una sola forma, también para el refresco).
+  const invalidar = () => qc.invalidateQueries({ queryKey: ["admin", "contabilidad"] });
   const [expandedMes, setExpandedMes] = useState<string | null>(null);
 
   const saldosQ = useQuery({
@@ -155,6 +150,15 @@ function CajaEstudioPage() {
         ),
       align: "right",
       className: "font-mono tabular-nums",
+    },
+    {
+      // Solo los movimientos MANUALES de la caja se editan/borran acá. La fila
+      // de "Cobros" es derivada de `alquiler_pagos` (read-only): un cobro se
+      // anula desde su pedido, no desde la caja.
+      header: "Acciones",
+      cell: (f) =>
+        f.kind === "mov" ? <AccionesMovimiento mov={f.mov} onChanged={invalidar} /> : null,
+      align: "right",
     },
   ];
 
