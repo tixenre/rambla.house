@@ -61,6 +61,11 @@ def ganancia_neta(conn, mes: str) -> dict:
         "mes": mes,
         "facturado": facturado,
         "comisiones_duenos": comisiones_duenos,
+        # `parte_rental` explícito (antes quedaba implícito en `ganancia_neta`):
+        # es el ingreso REAL de Rental del mes — el número contra el que hay que
+        # leer los gastos. `facturado` incluye la plata de los dueños y la del
+        # Estudio, que NO son ingreso de Rental (2026-08-02).
+        "parte_rental": parte_rental,
         "parte_estudio": parte_estudio,
         "gastos": gastos,
         "ganancia_neta": parte_rental - gastos,

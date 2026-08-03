@@ -12,7 +12,7 @@
     "changelog:build": "bun run ../scripts/build-changelog.ts",
     "test:mobile": "playwright test",
     "test:admin": "PLAYWRIGHT_ADMIN=1 playwright test admin-",
-    "test:unit": "node --experimental-strip-types --test src/lib/utils.test.ts src/lib/estudio-slots.test.ts src/lib/admin/mover-plata.test.ts",
+    "test:unit": "node --experimental-strip-types --test src/lib/utils.test.ts src/lib/estudio-slots.test.ts src/lib/rental-dates.test.ts src/lib/admin/mover-plata.test.ts",
     "lint": "eslint . --cache --cache-location node_modules/.cache/eslint/",
     "lint:fix": "eslint . --fix --cache --cache-location node_modules/.cache/eslint/",
     "format": "prettier --write \"src/**/*.{ts,tsx,css}\"",

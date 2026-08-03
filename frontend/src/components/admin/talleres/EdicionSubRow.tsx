@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import { talleresAdminApi } from "@/lib/admin/api/talleres";
 import type { EdicionAdmin, TallerConcepto } from "@/lib/admin/api/types";
+import { hoyAR } from "@/lib/rental-dates";
 import { Pill, type PillTone } from "@/design-system/ui/Pill";
 import { Spinner } from "@/design-system/ui/spinner";
 import { Switch } from "@/design-system/ui/switch";
@@ -21,7 +22,7 @@ import { InscripcionesSection } from "./InscripcionesSection";
 import { updateEdicionInCache } from "./cache";
 
 function badgeEstadoEdicion(edicion: EdicionAdmin): { label: string; tone: PillTone } {
-  const today = new Date().toISOString().slice(0, 10);
+  const today = hoyAR();
   // F2: una edición despublicada es un BORRADOR — se arma sin estar en la web
   // (preview vía "ver en web" con sesión admin) y no bloquea el estudio.
   if (!edicion.activo) return { label: "BORRADOR", tone: "warning" };

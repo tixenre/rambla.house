@@ -645,7 +645,22 @@ export interface TableroData {
   mes: string;
   cierre: { cerrado: boolean; cerrado_por: string | null; cerrado_at: string | null };
   disponible: SaldosData;
-  ganancia_mes: { mes: string; ingresos: number; gastos: number; neta: number };
+  ganancia_mes: {
+    mes: string;
+    /** Devengado TOTAL del mes (Rental + dueños + Estudio). NO es el ingreso de
+     *  Rental — para eso está `parte_rental`. */
+    ingresos: number;
+    /** Lo que de lo facturado es de Rental — el ingreso real contra el que se
+     *  leen los gastos (`neta = parte_rental − gastos`). */
+    parte_rental: number;
+    comisiones_duenos: number;
+    /** La parte del Estudio: otra economía, ni ingreso ni costo de Rental. */
+    parte_estudio: number;
+    gastos: number;
+    neta: number;
+  };
+  /** El disponible en ARS partido por economía (Rental vs. Estudio). */
+  disponible_por_economia: { rental: number; estudio: number };
 }
 export interface RendicionPersona {
   persona: string;

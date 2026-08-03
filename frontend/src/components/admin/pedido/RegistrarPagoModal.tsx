@@ -24,6 +24,7 @@ import {
   type RepartoPagoLinea,
 } from "@/lib/admin/api";
 import { fmtArs } from "@/lib/format";
+import { hoyAR } from "@/lib/rental-dates";
 import { combinarTotales, etiquetaTurno } from "@/lib/pedido-combinado";
 
 export function RegistrarPagoModal({
@@ -70,7 +71,7 @@ export function RegistrarPagoModal({
   // si el pedido es del Estudio — esa plata no es de Rental ni de los socios).
   const [destinatario, setDestinatario] = useState<string>(destinatarioDefault);
   const [metodo, setMetodo] = useState<string>("transferencia");
-  const [fecha, setFecha] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [fecha, setFecha] = useState<string>(() => hoyAR());
 
   const monto = Math.max(0, Number(montoInput) || 0);
 
@@ -81,7 +82,7 @@ export function RegistrarPagoModal({
     if (!open) return;
     setDestinatario(destinatarioDefault);
     setMetodo("transferencia");
-    setFecha(new Date().toISOString().slice(0, 10));
+    setFecha(hoyAR());
     setPreset("saldo");
     setMontoInput(String(combinado.restaCombinado));
     setConcepto("Saldo final");

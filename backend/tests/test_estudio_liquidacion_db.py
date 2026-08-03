@@ -179,3 +179,38 @@ def test_pyl_parte_estudio(conn):
     # comisiones_duenos excluye TANTO Rental como Estudio — solo Pablo/Tincho.
     assert gan["comisiones_duenos"] == parte_pablo_esperada + parte_tincho_esperada
     assert gan["ganancia_neta"] == parte_rental_esperada - gan["gastos"]
+    # `parte_rental` explícito (2026-08-02): es el ingreso REAL de Rental, el
+    # número contra el que la pantalla lee los gastos. `facturado` no lo es —
+    # incluye la plata de los dueños y la del Estudio.
+    assert gan["parte_rental"] == parte_rental_esperada
+    assert gan["facturado"] == (
+        gan["parte_rental"] + gan["comisiones_duenos"] + gan["parte_estudio"]
+    )
+
+
+def test_tablero_separa_el_disponible_de_rental_y_del_estudio(conn):
+    """Rental y el Estudio son dos economías: el tablero las devuelve separadas
+    para que la pantalla no sume la Caja Estudio al disponible de Rental
+    (pedido del dueño 2026-08-02)."""
+    from contabilidad.queries.tablero import tablero
+
+    _setup_pedido_mixto(conn)
+    t = tablero(conn, MES)
+    eco = t["disponible_por_economia"]
+    cajas = t["disponible"]["cajas"]
+    saldo_estudio = sum(
+        int(c["saldo"]) for c in cajas if c.get("socio") == "Estudio" and c["moneda"] == "ARS"
+    )
+    saldo_resto = sum(
+        int(c["saldo"]) for c in cajas if c.get("socio") != "Estudio" and c["moneda"] == "ARS"
+    )
+    assert eco["estudio"] == saldo_estudio
+    assert eco["rental"] == saldo_resto
+    # Juntas siguen siendo el total de siempre — se separa la lectura, no el número.
+    assert eco["rental"] + eco["estudio"] == t["disponible"]["totales"].get("ARS", 0)
+    # El KPI de ganancia viaja con las dos economías desagregadas.
+    assert t["ganancia_mes"]["parte_estudio"] == ESPACIO_MONTO
+    assert (
+        t["ganancia_mes"]["neta"]
+        == t["ganancia_mes"]["parte_rental"] - t["ganancia_mes"]["gastos"]
+    )

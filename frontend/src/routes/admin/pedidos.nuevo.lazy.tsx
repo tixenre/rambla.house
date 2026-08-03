@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import { Spinner } from "@/design-system/ui/spinner";
 import { adminApi } from "@/lib/admin/api";
+import { ymd } from "@/lib/rental-dates";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
 
 export const Route = createLazyFileRoute("/admin/pedidos/nuevo")({
@@ -27,7 +28,6 @@ function NuevoPedidoPage() {
     const hoy = new Date();
     const manana = new Date(hoy);
     manana.setDate(manana.getDate() + 1);
-    const ymd = (d: Date) => d.toISOString().slice(0, 10);
     const clienteId = Number(search.cliente_id);
     adminApi
       .createPedido({

@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useCart } from "@/lib/cart-store";
 import { authedFetch } from "@/lib/authedFetch";
+import { ymd } from "@/lib/rental-dates";
 
 const DEBOUNCE_MS = 2000;
 
@@ -22,8 +23,10 @@ export function syncCartHeartbeat() {
       equipo_id: Number(equipo_id),
       cantidad,
     })),
-    fecha_desde: startDate ? startDate.toISOString().split("T")[0] : null,
-    fecha_hasta: endDate ? endDate.toISOString().split("T")[0] : null,
+    // `ymd` (fecha local) y no `toISOString()`: el ISO pasa a UTC y podía
+    // correr un día la fecha elegida por el cliente.
+    fecha_desde: startDate ? ymd(startDate) : null,
+    fecha_hasta: endDate ? ymd(endDate) : null,
     hora_desde: startTime ?? null,
     hora_hasta: endTime ?? null,
   };
