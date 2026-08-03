@@ -163,7 +163,7 @@ function CajaEstudioPage() {
       title="Caja Estudio"
       maxW="detail"
       description="La economía del Estudio, separada del Rental — hoy no se reparte ganancia, así que esto es lo único que hace falta ver: qué entra y qué sale de su propia caja."
-      backTo={{ to: "/admin/contabilidad", label: "Tablero" }}
+      backTo={{ to: "/admin/contabilidad", label: "Finanzas" }}
       actions={
         <Button variant="outline" size="sm" asChild>
           <Link to="/admin/contabilidad/movimientos">Registrar / anular movimiento</Link>
@@ -193,10 +193,10 @@ function CajaEstudioPage() {
             <b>{formatARS(parte.pendiente)}</b> (alguien más cobró plata que era del Estudio). Vas a
             ver a quién pedírselo en{" "}
             <Link
-              to="/admin/contabilidad/rendicion"
+              to="/admin/contabilidad"
               className="underline decoration-amber/60 underline-offset-2"
             >
-              Rendición
+              Finanzas
             </Link>
             .
           </div>

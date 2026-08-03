@@ -48,7 +48,7 @@ function ReporteMensualPage() {
       title="Reporte mensual"
       maxW="detail"
       description="El mes de Rental, completo: lo facturado, lo que se llevan los dueños de los equipos, los gastos, y lo que realmente le queda a Rental. Todo sale del mismo motor — no hay un peso sumado dos veces."
-      backTo={{ to: "/admin/contabilidad", label: "Tablero" }}
+      backTo={{ to: "/admin/contabilidad", label: "Finanzas" }}
       actions={
         <Input
           type="month"

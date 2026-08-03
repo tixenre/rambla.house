@@ -25,7 +25,6 @@ import {
   Wallet,
   BarChart3,
   Calculator,
-  Scale,
   TrendingUp,
   BookOpen,
   Palette,
@@ -104,18 +103,18 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     label: "Finanzas",
     defaultOpen: true,
     items: [
-      { title: "Tablero", url: "/admin/contabilidad", icon: LayoutDashboard, exact: true },
+      // Finanzas = Tablero + Cuentas + Rendición fundidos en una pantalla
+      // (2026-08-03); /cuentas y /rendicion redirigen acá.
+      { title: "Finanzas", url: "/admin/contabilidad", icon: Wallet, exact: true },
       // Los cobros de pedidos viven dentro de Movimientos (fila mensual desplegable);
       // /admin/pagos sigue accesible como "ver ledger completo" desde ese detalle.
       { title: "Movimientos", url: "/admin/contabilidad/movimientos", icon: ClipboardList },
-      { title: "Cuentas", url: "/admin/contabilidad/cuentas", icon: Wallet },
       // Economía separada del Estudio (caja + movimientos + rendición propia) —
       // vive en Finanzas, no en "Estudio y talleres": es una vista de plata,
       // no de operación (mismo criterio que Productoras vs. Clientes, #1251).
       { title: "Caja Estudio", url: "/admin/contabilidad/estudio", icon: Clapperboard },
       { title: "Reporte mensual", url: "/admin/contabilidad/reporte", icon: BarChart3 },
       { title: "Liquidación", url: "/admin/contabilidad/liquidacion", icon: Calculator },
-      { title: "Rendición", url: "/admin/contabilidad/rendicion", icon: Scale },
       { title: "Estadísticas", url: "/admin/estadisticas", icon: TrendingUp },
       { title: "Facturas ARCA", url: "/admin/facturas", icon: ClipboardList },
       { title: "Emisores ARCA", url: "/admin/facturacion/emisores", icon: Settings },

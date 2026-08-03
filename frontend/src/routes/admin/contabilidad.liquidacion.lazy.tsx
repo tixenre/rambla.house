@@ -21,7 +21,7 @@ function LiquidacionPage() {
     <AdminPage
       title="Liquidación"
       description="Rendición a los dueños: cuánto le toca cobrar a cada dueño/socio por sus equipos alquilados (devengado), por mes y por año. Es para repartir la plata entre ellos — con cierre de mes, export CSV y envío por mail."
-      backTo={{ to: "/admin/contabilidad", label: "Tablero" }}
+      backTo={{ to: "/admin/contabilidad", label: "Finanzas" }}
     >
       <LiquidacionReporte />
     </AdminPage>
