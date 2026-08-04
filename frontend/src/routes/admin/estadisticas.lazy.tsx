@@ -73,6 +73,14 @@ function EstadisticasPage() {
     queryFn: () => adminApi.getActividadCalendario(anioCal, modoCalendario === "todos"),
   });
 
+  // Distribución por período cíclico ("todos los lunes sumados contra todos
+  // los martes") — sobre TODO el historial, sin eje de año: query propia,
+  // fija (sin params que la invaliden — nunca refetchea sola).
+  const distQ = useQuery({
+    queryKey: ["admin", "estadisticas", "actividad-distribucion"],
+    queryFn: () => adminApi.getActividadDistribucion(),
+  });
+
   const data = statsQ.data;
   const ajustado = modo === "ajustado";
   // Elige nominal o ajustado según el toggle — el backend ya manda los dos
@@ -401,6 +409,55 @@ function EstadisticasPage() {
                 onSeleccionarTodos={() => setModoCalendario("todos")}
               />
             </Section>
+
+            {/* Distribución por período cíclico — "¿todos los lunes suman más
+                que todos los martes?" — complementa el calendario de arriba
+                (que muestra fechas concretas) revelando si hay un patrón
+                sistemático. Misma métrica (equipo afuera), sobre TODO el
+                historial, sin eje de año. */}
+            {distQ.data && (
+              <Section
+                title="Distribución"
+                subtitle="Suma de equipo afuera por período — todo el historial"
+              >
+                <div className="grid md:grid-cols-2 gap-6 mb-6">
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2">Por día de semana</p>
+                    <BarChart
+                      data={distQ.data.dia_semana.map((d) => ({
+                        label: d.label,
+                        value: d.total,
+                      }))}
+                      labelFn={(l) => l}
+                      valueFormat={(v) => `${v}×`}
+                    />
+                  </div>
+                  <div>
+                    <p className="text-xs text-muted-foreground mb-2">Por mes del año</p>
+                    <BarChart
+                      data={distQ.data.mes.map((m) => ({ label: m.label, value: m.total }))}
+                      labelFn={(l) => l}
+                      valueFormat={(v) => `${v}×`}
+                    />
+                  </div>
+                </div>
+                {/* 31 barras — su propia fila, no encaja en 2/3 columnas. */}
+                <div>
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Por día del mes
+                    <span className="text-3xs"> (suma cruda — el 31 solo lo tienen 7 meses)</span>
+                  </p>
+                  <BarChart
+                    data={distQ.data.dia_mes.map((d) => ({
+                      label: String(d.dia),
+                      value: d.total,
+                    }))}
+                    labelFn={(l) => l}
+                    valueFormat={(v) => `${v}×`}
+                  />
+                </div>
+              </Section>
+            )}
           </>
         )}
 

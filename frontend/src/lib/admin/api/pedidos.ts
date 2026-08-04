@@ -15,6 +15,7 @@ import type {
   CalendarioPedido,
   EstadisticasData,
   ActividadCalendarioData,
+  ActividadDistribucionData,
   BusquedasData,
   LiquidacionData,
   ReconciliacionData,
@@ -288,6 +289,8 @@ export const pedidosMethods = {
       `/api/estadisticas/actividad-calendario${qs ? `?${qs}` : ""}`,
     );
   },
+  getActividadDistribucion: () =>
+    authedJson<ActividadDistribucionData>("/api/estadisticas/actividad-distribucion"),
 
   // analítica de búsquedas del catálogo público
   getBusquedas: (dias?: number) =>

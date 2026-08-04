@@ -639,6 +639,75 @@ def test_actividad_calendario_todos_bucketiza_tiers_por_anio_no_global(conn):
         conn.commit()
 
 
+# ── Distribución por período cíclico (día de semana / día del mes / mes del
+# año) — "¿todos los lunes sumados contra todos los martes sumados?", sobre
+# TODO el historial, sin scoping por año. Año ficticio propio 1895 (no choca
+# con los demás fixtures de este archivo).
+E_DIST = 9_301_701
+IDS_DIST = list(range(9_301_711, 9_301_720))
+
+
+def _limpiar_distribucion(conn):
+    conn.execute("DELETE FROM alquiler_items WHERE pedido_id = ANY(%s)", (IDS_DIST,))
+    conn.execute("DELETE FROM alquileres WHERE id = ANY(%s)", (IDS_DIST,))
+    conn.execute("DELETE FROM equipos WHERE id = %s", (E_DIST,))
+
+
+def test_actividad_distribucion_suma_por_dia_semana_mes_y_dia_del_mes(conn):
+    """3 pedidos en LUNES (1895-05-06, -13, -20 — confirmados lunes vía
+    `date.weekday()`, NO asumidos a ojo) + 1 pedido en MARTES (1895-05-07)
+    tienen que sumar +3/+1 en el delta de Lun/Mar de la distribución por día
+    de semana, +1 en cada uno de los 4 días del mes usados (6/7/13/20 —
+    todos distintos), y +4 en el delta del mes de mayo. Delta contra "antes"
+    (no absoluto): la función suma sobre TODO el historial, sin scoping por
+    año/id."""
+    from routes.estadisticas import compute_actividad_distribucion
+
+    _limpiar_distribucion(conn)
+    conn.commit()
+    try:
+        antes = compute_actividad_distribucion(conn)
+        lun_antes = next(d["total"] for d in antes["dia_semana"] if d["label"] == "Lun")
+        mar_antes = next(d["total"] for d in antes["dia_semana"] if d["label"] == "Mar")
+        may_antes = next(m["total"] for m in antes["mes"] if m["label"] == "May")
+        dia_mes_antes = {d["dia"]: d["total"] for d in antes["dia_mes"]}
+
+        conn.execute(
+            "INSERT INTO equipos (id, nombre, cantidad, dueno, precio_jornada) "
+            "VALUES (%s, %s, 5, 'Rental', 1000)",
+            (E_DIST, "Cámara test #distribucion"),
+        )
+        dias_lunes = ["1895-05-06", "1895-05-13", "1895-05-20"]
+        dia_martes = "1895-05-07"
+        for pid, dia in zip(IDS_DIST, [*dias_lunes, dia_martes]):
+            conn.execute(
+                """INSERT INTO alquileres (id, cliente_nombre, estado, fecha_desde, fecha_hasta, monto_total)
+                   VALUES (%s, 'C', 'finalizado', %s, %s, 1000)""",
+                (pid, f"{dia}T09:00:00", f"{dia}T09:00:00"),
+            )
+            conn.execute(
+                "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, subtotal) "
+                "VALUES (%s, %s, 1, 1000, 1000)",
+                (pid, E_DIST),
+            )
+        conn.commit()
+
+        despues = compute_actividad_distribucion(conn)
+        lun_despues = next(d["total"] for d in despues["dia_semana"] if d["label"] == "Lun")
+        mar_despues = next(d["total"] for d in despues["dia_semana"] if d["label"] == "Mar")
+        may_despues = next(m["total"] for m in despues["mes"] if m["label"] == "May")
+        dia_mes_despues = {d["dia"]: d["total"] for d in despues["dia_mes"]}
+
+        assert lun_despues - lun_antes == 3
+        assert mar_despues - mar_antes == 1
+        assert may_despues - may_antes == 4
+        for dia in (6, 7, 13, 20):
+            assert dia_mes_despues[dia] - dia_mes_antes[dia] == 1
+    finally:
+        _limpiar_distribucion(conn)
+        conn.commit()
+
+
 # ── Toggle de IPC — el candado central: "ajustar en origen" (cada pedido
 # deflactado por SU PROPIO mes antes de sumar) tiene que dar un número distinto
 # de "ajustar post-suma" (un solo factor aplicado al total ya sumado), que es

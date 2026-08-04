@@ -112,6 +112,13 @@ def get_actividad_calendario(request: Request, anio: int | None = None, todos: b
         return compute_actividad_calendario(conn, anio, todos)
 
 
+@router.get("/estadisticas/actividad-distribucion")
+def get_actividad_distribucion(request: Request):
+    require_admin(request)
+    with get_db() as conn:
+        return compute_actividad_distribucion(conn)
+
+
 def compute_estadisticas(conn) -> dict:
     """Calcula el dict completo de estadísticas a partir de una conexión.
 
@@ -592,4 +599,61 @@ def compute_actividad_calendario(conn, anio: int | None = None, todos: bool = Fa
         "anio": anio_actual,
         "anios_disponibles": anios_disponibles,
         "dias": dias,
+    }
+
+
+_DIAS_SEMANA_ABREV = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+_MESES_ABREV = [
+    "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+    "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
+]
+
+
+def compute_actividad_distribucion(conn) -> dict:
+    """Distribución de actividad por período cíclico — responde "¿hay un
+    patrón sistemático de qué día de semana / día del mes / mes del año
+    suele ser más fuerte?", a diferencia de `compute_actividad_calendario`
+    que responde "¿cuándo en la historia real hubo actividad?" (fechas
+    concretas). Suma `pedidos_activos` (mismo "equipo afuera ese día" que el
+    calendario) agrupado por período, sobre TODO el historial disponible —
+    sin scoping por año: acá más datos por bucket da una señal más
+    confiable, y no hay un "año seleccionado" que tenga sentido recortar.
+    Mismo universo rental-only que el resto de Estadísticas
+    (`estado='finalizado'`, `tipo NOT IN TIPOS_DERIVADOS_SQL`).
+
+    Suma cruda, sin normalizar por cantidad de meses que aportan a cada
+    bucket (ej. el día 31 del mes solo lo tienen 7 meses del año, el día 30
+    lo tienen 11) — el dueño pidió "sumados", no un promedio; el frontend
+    aclara esto en el subtítulo para que no se lea como un sesgo real.
+    """
+    rows = conn.execute(f"""
+        SELECT dia::date AS dia, COUNT(*) AS pedidos_activos
+        FROM alquileres p
+        CROSS JOIN LATERAL generate_series(
+            p.fecha_desde::date, p.fecha_hasta::date, '1 day'::interval
+        ) AS dia
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
+        GROUP BY dia::date
+    """).fetchall()
+
+    por_dia_semana = [0] * 7  # 0=lunes...6=domingo (date.weekday() nativo)
+    por_dia_mes = [0] * 31  # 0=día 1...30=día 31
+    por_mes = [0] * 12  # 0=enero...11=diciembre
+
+    for r in rows:
+        dia = r["dia"]
+        pedidos = r["pedidos_activos"]
+        por_dia_semana[dia.weekday()] += pedidos
+        por_dia_mes[dia.day - 1] += pedidos
+        por_mes[dia.month - 1] += pedidos
+
+    return {
+        "dia_semana": [
+            {"label": label, "total": total}
+            for label, total in zip(_DIAS_SEMANA_ABREV, por_dia_semana)
+        ],
+        "dia_mes": [{"dia": i + 1, "total": total} for i, total in enumerate(por_dia_mes)],
+        "mes": [
+            {"label": label, "total": total} for label, total in zip(_MESES_ABREV, por_mes)
+        ],
     }

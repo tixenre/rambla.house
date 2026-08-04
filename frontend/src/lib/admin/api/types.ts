@@ -1167,6 +1167,18 @@ export type ActividadCalendarioData = {
   dias: { dia: string; pedidos_activos: number; tier: 0 | 1 | 2 | 3 | 4 }[];
 };
 
+/** Distribución de actividad por período cíclico ("¿todos los lunes sumados
+ *  contra todos los martes?") — sobre TODO el historial, sin scoping por año.
+ *  Complementa `ActividadCalendarioData` (fechas concretas) respondiendo "hay
+ *  un patrón sistemático de qué día/mes suele ser más fuerte". Suma cruda de
+ *  `pedidos_activos`, sin normalizar por cantidad de meses que aportan a cada
+ *  día del mes (el 31 solo lo tienen 7 meses). */
+export type ActividadDistribucionData = {
+  dia_semana: { label: string; total: number }[];
+  dia_mes: { dia: number; total: number }[];
+  mes: { label: string; total: number }[];
+};
+
 export type Cliente = {
   id: number;
   nombre: string;
