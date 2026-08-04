@@ -188,8 +188,7 @@ def reporte_destinatarios(request: Request):
             return {"destinatarios": _split_emails(row["value"])}
         from services.email import service as email_service
 
-        admin_to = email_service.get_admin_to()
-        return {"destinatarios": [admin_to] if admin_to else []}
+        return {"destinatarios": email_service.get_admin_tos()}
 
 
 class EnviarReporteBody(BaseModel):

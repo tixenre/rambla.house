@@ -60,7 +60,7 @@ def client(monkeypatch):
 
     # No mandar mails de verdad en el test.
     monkeypatch.setattr(t, "send_email", lambda *a, **k: None)
-    monkeypatch.setattr(t, "get_admin_to", lambda: "admin@example.com")
+    monkeypatch.setattr(t, "get_admin_tos", lambda: ["admin@example.com"])
 
     init_db()
     conn = get_db()

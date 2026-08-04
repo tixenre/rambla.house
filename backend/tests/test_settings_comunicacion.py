@@ -79,6 +79,32 @@ def test_numeros_del_equipo_se_pueden_vaciar(conn):
     assert conn.borrado == "whatsapp_admin_numeros"  # vuelve al default (nadie)
 
 
+# ── mismo criterio, para el mail al equipo (email_admin_to) ──────────────────
+def test_mails_del_equipo_se_guardan_normalizados(conn):
+    """El embudo único (services/email/service.validar_email) corre al GUARDAR:
+    si una dirección está mal el admin se entera acá, no cuando el aviso no
+    llegó (mismo criterio que whatsapp_admin_numeros)."""
+    _put("email_admin_to", " Equipo@Rambla.House , otra@rambla.house ")
+    assert conn.escrito == ("email_admin_to", "Equipo@rambla.house, otra@rambla.house")
+
+
+def test_mails_del_equipo_deduplican_sin_distinguir_mayusculas(conn):
+    _put("email_admin_to", "otra@rambla.house, OTRA@rambla.house")
+    assert conn.escrito[1] == "otra@rambla.house"
+
+
+def test_mail_invalido_del_equipo_se_rechaza(conn):
+    with pytest.raises(HTTPException) as e:
+        _put("email_admin_to", "equipo@rambla.house, no-es-un-mail")
+    assert e.value.status_code == 400 and "no-es-un-mail" in e.value.detail
+    assert conn.escrito is None  # no se guardó nada a medias
+
+
+def test_mails_del_equipo_se_pueden_vaciar(conn):
+    _put("email_admin_to", "")
+    assert conn.borrado == "email_admin_to"  # vuelve al default (ENV / nadie)
+
+
 @pytest.mark.parametrize(
     "key",
     [

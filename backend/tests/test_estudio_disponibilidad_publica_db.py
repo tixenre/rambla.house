@@ -277,7 +277,7 @@ def test_taller_publicado_bloquea_get_y_post(client_con_db, setup, monkeypatch):
 
     monkeypatch.setattr(t, "require_admin", lambda r: None)
     monkeypatch.setattr(t, "send_email", lambda *a, **k: None)
-    monkeypatch.setattr(t, "get_admin_to", lambda: "admin@example.com")
+    monkeypatch.setattr(t, "get_admin_tos", lambda: ["admin@example.com"])
 
     conn = get_db()
     try:

@@ -77,6 +77,17 @@ OPCIONES: dict[str, tuple[OpcionEvento, ...]] = {
             env="WHATSAPP_ADMIN_NUMEROS",
             placeholder="+5492235550000, +5492236660000",
         ),
+        OpcionEvento(
+            setting="email_admin_to",
+            label="Avisarle por mail al equipo",
+            tipo="texto",
+            ayuda=(
+                "Las direcciones que reciben el mail interno cuando entra una solicitud, "
+                "separadas por coma. Vacío = usa el default del ambiente, si hay."
+            ),
+            env="EMAIL_ADMIN_TO",
+            placeholder="equipo@rambla.house, otra@rambla.house",
+        ),
     ),
     "recordatorio_retiro": (
         OpcionEvento(

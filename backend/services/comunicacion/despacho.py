@@ -31,7 +31,7 @@ from services.comunicacion.eventos import (
     EventoComunicacion,
 )
 from services.email import Attachment, send_email
-from services.email.service import get_admin_to
+from services.email.service import get_admin_tos
 from services.ical import build_vcalendar, google_calendar_url, reserva_to_vevent
 from services.precios import jornadas_periodo
 from tipos_pedido import TIPOS_ESTUDIO
@@ -209,14 +209,17 @@ def _mail_cliente(canal: Optional[CanalMail], pedido: dict, ctx: dict):
     return send_email(canal.template_cliente, to, ctx, pedido.get("id"), attachments=attachments)
 
 
-def _mail_admin(canal: Optional[CanalMail], pedido: dict, ctx: dict):
-    """Manda la copia al admin (síncrono). Independiente del plan A/B del cliente."""
+def _mail_admin(canal: Optional[CanalMail], pedido: dict, ctx: dict) -> list[dict]:
+    """Manda la copia al admin a CADA destinatario configurado — un `send_email`
+    por dirección (mismo patrón que `services.whatsapp.enviar_evento_admin`,
+    que también itera direcciones una por una: evita depender de que el
+    backend de mail activo sepa partir un `to` con comas — Resend, por
+    ejemplo, no lo hace). Independiente del plan A/B del cliente. Lista
+    vacía si no hay template o no hay destinatarios configurados."""
     if not (canal and canal.template_admin):
-        return None
-    to = get_admin_to()
-    if not to:
-        return None
-    return send_email(canal.template_admin, to, ctx, pedido.get("id"))
+        return []
+    tos = get_admin_tos()
+    return [send_email(canal.template_admin, to, ctx, pedido.get("id")) for to in tos]
 
 
 def _whatsapp_admin(template_key: str, pedido: dict, ctx: dict):
@@ -305,8 +308,8 @@ def notificar_pedido(
 
     def _run() -> dict:
         cliente = _despachar_cliente(evento, pedido, ctx)
-        admin = _mail_admin(evento.mail, pedido, ctx) if evento.mail else None
-        mails = [m for m in (cliente["mail"], admin) if m is not None]
+        admin = _mail_admin(evento.mail, pedido, ctx) if evento.mail else []
+        mails = [m for m in (cliente["mail"], *admin) if m is not None]
         wa_admin = (
             _whatsapp_admin(evento.whatsapp_admin, pedido, ctx) if evento.whatsapp_admin else None
         )

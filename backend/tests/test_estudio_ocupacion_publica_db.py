@@ -162,7 +162,7 @@ def test_combina_slot_taller_y_centinela_sin_datos_no_anonimos(client_con_db, se
     with pytest.MonkeyPatch.context() as mp:
         mp.setattr(t, "require_admin", lambda r: None)
         mp.setattr(t, "send_email", lambda *a, **k: None)
-        mp.setattr(t, "get_admin_to", lambda: "admin@example.com")
+        mp.setattr(t, "get_admin_tos", lambda: ["admin@example.com"])
 
         conn = get_db()
         try:
