@@ -60,19 +60,54 @@ def _resolve_from(conn) -> str:
     return f"Rambla Rental <noreply@{urlparse(settings.SITE_URL).netloc}>"
 
 
-def get_admin_to() -> Optional[str]:
-    """`to` para notif al admin: env EMAIL_ADMIN_TO > app_settings.email_admin_to."""
-    env_val = settings.EMAIL_ADMIN_TO.strip()
-    if env_val:
-        return env_val
-    conn = get_db()
+def _split_emails(raw: str) -> list[str]:
+    """Parte un string crudo en direcciones — separador coma, punto y coma, o
+    salto de línea (mismo criterio que ya usaba `routes/reportes.py` para la
+    lista de destinatarios del reporte de liquidación; fuente única para no
+    tener dos regexes ligeramente distintas)."""
+    import re
+
+    return [p.strip() for p in re.split(r"[,;\n]+", raw) if p.strip()]
+
+
+def validar_email(direccion: str) -> Optional[str]:
+    """Valida el FORMATO de una dirección (no la deliverability — no
+    resuelve MX en el momento de guardar un setting) vía `email-validator`
+    (ya es dependencia real de Pydantic). Devuelve la forma normalizada o
+    `None` si es inválida."""
+    from email_validator import validate_email, EmailNotValidError
+
     try:
-        row = conn.execute(
-            "SELECT value FROM app_settings WHERE key = %s", ("email_admin_to",),
-        ).fetchone()
-        return row["value"] if row and row["value"] else None
-    finally:
-        conn.close()
+        return validate_email(direccion, check_deliverability=False).normalized
+    except EmailNotValidError:
+        return None
+
+
+def get_admin_tos() -> list[str]:
+    """Direcciones para la notificación al admin: env `EMAIL_ADMIN_TO` >
+    `app_settings.email_admin_to`, separadas por coma/punto y coma/salto de
+    línea. Filtra entradas inválidas en vez de romper (mismo criterio que
+    `services/whatsapp/config.py::destinatarios_admin`, su equivalente para
+    WhatsApp) — deduplicadas sin distinguir mayúsculas."""
+    crudo = settings.EMAIL_ADMIN_TO.strip()
+    if not crudo:
+        conn = get_db()
+        try:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key = %s", ("email_admin_to",),
+            ).fetchone()
+            crudo = row["value"] if row and row["value"] else ""
+        finally:
+            conn.close()
+
+    out: list[str] = []
+    vistos: set[str] = set()
+    for direccion in _split_emails(crudo):
+        norm = validar_email(direccion)
+        if norm and norm.lower() not in vistos:
+            vistos.add(norm.lower())
+            out.append(norm)
+    return out
 
 
 def channel_status() -> dict:
@@ -95,7 +130,7 @@ def channel_status() -> dict:
         "provider": provider,
         "activo": provider != "test",
         "from_addr": from_addr,
-        "admin_to": get_admin_to() or "",
+        "admin_to": ", ".join(get_admin_tos()),
     }
 
 

@@ -14,6 +14,8 @@ import type {
   CobroModo,
   CalendarioPedido,
   EstadisticasData,
+  ActividadCalendarioData,
+  ActividadDistribucionData,
   BusquedasData,
   LiquidacionData,
   ReconciliacionData,
@@ -278,6 +280,17 @@ export const pedidosMethods = {
 
   // estadísticas
   getEstadisticas: () => authedJson<EstadisticasData>("/api/estadisticas"),
+  getActividadCalendario: (anio?: number, todos?: boolean) => {
+    const sp = new URLSearchParams();
+    if (todos) sp.set("todos", "true");
+    else if (anio) sp.set("anio", String(anio));
+    const qs = sp.toString();
+    return authedJson<ActividadCalendarioData>(
+      `/api/estadisticas/actividad-calendario${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getActividadDistribucion: () =>
+    authedJson<ActividadDistribucionData>("/api/estadisticas/actividad-distribucion"),
 
   // analítica de búsquedas del catálogo público
   getBusquedas: (dias?: number) =>

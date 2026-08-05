@@ -122,6 +122,36 @@ def test_estados_reservado_es_literal_seguro():
     assert set(re.findall(r"'([^']+)'", ESTADOS_RESERVADO)) == ESTADOS_CANONICOS
 
 
+def test_estados_en_calendario_es_literal_seguro_y_mas_ancho():
+    """La lista de DISPLAY (2026-08-02) es un literal seguro igual que la del
+    gate, y es un SUPERCONJUNTO de ella: agrega lo ya terminado
+    (`devuelto`/`finalizado`) pero nunca `cancelado` (no ocurrió) ni
+    `borrador` (todavía no es una reserva)."""
+    from reservas.estados import ESTADOS_EN_CALENDARIO, ESTADOS_RESERVADO
+
+    for veneno in ("?", "%s", "%", "{", "}", ";", "--", " OR ", "UNION"):
+        assert veneno not in ESTADOS_EN_CALENDARIO
+    estados = set(re.findall(r"'([^']+)'", ESTADOS_EN_CALENDARIO))
+    assert estados == ESTADOS_CANONICOS | {"devuelto", "finalizado"}
+    assert set(re.findall(r"'([^']+)'", ESTADOS_RESERVADO)) < estados
+    assert "cancelado" not in estados and "borrador" not in estados
+
+
+def test_el_motor_no_usa_la_lista_de_calendario():
+    """**Invariante duro:** ninguna función del motor (gate/disponibilidad/
+    centinela) puede filtrar por `ESTADOS_EN_CALENDARIO` — incluye estados que
+    YA NO reservan, así que usarla ahí bloquearía equipos libres y, del otro
+    lado, invitaría a "ampliar" la lista del gate, que es la puerta a la
+    sobreventa. `ALLOWLIST_INTERPOLACIONES` ya lo caza por omisión; este test
+    lo deja dicho con todas las letras para el que venga."""
+    assert "ESTADOS_EN_CALENDARIO" not in ALLOWLIST_INTERPOLACIONES
+    for fn in _funciones_motor():
+        fuente = textwrap.dedent(inspect.getsource(fn))
+        assert "ESTADOS_EN_CALENDARIO" not in fuente, (
+            f"{fn.__qualname__} usa la lista de calendario — el motor va con ESTADOS_RESERVADO"
+        )
+
+
 def test_solicitado_reserva_stock_y_presupuesto_ya_no_existe():
     """Candado del rename `presupuesto` → `solicitado` (2026-07-14): el estado
     INICIAL del pedido reserva stock bajo su nuevo nombre. Si un cambio futuro

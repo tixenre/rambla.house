@@ -347,11 +347,11 @@ def import_equipos(
             INSERT INTO equipos (
                 slug, nombre, modelo, brand_id, cantidad,
                 precio_jornada, precio_jornada_manual, precio_usd, roi_pct,
-                valor_reposicion, foto_url, fecha_compra, serie, bh_url,
+                valor_reposicion, costo_compra, foto_url, fecha_compra, serie, bh_url,
                 dueno, visible_catalogo, estado, ficha_completa, eliminado_at,
                 nombre_publico_override, nombre_publico_revisado, relevancia_manual
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (slug) DO UPDATE SET
                 nombre = EXCLUDED.nombre,
                 modelo = EXCLUDED.modelo,
@@ -362,6 +362,7 @@ def import_equipos(
                 precio_usd = EXCLUDED.precio_usd,
                 roi_pct = EXCLUDED.roi_pct,
                 valor_reposicion = EXCLUDED.valor_reposicion,
+                costo_compra = EXCLUDED.costo_compra,
                 foto_url = EXCLUDED.foto_url,
                 fecha_compra = EXCLUDED.fecha_compra,
                 serie = EXCLUDED.serie,
@@ -378,7 +379,7 @@ def import_equipos(
             WHERE (
                 equipos.nombre, equipos.modelo, equipos.brand_id, equipos.cantidad,
                 equipos.precio_jornada, equipos.precio_jornada_manual, equipos.precio_usd,
-                equipos.roi_pct, equipos.valor_reposicion, equipos.foto_url,
+                equipos.roi_pct, equipos.valor_reposicion, equipos.costo_compra, equipos.foto_url,
                 equipos.fecha_compra, equipos.serie, equipos.bh_url, equipos.dueno,
                 equipos.visible_catalogo, equipos.estado, equipos.ficha_completa,
                 equipos.eliminado_at, equipos.nombre_publico_override,
@@ -386,7 +387,7 @@ def import_equipos(
             ) IS DISTINCT FROM (
                 EXCLUDED.nombre, EXCLUDED.modelo, EXCLUDED.brand_id, EXCLUDED.cantidad,
                 EXCLUDED.precio_jornada, EXCLUDED.precio_jornada_manual, EXCLUDED.precio_usd,
-                EXCLUDED.roi_pct, EXCLUDED.valor_reposicion, EXCLUDED.foto_url,
+                EXCLUDED.roi_pct, EXCLUDED.valor_reposicion, EXCLUDED.costo_compra, EXCLUDED.foto_url,
                 EXCLUDED.fecha_compra, EXCLUDED.serie, EXCLUDED.bh_url, EXCLUDED.dueno,
                 EXCLUDED.visible_catalogo, EXCLUDED.estado, EXCLUDED.ficha_completa,
                 EXCLUDED.eliminado_at, EXCLUDED.nombre_publico_override,
@@ -397,7 +398,7 @@ def import_equipos(
             (
                 eq.slug, eq.nombre, eq.modelo, brand_id, eq.cantidad,
                 eq.precio_jornada, eq.precio_jornada_manual, eq.precio_usd,
-                eq.roi_pct, eq.valor_reposicion, eq.foto_url, eq.fecha_compra,
+                eq.roi_pct, eq.valor_reposicion, eq.costo_compra, eq.foto_url, eq.fecha_compra,
                 eq.serie, eq.bh_url, eq.dueno, eq.visible_catalogo, eq.estado,
                 eq.ficha_completa, eq.eliminado_at, eq.nombre_publico_override,
                 eq.nombre_publico_revisado, eq.relevancia_manual,

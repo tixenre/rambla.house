@@ -37,6 +37,7 @@ import {
 import { adminApi, type Equipo, type MantenimientoInput } from "@/lib/admin/api";
 import { useConfirm } from "@/components/admin/useConfirm";
 import { formatARS } from "@/lib/format";
+import { hoyAR } from "@/lib/rental-dates";
 
 const TIPOS = [
   { value: "revision", label: "Revisión" },
@@ -59,19 +60,9 @@ const fmtFecha = (iso: string) => {
 
 const fmtMoneda = (n: number) => formatARS(n);
 
-/**
- * Devuelve la fecha de HOY en formato YYYY-MM-DD según la zona horaria local.
- * `toISOString().slice(0,10)` daba la fecha UTC, lo cual shifteaba un día
- * para usuarios en zonas con offset negativo (es-AR es UTC-3) entre 21:00
- * y 23:59 → mostraba "mañana" como default.
- */
-const hoyISO = () => {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${dd}`;
-};
+/** Hoy en hora de Argentina — helper único (`lib/rental-dates`). Acá vivía una
+ *  copia local del mismo fix; se retiró al centralizarlo (2026-08-02). */
+const hoyISO = hoyAR;
 
 export function MantenimientoEquipoDialog({
   equipo,

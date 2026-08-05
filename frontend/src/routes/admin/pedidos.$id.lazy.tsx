@@ -402,6 +402,7 @@ function PedidoEditorPage() {
   // `combinado` es `null` y todo esto es un pass-through exacto de
   // total/pagadoMonto/restante (mismos números, cero cambio visual).
   const turnosVinculados = p.turnos_estudio_vinculados ?? [];
+  const turnosEmbebidos = p.turnos_estudio_embebidos ?? [];
   const combinado = combinarTotales(total, pagadoMonto, turnosVinculados, totales.combinado?.total);
   /** ¿El resumen se lee en dos partes? Sale de la lista de turnos del pedido
    *  (estable, viene con el payload) y no de `totales.combinado` (que llega
@@ -424,7 +425,7 @@ function PedidoEditorPage() {
    *  plata de un turno embebido a esa fila sin darle ninguna fila propia. */
   const turnosBreakdown = [
     ...combinado.turnos.map((t) => ({ key: `v-${t.id}`, monto_total: t.monto_total })),
-    ...(p.turnos_estudio_embebidos ?? []).map((t) => ({
+    ...turnosEmbebidos.map((t) => ({
       key: `e-${t.id}`,
       monto_total: t.monto_total,
     })),
@@ -1381,6 +1382,7 @@ function PedidoEditorPage() {
         onOpenChange={setOpenPagoModal}
         esEstudio={esEstudio}
         turnosVinculados={turnosVinculados}
+        hayTurnosEmbebidos={turnosEmbebidos.length > 0}
       />
       <EnviarDocsDialog
         pedidoId={p.id}

@@ -8,7 +8,7 @@ detalle por dueño). La parte SQL se valida en staging con datos reales.
 import pytest
 
 from reportes.comisiones import DEFAULT_MODELO, repartir, validar_modelo
-from reportes.liquidacion import agregar, combinar_meses
+from reportes.liquidacion import agregar, combinar_meses, excluir_dueno
 
 
 class TestRepartir:
@@ -141,6 +141,103 @@ class TestAgregar:
         pablo = {x["dueno"]: x for x in d["por_dueno"]}["Pablo"]
         assert pablo["pedidos_detalle"][0]["numero_pedido"] == 1  # == pedido_id
         assert pablo["pedidos_detalle"][0]["cliente"] == ""
+
+
+class TestExcluirDueno:
+    """Separar la Liquidación del Estudio y la de Rental (2026-08-03): el
+    Estudio se modela como "otro dueño 100% self" solo para que el reparto lo
+    calcule sin código aparte, pero la página de Liquidación (reparto real
+    entre Pablo/Tincho/Rental) no debe mostrarlo mezclado."""
+
+    def _filas_mixtas(self):
+        # Un pedido con equipo de Pablo Y el centinela del Estudio (mismo
+        # pedido — caso real: un turno del Estudio embebido en un alquiler
+        # normal, #1308), más un pedido de Rental puro en otro mes.
+        return [
+            {"fecha": "2026-06-03", "pedido_id": 1, "numero_pedido": 501,
+             "cliente": "Juan Pérez", "dueno": "Pablo", "equipo": "Sony FX3", "monto": 60000},
+            {"fecha": "2026-06-03", "pedido_id": 1, "numero_pedido": 501,
+             "cliente": "Juan Pérez", "dueno": "Estudio", "equipo": "Estudio (espacio)",
+             "monto": 40000},
+            {"fecha": "2026-07-10", "pedido_id": 2, "numero_pedido": 502,
+             "cliente": "Ana Gómez", "dueno": "Rental", "equipo": "Canon R5", "monto": 100000},
+        ]
+
+    def test_resta_el_total_del_dueno_excluido(self):
+        d = agregar(self._filas_mixtas(), DEFAULT_MODELO)
+        assert d["resumen"]["total"] == 200000  # 60k + 40k + 100k
+
+        sin_estudio = excluir_dueno(d, "Estudio")
+        assert sin_estudio["resumen"]["total"] == 160000  # 60k + 100k, sin los 40k
+
+    def test_saca_la_clave_de_los_tres_por_beneficiario(self):
+        # No alcanza con sacarlo de la lista `beneficiarios`: la clave del
+        # dict tiene que desaparecer de resumen Y de cada mes/día — un
+        # consumidor que iterara Object.keys() en vez de la lista lo seguiría
+        # viendo (bug real encontrado al escribir el test de ruta contra DB).
+        d = agregar(self._filas_mixtas(), DEFAULT_MODELO)
+        assert "Estudio" in d["resumen"]["por_beneficiario"]
+        sin_estudio = excluir_dueno(d, "Estudio")
+        assert "Estudio" not in sin_estudio["resumen"]["por_beneficiario"]
+        assert all("Estudio" not in m["por_beneficiario"] for m in sin_estudio["por_mes"])
+        assert all("Estudio" not in x["por_beneficiario"] for x in sin_estudio["por_dia"])
+
+    def test_saca_la_fila_de_por_dueno_y_de_beneficiarios(self):
+        d = agregar(self._filas_mixtas(), DEFAULT_MODELO)
+        d["beneficiarios"] = ["Pablo", "Rental", "Tincho", "Estudio"]
+        sin_estudio = excluir_dueno(d, "Estudio")
+        assert {x["dueno"] for x in sin_estudio["por_dueno"]} == {"Pablo", "Rental"}
+        assert "Estudio" not in sin_estudio["beneficiarios"]
+        assert sin_estudio["beneficiarios"] == ["Pablo", "Rental", "Tincho"]
+
+    def test_el_pedido_mixto_conserva_la_parte_de_pablo(self):
+        # El mismo pedido #501 aportó a Pablo Y a Estudio: excluir Estudio no
+        # debe tocar la fila de Pablo (su propia atribución en ESE pedido).
+        d = agregar(self._filas_mixtas(), DEFAULT_MODELO)
+        sin_estudio = excluir_dueno(d, "Estudio")
+        pablo = next(x for x in sin_estudio["por_dueno"] if x["dueno"] == "Pablo")
+        assert pablo["monto_generado"] == 60000
+        assert pablo["pedidos_detalle"][0]["monto"] == 60000
+
+    def test_ajusta_por_mes_y_por_dia_con_el_detalle_del_pedido(self):
+        d = agregar(self._filas_mixtas(), DEFAULT_MODELO)
+        sin_estudio = excluir_dueno(d, "Estudio")
+        meses = {m["mes"]: m["total"] for m in sin_estudio["por_mes"]}
+        dias = {x["dia"]: x["total"] for x in sin_estudio["por_dia"]}
+        # Junio tenía 60k (Pablo) + 40k (Estudio) = 100k; sin Estudio, 60k.
+        assert meses["2026-06"] == 60000
+        assert meses["2026-07"] == 100000
+        assert dias["2026-06-03"] == 60000
+        assert dias["2026-07-10"] == 100000
+
+    def test_resumen_pedidos_no_se_ajusta_a_proposito(self):
+        # "cuántos alquileres se cobraron" es un hecho del negocio, no de
+        # atribución por dueño — el pedido mixto sigue contando 1 vez.
+        d = agregar(self._filas_mixtas(), DEFAULT_MODELO)
+        sin_estudio = excluir_dueno(d, "Estudio")
+        assert sin_estudio["resumen"]["pedidos"] == d["resumen"]["pedidos"] == 2
+
+    def test_no_op_si_el_dueno_no_generó_nada(self):
+        filas_sin_estudio = [
+            {"fecha": "2026-06-03", "pedido_id": 1, "dueno": "Rental",
+             "equipo": "Canon R5", "monto": 100000},
+        ]
+        d = agregar(filas_sin_estudio, DEFAULT_MODELO)
+        assert excluir_dueno(d, "Estudio") == d
+
+    def test_degrada_sin_explotar_sin_pedidos_detalle(self):
+        # Snapshot viejo (antes de 2026-07-04): `pedidos_detalle` puede faltar.
+        # `total` se ajusta igual (viene de monto_generado); por_mes/por_dia
+        # quedan sin tocar para ese dueño — no revienta.
+        d = agregar(self._filas_mixtas(), DEFAULT_MODELO)
+        for fila in d["por_dueno"]:
+            fila.pop("pedidos_detalle", None)
+        sin_estudio = excluir_dueno(d, "Estudio")
+        assert sin_estudio["resumen"]["total"] == 160000
+        assert {m["mes"]: m["total"] for m in sin_estudio["por_mes"]} == {
+            "2026-06": 100000,  # sin el detalle no se puede aislar — queda el bruto
+            "2026-07": 100000,
+        }
 
 
 class TestCierresPuros:

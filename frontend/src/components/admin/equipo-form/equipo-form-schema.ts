@@ -27,6 +27,7 @@ export function buildSchema(isEdit: boolean) {
     precio_usd: z.coerce.number().min(0).optional().nullable(),
     roi_pct: z.coerce.number().min(0).optional().nullable(),
     valor_reposicion: z.coerce.number().min(0).optional().nullable(),
+    costo_compra: z.coerce.number().min(0).optional().nullable(),
     fecha_compra: z.string().optional().nullable(),
     serie: z.string().optional().nullable(),
     bh_url: z.string().optional().nullable(),

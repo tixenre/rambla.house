@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from database import get_db
 from auth.guards import require_admin
 from rate_limit import limiter, ADMIN_WRITE_LIMIT
-from reportes.liquidacion import liquidar
+from reportes.liquidacion import excluir_dueno, liquidar
 from reportes.reconciliacion import reconciliar
 from reportes.cierres import (
     cerrar_mes,
@@ -75,7 +75,14 @@ def _data_liquidacion(conn, desde: str, hasta: str) -> dict:
     delega en `liquidar_rango`, que usa la foto de cada mes cerrado que el rango
     cubre y calcula en vivo el resto — así un mes cerrado nunca muestra un número
     distinto entre la tarjeta del mes y la vista multi-mes/anual. Fuente única
-    usada por el endpoint JSON/CSV, el PDF y el envío por mail."""
+    usada por el endpoint JSON/CSV, el PDF y el envío por mail.
+
+    Excluye al Estudio (`excluir_dueno`, 2026-08-03): esta página es el reparto
+    real entre dueños de EQUIPO (Pablo/Tincho/Rental); el Estudio es otra
+    economía, todavía en desarrollo — se ve aparte (Caja Estudio / Finanzas),
+    no acá. `liquidar`/`liquidar_rango`/`cerrar_mes` en sí NO se tocan (siguen
+    calculando con el Estudio adentro) — el filtro es solo de presentación,
+    aplicado acá porque este es el único punto de salida de la página."""
     mes = mes_de_rango(desde, hasta)
     if mes:
         snap = snapshot_de(conn, mes)
@@ -90,7 +97,7 @@ def _data_liquidacion(conn, desde: str, hasta: str) -> dict:
         data["mes"] = mes
     data["desde"] = desde
     data["hasta"] = hasta
-    return data
+    return excluir_dueno(data, "Estudio")
 
 
 def _periodo_label(desde: str, hasta: str) -> str:
@@ -181,8 +188,7 @@ def reporte_destinatarios(request: Request):
             return {"destinatarios": _split_emails(row["value"])}
         from services.email import service as email_service
 
-        admin_to = email_service.get_admin_to()
-        return {"destinatarios": [admin_to] if admin_to else []}
+        return {"destinatarios": email_service.get_admin_tos()}
 
 
 class EnviarReporteBody(BaseModel):

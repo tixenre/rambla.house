@@ -66,6 +66,11 @@ function FinanzasPage() {
   const data = tableroQ.data;
   const socios = data?.disponible.socios ?? [];
   const cajas = data?.disponible.cajas ?? [];
+  // Las cajas del Estudio se listan aparte (otra economía). La clasificación es
+  // por `socio`, el mismo puente caja↔cobrador que usa el backend; los totales
+  // los manda él ya sumados (`disponible_por_economia`).
+  const cajasEstudio = cajas.filter((c) => c.socio === "Estudio");
+  const cajasRental = cajas.filter((c) => c.socio !== "Estudio");
 
   return (
     <AdminPage
@@ -77,13 +82,15 @@ function FinanzasPage() {
         {tableroQ.isLoading && <CardGridSkeleton count={4} />}
         {tableroQ.isError && <ErrorState error={tableroQ.error} onRetry={tableroQ.refetch} />}
 
-        {/* 1 · KPIs: disponible · ganancia del mes */}
+        {/* 1 · KPIs. Rental y el Estudio son DOS economías (#1283): no se
+            mezclan en un mismo número. El de Rental es su parte de lo
+            facturado menos sus gastos; el del Estudio va aparte, con su caja. */}
         {data && (
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="card-elevated p-5">
-              <div className="t-eyebrow">Plata disponible</div>
+              <div className="t-eyebrow">Plata disponible · Rental</div>
               <div className="font-mono text-3xl font-semibold tabular-nums text-ink mt-1">
-                {formatMoney(data.disponible.totales.ARS ?? 0, "ARS")}
+                {formatMoney(data.disponible_por_economia.rental, "ARS")}
               </div>
               {(data.disponible.totales.USD ?? 0) !== 0 && (
                 <div className="font-mono text-lg font-semibold tabular-nums text-ink">
@@ -91,12 +98,18 @@ function FinanzasPage() {
                 </div>
               )}
               <div className="text-xs text-muted-foreground mt-1">
-                Suma de las cajas · al {data.disponible.as_of}
+                Sus cajas · al {data.disponible.as_of}
+                {data.disponible_por_economia.estudio !== 0 && (
+                  <>
+                    {" · "}el Estudio tiene{" "}
+                    {formatMoney(data.disponible_por_economia.estudio, "ARS")} aparte
+                  </>
+                )}
               </div>
             </div>
 
             <div className="card-elevated p-5">
-              <div className="t-eyebrow">Ganancia neta · {data.ganancia_mes.mes}</div>
+              <div className="t-eyebrow">Ganancia neta · Rental · {data.ganancia_mes.mes}</div>
               <div
                 className={`font-mono text-3xl font-semibold tabular-nums mt-1 ${
                   data.ganancia_mes.neta >= 0 ? "text-ink" : "text-destructive"
@@ -105,9 +118,20 @@ function FinanzasPage() {
                 {formatARS(data.ganancia_mes.neta)}
               </div>
               <div className="text-xs text-muted-foreground mt-1">
-                Ingresos {formatARS(data.ganancia_mes.ingresos)} − gastos{" "}
+                Su parte de lo facturado {formatARS(data.ganancia_mes.parte_rental)} − gastos{" "}
                 {formatARS(data.ganancia_mes.gastos)}
               </div>
+              {(data.ganancia_mes.comisiones_duenos !== 0 ||
+                data.ganancia_mes.parte_estudio !== 0) && (
+                <div className="text-xs text-muted-foreground mt-1">
+                  Del total facturado ({formatARS(data.ganancia_mes.ingresos)}) se descuentan{" "}
+                  {formatARS(data.ganancia_mes.comisiones_duenos)} de los dueños
+                  {data.ganancia_mes.parte_estudio !== 0 && (
+                    <> y {formatARS(data.ganancia_mes.parte_estudio)} del Estudio</>
+                  )}
+                  .
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -123,14 +147,20 @@ function FinanzasPage() {
                 subtitle="Solo cuenta la plata de pedidos ya cerrados. Lo cobrado de pedidos en curso se reparte cuando cierren."
                 icon={Scale}
               >
-                {pos.sugeridos.length === 0 ? (
+                {/* El estado "Al día" se decide por si ALGUIEN espera cobrar, no
+                    por si hay sugerencias: un socio nunca aparece como pagador
+                    sugerido (su deuda se salda sola), así que puede haber una
+                    parte esperando sin ninguna transferencia sugerible. Ahí las
+                    tarjetas se muestran igual — esconderlas diría "al día"
+                    cuando no lo está. */}
+                {!alguienEspera ? (
                   <EmptyState
                     icon={<Scale className="h-6 w-6" />}
                     title="Al día — nada para repartir hoy"
                     sub={
                       enCursoTotal > 0
                         ? `Hay ${formatARS(enCursoTotal)} cobrados de pedidos que todavía no cerraron — se reparten cuando cierren.`
-                        : "Las 4 partes están en cero entre ellas."
+                        : "Ninguna parte espera cobrar nada."
                     }
                   />
                 ) : (
@@ -145,6 +175,13 @@ function FinanzasPage() {
                         Para que quede repartido. Cada botón registra una transferencia REAL en el
                         libro — usalo cuando la plata se movió de verdad.
                       </p>
+                      {pos.sugeridos.length === 0 && (
+                        <p className="text-sm text-muted-foreground">
+                          Sin transferencias para sugerir: la plata que falta no está hoy en una
+                          caja del negocio (la deuda de un socio se salda sola con su parte, no se
+                          le pide cash).
+                        </p>
+                      )}
                       {pos.sugeridos.map((s, i) => (
                         <div
                           key={i}
@@ -195,7 +232,8 @@ function FinanzasPage() {
           </Section>
         )}
 
-        {/* 4 · Cajas — plata real, editable. */}
+        {/* 4 · Cajas — plata real, editable. Las del Estudio van al final y con
+            su propio total: es otra economía, no plata de Rental. */}
         {data && (
           <Section title="Cajas" subtitle="La plata real del negocio y dónde está." icon={Wallet}>
             <div className="overflow-x-auto rounded-lg border hairline">
@@ -210,24 +248,45 @@ function FinanzasPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {cajas.map((c) => (
+                  {cajasRental.map((c) => (
                     <CajaRow key={c.id} cuenta={c} onChanged={invalidar} />
                   ))}
+                  <tr className="border-t hairline bg-muted/20">
+                    <td className="px-3 py-2 font-medium" colSpan={2}>
+                      Total Rental
+                    </td>
+                    <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">
+                      {formatMoney(data.disponible_por_economia.rental, "ARS")}
+                    </td>
+                    <td />
+                  </tr>
+                  {cajasEstudio.map((c) => (
+                    <CajaRow key={c.id} cuenta={c} onChanged={invalidar} />
+                  ))}
+                  {cajasEstudio.length > 0 && (
+                    <tr className="border-t hairline bg-muted/20">
+                      <td className="px-3 py-2 font-medium" colSpan={2}>
+                        Total Estudio
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">
+                        {formatMoney(data.disponible_por_economia.estudio, "ARS")}
+                      </td>
+                      <td />
+                    </tr>
+                  )}
                 </tbody>
                 <tfoot>
-                  {Object.entries(data.disponible.totales)
-                    .sort(([a], [b]) => (a === "ARS" ? -1 : b === "ARS" ? 1 : a.localeCompare(b)))
-                    .map(([moneda, total]) => (
-                      <tr key={moneda} className="border-t hairline">
-                        <td className="px-3 py-2 font-medium" colSpan={2}>
-                          Total disponible {moneda !== "ARS" ? `(${moneda})` : ""}
-                        </td>
-                        <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">
-                          {formatMoney(total, moneda)}
-                        </td>
-                        <td />
-                      </tr>
-                    ))}
+                  {(data.disponible.totales.USD ?? 0) !== 0 && (
+                    <tr className="border-t hairline">
+                      <td className="px-3 py-2 font-medium" colSpan={2}>
+                        Total disponible (USD)
+                      </td>
+                      <td className="px-3 py-2 text-right font-mono font-semibold tabular-nums">
+                        {formatMoney(data.disponible.totales.USD, "USD")}
+                      </td>
+                      <td />
+                    </tr>
+                  )}
                 </tfoot>
               </table>
             </div>

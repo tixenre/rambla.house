@@ -25,6 +25,33 @@ export function timeToMinutes(time: string): number {
 export const ymd = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 
+/** Zona horaria del negocio. Espejo de `now_ar()` del backend
+ *  (`backend/services/fechas.py`): Rambla razona SIEMPRE en hora de Argentina,
+ *  no en la del dispositivo ni en UTC. */
+export const TZ_AR = "America/Argentina/Buenos_Aires";
+
+const _fmtHoyAR = new Intl.DateTimeFormat("en-CA", {
+  timeZone: TZ_AR,
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+});
+
+/**
+ * HOY en Argentina, "YYYY-MM-DD" — la fecha que el dueño ve en su reloj.
+ *
+ * **Fuente única del "hoy" del front.** Antes cada pantalla hacía
+ * `new Date().toISOString().slice(0, 10)`, que devuelve la fecha **UTC**: de
+ * las 21:00 en adelante (hora argentina) ya proponía la de MAÑANA. Bug real
+ * 2026-08-02: un pago registrado a las 21:54 quedó fechado el 3 de agosto, y
+ * en el borde de mes se iba al mes siguiente (mueve la plata de reporte).
+ *
+ * Pinnea Argentina en vez de usar la hora local del dispositivo: el negocio
+ * factura en hora argentina aunque el que cargue esté de viaje o tenga el
+ * reloj mal configurado — mismo criterio que `now_ar()` en el backend.
+ */
+export const hoyAR = () => _fmtHoyAR.format(new Date());
+
 /**
  * Fecha local + "HH:MM" → string ISO-local `YYYY-MM-DDTHH:MM:00` (sin pasar a
  * UTC). Es el formato que esperan los endpoints de pedidos/cotización para

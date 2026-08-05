@@ -102,6 +102,7 @@ export function EquipoFormDialog({
       precio_usd: initial?.precio_usd ?? undefined,
       roi_pct: initial?.roi_pct ?? (initial ? undefined : roiDefault),
       valor_reposicion: initial?.valor_reposicion ?? undefined,
+      costo_compra: initial?.costo_compra ?? undefined,
       fecha_compra: initial?.fecha_compra ?? "",
       // Default "N/A" en CREATE — equipos sin serie real comparten este
       // placeholder y el preflight de duplicados lo ignora.

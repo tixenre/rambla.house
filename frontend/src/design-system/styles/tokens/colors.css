@@ -13,6 +13,15 @@
   --color-amber-soft: color-mix(in oklch, #fab428 18%, transparent);
   --color-amber-hot: #ffcc55; /* stripe alternado en amber-tape */
 
+  /* ── Heatmap de actividad (calendario estilo GitHub/Apple Fitness) ──────
+     4 tiers derivados de --color-amber por color-mix (mismo patrón que
+     amber-soft/-hot arriba) — no un hex nuevo. tier-0 (sin actividad) usa
+     --color-muted, ya declarado más abajo. Ver CalendarioActividad.tsx. */
+  --color-heat-1: color-mix(in oklch, var(--color-amber) 25%, var(--color-surface));
+  --color-heat-2: color-mix(in oklch, var(--color-amber) 50%, var(--color-surface));
+  --color-heat-3: color-mix(in oklch, var(--color-amber) 75%, var(--color-surface));
+  --color-heat-4: var(--color-amber);
+
   /* ── Brand · estudio ───────────────────────────────────── */
   --color-estudio: #e9552f; /* Pantone 172 C — identidad del Estudio */
   --color-estudio-soft: color-mix(in oklch, #e9552f 18%, transparent);

@@ -34,6 +34,7 @@ import { CountBadge } from "@/design-system/ui/count-badge";
 import { adminApi, ESTADO_LABEL, type Pedido } from "@/lib/admin/api";
 import { etiquetaPedido, nextStep, type EstadoPedido } from "@/lib/pedido-estados";
 import { combinarTotales, etiquetaTurno } from "@/lib/pedido-combinado";
+import { hoyAR } from "@/lib/rental-dates";
 import { esPedidoEstudio } from "@/lib/tipos-pedido";
 import { EquipoThumb } from "@/components/admin/pedido/EquipoThumb";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
@@ -55,7 +56,7 @@ export const Route = createLazyFileRoute("/admin/pedidos/")({
 
 // ── Helpers de fecha / cobranza ──────────────────────────────────────────────
 
-const todayYmd = () => new Date().toISOString().slice(0, 10);
+const todayYmd = hoyAR;
 const esHoy = (s: string | null) => !!s && s.slice(0, 10) === todayYmd();
 
 const DIAS = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];

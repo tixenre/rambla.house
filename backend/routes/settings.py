@@ -254,6 +254,7 @@ CLEARABLE_SETTINGS_KEYS = {
     "disclaimer_antelacion_texto",       # Vaciarlo vuelve al texto default.
     "disclaimer_horarios_finde_texto",
     "whatsapp_admin_numeros",  # Vaciarlo = no se le avisa a nadie del equipo por WhatsApp.
+    "email_admin_to",  # Vaciarlo cae al default de ENV/código (services/email/service.py).
     # Vaciar la estrategia de un evento = volver al default que declara el registro.
     *(_estrategia.setting_de(_k) for _k in _EVENTOS_COMUNICACION),
 }
@@ -444,6 +445,29 @@ def update_setting(key: str, payload: dict, request: Request):
                 ". Escribilos con código de país (ej. +5492235550000).",
             )
         value = ", ".join(numeros)
+    if key == "email_admin_to":
+        # Mismo criterio que whatsapp_admin_numeros: se valida al GUARDAR (no
+        # recién al enviar), normalizado por el embudo único de mail
+        # (services/email/service.validar_email).
+        from services.email.service import validar_email
+
+        direcciones, invalidas = [], []
+        for parte in value.split(","):
+            crudo = parte.strip()
+            if not crudo:
+                continue
+            direccion = validar_email(crudo)
+            if direccion is None:
+                invalidas.append(crudo)
+            elif direccion.lower() not in [d.lower() for d in direcciones]:
+                direcciones.append(direccion)
+        if invalidas:
+            raise HTTPException(
+                400,
+                "No pude leer estas direcciones: " + ", ".join(invalidas) +
+                ". Revisá que estén bien escritas.",
+            )
+        value = ", ".join(direcciones)
     if key == "ga4_measurement_id":
         # GA4 IDs son case-insensitive pero conviven mejor en mayúscula.
         value = value.upper()

@@ -18,6 +18,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/design-syste
 import { SegmentedControl } from "@/design-system/ui/segmented-control";
 import { adminApi, METODOS_PAGO, type SugeridoRendicion } from "@/lib/admin/api";
 import { formatARS } from "@/lib/format";
+import { hoyAR } from "@/lib/rental-dates";
 
 export function SaldarDialog({
   sugerido,
@@ -30,14 +31,14 @@ export function SaldarDialog({
 }) {
   const [monto, setMonto] = useState(String(sugerido.monto));
   const [metodo, setMetodo] = useState<string>("transferencia");
-  const [fecha, setFecha] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [fecha, setFecha] = useState<string>(hoyAR);
   const [nota, setNota] = useState("");
 
   // El `rendicion_mes` del movimiento sale de la FECHA en que la plata se movió,
   // no del mes que el admin esté mirando: la sugerencia es acumulada, así que
   // "qué mes estoy viendo" no dice nada sobre cuándo se hizo la transferencia.
   // Así el movimiento aparece en el registro del mes correcto.
-  const mesDelMovimiento = (fecha || new Date().toISOString().slice(0, 10)).slice(0, 7);
+  const mesDelMovimiento = (fecha || hoyAR()).slice(0, 7);
 
   const saldar = useMutation({
     mutationFn: () =>

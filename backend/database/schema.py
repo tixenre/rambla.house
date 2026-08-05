@@ -177,6 +177,13 @@ def _init_db_schema(conn):
     # DROP viven en la migración d5a8f2c4b6e9 (corre una sola vez).
     conn.execute("ALTER TABLE equipos ADD COLUMN IF NOT EXISTS brand_id INTEGER REFERENCES marcas(id)")
 
+    # Migration: costo de COMPRA del equipo (no confundir con `valor_reposicion`,
+    # que es para seguros/remitos). Nullable a propósito — NULL = todavía no
+    # cargado (distinto de $0); habilita el ranking "rentabilidad neta" de
+    # Estadísticas (ingreso − costo), que solo cuenta los equipos con el dato
+    # cargado. Se carga a mano, sin fuente que lo derive.
+    conn.execute("ALTER TABLE equipos ADD COLUMN IF NOT EXISTS costo_compra INTEGER")
+
     conn.execute("""
         CREATE TABLE IF NOT EXISTS clientes (
             id                SERIAL PRIMARY KEY,
@@ -2686,5 +2693,17 @@ def _init_db_schema(conn):
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_pedidos_principal ON alquileres(pedido_principal_id)"
     )
+
+    # ── Serie de IPC (INDEC) para ajustar Estadísticas por inflación ────────
+    # Cache local de la API pública de INDEC; se refresca 1×/día desde el
+    # scheduler in-process (jobs/ipc.py). `mes` es 'YYYY-MM'. Esquema en dos
+    # capas (MEMORIA 2026-06-03): también en la migración ipcseries.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ipc_series (
+            mes           VARCHAR(7) PRIMARY KEY,
+            indice        NUMERIC(14,4) NOT NULL,
+            actualizado_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
 
     conn.commit()

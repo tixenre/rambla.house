@@ -118,6 +118,10 @@ export type Equipo = {
   precio_usd: number | null;
   roi_pct: number | null;
   valor_reposicion: number | null;
+  /** Costo de compra del equipo, cargado a mano (ARS) — distinto de
+   *  `valor_reposicion` (estimación para seguros, en USD). Alimenta el
+   *  ranking "rentabilidad neta" de Estadísticas. null = no cargado. */
+  costo_compra: number | null;
   foto_url: string | null;
   fecha_compra: string | null;
   serie: string | null;
@@ -645,7 +649,22 @@ export interface TableroData {
   mes: string;
   cierre: { cerrado: boolean; cerrado_por: string | null; cerrado_at: string | null };
   disponible: SaldosData;
-  ganancia_mes: { mes: string; ingresos: number; gastos: number; neta: number };
+  ganancia_mes: {
+    mes: string;
+    /** Devengado TOTAL del mes (Rental + dueños + Estudio). NO es el ingreso de
+     *  Rental — para eso está `parte_rental`. */
+    ingresos: number;
+    /** Lo que de lo facturado es de Rental — el ingreso real contra el que se
+     *  leen los gastos (`neta = parte_rental − gastos`). */
+    parte_rental: number;
+    comisiones_duenos: number;
+    /** La parte del Estudio: otra economía, ni ingreso ni costo de Rental. */
+    parte_estudio: number;
+    gastos: number;
+    neta: number;
+  };
+  /** El disponible en ARS partido por economía (Rental vs. Estudio). */
+  disponible_por_economia: { rental: number; estudio: number };
 }
 export interface RendicionPersona {
   persona: string;
@@ -1046,22 +1065,67 @@ export type EstadisticasData = {
     total_pedidos: number;
     total_clientes: number;
     total_ars: number;
+    /** "Pesos de hoy" — cada pedido deflactado por SU PROPIO mes antes de
+     *  sumar (`services/ipc.py`), no el nominal multiplicado por un factor. */
+    total_ars_ajustado: number;
     desde: string | null;
     hasta: string | null;
   };
-  por_mes: { mes: string; pedidos: number; total_ars: number }[];
-  crecimiento: { mes: string; total_ars: number; crecimiento_pct: number }[];
-  top_equipos: { equipo: string; total_ars: number; veces: number }[];
-  top_clientes: { cliente: string; total_ars: number; pedidos: number }[];
-  clientes_recurrentes: { cliente: string; veces_alquiladas: number; total_ars: number }[];
+  por_mes: { mes: string; pedidos: number; total_ars: number; total_ars_ajustado: number }[];
+  crecimiento: {
+    mes: string;
+    total_ars: number;
+    total_ars_ajustado: number;
+    crecimiento_pct: number;
+    crecimiento_pct_ajustado: number;
+  }[];
+  top_equipos: {
+    equipo: string;
+    total_ars: number;
+    total_ars_ajustado: number;
+    veces: number;
+    /** Costo de compra cargado a mano (`equipos.costo_compra`) — null si
+     *  todavía no se cargó para este equipo. */
+    costo_compra: number | null;
+  }[];
+  /** Mismo universo que `top_equipos`, filtrado a los que YA tienen
+   *  `costo_compra` cargado y ordenado por rentabilidad neta (ingreso −
+   *  costo) en vez de ingreso bruto — un equipo caro puede facturar más y
+   *  rentabilizar menos que uno barato. Sin variante ajustada por IPC a
+   *  propósito: `costo_compra` es un desembolso puntual, no una serie
+   *  mensual — el toggle no aplica acá. */
+  top_equipos_rentabilidad: {
+    equipo: string;
+    total_ars: number;
+    veces: number;
+    costo_compra: number;
+    rentabilidad_neta: number;
+  }[];
+  top_clientes: {
+    cliente: string;
+    total_ars: number;
+    total_ars_ajustado: number;
+    pedidos: number;
+  }[];
+  clientes_recurrentes: {
+    cliente: string;
+    veces_alquiladas: number;
+    total_ars: number;
+    total_ars_ajustado: number;
+  }[];
   mejor_peor_mes: {
     mejor_mes: string | null;
     mejor_total: number | null;
+    mejor_total_ajustado: number | null;
     peor_mes: string | null;
     peor_total: number | null;
+    peor_total_ajustado: number | null;
   };
-  por_dueno: { dueno: string; total_ars: number; items: number }[];
+  por_dueno: { dueno: string; total_ars: number; total_ars_ajustado: number; items: number }[];
   favoritos_equipo?: { equipo: string; total_favoritos: number; clientes_unicos: number }[];
+  /** Gastos internos (`backend/contabilidad`) agrupados por categoría —
+   *  histórico completo, no solo Mantenimiento/Servicios. Más gastado primero. */
+  gastos_por_categoria: { categoria: string; monto: number; monto_ajustado: number }[];
   /** Economía separada del Estudio (#1283 Fase 7) — turnos reales +
    *  meses de slot fijo, aparte de las tarjetas de rental de arriba. */
   estudio: {
@@ -1070,6 +1134,7 @@ export type EstadisticasData = {
       total_meses_slot_fijo: number;
       total_clientes: number;
       total_ars: number;
+      total_ars_ajustado: number;
       horas_vendidas: number;
     };
     por_mes: {
@@ -1077,9 +1142,41 @@ export type EstadisticasData = {
       turnos: number;
       meses_slot_fijo: number;
       total_ars: number;
+      total_ars_ajustado: number;
       horas_vendidas: number;
     }[];
   };
+  /** Metadata del ajuste por IPC — solo para el label del toggle ("pesos
+   *  ajustados a agosto 2026"), nunca para calcular nada en el front. */
+  ipc: { mes_referencia: string | null };
+};
+
+/** Heatmap de actividad estilo GitHub/Apple Fitness — un día por celda, un
+ *  año por grilla. `pedidos_activos` = cuántos pedidos de rental (no Estudio/
+ *  Talleres) tenían equipo AFUERA ese día (fecha_desde <= día <= fecha_hasta),
+ *  no solo el día de retiro. `tier` (0-4) ya viene bucketizado por el backend
+ *  con los percentiles del propio año (`routes/estadisticas.py`) — el front
+ *  solo mapea tier → color, no recalcula la escala. */
+export type ActividadCalendarioData = {
+  /** `null` en modo `todos` (el view apilado no tiene un único año). */
+  anio: number | null;
+  anios_disponibles: number[];
+  /** En modo `todos` abarca TODOS los años de `anios_disponibles` — el front
+   *  agrupa por año (prefijo de `dia`) para apilar una grilla por año. Los
+   *  tiers vienen bucketizados POR AÑO por separado, incluso acá. */
+  dias: { dia: string; pedidos_activos: number; tier: 0 | 1 | 2 | 3 | 4 }[];
+};
+
+/** Distribución de actividad por período cíclico ("¿todos los lunes sumados
+ *  contra todos los martes?") — sobre TODO el historial, sin scoping por año.
+ *  Complementa `ActividadCalendarioData` (fechas concretas) respondiendo "hay
+ *  un patrón sistemático de qué día/mes suele ser más fuerte". Suma cruda de
+ *  `pedidos_activos`, sin normalizar por cantidad de meses que aportan a cada
+ *  día del mes (el 31 solo lo tienen 7 meses). */
+export type ActividadDistribucionData = {
+  dia_semana: { label: string; total: number }[];
+  dia_mes: { dia: number; total: number }[];
+  mes: { label: string; total: number }[];
 };
 
 export type Cliente = {

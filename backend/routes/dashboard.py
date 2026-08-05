@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query
 from database import get_db, now_ar, row_to_dict
 from auth.guards import require_admin
 from pedidos_vinculados import SIN_PRINCIPAL_SQL
+from reservas.estados import ESTADOS_EN_CALENDARIO
 from tipos_pedido import TIPOS_SIN_RETIRO_SQL
 
 router = APIRouter()
@@ -154,7 +155,7 @@ def get_calendario(
             FROM alquileres p
             JOIN alquiler_items pi ON pi.pedido_id = p.id AND pi.turno_estudio_id IS NULL
             JOIN equipos e ON e.id = pi.equipo_id
-            WHERE p.estado IN ('solicitado','confirmado','retirado','devuelto','finalizado')
+            WHERE p.estado IN {ESTADOS_EN_CALENDARIO}
               AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
               AND p.fecha_hasta >= %s AND p.fecha_desde <= %s
             GROUP BY p.id, p.numero_pedido, p.cliente_nombre, p.estado, p.tipo,
@@ -166,7 +167,7 @@ def get_calendario(
         # `tipo='estudio'` sintético (mismo criterio que `eventos_estudio` en
         # `estadisticas.py`) para que el front lo coloree vía
         # `estadoClaseEstudio` como cualquier turno del Estudio.
-        rows_turnos = conn.execute("""
+        rows_turnos = conn.execute(f"""
             SELECT a.id, a.numero_pedido, a.cliente_nombre, a.estado,
                    'estudio' AS tipo, ate.fecha_desde, ate.fecha_hasta,
                    COALESCE((SELECT SUM(subtotal) FROM alquiler_items
@@ -176,7 +177,7 @@ def get_calendario(
                     WHERE ai.turno_estudio_id = ate.id) AS equipos
             FROM alquiler_turnos_estudio ate
             JOIN alquileres a ON a.id = ate.pedido_id
-            WHERE a.estado IN ('solicitado','confirmado','retirado','devuelto','finalizado')
+            WHERE a.estado IN {ESTADOS_EN_CALENDARIO}
               AND ate.fecha_hasta >= %s AND ate.fecha_desde <= %s
             ORDER BY ate.fecha_desde
         """, (desde, hasta)).fetchall()

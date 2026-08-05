@@ -89,7 +89,7 @@ def test_el_despacho_usa_la_estrategia_elegida_no_la_del_registro(monkeypatch):
     el WhatsApp no sale."""
     sink = []
     _mock_mail(monkeypatch, sink)
-    monkeypatch.setattr(d, "get_admin_to", lambda: "")
+    monkeypatch.setattr(d, "get_admin_tos", lambda: [])
     wa_llamado = []
     monkeypatch.setattr(
         wa, "enviar_evento_pedido", lambda *a, **k: wa_llamado.append(a) or {"ok": True, "wamid": "W"}
@@ -104,7 +104,7 @@ def test_el_despacho_usa_la_estrategia_elegida_no_la_del_registro(monkeypatch):
 def test_fallback_whatsapp_entrego_no_manda_mail_al_cliente_pero_si_al_admin(monkeypatch):
     sink = []
     _mock_mail(monkeypatch, sink)
-    monkeypatch.setattr(d, "get_admin_to", lambda: "admin@x.com")
+    monkeypatch.setattr(d, "get_admin_tos", lambda: ["admin@x.com"])
     monkeypatch.setattr(wa, "enviar_evento_pedido", lambda *a, **k: {"ok": True, "wamid": "W"})
     res = d.notificar_pedido("pedido_creado", {"id": 1, "cliente_id": 2, "cliente_email": "c@x.com"}, {})
     # WhatsApp llegó → NO se manda el mail al cliente; el admin SÍ (fuera del plan A/B).
@@ -117,7 +117,7 @@ def test_fallback_whatsapp_entrego_no_manda_mail_al_cliente_pero_si_al_admin(mon
 def test_fallback_whatsapp_no_disponible_cae_a_mail_del_cliente(monkeypatch):
     sink = []
     _mock_mail(monkeypatch, sink)
-    monkeypatch.setattr(d, "get_admin_to", lambda: "admin@x.com")
+    monkeypatch.setattr(d, "get_admin_tos", lambda: ["admin@x.com"])
     monkeypatch.setattr(wa, "enviar_evento_pedido", lambda *a, **k: {"ok": True, "skipped": True, "reason": "sin_opt_in"})
     res = d.notificar_pedido("pedido_creado", {"id": 1, "cliente_id": 2, "cliente_email": "c@x.com"}, {})
     # WhatsApp no llegó → mail al cliente (plan B) + mail al admin.
@@ -129,7 +129,7 @@ def test_fallback_whatsapp_no_disponible_cae_a_mail_del_cliente(monkeypatch):
 def test_fallback_whatsapp_duplicado_cuenta_como_entregado(monkeypatch):
     sink = []
     _mock_mail(monkeypatch, sink)
-    monkeypatch.setattr(d, "get_admin_to", lambda: "admin@x.com")
+    monkeypatch.setattr(d, "get_admin_tos", lambda: ["admin@x.com"])
     monkeypatch.setattr(wa, "enviar_evento_pedido", lambda *a, **k: {"ok": True, "skipped": True, "reason": "duplicado"})
     res = d.notificar_pedido("pedido_creado", {"id": 1, "cliente_id": 2, "cliente_email": "c@x.com"}, {})
     # 'duplicado' = ya se había mandado ese WhatsApp → NO se cae al mail del cliente.
@@ -150,7 +150,7 @@ def test_confirmado_manda_whatsapp_y_mail_con_ics(monkeypatch):
     sink = []
     _mock_mail(monkeypatch, sink)
     monkeypatch.setattr(d, "ics_adjunto_pedido", lambda p: ["ICS"])
-    monkeypatch.setattr(d, "get_admin_to", lambda: "admin@x.com")  # confirmación NO tiene admin
+    monkeypatch.setattr(d, "get_admin_tos", lambda: ["admin@x.com"])  # confirmación NO tiene admin
     monkeypatch.setattr(wa, "enviar_evento_pedido", lambda *a, **k: {"ok": True, "wamid": "W"})
     res = d.notificar_pedido("pedido_confirmado", {"id": 1, "cliente_id": 2, "cliente_email": "c@x.com"}, {})
     assert res["whatsapp"]["wamid"] == "W"  # WhatsApp salió
@@ -186,7 +186,7 @@ def test_solo_mail_no_toca_whatsapp(monkeypatch):
 def test_sin_email_cliente_igual_avisa_al_admin(monkeypatch):
     sink = []
     _mock_mail(monkeypatch, sink)
-    monkeypatch.setattr(d, "get_admin_to", lambda: "admin@x.com")
+    monkeypatch.setattr(d, "get_admin_tos", lambda: ["admin@x.com"])
     # WhatsApp no disponible y el cliente no tiene email → solo el admin recibe.
     monkeypatch.setattr(wa, "enviar_evento_pedido", lambda *a, **k: {"ok": True, "skipped": True, "reason": "sin_opt_in"})
     res = d.notificar_pedido("pedido_creado", {"id": 1, "cliente_id": 2}, {})  # sin cliente_email
@@ -198,7 +198,7 @@ def test_sin_email_cliente_igual_avisa_al_admin(monkeypatch):
 def test_background_encola_una_sola_tarea(monkeypatch):
     sink = []
     _mock_mail(monkeypatch, sink)
-    monkeypatch.setattr(d, "get_admin_to", lambda: "admin@x.com")
+    monkeypatch.setattr(d, "get_admin_tos", lambda: ["admin@x.com"])
     monkeypatch.setattr(wa, "enviar_evento_pedido", lambda *a, **k: {"ok": True, "wamid": "W"})
     bg = _FakeBG()
     res = d.notificar_pedido(
@@ -216,7 +216,7 @@ def test_ctx_none_se_arma_solo_con_pedido_email_context(monkeypatch):
     llamado = []
     monkeypatch.setattr(d, "pedido_email_context", lambda p: llamado.append(p.get("id")) or {"built": True})
     _mock_mail(monkeypatch)
-    monkeypatch.setattr(d, "get_admin_to", lambda: "")
+    monkeypatch.setattr(d, "get_admin_tos", lambda: [])
     monkeypatch.setattr(wa, "enviar_evento_pedido", lambda *a, **k: {"ok": True, "wamid": "W"})
     d.notificar_pedido("pedido_creado", {"id": 7, "cliente_id": 2, "cliente_email": "c@x.com"})  # ctx omitido
     assert llamado == [7]

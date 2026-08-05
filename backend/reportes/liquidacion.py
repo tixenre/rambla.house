@@ -239,6 +239,80 @@ def agregar(filas: list[dict], modelo: dict) -> dict:
     }
 
 
+def excluir_dueno(data: dict, dueno: str) -> dict:
+    """PURA. Copia de un reporte (la forma de `liquidar()`/`combinar_meses()`/
+    una foto de `snapshot_de()` — las tres comparten forma) SIN la
+    contribución de `dueno`: resta lo que generó de `resumen.total`/`por_mes`/
+    `por_dia` (derivado de `pedidos_detalle`, que retiene fecha+monto por
+    pedido de ESE dueño), le saca su fila a `por_dueno` + `beneficiarios`, y
+    borra su clave de los TRES `por_beneficiario` (el de `resumen` y el de
+    cada entrada de `por_mes`/`por_dia`) — no alcanza con sacarlo de la lista
+    `beneficiarios`: un consumidor que iterara las claves del dict a mano
+    (en vez de la lista) lo seguiría viendo. No vuelve a la DB — sirve igual
+    sobre un cálculo en vivo que sobre una foto congelada.
+
+    Nace de separar la Liquidación del Estudio y la de Rental (2026-08-03,
+    pedido del dueño): el Estudio se MODELA como "otro dueño que se queda el
+    100% de lo suyo" (mismo mecanismo que usa Rental para sus propios equipos,
+    `comisiones.DEFAULT_MODELO`) solo para que el reparto lo calcule sin código
+    aparte — pero conceptualmente no es un dueño de equipo que reparte
+    comisión con Pablo/Tincho, es otra unidad de negocio, todavía en
+    desarrollo. La página de Liquidación (el reparto real entre dueños de
+    equipo) lo excluye vía esta función, aplicada SOLO en
+    `routes/reportes.py::_data_liquidacion`; `posiciones()`/`cerrar_mes` NO
+    la usan — siguen viendo al Estudio (necesitan su devengado completo para
+    la posición acumulada / la foto congelada íntegra).
+
+    `resumen.pedidos` NO se ajusta a propósito: es un hecho del negocio
+    ("cuántos alquileres se cobraron"), no de atribución por dueño — un
+    pedido mixto (equipos de Rental + turno del Estudio) sigue contando 1 vez
+    para ese total, esté o no el Estudio en el reparto. Snapshots de antes de
+    `pedidos_detalle` (2026-07-04, campo opcional) no tienen el detalle por
+    pedido: en ese caso `resumen.total` sí queda bien ajustado (viene de
+    `monto_generado`), pero `por_mes`/`por_dia` de esos meses viejos no
+    — imprecisión histórica acotada, no vale recalcular el dato viejo para
+    corregirla."""
+    entrada = next((d for d in data.get("por_dueno", []) if d["dueno"] == dueno), None)
+    if entrada is None:
+        return data
+
+    por_mes_dueno: dict[str, int] = defaultdict(int)
+    por_dia_dueno: dict[str, int] = defaultdict(int)
+    for p in entrada.get("pedidos_detalle") or []:
+        fecha = str(p["fecha"])
+        por_mes_dueno[fecha[:7]] += p["monto"]
+        por_dia_dueno[fecha[:10]] += p["monto"]
+
+    def _sin_beneficiario(pb: dict) -> dict:
+        return {k: v for k, v in pb.items() if k != dueno}
+
+    nuevo = dict(data)
+    nuevo["resumen"] = {
+        **data["resumen"],
+        "total": data["resumen"]["total"] - entrada["monto_generado"],
+        "por_beneficiario": _sin_beneficiario(data["resumen"]["por_beneficiario"]),
+    }
+    nuevo["por_mes"] = [
+        {
+            **m,
+            "total": m["total"] - por_mes_dueno.get(m["mes"], 0),
+            "por_beneficiario": _sin_beneficiario(m["por_beneficiario"]),
+        }
+        for m in data.get("por_mes", [])
+    ]
+    nuevo["por_dia"] = [
+        {
+            **d,
+            "total": d["total"] - por_dia_dueno.get(d["dia"], 0),
+            "por_beneficiario": _sin_beneficiario(d["por_beneficiario"]),
+        }
+        for d in data.get("por_dia", [])
+    ]
+    nuevo["por_dueno"] = [d for d in data.get("por_dueno", []) if d["dueno"] != dueno]
+    nuevo["beneficiarios"] = [b for b in data.get("beneficiarios", []) if b != dueno]
+    return nuevo
+
+
 def combinar_meses(meses_data: list[dict]) -> dict:
     """Combina N reportes por-mes (cada uno con la forma de `liquidar`: `resumen`/
     `por_mes`/`por_dia`/`por_dueno`/`modelo`/`beneficiarios`) en un solo reporte

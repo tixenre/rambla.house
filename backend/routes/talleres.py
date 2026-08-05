@@ -29,7 +29,7 @@ from dataio.slug import slugify, slug_unico
 from routes.alquileres import _next_numero_pedido
 from services.email import send_email
 from services.fechas import fmt_fecha_es as _fmt_fecha_es
-from services.email.service import get_admin_to
+from services.email.service import get_admin_tos
 from services.media.models import DeriveSpec
 from services.media.errors import MediaError
 from services.media.service import store_upload, store_raw_document
@@ -611,7 +611,7 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
 
     nombre_pila = nombre.split()[0]
     fecha_str = now_ar().strftime("%-d de %B de %Y, %H:%M hs")
-    admin_to = edicion_row["notif_email"] or get_admin_to()
+    admin_tos = [edicion_row["notif_email"]] if edicion_row["notif_email"] else get_admin_tos()
 
     ctx_admin = {
         "taller_nombre": edicion_row["nombre"],
@@ -637,8 +637,8 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
         "pago_banco": edicion_row["pago_banco"],
     }
 
-    if admin_to:
-        send_email("taller_inscripcion_admin", admin_to, ctx_admin)
+    for to in admin_tos:
+        send_email("taller_inscripcion_admin", to, ctx_admin)
     send_email("taller_inscripcion_cliente", email, ctx_cliente)
 
     cupos_disponibles = max(0, locked["cupos_total"] - locked["cupos_confirmados"] - (0 if en_lista else 1))
@@ -811,7 +811,7 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
         "pago_cbu": edicion_row["pago_cbu"],
         "pago_banco": edicion_row["pago_banco"],
     }
-    admin_to = edicion_row["notif_email"] or get_admin_to()
+    admin_tos = [edicion_row["notif_email"]] if edicion_row["notif_email"] else get_admin_tos()
     ctx_admin = {
         "taller_nombre": edicion_row["taller_nombre"],
         "nombre": ins["nombre"],
@@ -822,8 +822,8 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
         "en_lista_espera": False,
         "fecha": now_ar().strftime("%-d de %B de %Y, %H:%M hs"),
     }
-    if admin_to:
-        send_email("taller_inscripcion_admin", admin_to, ctx_admin)
+    for to in admin_tos:
+        send_email("taller_inscripcion_admin", to, ctx_admin)
     send_email("taller_inscripcion_cliente", ins["email"], ctx_cliente)
 
     return {"ok": True}

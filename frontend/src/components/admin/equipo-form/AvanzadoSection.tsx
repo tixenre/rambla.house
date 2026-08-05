@@ -51,9 +51,16 @@ export function AvanzadoSection({
           </Field>
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <Field label="Valor reposición (USD)">
             <Input type="number" step="0.01" {...form.register("valor_reposicion")} />
+          </Field>
+          {/* ARS, no USD como valor_reposicion — lo que costó COMPRARLO, para
+              el ranking "rentabilidad neta" (ingreso − costo) de Estadísticas.
+              Nullable a propósito: un equipo sin este dato sigue en el resto
+              de la pantalla, solo queda afuera de ese ranking puntual. */}
+          <Field label="Costo de compra (ARS)">
+            <Input type="number" step="1" {...form.register("costo_compra")} />
           </Field>
           <Field label="Fecha de compra">
             <MonthYearPicker

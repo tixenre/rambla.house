@@ -3,10 +3,14 @@ routes/estadisticas.py — Análisis y estadísticas de alquileres.
 Lee directo de pedidos + alquiler_items + equipos. Sin tablas intermedias.
 """
 
+import statistics
+
 from fastapi import APIRouter, Request
-from database import get_db, row_to_dict
+from database import get_db, now_ar, row_to_dict
 from auth.guards import require_admin
 from tipos_pedido import TIPOS_DERIVADOS_SQL, TIPOS_ESTUDIO_SQL
+from contabilidad.queries.movimientos import gastos_por_categoria
+from services.ipc import IPC_FACTOR_CTE, mes_referencia
 
 router = APIRouter()
 
@@ -101,12 +105,40 @@ def get_estadisticas(request: Request):
         return compute_estadisticas(conn)
 
 
+@router.get("/estadisticas/actividad-calendario")
+def get_actividad_calendario(request: Request, anio: int | None = None, todos: bool = False):
+    require_admin(request)
+    with get_db() as conn:
+        return compute_actividad_calendario(conn, anio, todos)
+
+
+@router.get("/estadisticas/actividad-distribucion")
+def get_actividad_distribucion(request: Request):
+    require_admin(request)
+    with get_db() as conn:
+        return compute_actividad_distribucion(conn)
+
+
 def compute_estadisticas(conn) -> dict:
     """Calcula el dict completo de estadísticas a partir de una conexión.
 
     Fuente única (barra de calidad: modularidad) — la usan tanto el endpoint
     `get_estadisticas` (transporte HTTP) como el PDF de Reportes (sección
     'Resumen general'). No abre ni cierra la conexión: el caller la administra.
+
+    **Toggle de IPC — "pesos ajustados" (`services/ipc.py`):** cada agregado de
+    plata que suma por PEDIDO/ÍTEM/MOVIMIENTO trae su par `..._ajustado`, con el
+    ajuste hecho EN ORIGEN (cada fila deflactada por el mes en que ocurrió, ANTES
+    de sumar/agrupar) vía `IPC_FACTOR_CTE` — nunca un factor único aplicado
+    post-suma, que sería matemáticamente incorrecto cuando el total mezcla varios
+    meses. Alcance deliberado: el CONJUNTO de filas de cada ranking (qué entra en
+    el top 15/10) se sigue eligiendo por el monto NOMINAL, igual que hoy — el
+    toggle cambia qué NÚMERO se muestra para cada fila ya elegida, no cuáles
+    filas se eligen (evitar que el set del ranking "salte" según el modo).
+    `top_equipos_rentabilidad` (ingreso − costo de compra) queda FUERA de este
+    ajuste: `costo_compra` es un desembolso puntual, no una serie mensual —
+    ajustarlo requeriría además la fecha de compra del equipo, una pregunta
+    aparte de "ajustar los ingresos por inflación".
     """
     # ── Totales generales (SOLO pedidos `finalizado` — devengado + cerrado) ───
     # Criterio explícito del dueño (2026-07-04): Estadísticas cuenta negocio YA
@@ -126,27 +158,33 @@ def compute_estadisticas(conn) -> dict:
     # históricos de estas tarjetas cambian (bajan) respecto de antes de cada
     # fase — es la separación intencional, no una regresión.
     totales = conn.execute(f"""
-        WITH {_TURNO_NETO_CTE}
+        WITH {_TURNO_NETO_CTE}, {IPC_FACTOR_CTE}
         SELECT
             COUNT(*)                       AS total_pedidos,
             COUNT(DISTINCT p.cliente_id)   AS total_clientes,
             SUM(p.monto_total - COALESCE(tn.monto_turnos, 0)) AS total_ars,
+            SUM((p.monto_total - COALESCE(tn.monto_turnos, 0)) * COALESCE(ipf.factor, 1))
+                                            AS total_ars_ajustado,
             MIN(p.fecha_desde)             AS desde,
             MAX(p.fecha_desde)             AS hasta
         FROM alquileres p
         LEFT JOIN turno_neto tn ON tn.pedido_id = p.id
+        LEFT JOIN ipc_factor ipf ON ipf.mes = to_char(p.fecha_desde, 'YYYY-MM')
         WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
     """).fetchone()
 
     # ── Por mes ───────────────────────────────────────────────────────────────
     por_mes = conn.execute(f"""
-        WITH {_TURNO_NETO_CTE}
+        WITH {_TURNO_NETO_CTE}, {IPC_FACTOR_CTE}
         SELECT
             to_char(p.fecha_desde, 'YYYY-MM')    AS mes,
             COUNT(*)                       AS pedidos,
-            SUM(p.monto_total - COALESCE(tn.monto_turnos, 0)) AS total_ars
+            SUM(p.monto_total - COALESCE(tn.monto_turnos, 0)) AS total_ars,
+            SUM((p.monto_total - COALESCE(tn.monto_turnos, 0)) * COALESCE(ipf.factor, 1))
+                                            AS total_ars_ajustado
         FROM alquileres p
         LEFT JOIN turno_neto tn ON tn.pedido_id = p.id
+        LEFT JOIN ipc_factor ipf ON ipf.mes = to_char(p.fecha_desde, 'YYYY-MM')
         WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
         GROUP BY to_char(p.fecha_desde, 'YYYY-MM')
         ORDER BY to_char(p.fecha_desde, 'YYYY-MM') DESC
@@ -164,33 +202,68 @@ def compute_estadisticas(conn) -> dict:
     # que ya usa `routes/dashboard.py::equipos_afuera` para lo mismo. Los
     # SUELTOS de un turno embebido (equipos reales) NO se excluyen — su uso y
     # su prorrateo de plata son reales, quedan contados como cualquier ítem.
-    top_equipos = conn.execute(f"""
-        WITH {_PRORRATEO_CTE}
-        SELECT
-            e.nombre                       AS equipo,
-            SUM(p.monto_total * pi.subtotal::numeric / NULLIF(t.suma_items, 0)) AS total_ars,
-            COUNT(*)                       AS veces
-        FROM alquiler_items pi
-        JOIN alquileres p  ON p.id  = pi.pedido_id
-        JOIN equipos e  ON e.id  = pi.equipo_id
-        JOIN tot t ON t.pedido_id = p.id
-        WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
-          AND e.es_recurso_interno = FALSE
-        GROUP BY pi.equipo_id, e.nombre
-        ORDER BY total_ars DESC
-        LIMIT 15
-    """).fetchall()
+    # Sin LIMIT/ORDER BY acá: se derivan DOS rankings distintos de este mismo
+    # resultado en Python (por ingreso y por rentabilidad neta, ver abajo) —
+    # cortar u ordenar en SQL serviría solo a uno de los dos. `costo_compra`
+    # (MAX: mismo valor para todas las filas del grupo, es un atributo del
+    # equipo — la agregación es solo para que Postgres acepte la columna sin
+    # sumarla al GROUP BY) es NULL para un equipo sin el dato cargado.
+    _equipos_ingreso_y_costo = [
+        row_to_dict(r)
+        for r in conn.execute(f"""
+            WITH {_PRORRATEO_CTE}, {IPC_FACTOR_CTE}
+            SELECT
+                e.nombre                       AS equipo,
+                SUM(p.monto_total * pi.subtotal::numeric / NULLIF(t.suma_items, 0)) AS total_ars,
+                SUM(p.monto_total * pi.subtotal::numeric / NULLIF(t.suma_items, 0)
+                    * COALESCE(ipf.factor, 1)) AS total_ars_ajustado,
+                COUNT(*)                       AS veces,
+                MAX(e.costo_compra)            AS costo_compra
+            FROM alquiler_items pi
+            JOIN alquileres p  ON p.id  = pi.pedido_id
+            JOIN equipos e  ON e.id  = pi.equipo_id
+            JOIN tot t ON t.pedido_id = p.id
+            LEFT JOIN ipc_factor ipf ON ipf.mes = to_char(p.fecha_desde, 'YYYY-MM')
+            WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
+              AND e.es_recurso_interno = FALSE
+            GROUP BY pi.equipo_id, e.nombre
+        """).fetchall()
+    ]
+    top_equipos = sorted(
+        _equipos_ingreso_y_costo, key=lambda e: e["total_ars"] or 0, reverse=True
+    )[:15]
+
+    # Rentabilidad neta (ingreso − costo de compra) — pedido del dueño: un
+    # equipo puede facturar mucho y no ser el más rentable si costó caro
+    # comprarlo (ejemplo real: una cámara top-of-line vs. un equipo más
+    # barato con casi el mismo ingreso). Solo cuenta equipos CON el costo
+    # cargado — no hay forma de comparar rentabilidad sin ese dato, y
+    # mostrar un 0 inventado sería peor que no mostrar el equipo. Sin ajuste
+    # por IPC (ver docstring de la función) — el ingreso que trae vía `{**e}`
+    # es el NOMINAL, a propósito.
+    top_equipos_rentabilidad = sorted(
+        (
+            {**e, "rentabilidad_neta": (e["total_ars"] or 0) - e["costo_compra"]}
+            for e in _equipos_ingreso_y_costo
+            if e["costo_compra"] is not None
+        ),
+        key=lambda e: e["rentabilidad_neta"],
+        reverse=True,
+    )[:15]
 
     # ── Top clientes ──────────────────────────────────────────────────────────
     top_clientes = conn.execute(f"""
-        WITH {_TURNO_NETO_CTE}
+        WITH {_TURNO_NETO_CTE}, {IPC_FACTOR_CTE}
         SELECT
             MAX(COALESCE(c.nombre || ' ' || c.apellido, p.cliente_nombre)) AS cliente,
             SUM(p.monto_total - COALESCE(tn.monto_turnos, 0)) AS total_ars,
+            SUM((p.monto_total - COALESCE(tn.monto_turnos, 0)) * COALESCE(ipf.factor, 1))
+                                            AS total_ars_ajustado,
             COUNT(DISTINCT p.id)           AS pedidos
         FROM alquileres p
         LEFT JOIN clientes c ON c.id = p.cliente_id
         LEFT JOIN turno_neto tn ON tn.pedido_id = p.id
+        LEFT JOIN ipc_factor ipf ON ipf.mes = to_char(p.fecha_desde, 'YYYY-MM')
         WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
         GROUP BY COALESCE(CAST(p.cliente_id AS TEXT), 'txt:' || p.cliente_nombre)
         ORDER BY total_ars DESC
@@ -203,15 +276,18 @@ def compute_estadisticas(conn) -> dict:
     # el centinela (atribuido a un dueño real solo a efectos de la liquidación
     # del Estudio, no de "por dueño" de rental).
     por_dueno = conn.execute(f"""
-        WITH {_PRORRATEO_CTE}
+        WITH {_PRORRATEO_CTE}, {IPC_FACTOR_CTE}
         SELECT
             COALESCE(e.dueno, 'Rental')    AS dueno,
             SUM(p.monto_total * pi.subtotal::numeric / NULLIF(t.suma_items, 0)) AS total_ars,
+            SUM(p.monto_total * pi.subtotal::numeric / NULLIF(t.suma_items, 0)
+                * COALESCE(ipf.factor, 1)) AS total_ars_ajustado,
             COUNT(*)                       AS items
         FROM alquiler_items pi
         JOIN alquileres p ON p.id = pi.pedido_id
         JOIN equipos e ON e.id = pi.equipo_id
         JOIN tot t ON t.pedido_id = p.id
+        LEFT JOIN ipc_factor ipf ON ipf.mes = to_char(p.fecha_desde, 'YYYY-MM')
         WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
           AND e.es_recurso_interno = FALSE
         GROUP BY COALESCE(e.dueno, 'Rental')
@@ -219,37 +295,50 @@ def compute_estadisticas(conn) -> dict:
     """).fetchall()
 
     # ── Crecimiento mes a mes ──────────────────────────────────────────────────
+    # Mismo cálculo en paralelo para nominal y ajustado — la comparación entre
+    # los dos es el punto central del toggle ("¿crecí de verdad o es inflación?"):
+    # un mes puede crecer +40% nominal y caer en términos reales.
     por_mes_calc = [row_to_dict(r) for r in por_mes]
     por_mes_calc.sort(key=lambda x: x['mes'])
+
+    def _crecimiento_pct(actual, anterior):
+        if anterior and anterior > 0:
+            return round(((actual - anterior) / anterior) * 100, 1)
+        return 0 if not actual else 100
 
     crecimiento = []
     for i, mes in enumerate(por_mes_calc):
         if i > 0:
             mes_anterior = por_mes_calc[i - 1]
-            total_ant = mes_anterior['total_ars'] or 0
-            if total_ant > 0:
-                pct = ((mes['total_ars'] - total_ant) / total_ant) * 100
-            else:
-                pct = 0 if mes['total_ars'] == 0 else 100
+            pct = _crecimiento_pct(mes['total_ars'], mes_anterior['total_ars'] or 0)
+            pct_ajustado = _crecimiento_pct(
+                mes['total_ars_ajustado'], mes_anterior['total_ars_ajustado'] or 0
+            )
         else:
             pct = 0
+            pct_ajustado = 0
         crecimiento.append({
-            'mes':             mes['mes'],
-            'total_ars':       mes['total_ars'],
-            'crecimiento_pct': round(pct, 1) if pct else 0,
+            'mes':                      mes['mes'],
+            'total_ars':                mes['total_ars'],
+            'total_ars_ajustado':       mes['total_ars_ajustado'],
+            'crecimiento_pct':          pct,
+            'crecimiento_pct_ajustado': pct_ajustado,
         })
     crecimiento.sort(key=lambda x: x['mes'], reverse=True)
 
     # ── Clientes más recurrentes ───────────────────────────────────────────────
     clientes_recurrentes = conn.execute(f"""
-        WITH {_TURNO_NETO_CTE}
+        WITH {_TURNO_NETO_CTE}, {IPC_FACTOR_CTE}
         SELECT
             MAX(COALESCE(c.nombre || ' ' || c.apellido, p.cliente_nombre)) AS cliente,
             COUNT(DISTINCT p.id)           AS veces_alquiladas,
-            SUM(p.monto_total - COALESCE(tn.monto_turnos, 0)) AS total_ars
+            SUM(p.monto_total - COALESCE(tn.monto_turnos, 0)) AS total_ars,
+            SUM((p.monto_total - COALESCE(tn.monto_turnos, 0)) * COALESCE(ipf.factor, 1))
+                                            AS total_ars_ajustado
         FROM alquileres p
         LEFT JOIN clientes c ON c.id = p.cliente_id
         LEFT JOIN turno_neto tn ON tn.pedido_id = p.id
+        LEFT JOIN ipc_factor ipf ON ipf.mes = to_char(p.fecha_desde, 'YYYY-MM')
         WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
         GROUP BY COALESCE(CAST(p.cliente_id AS TEXT), 'txt:' || p.cliente_nombre)
         HAVING COUNT(DISTINCT p.id) > 1
@@ -263,29 +352,39 @@ def compute_estadisticas(conn) -> dict:
     # en cada subquery. Sobre TODO el histórico (sin el LIMIT 24 de `por_mes`) —
     # mismo universo que antes. `tipo NOT IN (...)` también acá (Fase 7): un mes
     # con mucho volumen de estudio no debe aparecer como "mejor mes" del rental.
+    # El mejor/peor mes SE ELIGE por el total NOMINAL (mismo alcance que los
+    # rankings de arriba) — `mejor_total_ajustado`/`peor_total_ajustado` son el
+    # valor ajustado de ESE MISMO mes ya elegido, no una re-elección por ajustado.
     mejor_peor = conn.execute(f"""
-        WITH {_TURNO_NETO_CTE},
+        WITH {_TURNO_NETO_CTE}, {IPC_FACTOR_CTE},
         por_mes_full AS (
             SELECT to_char(p.fecha_desde, 'YYYY-MM') AS mes,
-                   SUM(p.monto_total - COALESCE(tn.monto_turnos, 0)) AS total
+                   SUM(p.monto_total - COALESCE(tn.monto_turnos, 0)) AS total,
+                   SUM((p.monto_total - COALESCE(tn.monto_turnos, 0)) * COALESCE(ipf.factor, 1))
+                                                                      AS total_ajustado
             FROM alquileres p
             LEFT JOIN turno_neto tn ON tn.pedido_id = p.id
+            LEFT JOIN ipc_factor ipf ON ipf.mes = to_char(p.fecha_desde, 'YYYY-MM')
             WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
             GROUP BY to_char(p.fecha_desde, 'YYYY-MM')
         )
         SELECT
-            (SELECT mes   FROM por_mes_full ORDER BY total DESC LIMIT 1) AS mejor_mes,
-            (SELECT MAX(total) FROM por_mes_full)                       AS mejor_total,
-            (SELECT mes   FROM por_mes_full ORDER BY total ASC LIMIT 1) AS peor_mes,
-            (SELECT MIN(total) FROM por_mes_full)                       AS peor_total
+            (SELECT mes            FROM por_mes_full ORDER BY total DESC LIMIT 1) AS mejor_mes,
+            (SELECT total          FROM por_mes_full ORDER BY total DESC LIMIT 1) AS mejor_total,
+            (SELECT total_ajustado FROM por_mes_full ORDER BY total DESC LIMIT 1) AS mejor_total_ajustado,
+            (SELECT mes            FROM por_mes_full ORDER BY total ASC LIMIT 1)  AS peor_mes,
+            (SELECT total          FROM por_mes_full ORDER BY total ASC LIMIT 1)  AS peor_total,
+            (SELECT total_ajustado FROM por_mes_full ORDER BY total ASC LIMIT 1)  AS peor_total_ajustado
     """).fetchone()
 
     mejor_peor_dict = row_to_dict(mejor_peor) if mejor_peor else {}
     mejor_peor_mes = {
-        'mejor_mes':   mejor_peor_dict.get('mejor_mes'),
-        'mejor_total': mejor_peor_dict.get('mejor_total'),
-        'peor_mes':    mejor_peor_dict.get('peor_mes'),
-        'peor_total':  mejor_peor_dict.get('peor_total'),
+        'mejor_mes':            mejor_peor_dict.get('mejor_mes'),
+        'mejor_total':          mejor_peor_dict.get('mejor_total'),
+        'mejor_total_ajustado': mejor_peor_dict.get('mejor_total_ajustado'),
+        'peor_mes':             mejor_peor_dict.get('peor_mes'),
+        'peor_total':           mejor_peor_dict.get('peor_total'),
+        'peor_total_ajustado':  mejor_peor_dict.get('peor_total_ajustado'),
     }
 
     # ── Equipos más favoriteados (analytics de comportamiento de clientes) ──
@@ -327,44 +426,234 @@ def compute_estadisticas(conn) -> dict:
     # Estudio), solo separados en columnas propias (`turnos` vs
     # `meses_slot_fijo`) para no mezclar la unidad de negocio.
     estudio_por_mes = conn.execute(f"""
-        WITH {_TURNO_EVENTOS_CTE}
+        WITH {_TURNO_EVENTOS_CTE}, {IPC_FACTOR_CTE}
         SELECT
             to_char(fecha_desde, 'YYYY-MM')                  AS mes,
             COUNT(*) FILTER (WHERE tipo = 'estudio')         AS turnos,
             COUNT(*) FILTER (WHERE tipo = 'estudio_fijo')    AS meses_slot_fijo,
             SUM(monto)                                       AS total_ars,
+            SUM(monto * COALESCE(ipf.factor, 1))             AS total_ars_ajustado,
             COALESCE(SUM(EXTRACT(EPOCH FROM (fecha_hasta - fecha_desde)) / 3600)
                      FILTER (WHERE tipo = 'estudio'), 0)      AS horas_vendidas
         FROM eventos_estudio
+        LEFT JOIN ipc_factor ipf ON ipf.mes = to_char(fecha_desde, 'YYYY-MM')
         GROUP BY to_char(fecha_desde, 'YYYY-MM')
         ORDER BY to_char(fecha_desde, 'YYYY-MM') DESC
         LIMIT 24
     """).fetchall()
 
     estudio_totales = conn.execute(f"""
-        WITH {_TURNO_EVENTOS_CTE}
+        WITH {_TURNO_EVENTOS_CTE}, {IPC_FACTOR_CTE}
         SELECT
             COUNT(*) FILTER (WHERE tipo = 'estudio')         AS total_turnos,
             COUNT(*) FILTER (WHERE tipo = 'estudio_fijo')    AS total_meses_slot_fijo,
             COUNT(DISTINCT cliente_id)                       AS total_clientes,
             SUM(monto)                                       AS total_ars,
+            SUM(monto * COALESCE(ipf.factor, 1))             AS total_ars_ajustado,
             COALESCE(SUM(EXTRACT(EPOCH FROM (fecha_hasta - fecha_desde)) / 3600)
                      FILTER (WHERE tipo = 'estudio'), 0)      AS horas_vendidas
         FROM eventos_estudio
+        LEFT JOIN ipc_factor ipf ON ipf.mes = to_char(fecha_desde, 'YYYY-MM')
     """).fetchone()
 
+    # ── Gastos por categoría (histórico completo, motor único: `contabilidad`) ──
+    # Reusa tal cual `gastos_por_categoria` de `contabilidad/queries/movimientos.py`
+    # (la misma función que ya alimenta el P&L mensual) sin fecha → todo el
+    # historial, mismo criterio que el resto de esta función. `incluir_ajustado=True`
+    # es la única diferencia con el caller del P&L — aditivo, no reimplementa SQL.
+    gastos_categoria = gastos_por_categoria(conn, incluir_ajustado=True)
+
     return {
-        "totales":              row_to_dict(totales),
-        "por_mes":              [row_to_dict(r) for r in por_mes],
-        "crecimiento":          crecimiento,
-        "top_equipos":          [row_to_dict(r) for r in top_equipos],
-        "top_clientes":         [row_to_dict(r) for r in top_clientes],
-        "clientes_recurrentes": [row_to_dict(r) for r in clientes_recurrentes],
-        "mejor_peor_mes":       mejor_peor_mes,
-        "por_dueno":            [row_to_dict(r) for r in por_dueno],
-        "favoritos_equipo":     [row_to_dict(r) for r in favoritos_equipo],
+        "totales":                  row_to_dict(totales),
+        "por_mes":                  [row_to_dict(r) for r in por_mes],
+        "crecimiento":              crecimiento,
+        "top_equipos":              top_equipos,
+        "top_equipos_rentabilidad": top_equipos_rentabilidad,
+        "top_clientes":             [row_to_dict(r) for r in top_clientes],
+        "clientes_recurrentes":     [row_to_dict(r) for r in clientes_recurrentes],
+        "mejor_peor_mes":           mejor_peor_mes,
+        "por_dueno":                [row_to_dict(r) for r in por_dueno],
+        "favoritos_equipo":         [row_to_dict(r) for r in favoritos_equipo],
+        "gastos_por_categoria":     gastos_categoria,
         "estudio": {
             "totales": row_to_dict(estudio_totales),
             "por_mes": [row_to_dict(r) for r in estudio_por_mes],
         },
+        # Metadata del ajuste por IPC: el frontend la usa para el label del
+        # toggle ("pesos ajustados a agosto 2026") — nunca para calcular nada
+        # (el front no calcula plata, MEMORIA 2026-06-29).
+        "ipc": {"mes_referencia": mes_referencia(conn)},
+    }
+
+
+def _tiers_percentiles(valores_no_cero: list[int]) -> tuple[float, float, float]:
+    """Percentiles 25/50/75 de una lista de valores >0, para bucketizar un
+    heatmap en 4 tiers. Robusto a poca data (negocio recién arrancado, o un
+    año con pocos días de actividad): con <4 puntos, `statistics.quantiles`
+    no da percentiles significativos, así que se cae a un split lineal
+    simple sobre el máximo — sigue siendo monótono, solo menos fino."""
+    if len(valores_no_cero) < 4:
+        m = max(valores_no_cero) if valores_no_cero else 1
+        return (m * 0.25, m * 0.5, m * 0.75)
+    q = statistics.quantiles(valores_no_cero, n=4)
+    return (q[0], q[1], q[2])
+
+
+def _tier(valor: int, p25: float, p50: float, p75: float) -> int:
+    if valor <= 0:
+        return 0
+    if valor <= p25:
+        return 1
+    if valor <= p50:
+        return 2
+    if valor <= p75:
+        return 3
+    return 4
+
+
+def compute_actividad_calendario(conn, anio: int | None = None, todos: bool = False) -> dict:
+    """Heatmap de actividad estilo GitHub/Apple Fitness: por cada día del año
+    pedido, cuántos pedidos de RENTAL (no Estudio/Talleres — misma economía
+    separada que el resto de esta página) tenían equipo AFUERA ese día
+    (`fecha_desde <= día <= fecha_hasta`) — no solo el día de retiro. Es la
+    métrica operativa real ("hubo actividad ese día"), más útil que contar
+    solo pickups: revela patrones de fin de semana/temporada y carga real de
+    depósito. Mismo universo `estado='finalizado'` que el resto de
+    Estadísticas (negocio devengado y cerrado, MEMORIA 2026-07-04).
+
+    Los tiers de color (0-4) se calculan con los percentiles 25/50/75 de los
+    DÍAS CON ACTIVIDAD de CADA AÑO POR SEPARADO — no un umbral fijo ni
+    compartido entre años (ni siquiera en modo `todos`, ver abajo). Así un
+    pedido gigante puntual no aplasta la variación del resto del año, y un
+    año más chico (negocio recién arrancado) no queda todo gris solo por
+    compararse contra un año con más volumen total. Esta es la
+    "normalización" que importa acá — la lista de años NO se colapsa en un
+    patrón promedio (eso perdería el historial real).
+
+    `todos=True` ignora `anio` y devuelve TODO el historial en una sola
+    respuesta (`dias` abarca todos los años en `anios_disponibles`), para el
+    view apilado "Todos los años" — sigue bucketizando cada año por separado
+    (agrupa las filas por año ANTES de calcular percentiles) para no repetir
+    la distorsión que el diseño per-año ya evita.
+    """
+    anios_rows = conn.execute(f"""
+        SELECT DISTINCT EXTRACT(YEAR FROM fecha_desde)::int AS anio
+        FROM alquileres
+        WHERE estado = 'finalizado' AND tipo NOT IN {TIPOS_DERIVADOS_SQL}
+        ORDER BY anio
+    """).fetchall()
+    anios_disponibles = [r["anio"] for r in anios_rows]
+
+    if todos:
+        if not anios_disponibles:
+            return {"anio": None, "anios_disponibles": [], "dias": []}
+        anio_actual = None
+        desde = f"{anios_disponibles[0]}-01-01"
+        hasta = f"{anios_disponibles[-1]}-12-31"
+    else:
+        anio_actual = anio or (anios_disponibles[-1] if anios_disponibles else now_ar().year)
+        desde = f"{anio_actual}-01-01"
+        hasta = f"{anio_actual}-12-31"
+
+    # `generate_series` expande cada pedido a sus días reales dentro de la
+    # ventana pedida (GREATEST/LEAST recorta); un pedido de 5 días "enciende"
+    # 5 celdas, no solo la de inicio. El WHERE de rango es redundante con el
+    # recorte (un pedido totalmente afuera de la ventana genera una serie
+    # vacía) pero deja que Postgres descarte esas filas ANTES de evaluar la
+    # función de la LATERAL — más barato a medida que crece el historial.
+    rows = conn.execute(f"""
+        SELECT dia::date AS dia, COUNT(*) AS pedidos_activos
+        FROM alquileres p
+        CROSS JOIN LATERAL generate_series(
+            GREATEST(p.fecha_desde::date, %s::date),
+            LEAST(p.fecha_hasta::date, %s::date),
+            '1 day'::interval
+        ) AS dia
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
+          AND p.fecha_desde::date <= %s::date
+          AND p.fecha_hasta::date >= %s::date
+        GROUP BY dia::date
+        ORDER BY dia::date
+    """, (desde, hasta, hasta, desde)).fetchall()
+
+    # Agrupa por año ANTES de bucketizar — en modo single-year es un solo
+    # grupo (comportamiento sin cambios); en modo `todos` son N grupos, cada
+    # uno con sus propios percentiles.
+    filas_por_anio: dict[int, list] = {}
+    for r in rows:
+        filas_por_anio.setdefault(r["dia"].year, []).append(r)
+
+    dias = []
+    for filas in filas_por_anio.values():
+        valores = [f["pedidos_activos"] for f in filas]
+        p25, p50, p75 = _tiers_percentiles(valores)
+        for f in filas:
+            dias.append({
+                "dia": f["dia"].isoformat(),
+                "pedidos_activos": f["pedidos_activos"],
+                "tier": _tier(f["pedidos_activos"], p25, p50, p75),
+            })
+    dias.sort(key=lambda d: d["dia"])
+
+    return {
+        "anio": anio_actual,
+        "anios_disponibles": anios_disponibles,
+        "dias": dias,
+    }
+
+
+_DIAS_SEMANA_ABREV = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
+_MESES_ABREV = [
+    "Ene", "Feb", "Mar", "Abr", "May", "Jun",
+    "Jul", "Ago", "Sep", "Oct", "Nov", "Dic",
+]
+
+
+def compute_actividad_distribucion(conn) -> dict:
+    """Distribución de actividad por período cíclico — responde "¿hay un
+    patrón sistemático de qué día de semana / día del mes / mes del año
+    suele ser más fuerte?", a diferencia de `compute_actividad_calendario`
+    que responde "¿cuándo en la historia real hubo actividad?" (fechas
+    concretas). Suma `pedidos_activos` (mismo "equipo afuera ese día" que el
+    calendario) agrupado por período, sobre TODO el historial disponible —
+    sin scoping por año: acá más datos por bucket da una señal más
+    confiable, y no hay un "año seleccionado" que tenga sentido recortar.
+    Mismo universo rental-only que el resto de Estadísticas
+    (`estado='finalizado'`, `tipo NOT IN TIPOS_DERIVADOS_SQL`).
+
+    Suma cruda, sin normalizar por cantidad de meses que aportan a cada
+    bucket (ej. el día 31 del mes solo lo tienen 7 meses del año, el día 30
+    lo tienen 11) — el dueño pidió "sumados", no un promedio; el frontend
+    aclara esto en el subtítulo para que no se lea como un sesgo real.
+    """
+    rows = conn.execute(f"""
+        SELECT dia::date AS dia, COUNT(*) AS pedidos_activos
+        FROM alquileres p
+        CROSS JOIN LATERAL generate_series(
+            p.fecha_desde::date, p.fecha_hasta::date, '1 day'::interval
+        ) AS dia
+        WHERE p.estado = 'finalizado' AND p.tipo NOT IN {TIPOS_DERIVADOS_SQL}
+        GROUP BY dia::date
+    """).fetchall()
+
+    por_dia_semana = [0] * 7  # 0=lunes...6=domingo (date.weekday() nativo)
+    por_dia_mes = [0] * 31  # 0=día 1...30=día 31
+    por_mes = [0] * 12  # 0=enero...11=diciembre
+
+    for r in rows:
+        dia = r["dia"]
+        pedidos = r["pedidos_activos"]
+        por_dia_semana[dia.weekday()] += pedidos
+        por_dia_mes[dia.day - 1] += pedidos
+        por_mes[dia.month - 1] += pedidos
+
+    return {
+        "dia_semana": [
+            {"label": label, "total": total}
+            for label, total in zip(_DIAS_SEMANA_ABREV, por_dia_semana)
+        ],
+        "dia_mes": [{"dia": i + 1, "total": total} for i, total in enumerate(por_dia_mes)],
+        "mes": [
+            {"label": label, "total": total} for label, total in zip(_MESES_ABREV, por_mes)
+        ],
     }

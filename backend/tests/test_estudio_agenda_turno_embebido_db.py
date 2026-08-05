@@ -41,6 +41,10 @@ import main  # noqa: E402 — importado después del gating, mismo patrón que l
 CLIENTE_ID = 9_482_001
 PEDIDO_ID = 9_482_010
 NUMERO_PEDIDO = 948210
+# Turno STANDALONE (su propia fila `alquileres`, `tipo='estudio'`) — el caso que
+# el dueño vio vacío en pantalla. Ids propios para no chocar con el embebido.
+PEDIDO_STANDALONE = 9_482_011
+NUMERO_STANDALONE = 948211
 
 
 @pytest.fixture
@@ -89,9 +93,10 @@ def setup(monkeypatch):
 
 
 def _limpiar(conn):
-    conn.execute("DELETE FROM alquiler_items WHERE pedido_id = %s", (PEDIDO_ID,))
-    conn.execute("DELETE FROM alquiler_turnos_estudio WHERE pedido_id = %s", (PEDIDO_ID,))
-    conn.execute("DELETE FROM alquileres WHERE id = %s", (PEDIDO_ID,))
+    ids = (PEDIDO_ID, PEDIDO_STANDALONE)
+    conn.execute("DELETE FROM alquiler_items WHERE pedido_id IN (%s,%s)", ids)
+    conn.execute("DELETE FROM alquiler_turnos_estudio WHERE pedido_id IN (%s,%s)", ids)
+    conn.execute("DELETE FROM alquileres WHERE id IN (%s,%s)", ids)
     conn.execute("DELETE FROM clientes WHERE id = %s", (CLIENTE_ID,))
 
 
@@ -135,6 +140,93 @@ def test_turno_embebido_aparece_en_agenda_estudio(client_con_db, setup):
     assert fila["numero_pedido"] == NUMERO_PEDIDO
     assert fila["fecha_desde"].startswith("2030-03-10T14:00")
     assert fila["fecha_hasta"].startswith("2030-03-10T16:00")
+
+
+@pytest.mark.parametrize("estado", ["devuelto", "finalizado"])
+def test_un_turno_ya_terminado_sigue_en_la_agenda(client_con_db, setup, estado):
+    """Bug real 2026-08-02 (reportado por el dueño): la agenda del Estudio
+    filtraba por `ESTADOS_RESERVADO`, así que un mes ya pasado se veía VACÍO —
+    sus turnos estaban `devuelto`/`finalizado` y desaparecían—, mientras el
+    calendario general del Dashboard sí los mostraba. Un turno que YA OCURRIÓ
+    ocupó el espacio y tiene que seguir viéndose en las dos vistas."""
+    from database import get_db
+
+    conn = get_db()
+    try:
+        conn.execute("UPDATE alquileres SET estado=%s WHERE id=%s", (estado, PEDIDO_ID))
+        conn.commit()
+    finally:
+        conn.close()
+
+    r = client_con_db.get(
+        "/api/admin/estudio/agenda", params={"desde": "2030-03-01", "hasta": "2030-03-31"}
+    )
+    assert r.status_code == 200
+    bloques = r.json()["bloques"]
+    fila = next((b for b in bloques if b.get("id") == PEDIDO_ID), None)
+    assert fila is not None, f"un turno {estado} desapareció de la agenda: {bloques}"
+    assert fila["estado"] == estado
+
+    # La lista (`/reservas`) nunca filtró por estado — se verifica igual, para
+    # que las dos superficies queden fijadas juntas y no vuelvan a divergir.
+    r2 = client_con_db.get(
+        "/api/admin/estudio/reservas", params={"desde": "2030-03-01", "hasta": "2030-03-31"}
+    )
+    assert r2.status_code == 200
+    assert any(x["id"] == PEDIDO_ID for x in r2.json()["reservas"])
+
+
+@pytest.mark.parametrize("estado", ["devuelto", "finalizado"])
+def test_un_turno_standalone_ya_terminado_sigue_en_la_agenda(client_con_db, setup, estado):
+    """Gemelo del anterior para un turno STANDALONE (`tipo='estudio'`, su propia
+    fila en `alquileres`) — es el caso que el dueño vio en pantalla: julio 2026
+    aparecía con solo los talleres. Las dos queries de la agenda (standalone y
+    embebida) tienen que filtrar igual; sin este test, arreglar una y olvidar la
+    otra pasaba el CI."""
+    from database import get_db
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO alquileres (id, cliente_id, cliente_nombre, estado, tipo, "
+            "fecha_desde, fecha_hasta, numero_pedido) "
+            "VALUES (%s,%s,'Turno Standalone',%s,'estudio',"
+            "'2030-03-20 10:00','2030-03-20 13:00',%s)",
+            (PEDIDO_STANDALONE, CLIENTE_ID, estado, NUMERO_STANDALONE),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    r = client_con_db.get(
+        "/api/admin/estudio/agenda", params={"desde": "2030-03-01", "hasta": "2030-03-31"}
+    )
+    assert r.status_code == 200
+    fila = next((b for b in r.json()["bloques"] if b.get("id") == PEDIDO_STANDALONE), None)
+    assert fila is not None, f"un turno standalone {estado} desapareció de la agenda"
+    assert fila["estado"] == estado
+    assert not fila.get("embebido")
+
+
+@pytest.mark.parametrize("estado", ["cancelado", "borrador"])
+def test_un_turno_cancelado_o_borrador_no_ocupa_la_agenda(client_con_db, setup, estado):
+    """La otra mitad del criterio: un turno que NO ocurrió (cancelado) o que
+    todavía no es una reserva (borrador) no se muestra como ocupación — sin
+    esto, "mostrar lo terminado" se habría vuelto "mostrar todo"."""
+    from database import get_db
+
+    conn = get_db()
+    try:
+        conn.execute("UPDATE alquileres SET estado=%s WHERE id=%s", (estado, PEDIDO_ID))
+        conn.commit()
+    finally:
+        conn.close()
+
+    r = client_con_db.get(
+        "/api/admin/estudio/agenda", params={"desde": "2030-03-01", "hasta": "2030-03-31"}
+    )
+    assert r.status_code == 200
+    assert all(b.get("id") != PEDIDO_ID for b in r.json()["bloques"])
 
 
 def test_sin_turno_embebido_no_aparece_nada_extra(client_con_db, setup):

@@ -98,6 +98,7 @@ class EquipoCreate(BaseModel):
     precio_usd:       Optional[float] = Field(default=None, ge=0)
     roi_pct:          Optional[float] = Field(default=None, ge=0, le=100)
     valor_reposicion: Optional[float] = Field(default=None, ge=0)
+    costo_compra:     Optional[int]   = Field(default=None, ge=0, le=2_147_483_647)
     foto_url:         Optional[str]   = None
     fecha_compra:     Optional[str]   = None
     serie:            Optional[str]   = None
@@ -152,6 +153,7 @@ class EquipoUpdate(BaseModel):
     precio_usd:       Optional[float] = Field(default=None, ge=0)
     roi_pct:          Optional[float] = Field(default=None, ge=0, le=100)
     valor_reposicion: Optional[float] = Field(default=None, ge=0)
+    costo_compra:     Optional[int]   = Field(default=None, ge=0, le=2_147_483_647)
     foto_url:         Optional[str]   = None
     fecha_compra:     Optional[str]   = None
     serie:            Optional[str]   = None
@@ -553,13 +555,14 @@ def create_equipo(data: EquipoCreate, request: Request):
             new_id = conn.insert_returning("""
                 INSERT INTO equipos (nombre, brand_id, modelo, cantidad,
                                      precio_jornada, precio_usd, roi_pct,
-                                     valor_reposicion, foto_url, fecha_compra,
+                                     valor_reposicion, costo_compra, foto_url, fecha_compra,
                                      serie, bh_url, dueno, visible_catalogo, estado,
                                      ficha_completa, categoria_specs, tipo)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, (data.nombre, brand_id, data.modelo, data.cantidad,
                   data.precio_jornada, data.precio_usd, data.roi_pct,
-                  data.valor_reposicion, data.foto_url, _normalize_fecha_compra(data.fecha_compra),
+                  data.valor_reposicion, data.costo_compra, data.foto_url,
+                  _normalize_fecha_compra(data.fecha_compra),
                   data.serie, data.bh_url, data.dueno, data.visible_catalogo, data.estado,
                   bool(data.ficha_completa), data.categoria_specs, data.tipo or "simple"))
             # Hook: calcular nombre_publico inicial. No falla el create si esto
@@ -681,15 +684,16 @@ def duplicate_equipo(id: int, request: Request):
                 INSERT INTO equipos (
                     nombre, brand_id, modelo, cantidad,
                     precio_jornada, precio_usd, roi_pct,
-                    valor_reposicion, foto_url, fecha_compra,
+                    valor_reposicion, costo_compra, foto_url, fecha_compra,
                     serie, bh_url, dueno, visible_catalogo, estado,
                     ficha_completa, tipo
-                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                ) VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
             """, (
                 f"{src_d['nombre']} (copia)",
                 src_d.get("brand_id"), src_d.get("modelo"), 1,
                 src_d.get("precio_jornada"), src_d.get("precio_usd"), src_d.get("roi_pct"),
-                src_d.get("valor_reposicion"), src_d.get("foto_url"), _normalize_fecha_compra(src_d.get("fecha_compra")),
+                src_d.get("valor_reposicion"), src_d.get("costo_compra"), src_d.get("foto_url"),
+                _normalize_fecha_compra(src_d.get("fecha_compra")),
                 None,  # serie vacía
                 src_d.get("bh_url"), src_d.get("dueno"), src_d.get("visible_catalogo", 1), src_d.get("estado", "operativo"),
                 False,  # ficha_completa false para que el admin la revise

@@ -24,6 +24,7 @@ import {
   type RepartoPagoLinea,
 } from "@/lib/admin/api";
 import { fmtArs } from "@/lib/format";
+import { hoyAR } from "@/lib/rental-dates";
 import { combinarTotales, etiquetaTurno } from "@/lib/pedido-combinado";
 
 export function RegistrarPagoModal({
@@ -34,6 +35,7 @@ export function RegistrarPagoModal({
   onOpenChange,
   esEstudio = false,
   turnosVinculados = [],
+  hayTurnosEmbebidos = false,
 }: {
   pedidoId: number;
   total: number;
@@ -43,20 +45,31 @@ export function RegistrarPagoModal({
   /** El pedido es un turno/slot del Estudio (economía separada, #1283) — el
    *  cobro va por defecto a "Estudio", no a "Rental". */
   esEstudio?: boolean;
-  /** Turnos del Estudio vinculados a `pedidoId` (#1308) — si hay al menos
-   *  uno, el modal cobra el TOTAL COMBINADO y usa `addPagoCombinado` en vez
-   *  de `addPago`; sin turnos, cero cambio de comportamiento. */
+  /** Turnos del Estudio vinculados a `pedidoId` (#1308, mecanismo VIEJO — fila
+   *  `alquileres` aparte) — si hay al menos uno, el modal cobra el TOTAL
+   *  COMBINADO y usa `addPagoCombinado` en vez de `addPago`; sin turnos, cero
+   *  cambio de comportamiento. */
   turnosVinculados?: PedidoGeneradoEdicion[];
+  /** Hay al menos un turno del Estudio EMBEBIDO en este pedido
+   *  (`turnos_estudio_embebidos`, #1308 Fase 4 — el mecanismo NUEVO: ítems de
+   *  ESTE MISMO pedido, sin fila `alquileres` propia). A diferencia de
+   *  `turnosVinculados`, su plata YA está adentro de `total`/`pagado` (no se
+   *  sube a `combinarTotales`, se contaría dos veces) — este flag solo avisa
+   *  que SÍ hay plata del Estudio acá, para `hayParteEstudio` de abajo. */
+  hayTurnosEmbebidos?: boolean;
 }) {
   const qc = useQueryClient();
   const combinado = combinarTotales(total, pagado, turnosVinculados);
   const saldo = combinado.restaCombinado;
-  // La sola presencia de un turno vinculado ya implica plata del Estudio
-  // (`_crear_pedido_estudio` siempre lo crea `tipo='estudio'`) — sin este
-  // OR, cobrar acá (un pedido `tipo='diaria'`, esEstudio=false) con turnos
-  // vinculados sin cobrar no mostraba el aviso pese a que parte de lo
-  // combinado SÍ es plata del Estudio.
-  const hayParteEstudio = esEstudio || turnosVinculados.length > 0;
+  // La sola presencia de un turno vinculado o embebido ya implica plata del
+  // Estudio (`_crear_pedido_estudio`/`agregar_turno_embebido` siempre nacen
+  // del Estudio) — sin este OR, cobrar acá (un pedido `tipo='diaria'`,
+  // esEstudio=false) con turnos sin cobrar no mostraba el aviso pese a que
+  // parte de lo combinado SÍ es plata del Estudio. Bug real encontrado en vivo
+  // (#1308 Fase 4 tiene turnos embebidos, nunca vinculados — el chequeo viejo
+  // solo miraba `turnosVinculados` y decía "esta plata es del rental" con un
+  // turno embebido en pantalla).
+  const hayParteEstudio = esEstudio || turnosVinculados.length > 0 || hayTurnosEmbebidos;
   const destinatarioDefault = hayParteEstudio ? "Estudio" : "Rental";
 
   // Presets: Seña 50% / Saldo total / Otro
@@ -70,7 +83,7 @@ export function RegistrarPagoModal({
   // si el pedido es del Estudio — esa plata no es de Rental ni de los socios).
   const [destinatario, setDestinatario] = useState<string>(destinatarioDefault);
   const [metodo, setMetodo] = useState<string>("transferencia");
-  const [fecha, setFecha] = useState<string>(() => new Date().toISOString().slice(0, 10));
+  const [fecha, setFecha] = useState<string>(() => hoyAR());
 
   const monto = Math.max(0, Number(montoInput) || 0);
 
@@ -81,7 +94,7 @@ export function RegistrarPagoModal({
     if (!open) return;
     setDestinatario(destinatarioDefault);
     setMetodo("transferencia");
-    setFecha(new Date().toISOString().slice(0, 10));
+    setFecha(hoyAR());
     setPreset("saldo");
     setMontoInput(String(combinado.restaCombinado));
     setConcepto("Saldo final");

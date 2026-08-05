@@ -126,6 +126,51 @@ def test_liquidacion_estudio_beneficiario_db(conn):
     assert "Estudio" not in rep["duenos_no_canonicos"]
 
 
+def test_liquidacion_ruta_separa_estudio_de_rental_db(conn):
+    """Separar la Liquidación del Estudio y la de Rental (2026-08-03, pedido
+    del dueño confirmado: dejar al Estudio aparte por ahora, todavía en
+    desarrollo). La RUTA de la página (`_data_liquidacion`, la que alimenta
+    JSON/CSV/PDF/mail) no debe mostrar al Estudio mezclado con Pablo/Rental —
+    pero `liquidar()` crudo (del que depende `posiciones()`) sigue viéndolo
+    completo, sin cambios."""
+    from reportes.cierres import rango_mes
+    from routes.reportes import _data_liquidacion
+
+    _setup_pedido_mixto(conn)
+    desde, hasta = rango_mes(MES)
+
+    ruta = _data_liquidacion(conn, desde, hasta)
+    assert "Estudio" not in {d["dueno"] for d in ruta["por_dueno"]}
+    assert "Estudio" not in ruta["beneficiarios"]
+    assert "Estudio" not in ruta["resumen"]["por_beneficiario"]
+    # El total de la página ya NO incluye la plata del espacio del Estudio —
+    # solo Rental (promo) + Pablo (suelto).
+    assert ruta["resumen"]["total"] == PROMO_MONTO + SUELTO_MONTO
+
+    # `liquidar()` crudo (lo que usa `posiciones()`) sigue viendo al Estudio
+    # completo — el filtro es solo de la RUTA, no del motor.
+    from reportes.liquidacion import liquidar
+
+    crudo = liquidar(conn, desde, hasta)
+    assert crudo["resumen"]["por_beneficiario"]["Estudio"] == ESPACIO_MONTO
+    assert crudo["resumen"]["total"] == ESPACIO_MONTO + PROMO_MONTO + SUELTO_MONTO
+
+
+def test_posiciones_sigue_viendo_al_estudio_tras_separar_la_ruta_db(conn):
+    """Candado explícito de que separar la RUTA de Liquidación (arriba) no le
+    rompió el devengado del Estudio a `posiciones()` — que sigue necesitando
+    verlo completo para la posición acumulada / "Para repartir hoy"."""
+    from contabilidad.queries.posiciones import posiciones
+
+    _setup_pedido_mixto(conn)
+    # Sin commit: `posiciones(conn)` corre sobre la MISMA conexión/transacción
+    # — lee sus propios inserts sin commitear (como el resto de los tests de
+    # este archivo, que limpian con rollback en el fixture `conn`).
+    pos = posiciones(conn)
+    estudio = next(p for p in pos["partes"] if p["parte"] == "Estudio")
+    assert estudio["le_corresponde"] == ESPACIO_MONTO
+
+
 def test_rendicion_estudio_db(conn):
     # Rental cobró un pedido íntegramente de espacio (dueno=Estudio) — le
     # corresponde al Estudio, no a Rental. El netting (ya genérico a 4 partes,
@@ -179,3 +224,38 @@ def test_pyl_parte_estudio(conn):
     # comisiones_duenos excluye TANTO Rental como Estudio — solo Pablo/Tincho.
     assert gan["comisiones_duenos"] == parte_pablo_esperada + parte_tincho_esperada
     assert gan["ganancia_neta"] == parte_rental_esperada - gan["gastos"]
+    # `parte_rental` explícito (2026-08-02): es el ingreso REAL de Rental, el
+    # número contra el que la pantalla lee los gastos. `facturado` no lo es —
+    # incluye la plata de los dueños y la del Estudio.
+    assert gan["parte_rental"] == parte_rental_esperada
+    assert gan["facturado"] == (
+        gan["parte_rental"] + gan["comisiones_duenos"] + gan["parte_estudio"]
+    )
+
+
+def test_tablero_separa_el_disponible_de_rental_y_del_estudio(conn):
+    """Rental y el Estudio son dos economías: el tablero las devuelve separadas
+    para que la pantalla no sume la Caja Estudio al disponible de Rental
+    (pedido del dueño 2026-08-02)."""
+    from contabilidad.queries.tablero import tablero
+
+    _setup_pedido_mixto(conn)
+    t = tablero(conn, MES)
+    eco = t["disponible_por_economia"]
+    cajas = t["disponible"]["cajas"]
+    saldo_estudio = sum(
+        int(c["saldo"]) for c in cajas if c.get("socio") == "Estudio" and c["moneda"] == "ARS"
+    )
+    saldo_resto = sum(
+        int(c["saldo"]) for c in cajas if c.get("socio") != "Estudio" and c["moneda"] == "ARS"
+    )
+    assert eco["estudio"] == saldo_estudio
+    assert eco["rental"] == saldo_resto
+    # Juntas siguen siendo el total de siempre — se separa la lectura, no el número.
+    assert eco["rental"] + eco["estudio"] == t["disponible"]["totales"].get("ARS", 0)
+    # El KPI de ganancia viaja con las dos economías desagregadas.
+    assert t["ganancia_mes"]["parte_estudio"] == ESPACIO_MONTO
+    assert (
+        t["ganancia_mes"]["neta"]
+        == t["ganancia_mes"]["parte_rental"] - t["ganancia_mes"]["gastos"]
+    )

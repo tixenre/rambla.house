@@ -159,7 +159,8 @@ def flujos_netos(movimientos: list[dict], parte_por_cuenta: dict, cc_por_cuenta:
     return dict(neto)
 
 
-def sugerir_transferencias(pendiente: dict, liquidez: dict | None = None) -> list[dict]:
+def sugerir_transferencias(pendiente: dict, liquidez: dict | None = None,
+                           excluir_pagadores=()) -> list[dict]:
     """PURA. Emparejamiento greedy: quién le transfiere a quién para que todas las
     partes queden en cero. Determinístico (orden fijo de `PARTES`).
 
@@ -174,9 +175,17 @@ def sugerir_transferencias(pendiente: dict, liquidez: dict | None = None) -> lis
     la deuda de un socio es puro balance (su plata está en un banco propio, fuera
     del sistema), mientras que el Fondo Rental es cash de verdad. El orden de
     `PARTES` se conserva como desempate — `sort` es estable, así que el resultado
-    sigue siendo determinístico."""
+    sigue siendo determinístico.
+
+    `excluir_pagadores` (opcional): partes que NUNCA aparecen como pagadoras,
+    aunque su número dé negativo. La acumulada pasa `SOCIOS_HUMANOS` (decisión
+    del dueño, 2026-08-03: la deuda de un socio se salda sola con su parte de lo
+    que se alquila — no se le sugieren pagos cash; su negativo incluye el
+    arranque, que es deuda histórica, no plata en la mano). Como receptores
+    siguen entrando igual: "Rental → Tincho" se sugiere; "Tincho → X", nunca."""
     receptores = [[p, pendiente.get(p, 0)] for p in PARTES if pendiente.get(p, 0) > 0]
-    pagadores = [[p, -pendiente.get(p, 0)] for p in PARTES if pendiente.get(p, 0) < 0]
+    pagadores = [[p, -pendiente.get(p, 0)] for p in PARTES
+                 if pendiente.get(p, 0) < 0 and p not in excluir_pagadores]
     if liquidez:
         pagadores.sort(key=lambda par: -int(liquidez.get(par[0], 0)))
 
@@ -338,7 +347,10 @@ def posiciones(conn) -> dict:
 
     return {
         "partes": partes,
-        "sugeridos": sugerir_transferencias(repartible, liquidez),
+        # Un socio humano jamás aparece como pagador sugerido: su deuda se salda
+        # sola con su parte (decisión del dueño, 2026-08-03). Sí como receptor.
+        "sugeridos": sugerir_transferencias(repartible, liquidez,
+                                            excluir_pagadores=SOCIOS_HUMANOS),
         "liquidez": liquidez,
         "float_sin_saldar": _float_sin_saldar(conn),
         "as_of": hoy,
