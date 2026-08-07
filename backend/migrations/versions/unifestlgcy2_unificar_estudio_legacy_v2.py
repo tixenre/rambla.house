@@ -50,7 +50,7 @@ a contar como el `dueno` del combo (hoy 'Rental') — exactamente lo que pidió
 el dueño.
 
 Revision ID: unifestlgcy2
-Revises: turnoestudio
+Revises: ipcseries
 Create Date: 2026-08-05
 """
 from typing import Sequence, Union
@@ -59,7 +59,7 @@ from alembic import op
 from sqlalchemy import text
 
 revision: str = "unifestlgcy2"
-down_revision: Union[str, Sequence[str], None] = "turnoestudio"
+down_revision: Union[str, Sequence[str], None] = "ipcseries"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
