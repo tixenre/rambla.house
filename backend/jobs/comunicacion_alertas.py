@@ -77,8 +77,16 @@ def _resumen_html(fallos: dict, total: int) -> str:
 def chequear_fallas_y_alertar() -> bool:
     """Si los fallos de las últimas 24h superan `UMBRAL_FALLOS`, manda un mail
     a cada admin. Devuelve `True` si mandó alerta, `False` si no. Nunca
-    propaga — un error acá no debe tumbar el scheduler."""
+    propaga — un error acá no debe tumbar el scheduler.
+
+    Gateado a **solo producción** (`settings.is_production`), mismo criterio y
+    mismo motivo que `jobs/reconciliacion.py`: `dev` comparte el scheduler,
+    pero sus fallos de envío (credenciales/destinatarios de staging) no son
+    una alerta real."""
     from config import settings
+
+    if not settings.is_production:
+        return False
 
     with get_db() as conn:
         if _alertado_recientemente(conn):

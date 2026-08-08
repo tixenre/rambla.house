@@ -24,6 +24,15 @@ def _pocos_fallos():
     return {"mail": [{"template_key": "x", "to_addr": "a@test.com", "error": "boom"}], "whatsapp": []}
 
 
+def _prod(monkeypatch):
+    """Simula producción — ver test_analytics_config.py::_set_env, mismo patrón.
+    El job está gateado a `settings.is_production`; sin esto, todos los tests
+    de más abajo pasarían por el motivo equivocado (gate, no la lógica real)."""
+    from config import settings
+
+    monkeypatch.setattr(settings, "RAILWAY_ENVIRONMENT", "production")
+
+
 def _muchos_fallos():
     return {
         "mail": [
@@ -38,6 +47,7 @@ def _muchos_fallos():
 
 class TestChequearYAlertar:
     def test_pocos_fallos_no_manda_mail(self, monkeypatch):
+        _prod(monkeypatch)
         monkeypatch.setattr(job, "get_db", lambda: _FakeConn())
         monkeypatch.setattr(job, "_alertado_recientemente", lambda conn: False)
         monkeypatch.setattr(job, "_fallos_ultimas_24h", lambda conn: _pocos_fallos())
@@ -49,6 +59,7 @@ class TestChequearYAlertar:
     def test_fallos_por_encima_del_umbral_manda_mail_a_cada_admin(self, monkeypatch):
         from config import settings
 
+        _prod(monkeypatch)
         monkeypatch.setattr(settings, "ADMIN_EMAILS", "a@test.com,b@test.com")
         monkeypatch.setattr(job, "get_db", lambda: _FakeConn())
         monkeypatch.setattr(job, "_alertado_recientemente", lambda conn: False)
@@ -66,6 +77,7 @@ class TestChequearYAlertar:
         assert sent[0]["log_key"] == "comunicacion_alerta"
 
     def test_send_fallido_no_propaga_y_devuelve_false(self, monkeypatch):
+        _prod(monkeypatch)
         monkeypatch.setattr(job, "get_db", lambda: _FakeConn())
         monkeypatch.setattr(job, "_alertado_recientemente", lambda conn: False)
         monkeypatch.setattr(job, "_fallos_ultimas_24h", lambda conn: _muchos_fallos())
@@ -73,6 +85,7 @@ class TestChequearYAlertar:
         assert job.chequear_fallas_y_alertar() is False
 
     def test_ya_alertado_recientemente_no_recalcula_ni_manda(self, monkeypatch):
+        _prod(monkeypatch)
         monkeypatch.setattr(job, "get_db", lambda: _FakeConn())
         monkeypatch.setattr(job, "_alertado_recientemente", lambda conn: True)
         calls = []
@@ -84,6 +97,20 @@ class TestChequearYAlertar:
         assert job.chequear_fallas_y_alertar() is False
         assert not sent
         assert not calls
+
+    def test_no_produccion_no_alerta_ni_toca_db(self, monkeypatch):
+        """Gate de staging (#reporte-emails-dev): en `dev`/local no se manda ni
+        se consultan los fallos — corta ANTES de `get_db()`."""
+        from config import settings
+
+        monkeypatch.setattr(settings, "RAILWAY_ENVIRONMENT", "dev")
+        get_db_calls = []
+        monkeypatch.setattr(job, "get_db", lambda: (get_db_calls.append(1), _FakeConn())[1])
+        sent = []
+        monkeypatch.setattr(job, "send_raw_email", lambda **kw: (sent.append(kw), {"ok": True})[1])
+        assert job.chequear_fallas_y_alertar() is False
+        assert not sent
+        assert not get_db_calls
 
 
 class TestResumenHtml:

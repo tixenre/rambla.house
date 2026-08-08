@@ -109,8 +109,16 @@ def chequear_reconciliacion_y_alertar() -> bool:
     """Corre el semáforo unificado; si `ok=False`, manda un mail a cada admin.
     Devuelve `True` si mandó alerta, `False` si todo estaba en orden. Nunca
     propaga — un error acá no debe tumbar el scheduler (mismo contrato que los
-    otros jobs)."""
+    otros jobs).
+
+    Gateado a **solo producción** (`settings.is_production`): `dev` corre con
+    una BD copiada de prod (ver MEMORIA) y comparte este mismo scheduler
+    in-process, así que sin el gate alertaba con divergencias de datos de
+    staging — ruido, no una alerta real. Mismo criterio que GA4."""
     from config import settings
+
+    if not settings.is_production:
+        return False
 
     with get_db() as conn:
         if _alertado_recientemente(conn):
