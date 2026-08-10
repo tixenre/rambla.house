@@ -4,6 +4,7 @@ import { Plus } from "lucide-react";
 
 import type { TallerConcepto } from "@/lib/admin/api/types";
 import { Button } from "@/design-system/ui/button";
+import { useScrollFadeMask } from "@/hooks/useScrollFadeMask";
 import { ContenidoSection } from "./ConceptoTabs";
 import { EdicionSubRow } from "./EdicionSubRow";
 import { FaqSection } from "./FaqSection";
@@ -27,6 +28,11 @@ export function TallerConceptoRow({
   const [activeTab, setActiveTab] = useState<
     "ediciones" | "taller" | "instructores" | "instituciones" | "interesados" | "trabajos" | "faq"
   >("ediciones");
+
+  // 7 pestañas no entran en un viewport mobile (375px) — el tab-strip scrollea
+  // pero sin señal visual, así que 4 quedaban invisibles sin que nada avise que
+  // hay más.
+  const tabsScroll = useScrollFadeMask(expanded);
 
   const totalConfirmados = concepto.ediciones.reduce((s, e) => s + e.cupos_confirmados, 0);
   const activeEdiciones = concepto.ediciones.filter((e) => e.activo);
@@ -90,7 +96,12 @@ export function TallerConceptoRow({
       {/* Detail */}
       {expanded && (
         <div className="border-t border-border/40">
-          <div className="flex border-b border-border/60 overflow-x-auto">
+          <div
+            ref={tabsScroll.ref}
+            onScroll={tabsScroll.onScroll}
+            className="flex border-b border-border/60 overflow-x-auto"
+            style={tabsScroll.style}
+          >
             {(
               [
                 { id: "ediciones", label: "Ediciones" },

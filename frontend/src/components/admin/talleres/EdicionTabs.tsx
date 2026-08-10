@@ -333,7 +333,7 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={mut.isPending} className="gap-2">
           {mut.isPending ? <Spinner size="sm" /> : <Save className="h-4 w-4" />}
-          Guardar
+          Guardar precios
         </Button>
       </div>
     </div>
@@ -409,7 +409,7 @@ export function PagosSection({ edicion }: { edicion: EdicionAdmin }) {
       <div className="flex justify-end">
         <Button onClick={() => mut.mutate(form)} disabled={mut.isPending} className="gap-2">
           {mut.isPending ? <Spinner size="sm" /> : <Save className="h-4 w-4" />}
-          Guardar
+          Guardar datos de pago
         </Button>
       </div>
     </div>

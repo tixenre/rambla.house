@@ -10,6 +10,7 @@ import { Pill, type PillTone } from "@/design-system/ui/Pill";
 import { Spinner } from "@/design-system/ui/spinner";
 import { Switch } from "@/design-system/ui/switch";
 import { useConfirm } from "@/components/admin/useConfirm";
+import { useScrollFadeMask } from "@/hooks/useScrollFadeMask";
 import { CuposPill } from "./CuposPill";
 import {
   ClasesSection,
@@ -53,6 +54,10 @@ export function EdicionSubRow({
   const badge = badgeEstadoEdicion(edicion);
   const [expanded, setExpanded] = useState(false);
   const [activeTab, setActiveTab] = useState<"clases" | "precios" | "inscripciones">("clases");
+  // Mismo caso que el tab-strip del concepto (TallerConceptoRow): en mobile
+  // "Inscripciones (N)" puede quedar cortado sin que nada avise que hay que
+  // scrollear.
+  const tabsScroll = useScrollFadeMask(expanded);
 
   const { data: inscripciones = [], isLoading: loadingIns } = useQuery({
     queryKey: ["admin", "ediciones", edicion.id, "inscripciones"],
@@ -179,7 +184,12 @@ export function EdicionSubRow({
       {/* Edition detail */}
       {expanded && (
         <div className="border-t border-border/40">
-          <div className="flex border-b border-border/50 overflow-x-auto">
+          <div
+            ref={tabsScroll.ref}
+            onScroll={tabsScroll.onScroll}
+            className="flex border-b border-border/50 overflow-x-auto"
+            style={tabsScroll.style}
+          >
             {(
               [
                 { id: "clases", label: "Fechas y clases" },
@@ -220,8 +230,14 @@ export function EdicionSubRow({
             {activeTab === "clases" && <ClasesSection edicion={edicion} />}
             {activeTab === "precios" && (
               <div className="flex flex-col gap-0">
+                <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3">
+                  Precios
+                </p>
                 <PreciosSection edicion={edicion} />
                 <div className="border-t border-border/40 mt-6 pt-6">
+                  <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3">
+                    Datos de pago
+                  </p>
                   <PagosSection edicion={edicion} />
                 </div>
                 <div className="border-t border-border/40 mt-6 pt-6">
