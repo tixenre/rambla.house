@@ -126,3 +126,17 @@ export function formatFechaDisplay(s?: string | null): string {
     .map((n) => String(n).padStart(2, "0"))
     .join("-");
 }
+
+/** "hace 2 h" — relativo simple desde un `created_at` datetime completo (no
+ *  una fecha sola: usa la hora, a diferencia de `formatFechaCorta`/
+ *  `formatFechaDisplay`). Fuente única — no reimplementar por pantalla. */
+export function creadoHace(iso?: string | null): string | null {
+  if (!iso) return null;
+  const diff = Date.now() - new Date(iso).getTime();
+  if (Number.isNaN(diff)) return null;
+  const h = Math.floor(diff / 3_600_000);
+  if (h < 1) return "recién";
+  if (h < 24) return `hace ${h} h`;
+  const d = Math.floor(h / 24);
+  return `hace ${d} d`;
+}
