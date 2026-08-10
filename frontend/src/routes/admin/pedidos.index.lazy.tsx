@@ -54,7 +54,7 @@ export const Route = createLazyFileRoute("/admin/pedidos/")({
   component: PedidosPage,
 });
 
-// ── Helpers de fecha / cobranza ─────────────────────────────────────────────────────────────────
+// ── Helpers de fecha / cobranza ──────────────────────────────────────────────
 
 const todayYmd = hoyAR;
 const esHoy = (s: string | null) => !!s && s.slice(0, 10) === todayYmd();
@@ -92,7 +92,7 @@ function TurnosVinculadosTag({ count }: { count: number }) {
 const saldoDe = (p: Pedido) => Math.max(0, (p.monto_total ?? 0) - (p.monto_pagado ?? 0));
 // Pagado completo: mismo criterio que el "Pagado" de PagoBadge (pagado ≥ total > 0).
 const estaPagado = (p: Pedido) => (p.monto_total ?? 0) > 0 && saldoDe(p) === 0;
-const tieneSaldo = (p: Pedido) => !"[borrador cancelado]".includes(p.estado) && saldoDe(p) > 0;
+const tieneSaldo = (p: Pedido) => !["borrador", "cancelado"].includes(p.estado) && saldoDe(p) > 0;
 
 /** Origen del pedido → etiqueta legible (en vez del slug crudo "sistema"/"booqable-historico"/etc.). */
 function fuenteLabel(fuente: string | null): string | null {
@@ -135,7 +135,7 @@ const matchesDayFilter = (p: Pedido, f: DayFilter): boolean => {
   return tieneSaldo(p);
 };
 
-// ── Página ───────────────────────────────────────────────────────────────────────────────────────────
+// ── Página ───────────────────────────────────────────────────────────────────
 
 function PedidosPage() {
   useDocumentTitle("Pedidos · Back Office");
@@ -425,7 +425,7 @@ function PedidosPage() {
   );
 }
 
-// ── Subcomponentes ─────────────────────────────────────────────────────────────────────
+// ── Subcomponentes ───────────────────────────────────────────────────────────
 
 /** Tag "RETIRA HOY" / "DEVUELVE HOY" si aplica (para meta de fila/card). */
 function hoyTag(p: Pedido): ReactNode | null {

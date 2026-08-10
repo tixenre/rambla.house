@@ -89,7 +89,7 @@ import { es } from "date-fns/locale";
 import { useCotizacion, descuentoLabel } from "@/lib/cotizacion";
 import { combinarTotales } from "@/lib/pedido-combinado";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { fmtArs } from "@/lib/format";
+import { creadoHace, fmtArs } from "@/lib/format";
 import { nombreCliente } from "@/lib/cliente-nombre";
 import { EquipoComboSearch } from "@/components/admin/pedido/EquipoComboSearch";
 import { EnviarDocsDialog, DOCS_PEDIDO } from "@/components/admin/pedido/EnviarDocsDialog";
@@ -521,16 +521,23 @@ function PedidoEditorPage() {
           default del flex, que los encogía de forma impredecible). */}
       <header className="flex items-center gap-3 px-4 md:px-6 py-3 border-b hairline bg-surface-elevated">
         <BackLink onClick={goList} />
-        <div className="min-w-0 flex flex-1 items-center gap-2">
-          <span className="min-w-0 truncate font-display text-lg text-ink">
-            {p.cliente_nombre || "Sin cliente"}
-          </span>
-          <span className="hidden shrink-0 font-mono text-xs text-muted-foreground sm:inline">
-            {etiquetaPedido(p)}
-          </span>
-          <span className="shrink-0">
-            <EstadoBadge estado={p.estado} label={ESTADO_LABEL[p.estado]} />
-          </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <span className="min-w-0 truncate font-display text-lg text-ink">
+              {p.cliente_nombre || "Sin cliente"}
+            </span>
+            <span className="hidden shrink-0 font-mono text-xs text-muted-foreground sm:inline">
+              {etiquetaPedido(p)}
+            </span>
+            <span className="shrink-0">
+              <EstadoBadge estado={p.estado} label={ESTADO_LABEL[p.estado]} />
+            </span>
+          </div>
+          {creadoHace(p.created_at) && (
+            <div className="mt-1 font-mono text-xs text-muted-foreground">
+              creado {creadoHace(p.created_at)}
+            </div>
+          )}
         </div>
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <SaveIndicator status={saveStatus} />
