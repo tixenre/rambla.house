@@ -25,6 +25,9 @@ export const talleresAdminApi = {
 
   createConcepto: (body: object) => authedPostJson<TallerConcepto>("/api/admin/talleres", body),
 
+  deleteConcepto: (conceptoId: number) =>
+    authedJson<{ ok: boolean }>(`/api/admin/talleres/${conceptoId}`, { method: "DELETE" }),
+
   updateConcepto: (conceptoId: number, body: object) =>
     authedJson<TallerConcepto>(`/api/admin/talleres/${conceptoId}`, {
       method: "PATCH",
