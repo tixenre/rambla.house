@@ -1,0 +1,130 @@
+{
+  "nombre": "Taller de Semiótica y Narrativa Fotográfica",
+  "subtitulo": "Rambla × Ariel Perissinotti — 1ra edición",
+  "descripcion": "Este taller propone un recorrido integral de 16 clases en el que abordaremos los fundamentos teóricos y prácticos de la comunicación a través de la imagen fotográfica. Desde los conceptos clave de la semiótica —el signo, sus lógicas, la denotación y connotación, el mito y la intertextualidad— hasta las herramientas de análisis y producción de sentido, cada encuentro está diseñado para que los participantes no solo comprendan cómo funcionan las imágenes en la cultura, sino que también aprendan a utilizarlas con intención y conciencia crítica.\n\nA lo largo de la cursada, cada participante desarrollará un proyecto fotográfico personal, una serie de imágenes con un hilo narrativo propio, que será acompañado y analizado colectivamente en el taller, y que se presentará al final del curso como síntesis aplicada de los contenidos abordados. El cupo es reducido, para garantizar un seguimiento personalizado y un espacio de intercambio profundo.\n\nPrograma — versión breve:\n1. Fundamentos de la semiótica: el signo y sus lógicas\n2. Herramientas de análisis para la imagen fija\n3. Expansión del sentido: narrativa, cultura e intertextualidad\n4. Metodología de análisis integral y producción de imágenes\n5. Reflexión crítica y aplicaciones profesionales\n6. Proyecto personal: la serie fotográfica como enunciación semiótica\n\nPrograma — versión extensa:\n\n1. Fundamentos de la semiótica: el signo y sus lógicas\n· Introducción a la semiótica como disciplina y su relevancia en la cultura visual contemporánea.\n· Modelos de Saussure y Peirce\n\n2. Herramientas de análisis para la imagen fija\n· Modelo de Roland Barthes: denotación y connotación (mensaje cultural).\n· El mito como proceso de naturalización del sentido y vehículo de ideología.\n· El punctum y el studium como modos de lectura y afectación del espectador.\n\n3. Expansión del sentido: narrativa, cultura e intertextualidad\n· Semiótica de la cultura y la semiosfera (Iuri Lotman): la imagen como unidad cultural, dinámicas centro-periferia, explosión y gradualidad.\n· Intertextualidad (Julia Kristeva): diálogos de la imagen con otras imágenes y discursos previos.\n· La imagen como síntoma (Georges Didi-Huberman): lo significativo no solo está en lo intencional, sino en las grietas, fallas y detalles no programados.\n\n4. Metodología de análisis integral y producción de imágenes\n· Articulación de las herramientas de Saussure, Peirce, Barthes, Lotman, Kristeva y Didi-Huberman para el abordaje de fotografías, series documentales, publicidad y fenómenos visuales contemporáneos.\n· Identificación de niveles de sentido: literal (denotativo), cultural (connotativo/mítico), intertextual y sintomal.\n· Análisis de casos concretos: fotografía de prensa, publicitaria, artística y documental.\n\n5. Reflexión crítica y aplicaciones profesionales\n· La imagen como productora de sentido, poder y subjetividad en la cultura.\n· Deconstrucción de mitos visuales naturalizados.\n· La semiótica como herramienta para la creación visual consciente y la comunicación estratégica en el campo del arte, el diseño, la publicidad, el periodismo y la comunicación.\n\n6. Proyecto personal: la serie fotográfica como enunciación semiótica\n· A lo largo de la cursada, cada participante construirá una serie de imágenes con un hilo conductor temático y narrativo propio.\n· El proyecto funciona como síntesis aplicada de todos los conceptos: elección consciente de signos (íconos, índices, símbolos), gestión de la connotación y el mito, diálogos intertextuales y exploración de lo sintomal.",
+  "publico_objetivo": "Orientado a:\n· Creadores de contenido, comunicadores, fotógrafos y reporteros gráficos.\n· Estudiantes y profesionales de comunicación audiovisual, cine, fotografía y periodismo.\n· Personas interesadas en comprender los mecanismos de sentido que operan detrás de toda imagen y en aplicar ese conocimiento a su práctica creativa o profesional.\n\nImportante: no es requisito tener conocimientos profundos en técnica fotográfica ni poseer una cámara profesional para hacer este taller.",
+  "notif_email": "",
+  "instructor": {
+    "nombre": "Ariel Perissinotti",
+    "rol": "Reportero gráfico, periodista y fotógrafo · docente UNMDP",
+    "descripcion": "Soy marplatense, reportero gráfico, periodista y fotógrafo con más de 20 años de trayectoria en el campo de la comunicación visual. Construí mi formación en instituciones como la Escuela Argentina de Fotografía (EAF), la Asociación de Reporteros Gráficos de la República Argentina (ARGRA) y la Universidad Nacional de Mar del Plata (UNMDP).\n\nTrabajé para distintas empresas del ecosistema de la comunicación, medios locales, nacionales e internacionales, privados y estatales, lo que me ha permitido abordar la fotografía desde múltiples perspectivas: la cobertura periodística, la publicidad, el retrato, el documentalismo y la fotografía institucional. Actualmente, combino mi práctica profesional en el fotoperiodismo y el periodismo digital con la docencia universitaria en la carrera de periodismo de la UNMDP.",
+    "instagram": "",
+    "web": "",
+    "proyectos": "Presidencia de la Nación, Revista Debate, Revista El Federal, Editorial San Pablo, Aerolíneas Argentinas, Carnival Corporation, Princess Cruises, Open Sports, UNMDP, Gobierno de la Provincia de Buenos Aires, Municipalidad de General Pueyrredon, Municipalidad de Mar Chiquita, Punto Digital"
+  },
+  "edicion": {
+    "tipo_taller": "semanal",
+    "horario": "Jueves de 19:00 a 21:00",
+    "cupos_total": 12,
+    "precio_total": 0,
+    "precio_sena": 0,
+    "direccion": null,
+    "pago_alias": "",
+    "pago_cbu": "",
+    "pago_banco": "",
+    "usa_estudio": true,
+    "valor_estudio": 0,
+    "valor_estudio_modo": "mensual",
+    "usa_equipos": false,
+    "valor_equipos": 0,
+    "valor_equipos_modo": "mensual",
+    "clases": [
+      {
+        "fecha": "2026-09-03",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 1"
+      },
+      {
+        "fecha": "2026-09-10",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 2"
+      },
+      {
+        "fecha": "2026-09-17",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 3"
+      },
+      {
+        "fecha": "2026-09-24",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 4"
+      },
+      {
+        "fecha": "2026-10-01",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 5"
+      },
+      {
+        "fecha": "2026-10-08",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 6"
+      },
+      {
+        "fecha": "2026-10-15",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 7"
+      },
+      {
+        "fecha": "2026-10-22",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 8"
+      },
+      {
+        "fecha": "2026-10-29",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 9"
+      },
+      {
+        "fecha": "2026-11-05",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 10"
+      },
+      {
+        "fecha": "2026-11-12",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 11"
+      },
+      {
+        "fecha": "2026-11-19",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 12"
+      },
+      {
+        "fecha": "2026-11-26",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 13"
+      },
+      {
+        "fecha": "2026-12-03",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 14"
+      },
+      {
+        "fecha": "2026-12-10",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 15"
+      },
+      {
+        "fecha": "2026-12-17",
+        "hora_inicio_min": 1140,
+        "hora_fin_min": 1260,
+        "titulo": "Clase 16"
+      }
+    ]
+  }
+}
