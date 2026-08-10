@@ -21,7 +21,10 @@ Formato de la ficha (JSON) — ver `scripts/fichas/` para ejemplos reales:
     "usa_estudio": false, "valor_estudio": 0, "valor_estudio_modo": "mensual",
     "usa_equipos": false, "valor_equipos": 0, "valor_equipos_modo": "mensual",
     "clases": [{"fecha": "2026-09-03", "hora_inicio_min": 1140, "hora_fin_min": 1260,
-                "titulo": "Clase 1", "portada": "clase-1.jpg"}, ...]  // portada opcional
+                "titulo": "Clase 1", "portada": "clase-1.jpg"}, ...],  // portada opcional
+    "modalidades": [{"codigo": "total", "label": "Pago total", "monto_total": 320000},
+                     {"codigo": "mensual", "label": "Mensual", "monto_total": 80000,
+                      "nota": "Se abona en la primera clase de cada mes"}]  // opcional
   }
 }
 
@@ -189,6 +192,20 @@ def importar(client: httpx.Client, base: str, ficha: dict, ficha_dir: Path) -> d
             print(f"  aviso: no pude completar el perfil del instructor ({r2.status_code}): {r2.text}", file=sys.stderr)
         else:
             print(f"  perfil del instructor completado: {list(campos_ricos.keys())}")
+
+    # Modalidades de pago — `EdicionCreateBody` no las acepta en la creación
+    # (mismo campo que `ModalidadesSection` en el admin, agregado aparte vía
+    # PATCH). Con 2+ modalidades el público ve la LISTA (label+monto+nota);
+    # con 1 sola, esa se vuelve "el" precio mostrado en vez de `precio_total`
+    # (ver `PrecioCard.tsx`) — si la ficha quiere mostrar ambos, tiene que
+    # traer explícitamente una modalidad "Pago total" además de la mensual.
+    modalidades = edicion.get("modalidades")
+    if modalidades:
+        r3 = client.patch(f"{base}/api/admin/ediciones/{ed_out['id']}", json={"modalidades": modalidades})
+        if r3.status_code != 200:
+            print(f"  aviso: no pude cargar las modalidades de pago ({r3.status_code}): {r3.text}", file=sys.stderr)
+        else:
+            print(f"  modalidades de pago cargadas: {[m.get('label') for m in modalidades]}")
 
     # Foto de perfil del instructor.
     if instructor.get("foto") and instructor_id:

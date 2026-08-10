@@ -4,7 +4,7 @@ import { FileJson, Plus, Upload } from "lucide-react";
 import { toast } from "sonner";
 
 import { talleresAdminApi } from "@/lib/admin/api/talleres";
-import type { ClaseBody, TallerConcepto } from "@/lib/admin/api/types";
+import type { ClaseBody, ModalidadPagoBody, TallerConcepto } from "@/lib/admin/api/types";
 import { Button } from "@/design-system/ui/button";
 import { Input } from "@/design-system/ui/input";
 import { Spinner } from "@/design-system/ui/spinner";
@@ -60,6 +60,12 @@ type FichaTaller = {
     valor_equipos?: number;
     valor_equipos_modo?: "mensual" | "total";
     clases: ClaseBody[];
+    // Opcional — `EdicionCreateBody` no las acepta en la creación, se cargan
+    // aparte por PATCH (mismo campo que `ModalidadesSection` en el admin).
+    // Con 2+ el público ve la lista completa; con 1 sola, esa reemplaza a
+    // `precio_total` como "el" precio mostrado (ver `PrecioCard.tsx`) — para
+    // mostrar ambos hay que traer una modalidad "Pago total" explícita además.
+    modalidades?: ModalidadPagoBody[];
   };
 };
 
@@ -136,6 +142,15 @@ export function NuevoConceptoDialog({
           await talleresAdminApi.updateInstructor(instructorId, camposRicos);
         } catch (e) {
           toast.error(`No se pudo completar el perfil del instructor: ${(e as Error).message}`);
+        }
+      }
+      const modalidades = ficha?.edicion.modalidades;
+      const edicionId = created.ediciones[0]?.id;
+      if (modalidades?.length && edicionId) {
+        try {
+          await talleresAdminApi.updateEdicion(edicionId, { modalidades });
+        } catch (e) {
+          toast.error(`No se pudieron cargar las modalidades de pago: ${(e as Error).message}`);
         }
       }
       onSuccess(created);
@@ -308,6 +323,11 @@ export function NuevoConceptoDialog({
                     {!ficha.edicion.direccion &&
                       "dirección: la de Rambla (sin especificar en la ficha)"}
                   </p>
+                  {ficha.edicion.modalidades && ficha.edicion.modalidades.length > 0 && (
+                    <p className="text-muted-foreground">
+                      Modalidades: {ficha.edicion.modalidades.map((m) => m.label).join(" · ")}
+                    </p>
+                  )}
                 </div>
                 <p className="text-2xs text-muted-foreground border-t border-border/40 pt-2">
                   La edición queda en borrador. Fotos de portada/instructor se suben después, desde
