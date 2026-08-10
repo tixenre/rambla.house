@@ -245,7 +245,7 @@ function TallerLandingPage() {
               <div className="flex flex-col gap-12">
                 {/* Descripción + público */}
                 <section>
-                  <p className="text-base sm:text-lg leading-relaxed text-muted-foreground">
+                  <p className="text-base sm:text-lg leading-relaxed text-muted-foreground whitespace-pre-line">
                     {taller.descripcion}
                   </p>
                   {taller.publico_objetivo && (
@@ -253,7 +253,7 @@ function TallerLandingPage() {
                       <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground mb-2">
                         Orientado a
                       </p>
-                      <p className="text-sm text-muted-foreground leading-relaxed">
+                      <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">
                         {taller.publico_objetivo}
                       </p>
                     </div>
