@@ -48,13 +48,13 @@ import { FacturaPreviewDialog, FacturarButton } from "@/components/admin/pedido/
 import { useFacturacionArca } from "@/components/admin/pedido/useFacturacionArca";
 import { AdminCard, FAB } from "@/components/mobile";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { formatARS, formatFechaCorta, fmtArs } from "@/lib/format";
+import { creadoHace, formatARS, formatFechaCorta, fmtArs } from "@/lib/format";
 
 export const Route = createLazyFileRoute("/admin/pedidos/")({
   component: PedidosPage,
 });
 
-// ── Helpers de fecha / cobranza ──────────────────────────────────────────────
+// ── Helpers de fecha / cobranza ─────────────────────────────────────────────────────────────────
 
 const todayYmd = hoyAR;
 const esHoy = (s: string | null) => !!s && s.slice(0, 10) === todayYmd();
@@ -71,18 +71,6 @@ function fechaDia(s: string | null): string {
     if (hora && hora !== "00:00") return `${base} ${hora}`;
   }
   return base;
-}
-
-/** "creado hace 2 h" — relativo simple desde created_at. */
-function creadoHace(iso?: string): string | null {
-  if (!iso) return null;
-  const diff = Date.now() - new Date(iso).getTime();
-  if (Number.isNaN(diff)) return null;
-  const h = Math.floor(diff / 3_600_000);
-  if (h < 1) return "recién";
-  if (h < 24) return `hace ${h} h`;
-  const d = Math.floor(h / 24);
-  return `hace ${d} d`;
 }
 
 /** Cuántos turnos del Estudio tiene vinculados este pedido (#1308) — el
@@ -104,7 +92,7 @@ function TurnosVinculadosTag({ count }: { count: number }) {
 const saldoDe = (p: Pedido) => Math.max(0, (p.monto_total ?? 0) - (p.monto_pagado ?? 0));
 // Pagado completo: mismo criterio que el "Pagado" de PagoBadge (pagado ≥ total > 0).
 const estaPagado = (p: Pedido) => (p.monto_total ?? 0) > 0 && saldoDe(p) === 0;
-const tieneSaldo = (p: Pedido) => !["borrador", "cancelado"].includes(p.estado) && saldoDe(p) > 0;
+const tieneSaldo = (p: Pedido) => !"[borrador cancelado]".includes(p.estado) && saldoDe(p) > 0;
 
 /** Origen del pedido → etiqueta legible (en vez del slug crudo "sistema"/"booqable-historico"/etc.). */
 function fuenteLabel(fuente: string | null): string | null {
@@ -147,7 +135,7 @@ const matchesDayFilter = (p: Pedido, f: DayFilter): boolean => {
   return tieneSaldo(p);
 };
 
-// ── Página ───────────────────────────────────────────────────────────────────
+// ── Página ───────────────────────────────────────────────────────────────────────────────────────────
 
 function PedidosPage() {
   useDocumentTitle("Pedidos · Back Office");
@@ -437,7 +425,7 @@ function PedidosPage() {
   );
 }
 
-// ── Subcomponentes ───────────────────────────────────────────────────────────
+// ── Subcomponentes ─────────────────────────────────────────────────────────────────────
 
 /** Tag "RETIRA HOY" / "DEVUELVE HOY" si aplica (para meta de fila/card). */
 function hoyTag(p: Pedido): ReactNode | null {
