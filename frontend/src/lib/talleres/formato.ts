@@ -49,10 +49,12 @@ export function resumenFechas(
 }
 
 /** Horario de la landing: si todas las clases comparten franja horaria,
- * "08:30 — 12:30 hs"; si varían (ej. preproducción vs. rodaje), un texto
- * genérico en vez de mostrar solo la primera y mentir sobre el resto. Sin
- * clases cargadas (borrador recién creado), cae al `horario` libre del
- * taller — el único lector que le queda a ese campo legacy. */
+ * "08:30 — 12:30 hs" (o "Jueves 19:00 — 21:00 hs" si además caen siempre el
+ * mismo día de la semana, el caso común del taller semanal); si varían (ej.
+ * preproducción vs. rodaje), un texto genérico en vez de mostrar solo la
+ * primera y mentir sobre el resto. Sin clases cargadas (borrador recién
+ * creado), cae al `horario` libre del taller — el único lector que le queda
+ * a ese campo legacy. */
 export function resumenHorario(clases: SesionFecha[], fallback: string): string {
   if (clases.length === 0) return fallback;
   const [primero] = clases;
@@ -60,5 +62,12 @@ export function resumenHorario(clases: SesionFecha[], fallback: string): string 
     (c) => c.hora_inicio_min === primero.hora_inicio_min && c.hora_fin_min === primero.hora_fin_min,
   );
   if (!mismaFranja) return "Horarios según la clase";
-  return `${primero.hora_inicio_str ?? fmtHhmm(primero.hora_inicio_min)} — ${primero.hora_fin_str ?? fmtHhmm(primero.hora_fin_min)} hs`;
+  const horario = `${primero.hora_inicio_str ?? fmtHhmm(primero.hora_inicio_min)} — ${primero.hora_fin_str ?? fmtHhmm(primero.hora_fin_min)} hs`;
+  const primerDia = new Date(primero.fecha + "T12:00:00").getDay();
+  const mismoDia = clases.every((c) => new Date(c.fecha + "T12:00:00").getDay() === primerDia);
+  if (!mismoDia) return horario;
+  const dia = new Date(primero.fecha + "T12:00:00").toLocaleDateString("es-AR", {
+    weekday: "long",
+  });
+  return `${dia.charAt(0).toUpperCase()}${dia.slice(1)} ${horario}`;
 }

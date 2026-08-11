@@ -243,9 +243,16 @@ function TallerLandingPage() {
             <div className="grid lg:grid-cols-[1fr_380px] gap-10 lg:gap-16 items-start">
               {/* Columna principal */}
               <div className="flex flex-col gap-12">
-                {/* Orden: a quién está orientado → cuándo es (chequeo rápido
-                    antes de invertir tiempo en leer) → el desarrollo completo
-                    del programa. */}
+                {/* Orden: de qué se trata → a quién está orientado → cuándo es
+                    (chequeo rápido antes de invertir tiempo en leer) → el
+                    desarrollo completo del programa. */}
+                <section>
+                  <DescripcionRica
+                    texto={taller.descripcion}
+                    className="text-lg sm:text-xl text-muted-foreground"
+                  />
+                </section>
+
                 {taller.publico_objetivo && (
                   <section className="rounded-xl bg-muted/30 border border-border/50 px-5 py-4">
                     <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground mb-2">
@@ -267,12 +274,6 @@ function TallerLandingPage() {
                   </section>
                 )}
 
-                <section>
-                  <DescripcionRica
-                    texto={taller.descripcion}
-                    className="text-lg sm:text-xl text-muted-foreground"
-                  />
-                </section>
                 <ProgramaSection clases={clases} />
                 <InstitucionesRow taller={taller} />
                 <InstructorCard taller={taller} />
