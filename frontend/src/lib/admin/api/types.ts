@@ -1851,6 +1851,9 @@ export type TallerConcepto = {
   nombre: string;
   subtitulo: string;
   descripcion: string;
+  // F7: teaser corto para la tarjeta de /escuelas (mezcla "para quién" + "de
+  // qué trata") — "" = el front cae a `descripcion` truncada.
+  resumen: string;
   publico_objetivo: string;
   notif_email: string;
   // F2: T&C propios ('' → /terminos general), beneficios, pregunta del form

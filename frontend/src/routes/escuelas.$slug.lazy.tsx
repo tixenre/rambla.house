@@ -243,14 +243,11 @@ function TallerLandingPage() {
             <div className="grid lg:grid-cols-[1fr_380px] gap-10 lg:gap-16 items-start">
               {/* Columna principal */}
               <div className="flex flex-col gap-12">
-                {/* Descripción + público */}
+                {/* Público + descripción — a quién está orientado primero, el
+                    desarrollo completo del programa después. */}
                 <section>
-                  <DescripcionRica
-                    texto={taller.descripcion}
-                    className="text-lg sm:text-xl text-muted-foreground"
-                  />
                   {taller.publico_objetivo && (
-                    <div className="mt-6 rounded-xl bg-muted/30 border border-border/50 px-5 py-4">
+                    <div className="mb-6 rounded-xl bg-muted/30 border border-border/50 px-5 py-4">
                       <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground mb-2">
                         Orientado a
                       </p>
@@ -260,6 +257,10 @@ function TallerLandingPage() {
                       />
                     </div>
                   )}
+                  <DescripcionRica
+                    texto={taller.descripcion}
+                    className="text-lg sm:text-xl text-muted-foreground"
+                  />
                 </section>
 
                 {formTaller.sesiones.length > 0 && (

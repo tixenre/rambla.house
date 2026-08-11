@@ -1953,6 +1953,12 @@ def _init_db_schema(conn):
     # admin arma la lista de a una (hay preguntas sugeridas precargables en
     # el front); ninguna es obligatoria.
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS faqs JSONB NOT NULL DEFAULT '[]'")
+    # Escuela v2 F7: resumen corto para la TARJETA del listado (mezcla "para
+    # quién es" + "de qué trata") — `descripcion` es el texto largo de la
+    # página propia, pensado para leerse completo, no truncado a 2 líneas.
+    # '' → el front cae a `descripcion` truncada (cero ruptura para talleres
+    # que nunca lo cargan).
+    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS resumen TEXT NOT NULL DEFAULT ''")
 
     # ── Modelo de ediciones (F1): talleres → concepto + ediciones_taller + clases_taller ──
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS slug_base VARCHAR(120)")

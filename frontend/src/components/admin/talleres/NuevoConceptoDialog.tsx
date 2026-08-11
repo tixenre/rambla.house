@@ -29,6 +29,9 @@ type FichaTaller = {
   nombre: string;
   subtitulo?: string;
   descripcion?: string;
+  // Teaser corto para la tarjeta de /escuelas (mezcla "para quién" + "de qué
+  // trata") — no lo pisa la descripción completa truncada.
+  resumen?: string;
   publico_objetivo?: string;
   notif_email?: string;
   terminos?: string;
@@ -165,6 +168,7 @@ export function NuevoConceptoDialog({
       instructor_nombre: f.instructor?.nombre ?? "",
       subtitulo: f.subtitulo ?? "",
       descripcion: f.descripcion ?? "",
+      resumen: f.resumen ?? "",
       publico_objetivo: f.publico_objetivo ?? "",
       notif_email: f.notif_email ?? "",
       terminos: f.terminos ?? "",

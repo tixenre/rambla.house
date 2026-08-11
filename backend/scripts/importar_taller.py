@@ -9,6 +9,10 @@ script solo arma ese payload desde una ficha legible y lo manda.
 Formato de la ficha (JSON) — ver `scripts/fichas/` para ejemplos reales:
 {
   "nombre": "...", "subtitulo": "", "descripcion": "...",
+  "resumen": "...",  // opcional, teaser corto para la tarjeta de /escuelas
+                      // (mezcla "para quién" + "de qué trata" — NO el arranque
+                      // de la descripción larga; "" → el front cae a
+                      // descripcion truncada)
   "publico_objetivo": "...", "notif_email": "",
   "instructor": {"nombre": "...", "rol": "", "descripcion": "", "instagram": "",
                  "web": "", "proyectos": "A, B, C",
@@ -138,6 +142,7 @@ def importar(client: httpx.Client, base: str, ficha: dict, ficha_dir: Path) -> d
         "instructor_nombre": instructor.get("nombre", ""),
         "subtitulo": ficha.get("subtitulo", ""),
         "descripcion": ficha.get("descripcion", ""),
+        "resumen": ficha.get("resumen", ""),
         "publico_objetivo": ficha.get("publico_objetivo", ""),
         "notif_email": ficha.get("notif_email", ""),
         "terminos": ficha.get("terminos", ""),

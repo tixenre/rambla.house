@@ -90,7 +90,7 @@ def _fmt_pesos(n: int) -> str:
 # ── Helpers de lectura ────────────────────────────────────────────────────────
 
 _EDICION_JOIN_SELECT = """
-    SELECT e.*, t.nombre, t.subtitulo, t.descripcion,
+    SELECT e.*, t.nombre, t.subtitulo, t.descripcion, t.resumen,
            t.publico_objetivo, t.notif_email,
            t.slug_base, t.terminos, t.beneficios, t.pregunta_experiencia,
            t.mensaje_confirmacion, t.video_url, t.video_poster_url, t.faqs
@@ -265,6 +265,12 @@ def _edicion_to_public_dict(
         "nombre": row["nombre"],
         "subtitulo": row["subtitulo"],
         "descripcion": row["descripcion"],
+        # F7: resumen corto para la tarjeta del listado (mezcla "para quién" +
+        # "de qué trata" — la descripción completa no sirve truncada, arranca
+        # dirigiéndose al lector en vez de explicar el taller). '' = el front
+        # cae a la descripción truncada (cero ruptura para talleres viejos que
+        # nunca lo cargaron).
+        "resumen": _row_get(row, "resumen", ""),
         "publico_objetivo": row["publico_objetivo"],
         "fecha_inicio": str(row["fecha_inicio"]),
         "fecha_fin": str(row["fecha_fin"]),
@@ -362,6 +368,7 @@ def _concepto_to_admin_dict(
         "nombre": taller_row["nombre"],
         "subtitulo": taller_row["subtitulo"],
         "descripcion": taller_row["descripcion"],
+        "resumen": _row_get(taller_row, "resumen", ""),
         "publico_objetivo": taller_row["publico_objetivo"],
         "notif_email": taller_row["notif_email"],
         "terminos": _row_get(taller_row, "terminos", ""),
@@ -940,6 +947,7 @@ class TallerConceptoCreateBody(BaseModel):
     instructor_nombre: str
     subtitulo: str = ""
     descripcion: str = ""
+    resumen: str = ""
     publico_objetivo: str = ""
     notif_email: str = ""
     terminos: str = ""
@@ -1002,6 +1010,7 @@ class TallerConceptoUpdateBody(BaseModel):
     nombre: str | None = None
     subtitulo: str | None = None
     descripcion: str | None = None
+    resumen: str | None = None
     publico_objetivo: str | None = None
     notif_email: str | None = None
     terminos: str | None = None
@@ -1132,16 +1141,16 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
             cur = conn.execute(
                 """
                 INSERT INTO talleres (
-                    slug, nombre, subtitulo, descripcion, publico_objetivo,
+                    slug, nombre, subtitulo, descripcion, resumen, publico_objetivo,
                     notif_email, activo, slug_base,
                     terminos, beneficios, pregunta_experiencia, mensaje_confirmacion
                 ) VALUES (
-                    %s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s, %s, %s
+                    %s, %s, %s, %s, %s, %s, %s, TRUE, %s, %s, %s, %s, %s
                 ) RETURNING id
                 """,
                 (
                     slug_base, nombre_base, body.subtitulo.strip(),
-                    body.descripcion.strip(), body.publico_objetivo.strip(),
+                    body.descripcion.strip(), body.resumen.strip(), body.publico_objetivo.strip(),
                     body.notif_email.strip(), slug_base,
                     body.terminos.strip(), body.beneficios.strip(),
                     body.pregunta_experiencia.strip(), body.mensaje_confirmacion.strip(),
@@ -1288,6 +1297,8 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
         sets.append("subtitulo = %s"); params.append(body.subtitulo.strip())
     if body.descripcion is not None:
         sets.append("descripcion = %s"); params.append(body.descripcion.strip())
+    if body.resumen is not None:
+        sets.append("resumen = %s"); params.append(body.resumen.strip())
     if body.publico_objetivo is not None:
         sets.append("publico_objetivo = %s"); params.append(body.publico_objetivo.strip())
     if body.notif_email is not None:

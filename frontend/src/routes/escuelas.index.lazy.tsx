@@ -79,7 +79,9 @@ function WorkshopCard({ taller }: { taller: Taller }) {
             </span>
           </div>
         </div>
-        <p className="text-sm text-muted-foreground line-clamp-2">{taller.descripcion}</p>
+        <p className="text-sm text-muted-foreground line-clamp-2">
+          {taller.resumen || taller.descripcion}
+        </p>
         <div className="flex items-center justify-between pt-1">
           <p className="text-xl font-bold text-ink tabular-nums">
             {formatARS(taller.precio_total)}
