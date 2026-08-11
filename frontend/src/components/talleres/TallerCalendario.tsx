@@ -142,6 +142,12 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
             sesion: "bg-rosa text-ink font-bold !opacity-100 rounded-full",
           }}
           className="[--cell-size:2.75rem]"
+          classNames={{
+            // Un taller de 4+ meses no entra en una sola fila — sin esto se
+            // recortaba contra el `overflow-hidden` de la card (default del DS
+            // es `md:flex-row` sin wrap, pensado para 2 meses de un date-range picker).
+            months: "relative flex flex-col gap-4 md:flex-row md:flex-wrap md:justify-center",
+          }}
         />
       </div>
 
