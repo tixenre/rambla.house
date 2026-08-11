@@ -797,7 +797,7 @@ def equipo_page(id_or_slug: str):
             image = og_url
         else:
             foto = (d.get("foto_url") or "").strip()
-            image = foto if foto.startswith("http") else (f"{SITE_URL}{foto}" if foto else f"{SITE_URL}/icon-512.png")
+            image = foto if foto.startswith("http") else (f"{SITE_URL}{foto}" if foto else f"{SITE_URL}/og-image.png")
         url = f"{SITE_URL}/equipo/{id_or_slug}"
         html_text = _inject_og_meta(
             index_file.read_text(encoding="utf-8"),
@@ -990,7 +990,7 @@ def estudio_page():
         title = f"{nombre} — Rambla Rental"
         img = (foto_row["img_url"] if foto_row else "") or ""
         if not img.startswith("http"):
-            img = f"{SITE_URL}/icon-512.png"
+            img = f"{SITE_URL}/og-image.png"
         html_text = _inject_og_meta(
             index_file.read_text(encoding="utf-8"),
             title=title, description=desc, image=img, url=f"{SITE_URL}/estudio",
@@ -1070,7 +1070,13 @@ def workshop_page(slug: str, request: Request):
             desc_raw = f"Taller con {instructor} en Rambla, Mar del Plata." if instructor else "Talleres audiovisuales en Mar del Plata."
         title = f"{nombre} con {instructor} — Rambla" if instructor else f"{nombre} — Rambla"
         if not og_img.startswith("http"):
-            og_img = f"{SITE_URL}/icon-512.png"
+            # og-image.png (1200×630, ya encuadrada para OG) — no icon-512.png
+            # (ícono cuadrado): el mismo bug ya se había corregido en /c/{token}
+            # y en la home (ver sus comentarios), pero acá seguía sin
+            # arreglarse — WhatsApp lo mostraba como el logo gigante sin
+            # contexto (taller de Ariel Perissinotti, sin foto de instructor
+            # cargada todavía).
+            og_img = f"{SITE_URL}/og-image.png"
         taller_url = f"{SITE_URL}/escuelas/{slug}"
         html_text = _inject_og_meta(
             index_file.read_text(encoding="utf-8"),
