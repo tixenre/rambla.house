@@ -1,4 +1,5 @@
 import type { Taller } from "@/lib/api";
+import { DescripcionRica } from "@/components/talleres/DescripcionRica";
 
 type InstructorEntity = Taller["instructores"][number];
 
@@ -48,7 +49,7 @@ export function InstructorCard({ taller }: { taller: Taller }) {
             {ins.nombre}
           </h2>
         </div>
-        <p className="text-base text-ink/80 leading-relaxed">{ins.descripcion}</p>
+        <DescripcionRica texto={ins.descripcion} className="text-base text-ink/80" />
         {proyectos.length > 0 && (
           <div className="mt-6">
             <p className="font-mono text-2xs tracking-[0.2em] uppercase text-muted-foreground mb-3">
@@ -89,7 +90,7 @@ export function InstructorCard({ taller }: { taller: Taller }) {
               </div>
             </div>
             {ins.descripcion && (
-              <p className="text-sm text-muted-foreground leading-relaxed">{ins.descripcion}</p>
+              <DescripcionRica texto={ins.descripcion} className="text-sm text-muted-foreground" />
             )}
             {(ins.instagram || ins.web) && (
               <div className="flex gap-3 text-xs">
