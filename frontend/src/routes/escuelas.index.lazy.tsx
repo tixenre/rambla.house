@@ -79,7 +79,7 @@ function WorkshopCard({ taller }: { taller: Taller }) {
             </span>
           </div>
         </div>
-        <p className="text-sm text-muted-foreground line-clamp-2">
+        <p className="text-sm text-muted-foreground line-clamp-3">
           {taller.resumen || taller.descripcion}
         </p>
         <div className="flex items-center justify-between pt-1">

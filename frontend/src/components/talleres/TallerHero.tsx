@@ -19,7 +19,7 @@ function Titulo({ taller }: { taller: Taller }) {
         <p
           className="font-display font-bold lowercase leading-tight tracking-[-0.01em] mt-3"
           style={{
-            fontSize: "clamp(1.125rem, 2.5vw, 1.5rem)",
+            fontSize: "clamp(1.25rem, 3vw, 1.75rem)",
             color: "color-mix(in oklch, var(--color-rosa) 80%, white)",
           }}
         >
