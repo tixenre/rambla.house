@@ -48,7 +48,7 @@ import { FacturaPreviewDialog, FacturarButton } from "@/components/admin/pedido/
 import { useFacturacionArca } from "@/components/admin/pedido/useFacturacionArca";
 import { AdminCard, FAB } from "@/components/mobile";
 import { useDocumentTitle } from "@/hooks/useDocumentTitle";
-import { formatARS, formatFechaCorta, fmtArs } from "@/lib/format";
+import { creadoHace, formatARS, formatFechaCorta, fmtArs } from "@/lib/format";
 
 export const Route = createLazyFileRoute("/admin/pedidos/")({
   component: PedidosPage,
@@ -71,18 +71,6 @@ function fechaDia(s: string | null): string {
     if (hora && hora !== "00:00") return `${base} ${hora}`;
   }
   return base;
-}
-
-/** "creado hace 2 h" — relativo simple desde created_at. */
-function creadoHace(iso?: string): string | null {
-  if (!iso) return null;
-  const diff = Date.now() - new Date(iso).getTime();
-  if (Number.isNaN(diff)) return null;
-  const h = Math.floor(diff / 3_600_000);
-  if (h < 1) return "recién";
-  if (h < 24) return `hace ${h} h`;
-  const d = Math.floor(h / 24);
-  return `hace ${d} d`;
 }
 
 /** Cuántos turnos del Estudio tiene vinculados este pedido (#1308) — el

@@ -797,7 +797,7 @@ def equipo_page(id_or_slug: str):
             image = og_url
         else:
             foto = (d.get("foto_url") or "").strip()
-            image = foto if foto.startswith("http") else (f"{SITE_URL}{foto}" if foto else f"{SITE_URL}/icon-512.png")
+            image = foto if foto.startswith("http") else (f"{SITE_URL}{foto}" if foto else f"{SITE_URL}/og-image.png")
         url = f"{SITE_URL}/equipo/{id_or_slug}"
         html_text = _inject_og_meta(
             index_file.read_text(encoding="utf-8"),
@@ -990,7 +990,7 @@ def estudio_page():
         title = f"{nombre} — Rambla Rental"
         img = (foto_row["img_url"] if foto_row else "") or ""
         if not img.startswith("http"):
-            img = f"{SITE_URL}/icon-512.png"
+            img = f"{SITE_URL}/og-image.png"
         html_text = _inject_og_meta(
             index_file.read_text(encoding="utf-8"),
             title=title, description=desc, image=img, url=f"{SITE_URL}/estudio",
@@ -1004,7 +1004,7 @@ def estudio_page():
 @app.get("/escuelas/{slug}", include_in_schema=False)
 @app.get("/escuela/{slug}", include_in_schema=False)  # alias viejo (singular): el front lo redirige a /escuelas, acá sirve OG para scrapers
 @app.get("/workshops/{slug}", include_in_schema=False)  # alias más viejo: el front lo redirige a /escuelas, acá sirve OG para scrapers
-def workshop_page(slug: str):
+def workshop_page(slug: str, request: Request):
     """Sirve el SPA del taller con OG tags dinámicos (foto del instructor).
     Ante cualquier error sirve el index.html plano — nunca rompe la página.
 
@@ -1012,21 +1012,32 @@ def workshop_page(slug: str):
     `ediciones_taller.slug` — no `talleres.slug`, el del CONCEPTO, que solo
     coincide por convención para la 1ª edición). Escuela v2 F6: fechas/precio
     salen de `ediciones_taller`, instructor de `instructores` (las columnas
-    legacy que antes vivían en `talleres` ya no existen)."""
+    legacy que antes vivían en `talleres` ya no existen).
+
+    Visibilidad de un BORRADOR (`activo=FALSE`) — reusa `_get_edicion_row`
+    (`routes/talleres.py`), la MISMA puerta que `GET /talleres/{slug}`: en
+    prod, solo lo ve una sesión admin; en `dev`/local con `ADMIN_BYPASS_AUTH`
+    lo ve cualquiera (igual que ya ve la página del SPA). Antes esta ruta
+    filtraba `activo=TRUE` a mano, sin ese bypass — un taller en borrador
+    servía la página bien (la API SÍ respetaba el bypass) pero SIEMPRE con el
+    OG genérico del sitio, aunque quien comparte el link en staging esté
+    viendo el borrador real (encontrado con el taller de Ariel Perissinotti,
+    aún sin publicar)."""
     try:
         index_file = FRONT_NEW / "index.html"
         if not index_file.exists():
             return _serve_frontend("index.html")
+        from auth.guards import is_admin_email
+        from auth.session import dev_bypass_enabled, get_session
+        from routes.talleres import _get_edicion_row
+
+        session = get_session(request)
+        es_admin = dev_bypass_enabled() or bool(session and is_admin_email(session.get("email")))
         conn = get_db()
         try:
-            taller = conn.execute(
-                "SELECT t.nombre, t.descripcion, t.id AS taller_id, "
-                "e.fecha_inicio, e.fecha_fin, e.precio_total "
-                "FROM ediciones_taller e JOIN talleres t ON t.id = e.taller_id "
-                "WHERE e.slug = %s AND e.activo = TRUE",
-                (slug,),
-            ).fetchone()
-            if not taller:
+            try:
+                taller = _get_edicion_row(conn, slug, incluir_borrador=es_admin)
+            except HTTPException:
                 return _serve_frontend("index.html")
             instructor_row = conn.execute(
                 "SELECT i.nombre, i.foto_url, i.foto_media_id "
@@ -1059,7 +1070,13 @@ def workshop_page(slug: str):
             desc_raw = f"Taller con {instructor} en Rambla, Mar del Plata." if instructor else "Talleres audiovisuales en Mar del Plata."
         title = f"{nombre} con {instructor} — Rambla" if instructor else f"{nombre} — Rambla"
         if not og_img.startswith("http"):
-            og_img = f"{SITE_URL}/icon-512.png"
+            # og-image.png (1200×630, ya encuadrada para OG) — no icon-512.png
+            # (ícono cuadrado): el mismo bug ya se había corregido en /c/{token}
+            # y en la home (ver sus comentarios), pero acá seguía sin
+            # arreglarse — WhatsApp lo mostraba como el logo gigante sin
+            # contexto (taller de Ariel Perissinotti, sin foto de instructor
+            # cargada todavía).
+            og_img = f"{SITE_URL}/og-image.png"
         taller_url = f"{SITE_URL}/escuelas/{slug}"
         html_text = _inject_og_meta(
             index_file.read_text(encoding="utf-8"),

@@ -17,6 +17,7 @@ export function ContenidoSection({ concepto }: { concepto: TallerConcepto }) {
     nombre: concepto.nombre,
     subtitulo: concepto.subtitulo,
     descripcion: concepto.descripcion,
+    resumen: concepto.resumen ?? "",
     publico_objetivo: concepto.publico_objetivo,
     notif_email: concepto.notif_email ?? "",
     terminos: concepto.terminos ?? "",
@@ -31,6 +32,7 @@ export function ContenidoSection({ concepto }: { concepto: TallerConcepto }) {
       nombre: concepto.nombre,
       subtitulo: concepto.subtitulo,
       descripcion: concepto.descripcion,
+      resumen: concepto.resumen ?? "",
       publico_objetivo: concepto.publico_objetivo,
       notif_email: concepto.notif_email ?? "",
       terminos: concepto.terminos ?? "",
@@ -55,6 +57,7 @@ export function ContenidoSection({ concepto }: { concepto: TallerConcepto }) {
       nombre: form.nombre,
       subtitulo: form.subtitulo,
       descripcion: form.descripcion,
+      resumen: form.resumen,
       publico_objetivo: form.publico_objetivo,
       notif_email: form.notif_email,
       terminos: form.terminos,
@@ -108,6 +111,10 @@ export function ContenidoSection({ concepto }: { concepto: TallerConcepto }) {
       {field("¿Para quiénes?", "publico_objetivo", {
         rows: 3,
         hint: "Texto que aparece en el box 'Orientado a'",
+      })}
+      {field("Resumen (listado)", "resumen", {
+        rows: 2,
+        hint: "Aparece en la tarjeta de /escuelas — mezcla a quién está orientado + de qué trata, en 1-2 líneas. Vacío → se usa la descripción completa truncada.",
       })}
       <div className="flex flex-col gap-1.5">
         <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">

@@ -10,6 +10,8 @@ from urllib.parse import parse_qs, urlparse
 from services.ical import (
     build_vcalendar,
     build_vevent,
+    clase_taller_to_vevent,
+    clases_taller_to_ics,
     google_calendar_url,
     reserva_to_vevent,
     _escape,
@@ -225,3 +227,84 @@ class TestGoogleCalendarUrl:
 
     def test_sin_fecha_devuelve_vacio(self):
         assert google_calendar_url(self._diaria(fecha_desde=None)) == ""
+
+
+# ── clase_taller_to_vevent / clases_taller_to_ics ───────────────────────────
+
+class TestClaseTallerToVevent:
+    def _clase(self, **over):
+        base = {
+            "id": 42, "fecha": "2026-09-03",
+            "hora_inicio_min": 19 * 60, "hora_fin_min": 21 * 60,
+            "titulo": "Clase 1", "descripcion": "",
+        }
+        base.update(over)
+        return base
+
+    def test_con_hora_tiempo_flotante_y_uid_estable(self):
+        ve = clase_taller_to_vevent(self._clase(), taller_nombre="Semiótica")
+        assert "DTSTART:20260903T190000" in ve
+        assert "DTEND:20260903T210000" in ve
+        assert "20260903T190000Z" not in ve  # tiempo flotante, no UTC
+        assert "UID:taller-clase-42@rambla.house" in ve
+
+    def test_summary_con_titulo(self):
+        ve = clase_taller_to_vevent(self._clase(titulo="Clase 1"), taller_nombre="Semiótica")
+        assert "SUMMARY:Clase 1 — Semiótica" in ve
+
+    def test_summary_sin_titulo_cae_al_nombre_del_taller(self):
+        ve = clase_taller_to_vevent(self._clase(titulo=""), taller_nombre="Semiótica")
+        assert "SUMMARY:Semiótica" in ve
+        assert "—" not in ve
+
+    def test_location_y_descripcion_opcionales(self):
+        ve = clase_taller_to_vevent(
+            self._clase(descripcion="Fundamentos"),
+            taller_nombre="Semiótica", location="Estudio Rambla",
+        )
+        assert "LOCATION:Estudio Rambla" in ve
+        assert "DESCRIPTION:Fundamentos" in ve
+
+    def test_hora_fin_no_mayor_a_inicio_usa_1h_de_duracion(self):
+        # Dato corrupto (fin <= inicio): no debe producir un evento invertido.
+        ve = clase_taller_to_vevent(
+            self._clase(hora_inicio_min=600, hora_fin_min=600), taller_nombre="Semiótica",
+        )
+        assert "DTSTART:20260903T100000" in ve
+        assert "DTEND:20260903T110000" in ve
+
+    def test_recordatorio_dos_horas_antes(self):
+        ve = clase_taller_to_vevent(self._clase(), taller_nombre="Semiótica")
+        assert "TRIGGER:-PT2H" in ve
+
+    def test_sin_id_devuelve_vacio(self):
+        assert clase_taller_to_vevent(self._clase(id=None), taller_nombre="Semiótica") == ""
+
+    def test_sin_fecha_devuelve_vacio(self):
+        assert clase_taller_to_vevent(self._clase(fecha=None), taller_nombre="Semiótica") == ""
+
+
+class TestClasesTallerToIcs:
+    def test_una_vevent_por_clase(self):
+        clases = [
+            {"id": 1, "fecha": "2026-09-03", "hora_inicio_min": 1140, "hora_fin_min": 1260, "titulo": "Clase 1"},
+            {"id": 2, "fecha": "2026-09-10", "hora_inicio_min": 1140, "hora_fin_min": 1260, "titulo": "Clase 2"},
+        ]
+        ics = clases_taller_to_ics(clases, taller_nombre="Semiótica")
+        assert ics.count("BEGIN:VEVENT") == 2
+        assert ics.count("END:VEVENT") == 2
+        assert "X-WR-CALNAME:Semiótica" in ics
+        assert "METHOD:PUBLISH" in ics
+
+    def test_clase_invalida_se_omite_sin_romper_las_demas(self):
+        clases = [
+            {"id": None, "fecha": "2026-09-03", "hora_inicio_min": 1140, "hora_fin_min": 1260},
+            {"id": 2, "fecha": "2026-09-10", "hora_inicio_min": 1140, "hora_fin_min": 1260, "titulo": "Clase 2"},
+        ]
+        ics = clases_taller_to_ics(clases, taller_nombre="Semiótica")
+        assert ics.count("BEGIN:VEVENT") == 1
+        assert "UID:taller-clase-2@rambla.house" in ics
+
+    def test_sin_clases_validas_devuelve_vacio(self):
+        assert clases_taller_to_ics([], taller_nombre="Semiótica") == ""
+        assert clases_taller_to_ics([{"id": None, "fecha": None}], taller_nombre="Semiótica") == ""

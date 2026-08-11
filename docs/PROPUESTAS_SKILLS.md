@@ -189,3 +189,16 @@ importaban sí alineaban: un falso negativo que costó una vuelta de diagnóstic
 "medí dentro del contenedor de la sección (`section.querySelectorAll(...)`), no en `document`". · Por qué:
 el paso 4 ya empuja a medir por JS en vez de screenshot, pero no advierte que el alcance del selector es
 justo donde se cuela el falso negativo.
+
+2026-08-10 · pulido-frontend · El paso 1 (Diagnosticar) asume las tools `preview_*`
+(`preview_screenshot`/`preview_resize`/`preview_snapshot`/`preview_inspect`/`preview_eval`) como el único
+camino para "ver la pantalla viva". En esta sesión (Claude Code remoto/CLI, sin esas tools) no existían —
+la auditoría de `/admin/talleres` se hizo igual, armando a mano un script Playwright chico (mismo patrón
+que `staging-login` + `@playwright/test` ya establecido en MEMORIA *2026-06-20*) para navegar y capturar
+desktop+mobile. Funcionó bien, pero es repetir a mano un paso que el skill da por garantizado. Proponer:
+en el paso 1, aclarar que `preview_*` es el camino cuando está disponible (Claude Code interactivo/web con
+panel de preview); en su ausencia, el camino es un script Playwright puntual (`chromium.launch` +
+`staging-login` vía `context.request.post`, capturas con `page.screenshot`) — mismo resultado, sin
+depender de tooling que no todos los entornos tienen. · Por qué: el skill se invoca desde cualquier
+sesión (interactiva, remota, CLI); asumir un tooling específico sin decir la alternativa hace que cada
+sesión sin `preview_*` tenga que redescubrir el mismo patrón de reemplazo.

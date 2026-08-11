@@ -11,23 +11,25 @@ function Titulo({ taller }: { taller: Taller }) {
       <p className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa mb-4">Taller</p>
       <h1
         className="font-display font-black lowercase leading-[0.88] tracking-[-0.02em] text-background"
-        style={{ fontSize: "clamp(2.75rem, 8vw, 5.5rem)" }}
+        style={{ fontSize: "clamp(3rem, 9vw, 6rem)" }}
       >
         {taller.nombre}
       </h1>
+      {taller.subtitulo && (
+        <p
+          className="font-display font-bold lowercase leading-tight tracking-[-0.01em] mt-3"
+          style={{
+            fontSize: "clamp(1.25rem, 3vw, 1.75rem)",
+            color: "color-mix(in oklch, var(--color-rosa) 80%, white)",
+          }}
+        >
+          {taller.subtitulo}
+        </p>
+      )}
       <p
-        className="font-display font-black lowercase leading-[0.88] tracking-[-0.02em] mt-1"
+        className="font-display font-bold lowercase leading-tight tracking-[-0.01em] mt-1"
         style={{
-          fontSize: "clamp(2.75rem, 8vw, 5.5rem)",
-          color: "color-mix(in oklch, var(--color-rosa) 80%, white)",
-        }}
-      >
-        {taller.subtitulo}
-      </p>
-      <p
-        className="font-display font-black lowercase leading-tight tracking-[-0.02em] mt-2"
-        style={{
-          fontSize: "clamp(1.5rem, 4vw, 3rem)",
+          fontSize: "clamp(0.875rem, 2vw, 1.125rem)",
           color: "color-mix(in oklch, var(--color-rosa) 55%, white 45%)",
         }}
       >

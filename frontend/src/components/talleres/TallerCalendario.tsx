@@ -86,15 +86,15 @@ function GrupoPill({ grupo }: { grupo: Grupo }) {
       : null;
 
   return (
-    <div className="flex items-center gap-3 rounded-xl bg-muted/40 border border-border/50 px-4 py-3">
+    <div className="flex items-center gap-3 rounded-xl bg-muted/40 border border-border/50 px-5 py-4">
       <div className="w-1 self-stretch rounded-full bg-rosa flex-none" />
-      <div className="flex flex-col gap-0.5 min-w-0">
-        <span className="font-semibold text-ink text-sm">
+      <div className="flex flex-col gap-1 min-w-0">
+        <span className="font-semibold text-ink text-base sm:text-lg">
           {titulo}
           {rango && <span className="font-normal text-muted-foreground"> · {rango}</span>}
         </span>
-        <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <Clock className="h-3 w-3 text-rosa flex-none" />
+        <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+          <Clock className="h-3.5 w-3.5 text-rosa flex-none" />
           {grupo.horaInicio} — {grupo.horaFin} hs
         </span>
       </div>
@@ -120,9 +120,9 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
   const lastDate = sesionDates[sesionDates.length - 1];
   const firstMonthKey = sesionDates[0].getFullYear() * 12 + sesionDates[0].getMonth();
   const lastMonthKey = lastDate.getFullYear() * 12 + lastDate.getMonth();
-  // Hasta 3 meses uno al lado del otro; un rango más largo se recorre con la
-  // navegación real del calendario (antes: pointer-events-none, sin nav).
-  const numberOfMonths = Math.min(3, lastMonthKey - firstMonthKey + 1);
+  // Todos los meses que abarca el taller, uno al lado del otro (antes topeaba
+  // en 3 y un taller de 4+ meses escondía el resto detrás de la navegación).
+  const numberOfMonths = lastMonthKey - firstMonthKey + 1;
   const grupos = agruparPorPatron(sorted);
 
   return (
@@ -142,6 +142,12 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
             sesion: "bg-rosa text-ink font-bold !opacity-100 rounded-full",
           }}
           className="[--cell-size:2.75rem]"
+          classNames={{
+            // Un taller de 4+ meses no entra en una sola fila — sin esto se
+            // recortaba contra el `overflow-hidden` de la card (default del DS
+            // es `md:flex-row` sin wrap, pensado para 2 meses de un date-range picker).
+            months: "relative flex flex-col gap-4 md:flex-row md:flex-wrap md:justify-center",
+          }}
         />
       </div>
 

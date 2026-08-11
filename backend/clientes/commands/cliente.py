@@ -8,12 +8,17 @@ from clientes.queries import cliente as queries_cliente
 
 
 def crear(conn, data: dict) -> dict:
+    # `email` es UNIQUE en `clientes` — Postgres permite múltiples NULL pero NO
+    # múltiples "" (string vacío cuenta como valor). El picker rápido de ficha
+    # (ClienteAutocomplete) no pide email → sin este `or None`, el segundo
+    # cliente creado sin email choca contra el primero con un 400 genérico
+    # "ya existe un registro con ese valor".
     cliente_id = conn.insert_returning(
         """INSERT INTO clientes (nombre, apellido, telefono, email, direccion, cuit,
                                   descuento, perfil_impuestos, notas, direccion_maps_url)
            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
         (
-            data["nombre"], data["apellido"], data["telefono"], data["email"],
+            data["nombre"], data["apellido"], data["telefono"], data["email"] or None,
             data["direccion"], data["cuit"], data["descuento"], data["perfil_impuestos"],
             data["notas"], data["direccion_maps_url"],
         ),
@@ -30,6 +35,10 @@ def actualizar(conn, cliente_id: int, actual: dict, updates: dict) -> dict:
     solo se dispara el recálculo)."""
     if not updates:
         raise ValueError("Nada para actualizar")
+    # Mismo criterio que `crear`: vaciar el email en una edición no puede
+    # guardar "" (choca contra el UNIQUE) — se guarda NULL.
+    if updates.get("email") == "":
+        updates = {**updates, "email": None}
     set_clause = ", ".join(f"{k}=%s" for k in updates) + ", updated_at=CURRENT_TIMESTAMP"
     conn.execute(f"UPDATE clientes SET {set_clause} WHERE id=%s", list(updates.values()) + [cliente_id])
     if "descuento" in updates and (updates["descuento"] or 0) != (actual.get("descuento") or 0):

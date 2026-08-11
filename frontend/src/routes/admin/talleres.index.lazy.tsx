@@ -46,6 +46,13 @@ function TalleresAdminPage() {
     setExpandedId(created.id);
   }
 
+  function handleDeleteConcepto(conceptoId: number) {
+    qc.setQueryData(["admin", "talleres"], (prev: TallerConcepto[] | undefined) =>
+      prev?.filter((c) => c.id !== conceptoId),
+    );
+    setExpandedId((id) => (id === conceptoId ? null : id));
+  }
+
   function handleNuevaEdicionSuccess(created: EdicionAdmin) {
     qc.setQueryData(["admin", "talleres"], (prev: TallerConcepto[] | undefined) =>
       prev?.map((c) =>
@@ -94,6 +101,7 @@ function TalleresAdminPage() {
                 expanded={expandedId === concepto.id}
                 onToggle={() => setExpandedId(expandedId === concepto.id ? null : concepto.id)}
                 onNuevaEdicion={(c) => setNuevaEdicionConcepto(c)}
+                onDelete={handleDeleteConcepto}
               />
             ))}
           </div>

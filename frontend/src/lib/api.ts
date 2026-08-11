@@ -459,6 +459,9 @@ export type Taller = {
   nombre: string;
   subtitulo: string;
   descripcion: string;
+  // Teaser corto para la tarjeta del listado (mezcla "para quién" + "de qué
+  // trata") — "" = sin cargar, el front cae a `descripcion` truncada.
+  resumen: string;
   publico_objetivo: string;
   fecha_inicio: string;
   fecha_fin: string;

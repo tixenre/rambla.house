@@ -1,9 +1,14 @@
 import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { Plus } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 
+import { talleresAdminApi } from "@/lib/admin/api/talleres";
 import type { TallerConcepto } from "@/lib/admin/api/types";
 import { Button } from "@/design-system/ui/button";
+import { Spinner } from "@/design-system/ui/spinner";
+import { useConfirm } from "@/components/admin/useConfirm";
+import { useScrollFadeMask } from "@/hooks/useScrollFadeMask";
 import { ContenidoSection } from "./ConceptoTabs";
 import { EdicionSubRow } from "./EdicionSubRow";
 import { FaqSection } from "./FaqSection";
@@ -17,16 +22,24 @@ export function TallerConceptoRow({
   expanded,
   onToggle,
   onNuevaEdicion,
+  onDelete,
 }: {
   concepto: TallerConcepto;
   expanded: boolean;
   onToggle: () => void;
   onNuevaEdicion: (c: TallerConcepto) => void;
+  onDelete: (conceptoId: number) => void;
 }) {
   const qc = useQueryClient();
+  const confirm = useConfirm();
   const [activeTab, setActiveTab] = useState<
     "ediciones" | "taller" | "instructores" | "instituciones" | "interesados" | "trabajos" | "faq"
   >("ediciones");
+
+  // 7 pestañas no entran en un viewport mobile (375px) — el tab-strip scrollea
+  // pero sin señal visual, así que 4 quedaban invisibles sin que nada avise que
+  // hay más.
+  const tabsScroll = useScrollFadeMask(expanded);
 
   const totalConfirmados = concepto.ediciones.reduce((s, e) => s + e.cupos_confirmados, 0);
   const activeEdiciones = concepto.ediciones.filter((e) => e.activo);
@@ -39,6 +52,32 @@ export function TallerConceptoRow({
           : c,
       ),
     );
+  }
+
+  const deleteMut = useMutation({
+    mutationFn: () => talleresAdminApi.deleteConcepto(concepto.id),
+    onSuccess: () => {
+      toast.success("Taller eliminado");
+      onDelete(concepto.id);
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+
+  async function handleDeleteConcepto() {
+    if (totalConfirmados > 0) {
+      toast.error(`No se puede eliminar: hay ${totalConfirmados} inscripto(s) confirmado(s)`);
+      return;
+    }
+    if (
+      !(await confirm({
+        title: `¿Eliminar "${concepto.nombre}"?`,
+        description: `Se eliminará el taller y sus ${concepto.ediciones.length} edición${concepto.ediciones.length !== 1 ? "es" : ""}. Esta acción no se puede deshacer.`,
+        danger: true,
+        confirmLabel: "Eliminar",
+      }))
+    )
+      return;
+    deleteMut.mutate();
   }
 
   return (
@@ -90,7 +129,12 @@ export function TallerConceptoRow({
       {/* Detail */}
       {expanded && (
         <div className="border-t border-border/40">
-          <div className="flex border-b border-border/60 overflow-x-auto">
+          <div
+            ref={tabsScroll.ref}
+            onScroll={tabsScroll.onScroll}
+            className="flex border-b border-border/60 overflow-x-auto"
+            style={tabsScroll.style}
+          >
             {(
               [
                 { id: "ediciones", label: "Ediciones" },
@@ -124,6 +168,18 @@ export function TallerConceptoRow({
                 {tab.label}
               </button>
             ))}
+            <div className="flex-1" />
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                handleDeleteConcepto();
+              }}
+              disabled={deleteMut.isPending}
+              className="px-3 py-2 text-xs text-muted-foreground/60 hover:text-destructive transition shrink-0"
+              title="Eliminar taller"
+            >
+              {deleteMut.isPending ? <Spinner size="xs" /> : <Trash2 className="h-3.5 w-3.5" />}
+            </button>
           </div>
 
           <div className="px-4 pb-6 pt-5">

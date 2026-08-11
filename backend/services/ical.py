@@ -1,10 +1,14 @@
 """Generación de iCalendar (RFC 5545) — fuente ÚNICA de eventos de calendario.
 
-Lo usan las DOS bocas del calendario de reservas:
+Lo usan las bocas del calendario de reservas:
   1. el **feed iCal** suscribible (`routes/calendar.py`) — muchas reservas;
   2. el **adjunto `.ics`** del mail de confirmación al cliente
      (`routes/alquileres.py`) — una reserva, estilo "pasaje de avión".
-Tener un solo generador garantiza que el evento se vea idéntico en ambos lados
+Y, vía las mismas primitivas (`build_vevent`/`build_vcalendar`, sin reusar el
+adaptador de reserva), el **adjunto `.ics`** del mail de inscripción a un
+taller (`routes/talleres.py`, adaptador `clases_taller_to_ics` más abajo) — N
+clases de una edición, no una reserva.
+Tener un solo generador garantiza que el evento se vea idéntico en todos lados
 (barra de calidad del proyecto: modularidad a prueba de balas).
 
 Sin dependencias externas: el formato iCal es texto plano y se arma a mano (igual
@@ -288,3 +292,68 @@ def google_calendar_url(
         params["details"] = "\n".join(detalles)
 
     return "https://calendar.google.com/calendar/render?" + urlencode(params)
+
+
+# ── Adaptador de dominio: taller ─────────────────────────────────────────────
+
+def clase_taller_to_vevent(
+    clase: Mapping,
+    *,
+    taller_nombre: str,
+    location: str = "",
+) -> str:
+    """Mapea una clase de taller (fila de
+    `services.talleres.queries.clases.clases_de_edicion`) a un `VEVENT`.
+    `clase` necesita `id` y `fecha` (string ISO `YYYY-MM-DD`) +
+    `hora_inicio_min`/`hora_fin_min`; `titulo`/`descripcion` son opcionales.
+
+    UID estable (`taller-clase-{id}@…`) → re-generar el `.ics` no duplica el
+    evento si el cliente ya lo agregó a su calendario. Devuelve `""` si falta
+    fecha o id.
+    """
+    cid = clase.get("id")
+    fecha_str = clase.get("fecha")
+    if cid is None or not fecha_str:
+        return ""
+    base = datetime.strptime(fecha_str, "%Y-%m-%d")
+    dtstart = base + timedelta(minutes=clase.get("hora_inicio_min") or 0)
+    dtend = base + timedelta(minutes=clase.get("hora_fin_min") or 0)
+    if dtend <= dtstart:
+        dtend = dtstart + timedelta(hours=1)
+
+    titulo = (clase.get("titulo") or "").strip()
+    summary = f"{titulo} — {taller_nombre}" if titulo else taller_nombre
+
+    return build_vevent(
+        uid=f"taller-clase-{cid}@{_UID_DOMAIN}",
+        summary=summary,
+        dtstart=dtstart,
+        dtend=dtend,
+        all_day=False,
+        description=clase.get("descripcion") or "",
+        location=location,
+        reminders=("-PT2H",),
+    )
+
+
+def clases_taller_to_ics(
+    clases: Sequence[Mapping],
+    *,
+    taller_nombre: str,
+    location: str = "",
+) -> str:
+    """Arma el `.ics` con TODAS las clases de una edición de taller — un
+    `VEVENT` por clase, no un rango contable único (un taller `semanal` de 16
+    clases es 16 eventos puntuales, no "una reserva de 3 meses"; ver bug #445
+    / MEMORIA 2026-07-28). Pensado para el adjunto del mail de inscripción
+    (reemplaza el botón "Agregar a mi calendario" que vivía en la landing
+    pública). Devuelve `""` si ninguna clase tiene fecha/id válidos.
+    """
+    vevents = []
+    for c in clases:
+        v = clase_taller_to_vevent(c, taller_nombre=taller_nombre, location=location)
+        if v:
+            vevents.append(v)
+    if not vevents:
+        return ""
+    return build_vcalendar(vevents, method="PUBLISH", cal_name=taller_nombre)
