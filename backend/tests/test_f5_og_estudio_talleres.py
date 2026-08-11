@@ -200,3 +200,70 @@ def test_workshop_og_fallback_ante_error_bd(tmp_path):
         resp = client.get("/workshops/cualquier-slug")
 
     assert resp.status_code == 200
+
+
+def test_workshop_og_borrador_sin_bypass_filtra_por_activo(tmp_path):
+    """Sin admin/bypass, la query de `_get_edicion_row` filtra `activo = TRUE`
+    (mismo gate que `GET /talleres/{slug}` — un borrador no existe para el
+    público, ni para el crawler de OG)."""
+    index = tmp_path / "index.html"
+    index.write_text(STATIC_INDEX)
+
+    fake_taller = {
+        "nombre": "Taller Sin Publicar", "descripcion": "En preparación",
+        "taller_id": 5, "fecha_inicio": None, "fecha_fin": None, "precio_total": None,
+    }
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, None]
+    conn.close = MagicMock()
+
+    with (
+        patch("main.FRONT_NEW", tmp_path),
+        patch("main.get_db", return_value=conn),
+        patch("main.SITE_URL", "https://rambla.house"),
+        patch("auth.session.dev_bypass_enabled", return_value=False),
+    ):
+        client = _make_app()
+        resp = client.get("/workshops/taller-sin-publicar")
+
+    assert resp.status_code == 200
+    sql = conn.execute.call_args_list[0].args[0]
+    assert "e.activo = TRUE" in sql
+
+
+def test_workshop_og_borrador_visible_con_dev_bypass(tmp_path):
+    """Bug real (taller de Ariel Perissinotti, aún en borrador en `dev`):
+    con `ADMIN_BYPASS_AUTH` (staging/local), la MISMA edición despublicada
+    que ya ve el SPA (`GET /talleres/{slug}`, `incluir_borrador=es_admin`)
+    tiene que ver también su propio OG — antes esta ruta filtraba
+    `activo = TRUE` a mano, sin el bypass, y siempre caía al genérico."""
+    index = tmp_path / "index.html"
+    index.write_text(STATIC_INDEX)
+
+    fake_taller = {
+        "nombre": "Taller Sin Publicar", "descripcion": "En preparación",
+        "taller_id": 5, "fecha_inicio": None, "fecha_fin": None, "precio_total": None,
+    }
+    fake_instructor = {
+        "nombre": "Instructor Preview", "foto_url": "https://cdn.example/preview.jpg",
+        "foto_media_id": None,
+    }
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor]
+    conn.close = MagicMock()
+
+    with (
+        patch("main.FRONT_NEW", tmp_path),
+        patch("main.get_db", return_value=conn),
+        patch("main.SITE_URL", "https://rambla.house"),
+        patch("auth.session.dev_bypass_enabled", return_value=True),
+    ):
+        client = _make_app()
+        resp = client.get("/workshops/taller-sin-publicar")
+
+    assert resp.status_code == 200
+    sql = conn.execute.call_args_list[0].args[0]
+    assert "e.activo = TRUE" not in sql
+    body = resp.text
+    assert "Taller Sin Publicar" in body
+    assert "Instructor Preview" in body
