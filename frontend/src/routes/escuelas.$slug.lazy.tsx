@@ -8,6 +8,7 @@ import { Button } from "@/design-system/ui/button";
 import { IconButton } from "@/design-system/ui/icon-button";
 import { ModalBackdrop } from "@/design-system/ui/modal-backdrop";
 import { WorkshopInscripcionForm } from "@/components/talleres/WorkshopInscripcionForm";
+import { DescripcionRica } from "@/components/talleres/DescripcionRica";
 import { TallerHero } from "@/components/talleres/TallerHero";
 import { TallerCalendario } from "@/components/talleres/TallerCalendario";
 import { ProgramaSection } from "@/components/talleres/ProgramaSection";
@@ -245,17 +246,19 @@ function TallerLandingPage() {
               <div className="flex flex-col gap-12">
                 {/* Descripción + público */}
                 <section>
-                  <p className="text-base sm:text-lg leading-relaxed text-muted-foreground whitespace-pre-line">
-                    {taller.descripcion}
-                  </p>
+                  <DescripcionRica
+                    texto={taller.descripcion}
+                    className="text-base sm:text-lg text-muted-foreground"
+                  />
                   {taller.publico_objetivo && (
                     <div className="mt-6 rounded-xl bg-muted/30 border border-border/50 px-5 py-4">
                       <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground mb-2">
                         Orientado a
                       </p>
-                      <p className="text-sm text-muted-foreground leading-relaxed whitespace-pre-line">
-                        {taller.publico_objetivo}
-                      </p>
+                      <DescripcionRica
+                        texto={taller.publico_objetivo}
+                        className="text-sm text-muted-foreground"
+                      />
                     </div>
                   )}
                 </section>
