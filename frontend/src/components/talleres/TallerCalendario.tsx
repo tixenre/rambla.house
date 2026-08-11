@@ -137,6 +137,14 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
           startMonth={sesionDates[0]}
           endMonth={lastDate}
           showOutsideDays={false}
+          // No hay selección real (es un calendario de solo lectura) — pero
+          // react-day-picker solo renderiza el día vía el <DayButton> con su
+          // tamaño acotado (`min-w-(--cell-size)`) cuando `mode` u
+          // `onDayClick` están presentes (`isInteractive` en su código
+          // fuente); sin ninguno de los dos, cae a un <td> crudo sin límite
+          // de ancho — cada celda terminaba tan ancha como le dejara la fila,
+          // gigante en desktop/tablet. No-op a propósito, no agrega mode.
+          onDayClick={() => {}}
           modifiers={{ sesion: sesionDates }}
           modifiersClassNames={{
             sesion: "bg-rosa text-ink font-bold !opacity-100 rounded-full",
@@ -147,6 +155,10 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
             // recortaba contra el `overflow-hidden` de la card (default del DS
             // es `md:flex-row` sin wrap, pensado para 2 meses de un date-range picker).
             months: "relative flex flex-col gap-4 md:flex-row md:flex-wrap md:justify-center",
+            // El botón base del DS achica a `md:h-9` (tap target grande solo en
+            // mobile, patrón app-wide) — acá pisa el `aspect-square h-auto` del
+            // día y lo ovala en desktop. `!` fuerza el cuadrado en todo breakpoint.
+            day_button: "!h-(--cell-size)",
           }}
         />
       </div>
