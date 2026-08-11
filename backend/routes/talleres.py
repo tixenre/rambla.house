@@ -27,9 +27,10 @@ from database import get_db, now_ar
 from rate_limit import limiter
 from dataio.slug import slugify, slug_unico
 from routes.alquileres import _next_numero_pedido
-from services.email import send_email
+from services.email import Attachment, send_email
 from services.fechas import fmt_fecha_es as _fmt_fecha_es
 from services.email.service import get_admin_tos
+from services.ical import clases_taller_to_ics
 from services.media.models import DeriveSpec
 from services.media.errors import MediaError
 from services.media.service import store_upload, store_raw_document
@@ -507,6 +508,29 @@ def _comprobante_url_para_email(key: str | None, fallback_url: str | None) -> st
     return fallback_url or ""
 
 
+def _ics_adjunto_taller(
+    *, taller_nombre: str, direccion: str | None, slug: str, clases: list[dict],
+) -> list[Attachment] | None:
+    """Adjunto `.ics` del mail de inscripción confirmada — reemplaza el botón
+    "Agregar a mi calendario" que vivía en la landing pública (pedido del
+    dueño: solo tiene sentido una vez inscripto, no antes). Best-effort: si
+    falla o no hay clases cargadas, devuelve `None` y el mail sale igual."""
+    try:
+        ics = clases_taller_to_ics(clases, taller_nombre=taller_nombre, location=direccion or "")
+        if not ics:
+            return None
+        return [
+            Attachment(
+                filename=f"{slug}.ics",
+                content=ics.encode("utf-8"),
+                mimetype="text/calendar; method=PUBLISH; charset=utf-8",
+            )
+        ]
+    except Exception:
+        logger.warning("No se pudo generar el .ics del taller %s", slug, exc_info=True)
+        return None
+
+
 @router.post("/talleres/{slug}/inscripcion")
 @limiter.limit("10/minute")
 def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
@@ -526,6 +550,8 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
             edicion_row = _get_edicion_row(conn, slug)
             edicion_id = edicion_row["id"]
             taller_id = edicion_row["taller_id"]
+            # Clases reales (para el adjunto .ics del mail — ver más abajo).
+            clases = _get_clases(conn, edicion_id)
 
             # F4c: cierre de inscripciones por fecha (NULL = siempre abierto).
             cierre = edicion_row["fecha_cierre_inscripcion"]
@@ -623,6 +649,15 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
         "en_lista_espera": en_lista,
         "fecha": fecha_str,
     }
+    # El .ics solo tiene sentido con el cupo confirmado — a alguien en lista
+    # de espera no le mandamos un calendario para clases a las que todavía no
+    # sabemos si va a entrar.
+    attachments = None
+    if not en_lista:
+        attachments = _ics_adjunto_taller(
+            taller_nombre=edicion_row["nombre"], direccion=edicion_row["direccion"],
+            slug=edicion_row["slug"], clases=clases,
+        )
     ctx_cliente = {
         "taller_nombre": edicion_row["nombre"],
         "nombre_pila": nombre_pila,
@@ -635,11 +670,13 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
         "pago_alias": edicion_row["pago_alias"],
         "pago_cbu": edicion_row["pago_cbu"],
         "pago_banco": edicion_row["pago_banco"],
+        "tipo_taller": edicion_row["tipo_taller"],
+        "tiene_ics": bool(attachments),
     }
 
     for to in admin_tos:
         send_email("taller_inscripcion_admin", to, ctx_admin)
-    send_email("taller_inscripcion_cliente", email, ctx_cliente)
+    send_email("taller_inscripcion_cliente", email, ctx_cliente, attachments=attachments)
 
     cupos_disponibles = max(0, locked["cupos_total"] - locked["cupos_confirmados"] - (0 if en_lista else 1))
     return {
@@ -793,11 +830,17 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
                 "JOIN talleres t ON t.id = e.taller_id WHERE e.id = %s",
                 (ins["edicion_id"],),
             ).fetchone()
+            # Clases reales (para el adjunto .ics del mail — ver más abajo).
+            clases = _get_clases(conn, ins["edicion_id"])
         except Exception:
             conn.rollback()
             raise
 
     nombre_pila = ins["nombre"].split()[0]
+    attachments = _ics_adjunto_taller(
+        taller_nombre=edicion_row["taller_nombre"], direccion=edicion_row["direccion"],
+        slug=edicion_row["slug"], clases=clases,
+    )
     ctx_cliente = {
         "taller_nombre": edicion_row["taller_nombre"],
         "nombre_pila": nombre_pila,
@@ -810,6 +853,8 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
         "pago_alias": edicion_row["pago_alias"],
         "pago_cbu": edicion_row["pago_cbu"],
         "pago_banco": edicion_row["pago_banco"],
+        "tipo_taller": edicion_row["tipo_taller"],
+        "tiene_ics": bool(attachments),
     }
     admin_tos = [edicion_row["notif_email"]] if edicion_row["notif_email"] else get_admin_tos()
     ctx_admin = {
@@ -824,7 +869,7 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
     }
     for to in admin_tos:
         send_email("taller_inscripcion_admin", to, ctx_admin)
-    send_email("taller_inscripcion_cliente", ins["email"], ctx_cliente)
+    send_email("taller_inscripcion_cliente", ins["email"], ctx_cliente, attachments=attachments)
 
     return {"ok": True}
 

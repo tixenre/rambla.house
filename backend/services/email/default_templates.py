@@ -261,9 +261,16 @@ Fecha: {{ fecha }}""",
 <p style="margin:0 0 8px;">Hola <strong>{{{{ nombre_pila }}}}</strong>, {{% if en_lista_espera %}}te anotamos en la lista de espera de <strong>{{{{ taller_nombre }}}}</strong>. Te avisamos si se libera un cupo.{{% else %}}recibimos tu inscripción a <strong>{{{{ taller_nombre }}}}</strong>. Tu seña queda confirmada cuando verifiquemos el pago.{{% endif %}}</p>
 {{% if not en_lista_espera %}}
 <p {b.LBL}>Fechas</p>
+{{% if tipo_taller == 'semanal' %}}
+<p style="margin:0 0 4px;"><strong>Primera clase:</strong> {{{{ fecha_inicio_str }}}}<br><strong>Última clase:</strong> {{{{ fecha_fin_str }}}}<br><strong>Horario:</strong> {{{{ horario }}}}<br><strong>Lugar:</strong> {{{{ direccion }}}}</p>
+{{% else %}}
 <p style="margin:0 0 4px;"><strong>Clase teórica:</strong> {{{{ fecha_inicio_str }}}}, {{{{ horario }}}}<br><strong>Clase práctica:</strong> {{{{ fecha_fin_str }}}}, {{{{ horario }}}}<br><strong>Lugar:</strong> {{{{ direccion }}}}</p>
+{{% endif %}}
 <p {b.LBL}>Datos de pago (seña)</p>
 <p style="margin:0 0 4px;"><strong>Alias:</strong> {{{{ pago_alias }}}}<br><strong>CBU:</strong> {{{{ pago_cbu }}}}<br><strong>Banco:</strong> {{{{ pago_banco }}}}<br><strong>Monto:</strong> {{{{ precio_sena_str }}}}</p>
+{{% if tiene_ics %}}
+<p {b.MUTED_P}>📅 Te adjuntamos un calendario para agregar {{% if tipo_taller == 'semanal' %}}todas las clases{{% else %}}las clases{{% endif %}} a tu agenda.</p>
+{{% endif %}}
 {{% endif %}}
 <p {b.MUTED_P}>¿Preguntas? Respondé este mail o escribínos por WhatsApp.</p>
 <p style="margin:18px 0 0;">— El equipo de Rambla</p>""",
@@ -274,16 +281,25 @@ Te avisamos si se libera un cupo. ¿Preguntas? Respondé este mail.
 {%- else -%}
 Hola {{ nombre_pila }}, recibimos tu inscripción a {{ taller_nombre }}.
 
+{% if tipo_taller == 'semanal' -%}
+Primera clase: {{ fecha_inicio_str }}
+Última clase: {{ fecha_fin_str }}
+Horario: {{ horario }}
+Lugar: {{ direccion }}
+{%- else -%}
 Clase teórica: {{ fecha_inicio_str }}, {{ horario }}
 Clase práctica: {{ fecha_fin_str }}, {{ horario }}
 Lugar: {{ direccion }}
+{%- endif %}
 
 Datos de pago (seña):
   Alias: {{ pago_alias }}
   CBU: {{ pago_cbu }}
   Banco: {{ pago_banco }}
   Monto: {{ precio_sena_str }}
-
+{% if tiene_ics %}
+Te adjuntamos un calendario (.ics) para agregar las clases a tu agenda.
+{% endif %}
 ¿Preguntas? Respondé este mail.
 {%- endif %}
 

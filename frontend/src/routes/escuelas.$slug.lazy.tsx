@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { createLazyFileRoute, Link, notFound } from "@tanstack/react-router";
-import { CalendarPlus, CheckCircle2, X } from "lucide-react";
+import { CheckCircle2, X } from "lucide-react";
 
 import { PublicLayout } from "@/components/rental/shell/PublicLayout";
 import { Button } from "@/design-system/ui/button";
@@ -21,7 +21,6 @@ import { TallerCTABar } from "@/components/talleres/TallerCTABar";
 import { Input } from "@/design-system/ui/input";
 import { apiGetTaller, type EdicionLite, type Taller } from "@/lib/api";
 import { ordinalEdicion, resumenFechas, resumenHorario } from "@/lib/talleres/formato";
-import { descargarIcsTaller } from "@/lib/talleres/ical";
 
 export const Route = createLazyFileRoute("/escuelas/$slug")({
   component: TallerLandingPage,
@@ -265,27 +264,9 @@ function TallerLandingPage() {
 
                 {formTaller.sesiones.length > 0 && (
                   <section>
-                    <div className="flex items-center justify-between gap-3 mb-4">
-                      <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa">
-                        Cuándo
-                      </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5 h-7 text-xs"
-                        onClick={() =>
-                          descargarIcsTaller({
-                            tallerNombre: taller.nombre,
-                            slug: formTaller.slug,
-                            direccion: formTaller.direccion,
-                            clases: formTaller.sesiones,
-                          })
-                        }
-                      >
-                        <CalendarPlus className="h-3 w-3" />
-                        Agregar a mi calendario
-                      </Button>
-                    </div>
+                    <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa mb-4">
+                      Cuándo
+                    </p>
                     <TallerCalendario sesiones={formTaller.sesiones} horario={formTaller.horario} />
                   </section>
                 )}
