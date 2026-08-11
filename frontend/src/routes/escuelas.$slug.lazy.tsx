@@ -247,7 +247,7 @@ function TallerLandingPage() {
                 <section>
                   <DescripcionRica
                     texto={taller.descripcion}
-                    className="text-base sm:text-lg text-muted-foreground"
+                    className="text-lg sm:text-xl text-muted-foreground"
                   />
                   {taller.publico_objetivo && (
                     <div className="mt-6 rounded-xl bg-muted/30 border border-border/50 px-5 py-4">
@@ -256,7 +256,7 @@ function TallerLandingPage() {
                       </p>
                       <DescripcionRica
                         texto={taller.publico_objetivo}
-                        className="text-sm text-muted-foreground"
+                        className="text-base text-muted-foreground"
                       />
                     </div>
                   )}
