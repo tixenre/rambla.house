@@ -7,7 +7,6 @@ import { SectionBanner } from "@/components/rental/landing/SectionBanner";
 import { EmptyState } from "@/design-system/composites/EmptyState";
 import { Grain } from "@/components/common/Grain";
 import { apiGetTalleres, type Taller } from "@/lib/api";
-import { formatARS } from "@/lib/format";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
 
 export const Route = createLazyFileRoute("/escuelas/")({
@@ -82,10 +81,7 @@ function WorkshopCard({ taller }: { taller: Taller }) {
         <p className="text-sm text-muted-foreground line-clamp-3">
           {taller.resumen || taller.descripcion}
         </p>
-        <div className="flex items-center justify-between pt-1">
-          <p className="text-xl font-bold text-ink tabular-nums">
-            {formatARS(taller.precio_total)}
-          </p>
+        <div className="flex items-center justify-end pt-1">
           <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink group-hover:gap-3 transition-[gap]">
             Ver taller <ArrowRight className="h-4 w-4" />
           </span>
