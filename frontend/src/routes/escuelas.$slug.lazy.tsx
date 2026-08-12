@@ -232,14 +232,14 @@ function TallerLandingPage() {
             </div>
           )}
 
-          <TallerGaleria fotos={formTaller.fotos} alt={taller.nombre} />
-
           <TallerHero
             taller={taller}
             formTaller={formTaller}
             fechasResumen={fechasResumen}
             horarioResumen={horarioResumen}
           />
+
+          <TallerGaleria fotos={formTaller.fotos} alt={taller.nombre} />
 
           {/* ── Cuerpo ─────────────────────────────────────────────────────── */}
           <div className="max-w-[1100px] mx-auto px-4 sm:px-6 py-12 sm:py-16">
