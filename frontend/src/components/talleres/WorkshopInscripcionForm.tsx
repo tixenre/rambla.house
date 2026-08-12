@@ -214,7 +214,9 @@ export function WorkshopInscripcionForm({ taller, onSuccess }: Props) {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+    <form onSubmit={handleSubmit} className="card flex flex-col gap-5 p-5 sm:p-6">
+      <h2 className="font-display text-2xl font-bold text-ink lowercase">inscribite</h2>
+
       {/* Cupos badge */}
       <div
         className={`rounded-xl px-4 py-2.5 text-sm font-medium ${
