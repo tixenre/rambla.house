@@ -65,9 +65,9 @@ type FichaTaller = {
     clases: ClaseBody[];
     // Opcional — `EdicionCreateBody` no las acepta en la creación, se cargan
     // aparte por PATCH (mismo campo que `ModalidadesSection` en el admin).
-    // Con 2+ el público ve la lista completa; con 1 sola, esa reemplaza a
-    // `precio_total` como "el" precio mostrado (ver `PrecioCard.tsx`) — para
-    // mostrar ambos hay que traer una modalidad "Pago total" explícita además.
+    // El público las ve en `ModalidadSelector` (form de inscripción); con
+    // 2+ es un selector real, con ≤1 no renderiza nada (`PrecioCard`, que
+    // mostraba el precio sin depender del form, se retiró — 2026-08-12).
     modalidades?: ModalidadPagoBody[];
   };
 };

@@ -15,7 +15,6 @@ import { TallerCalendario } from "@/components/talleres/TallerCalendario";
 import { ProgramaSection } from "@/components/talleres/ProgramaSection";
 import { InstructorCard } from "@/components/talleres/InstructorCard";
 import { InstitucionesRow } from "@/components/talleres/InstitucionesRow";
-import { PrecioCard } from "@/components/talleres/PrecioCard";
 import { TallerTrabajos } from "@/components/talleres/TallerTrabajos";
 import { TallerFAQ } from "@/components/talleres/TallerFAQ";
 import { TallerCTABar } from "@/components/talleres/TallerCTABar";
@@ -285,8 +284,6 @@ function TallerLandingPage() {
 
               {/* Sidebar sticky */}
               <div className="lg:sticky lg:top-20">
-                <PrecioCard taller={formTaller} />
-
                 {/* Formulario de inscripción */}
                 <div id="inscripcion" className="scroll-mt-20">
                   {isFrozen ? (
