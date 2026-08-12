@@ -7,6 +7,12 @@ import { uploadEdicionFile } from "@/lib/talleres/photos";
 import { talleresAdminApi } from "@/lib/admin/api";
 import type { EdicionFotoOrdenItem } from "@/lib/admin/api/types";
 
+// Subir todo el FileList de una — el input acepta `multiple` y la UI invita
+// a elegir varias — disparaba N requests simultáneos sin tope; un lote de
+// ~15-20 fotos agotaba el rate limit de `upload-foto` (20/minuto, backend)
+// en la primera ráfaga y tiraba 429. De a tandas chicas, encadenadas.
+const UPLOAD_CONCURRENCY = 3;
+
 /**
  * Galería de fotos de una EDICIÓN de taller (portada + galería pública) —
  * espejo de GaleriaSection (Estudio), scoped a `edicionId` en vez del
@@ -27,13 +33,27 @@ export function GaleriaEdicionSection({
 
   async function handleUpload(files: FileList) {
     setUploading(true);
+    const fileArray = Array.from(files);
+    let fallidas = 0;
     try {
-      const uploads = Array.from(files).map((f) => uploadEdicionFile(edicionId, f));
-      await Promise.all(uploads);
-      toast.success(files.length === 1 ? "Foto subida" : `${files.length} fotos subidas`);
-      onChanged();
-    } catch (e) {
-      toast.error("Error subiendo foto", { description: (e as Error).message });
+      for (let i = 0; i < fileArray.length; i += UPLOAD_CONCURRENCY) {
+        const tanda = fileArray.slice(i, i + UPLOAD_CONCURRENCY);
+        const resultados = await Promise.allSettled(
+          tanda.map((f) => uploadEdicionFile(edicionId, f)),
+        );
+        fallidas += resultados.filter((r) => r.status === "rejected").length;
+      }
+      const subidas = fileArray.length - fallidas;
+      if (fallidas === 0) {
+        toast.success(subidas === 1 ? "Foto subida" : `${subidas} fotos subidas`);
+      } else if (subidas === 0) {
+        toast.error("No se pudo subir ninguna foto");
+      } else {
+        toast.warning(`${subidas} fotos subidas, ${fallidas} con error`, {
+          description: "Probá subir de nuevo las que fallaron.",
+        });
+      }
+      if (subidas > 0) onChanged();
     } finally {
       setUploading(false);
     }
