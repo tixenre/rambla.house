@@ -66,8 +66,9 @@ type FichaTaller = {
     // Opcional — `EdicionCreateBody` no las acepta en la creación, se cargan
     // aparte por PATCH (mismo campo que `ModalidadesSection` en el admin).
     // El público las ve en `ModalidadSelector` (form de inscripción); con
-    // 2+ es un selector real, con ≤1 no renderiza nada (`PrecioCard`, que
-    // mostraba el precio sin depender del form, se retiró — 2026-08-12).
+    // 2+ es un selector real, con 1 sola muestra el monto sin radio (nada
+    // que elegir). `PrecioCard`, que mostraba el precio sin depender del
+    // form, se retiró — 2026-08-12.
     modalidades?: ModalidadPagoBody[];
   };
 };
