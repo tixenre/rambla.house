@@ -123,6 +123,34 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
   // Todos los meses que abarca el taller, uno al lado del otro (antes topeaba
   // en 3 y un taller de 4+ meses escondía el resto detrás de la navegación).
   const numberOfMonths = lastMonthKey - firstMonthKey + 1;
+  // En mobile los meses siguen apilados 1 por fila (sin cambios, hay ancho de
+  // sobra) — el achique es SOLO desktop, `md:`, donde el objetivo pasa a ser
+  // que entren lado a lado en el ancho de la card (~530-610px) en vez de
+  // apilarse. Sin el prefijo `md:` acá, un taller de 4 meses también
+  // encogería el mobile (celdas de 16px con medio ancho de card vacío al
+  // lado — nadie lo pidió, ahí sí sobra lugar). Base mobile-safe (44px)
+  // siempre presente, el tramo por mes solo pisa desde `md:`. Números
+  // calibrados contra el ancho REAL medido en el build de prod: 4 meses a
+  // 1.75rem medía 784px reales contra una card de ~530-610px — hacía falta
+  // bastante menos, no un ajuste fino. Clases completas y estáticas (no
+  // template string) para que Tailwind las genere en el build.
+  const cellSizeClass =
+    numberOfMonths >= 4
+      ? "[--cell-size:2.75rem] md:[--cell-size:1rem]"
+      : numberOfMonths === 3
+        ? "[--cell-size:2.75rem] md:[--cell-size:1.5rem]"
+        : numberOfMonths === 2
+          ? "[--cell-size:2.75rem] md:[--cell-size:2.25rem]"
+          : "[--cell-size:2.75rem]";
+  // El botón hereda `text-sm` (14-15px) del Button base — a 16-24px de celda
+  // (desktop, 3+ meses) un número de 2 dígitos ("29") ya no entra sin pisar
+  // la celda de al lado. Va atado al mismo tramo que cellSizeClass; `md:`
+  // por la misma razón (mobile ya está bien con el tamaño heredado).
+  // text-2xs/text-3xs = tokens del DS (10px/9px, ver typography.css), no
+  // tamaños mágicos.
+  const dayTextClass =
+    numberOfMonths >= 4 ? "md:text-3xs" : numberOfMonths === 3 ? "md:text-2xs" : "";
+  const weekdayTextClass = numberOfMonths >= 3 ? "md:text-3xs" : "";
   const grupos = agruparPorPatron(sorted);
 
   return (
@@ -159,16 +187,46 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
             sesion:
               "[&_button]:!bg-rosa [&_button]:!text-ink [&_button]:font-bold [&_button]:!opacity-100 [&_button]:!rounded-full",
           }}
-          className="[--cell-size:2.75rem]"
+          className={cellSizeClass}
           classNames={{
-            // Un taller de 4+ meses no entra en una sola fila — sin esto se
-            // recortaba contra el `overflow-hidden` de la card (default del DS
-            // es `md:flex-row` sin wrap, pensado para 2 meses de un date-range picker).
-            months: "relative flex flex-col gap-4 md:flex-row md:flex-wrap md:justify-center",
-            // El botón base del DS achica a `md:h-9` (tap target grande solo en
-            // mobile, patrón app-wide) — acá pisa el `aspect-square h-auto` del
-            // día y lo ovala en desktop. `!` fuerza el cuadrado en todo breakpoint.
-            day_button: "!h-(--cell-size)",
+            // md:flex-wrap (no nowrap) a propósito: con el --cell-size chico
+            // de arriba, N meses entran lado a lado en una fila — pero si algún
+            // taller tuviera tantos meses que igual no entren, esto los manda a
+            // una fila nueva en vez de desbordar/recortarse contra el
+            // `overflow-hidden` de la card (default del DS es `md:flex-row`
+            // sin wrap, pensado para 2 meses de un date-range picker).
+            months:
+              "relative flex flex-col gap-3 md:flex-row md:flex-wrap md:justify-center md:gap-2",
+            // El default del DS es `w-full` — cada mes exige el 100% de la
+            // fila, así que con flex-wrap SIEMPRE se apila 1 por fila sin
+            // importar --cell-size (un % no se achica solo porque el
+            // contenido es más chico). `flex-1 basis-0` los hace repartirse el
+            // ancho por igual; `min-w-0` pisa el `min-width:auto` default de
+            // flex (si no, el mes se resiste a achicarse por debajo de su
+            // ancho de contenido y nunca entran 4 en una fila).
+            month: "flex flex-col gap-2 md:min-w-0 md:flex-1 md:basis-0",
+            // Default del DS: `table-layout: auto` — con 4 meses angostos el
+            // navegador igual dimensiona cada columna por su contenido
+            // (min-content de "30"/"29") e IGNORA el ancho angosto del <table>,
+            // desbordando hacia el mes de al lado (números pisándose entre
+            // meses). `table-fixed` fuerza a cada columna a `ancho_tabla / 7`
+            // de verdad — pero el `<table>` es a su vez HIJO FLEX de `.rdp-
+            // month` (`flex flex-col`) y por default un flex-item no se
+            // achica por debajo de su min-content (`min-width:auto`), mismo
+            // gotcha que en `.rdp-month` — sin `min-w-0` acá el ancho angosto
+            // de arriba nunca llegaba a pegarle a la tabla.
+            table: "w-full min-w-0 border-collapse table-fixed",
+            // El botón base del DS fija `md:h-9 md:w-9` (36px, tap target grande
+            // solo en mobile, patrón app-wide) — `min-w-(--cell-size)` de
+            // CalendarDayButton es apenas un PISO: con 1 mes (44px) ya ganaba
+            // por sí solo, pero con varios meses (--cell-size < 36px) el w-9
+            // fijo pasa a ganar y el botón deja de achicarse aunque el resto sí
+            // — hay que pisar ambos ejes con `!` para que seguir el tamaño
+            // sea real en los dos sentidos, no solo la altura. `text-sm`
+            // heredado (14-15px) no entra en una celda de 16-24px con 2
+            // dígitos sin pisar la celda de al lado — de ahí dayTextClass.
+            day_button: `!h-(--cell-size) !w-(--cell-size) ${dayTextClass}`,
+            weekday: `text-muted-foreground flex-1 select-none rounded-md text-xs font-normal ${weekdayTextClass}`,
           }}
         />
       </div>
