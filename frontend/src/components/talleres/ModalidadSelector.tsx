@@ -2,9 +2,12 @@ import { RadioGroup, RadioGroupItem } from "@/design-system/ui/radio-group";
 import type { Taller } from "@/lib/api";
 
 /**
- * Selector de modalidad de pago en el form de inscripción. 1 sola modalidad
- * configurada (o el fallback sintético "Pago total") → texto sin radio, cero
- * fricción extra. 2+ → RadioGroup DS.
+ * Selector de modalidad de pago en el form de inscripción. 0 modalidades no
+ * debería pasar (el backend siempre sintetiza "Pago total" si la edición no
+ * configuró ninguna) — defensivo, sin nada que mostrar. 1 sola → el monto se
+ * muestra igual (sin radio, cero fricción de elegir entre 1 sola opción) —
+ * si no, el form se queda sin ningún monto visible antes del comprobante de
+ * transferencia. 2+ → RadioGroup DS.
  */
 export function ModalidadSelector({
   modalidades,
@@ -15,7 +18,22 @@ export function ModalidadSelector({
   value: string;
   onChange: (codigo: string) => void;
 }) {
-  if (modalidades.length <= 1) return null;
+  if (modalidades.length === 0) return null;
+
+  if (modalidades.length === 1) {
+    const m = modalidades[0];
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 px-4 py-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-ink">{m.label}</p>
+          {m.nota && <p className="text-xs text-rosa">{m.nota}</p>}
+        </div>
+        <p className="font-display text-sm font-bold text-ink tabular-nums shrink-0">
+          {m.monto_total_str}
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-1.5">

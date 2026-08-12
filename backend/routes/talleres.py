@@ -24,7 +24,7 @@ from pydantic import BaseModel, EmailStr, Field
 from auth.guards import require_admin
 from config import SITE_URL, settings
 from database import get_db, now_ar
-from rate_limit import limiter
+from rate_limit import limiter, ADMIN_WRITE_LIMIT, ADMIN_UPLOAD_LIMIT
 from dataio.slug import slugify, slug_unico
 from routes.alquileres import _next_numero_pedido
 from services.email import Attachment, send_email
@@ -35,6 +35,15 @@ from services.media.models import DeriveSpec
 from services.media.errors import MediaError
 from services.media.service import store_upload, store_raw_document
 from services.media.youtube import extract_video_id, youtube_nocookie_url, store_youtube_poster
+from services.media import (
+    DISPLAY_KEEP_ASPECT,
+    DISPLAY_KEEP_ASPECT_AVIF,
+    DISPLAY_KEEP_ASPECT_SM,
+    DISPLAY_KEEP_ASPECT_SM_AVIF,
+    collect_asset_keys,
+    purge_r2,
+)
+from services.media_fastapi import media_http
 from services import telefono as telefono_svc
 # Lógica de decisión duplicada/compartida extraída a services/talleres/
 # (CQRS-lite): gate de conflicto con Estudio, creación de edición, validación
@@ -256,6 +265,7 @@ def _edicion_lite(row) -> dict:
 
 def _edicion_to_public_dict(
     row, clases=None, instructores=None, modalidades=None, trabajos=None, instituciones=None,
+    fotos=None,
 ) -> dict:
     """Convierte edicion_row (JOIN talleres) al shape plano del API público."""
     return {
@@ -315,10 +325,13 @@ def _edicion_to_public_dict(
             str(row["fecha_cierre_inscripcion"]) if _row_get(row, "fecha_cierre_inscripcion") else None
         ),
         "trabajos": trabajos if trabajos is not None else [],
+        # Portada + galería de ESTA edición (no del concepto) — confirmado con
+        # el dueño: cada edición tiene su propia tanda de fotos.
+        "fotos": fotos if fotos is not None else [],
     }
 
 
-def _edicion_to_admin_dict(edicion_row, clases=None, modalidades=None) -> dict:
+def _edicion_to_admin_dict(edicion_row, clases=None, modalidades=None, fotos=None) -> dict:
     """Convierte una fila de ediciones_taller al shape de admin (anidado en concepto)."""
     return {
         "id": edicion_row["id"],
@@ -355,6 +368,7 @@ def _edicion_to_admin_dict(edicion_row, clases=None, modalidades=None) -> dict:
         "usa_equipos": bool(edicion_row["usa_equipos"]),
         "valor_equipos": edicion_row["valor_equipos"],
         "valor_equipos_modo": edicion_row["valor_equipos_modo"],
+        "fotos": fotos if fotos is not None else [],
     }
 
 
@@ -400,6 +414,7 @@ def list_talleres():
                 r, _get_clases(conn, r["id"]), _get_instructores_taller(conn, r["taller_id"]),
                 _get_modalidades(conn, r["id"]),
                 instituciones=_get_instituciones_taller(conn, r["taller_id"]),
+                fotos=_get_edicion_fotos(conn, r["id"]),
             )
             for r in rows
         ]
@@ -423,6 +438,7 @@ def get_taller(slug: str, request: Request):
             row, _get_clases(conn, row["id"]), _get_instructores_taller(conn, row["taller_id"]),
             _get_modalidades(conn, row["id"]), _get_trabajos_taller(conn, row["taller_id"]),
             instituciones=_get_instituciones_taller(conn, row["taller_id"]),
+            fotos=_get_edicion_fotos(conn, row["id"]),
         )
 
         # Próxima edición: misma concepto (taller_id), numero_edicion mayor
@@ -1073,7 +1089,10 @@ def admin_list_talleres(request: Request):
                 (t["id"],),
             ).fetchall()
             ediciones = [
-                _edicion_to_admin_dict(e, _get_clases(conn, e["id"]), _get_modalidades(conn, e["id"]))
+                _edicion_to_admin_dict(
+                    e, _get_clases(conn, e["id"]), _get_modalidades(conn, e["id"]),
+                    fotos=_get_edicion_fotos(conn, e["id"]),
+                )
                 for e in edicion_rows
             ]
             result.append(
@@ -1205,7 +1224,7 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
             raise
 
     return _concepto_to_admin_dict(
-        t_row, [_edicion_to_admin_dict(e_row, clases_out)], instructores_out,
+        t_row, [_edicion_to_admin_dict(e_row, clases_out, fotos=[])], instructores_out,
         instituciones=instituciones_out,
     )
 
@@ -1282,7 +1301,7 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
             conn.rollback()
             raise
 
-    return _edicion_to_admin_dict(e_row, clases_out)
+    return _edicion_to_admin_dict(e_row, clases_out, fotos=[])
 
 
 @router.patch("/admin/talleres/{taller_id}")
@@ -1361,7 +1380,10 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
                 (taller_id,),
             ).fetchall()
             ediciones = [
-                _edicion_to_admin_dict(e, _get_clases(conn, e["id"]), _get_modalidades(conn, e["id"]))
+                _edicion_to_admin_dict(
+                    e, _get_clases(conn, e["id"]), _get_modalidades(conn, e["id"]),
+                    fotos=_get_edicion_fotos(conn, e["id"]),
+                )
                 for e in edicion_rows
             ]
             instructores_out = _get_instructores_taller(conn, taller_id)
@@ -1528,10 +1550,11 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
             # DENTRO del `with` — ver comentario gemelo en admin_create_taller.
             clases_out = _get_clases(conn, edicion_id)
             modalidades_out = _get_modalidades(conn, edicion_id)
+            fotos_out = _get_edicion_fotos(conn, edicion_id)
         except Exception:
             conn.rollback()
             raise
-    return _edicion_to_admin_dict(e_row, clases_out, modalidades_out)
+    return _edicion_to_admin_dict(e_row, clases_out, modalidades_out, fotos=fotos_out)
 
 
 @router.delete("/admin/talleres/{taller_id}", status_code=200)
@@ -2110,6 +2133,215 @@ def admin_delete_portada_clase(clase_id: int, request: Request):
         )
         conn.commit()
     return {"ok": True}
+
+
+# ── Galería de fotos por EDICIÓN (portada + galería pública) ────────────────
+# Espejo exacto de la galería del Estudio (`routes/estudio.py::_get_fotos` /
+# `_insert_foto` / upload / delete / reorder), scoped a `edicion_id` en vez
+# del singleton Estudio — por decisión del dueño, portada+galería son por
+# EDICIÓN, no por taller (a diferencia de `video_url`, que sí es del taller).
+
+
+def _get_edicion_fotos(conn, edicion_id: int) -> list:
+    cur = conn.execute(
+        "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
+        "FROM edicion_fotos WHERE edicion_id = %s ORDER BY orden, id",
+        (edicion_id,),
+    )
+    rows = cur.fetchall()
+    return [
+        {
+            "id": r["id"],
+            "url": r["url"],
+            "url_sm": r["url_sm"],
+            "url_avif": r["url_avif"],
+            "url_sm_avif": r["url_sm_avif"],
+            "path": r["path"],
+            "orden": r["orden"],
+            "es_principal": bool(r["es_principal"]),
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows
+    ]
+
+
+def _insert_edicion_foto(
+    conn,
+    edicion_id: int,
+    url: str,
+    path: str,
+    media_id: int | None = None,
+    url_sm: str | None = None,
+    url_avif: str | None = None,
+    url_sm_avif: str | None = None,
+) -> dict:
+    cur = conn.execute(
+        "SELECT COALESCE(MAX(orden), -1) + 1 AS next_orden FROM edicion_fotos WHERE edicion_id = %s",
+        (edicion_id,),
+    )
+    orden = cur.fetchone()["next_orden"]
+
+    cur2 = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM edicion_fotos WHERE edicion_id = %s", (edicion_id,)
+    )
+    is_first = cur2.fetchone()["cnt"] == 0
+
+    conn.execute(
+        "INSERT INTO edicion_fotos "
+        "(edicion_id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, media_id) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (edicion_id, url, url_sm, url_avif, url_sm_avif, path, orden, is_first, media_id),
+    )
+    conn.commit()
+
+    cur3 = conn.execute(
+        "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
+        "FROM edicion_fotos WHERE path = %s AND edicion_id = %s",
+        (path, edicion_id),
+    )
+    r = cur3.fetchone()
+    return {
+        "id": r["id"],
+        "url": r["url"],
+        "url_sm": r["url_sm"],
+        "url_avif": r["url_avif"],
+        "url_sm_avif": r["url_sm_avif"],
+        "path": r["path"],
+        "orden": r["orden"],
+        "es_principal": bool(r["es_principal"]),
+        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+    }
+
+
+@router.post("/admin/ediciones/{edicion_id}/upload-foto")
+@limiter.limit(ADMIN_UPLOAD_LIMIT)
+async def admin_upload_foto_edicion(edicion_id: int, request: Request):
+    """Sube un archivo (multipart, campo 'file') a R2 y lo registra en edicion_fotos."""
+    require_admin(request)
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM ediciones_taller WHERE id = %s", (edicion_id,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "Edición no encontrada")
+
+    form = await request.form()
+    file = form.get("file")
+    if file is None or not hasattr(file, "read"):
+        raise HTTPException(400, "Falta el campo 'file' en el form-data")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Archivo vacío")
+    if len(raw) > 20 * 1024 * 1024:
+        raise HTTPException(413, "Archivo muy grande (máx 20 MB)")
+
+    with get_db() as conn:
+        try:
+            with media_http():
+                asset = store_upload(
+                    raw,
+                    kind="taller",
+                    derive_specs=[
+                        DISPLAY_KEEP_ASPECT,
+                        DISPLAY_KEEP_ASPECT_SM,
+                        DISPLAY_KEEP_ASPECT_AVIF,
+                        DISPLAY_KEEP_ASPECT_SM_AVIF,
+                    ],
+                    conn=conn,
+                )
+            display = asset.variant("display")
+            display_sm = asset.variant("display-sm")
+            display_avif = asset.variant("display-avif")
+            display_sm_avif = asset.variant("display-sm-avif")
+            foto = _insert_edicion_foto(
+                conn,
+                edicion_id,
+                url=display.url,
+                path=display.key,
+                media_id=asset.id,
+                url_sm=display_sm.url if display_sm else None,
+                url_avif=display_avif.url if display_avif else None,
+                url_sm_avif=display_sm_avif.url if display_sm_avif else None,
+            )
+        except Exception:
+            conn.rollback()
+            raise
+
+    return {
+        "id": foto["id"],
+        "public_url": display.url,
+        "path": display.key,
+        "size": display.bytes,
+        "size_original": len(raw),
+        "content_type": display.content_type,
+        "width": display.width or None,
+        "height": display.height or None,
+    }
+
+
+@router.delete("/admin/ediciones/fotos/{foto_id}")
+@limiter.limit(ADMIN_WRITE_LIMIT)
+def admin_delete_foto_edicion(foto_id: int, request: Request):
+    require_admin(request)
+
+    with get_db() as conn:
+        cur = conn.execute(
+            "SELECT path, media_id FROM edicion_fotos WHERE id = %s", (foto_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Foto no encontrada")
+        path = row["path"]
+        media_id = row["media_id"]
+
+        # Recolectar keys R2 ANTES del DELETE (cascade borrará las filas de variants)
+        r2_keys: list[str] = []
+        if media_id:
+            r2_keys = collect_asset_keys(conn, media_id)
+
+        conn.execute("DELETE FROM edicion_fotos WHERE id = %s", (foto_id,))
+        if media_id:
+            conn.execute("DELETE FROM media_assets WHERE id = %s", (media_id,))
+        conn.commit()
+
+    # Best-effort R2 cleanup (después del commit — la DB es la fuente de verdad)
+    if r2_keys:
+        purge_r2(r2_keys)
+
+    return {"ok": True}
+
+
+class EdicionFotoOrdenItem(BaseModel):
+    id: int
+    orden: int
+    es_principal: bool
+
+
+class EdicionReorderFotosBody(BaseModel):
+    fotos: list[EdicionFotoOrdenItem]
+
+
+@router.patch("/admin/ediciones/{edicion_id}/fotos/orden")
+@limiter.limit(ADMIN_WRITE_LIMIT)
+def admin_reorder_fotos_edicion(edicion_id: int, body: EdicionReorderFotosBody, request: Request):
+    require_admin(request)
+
+    with get_db() as conn:
+        for f in body.fotos:
+            # El array llega completo en cada drag — el guard evita reescribir
+            # las fotos que no se movieron (mismo patrón que estudio_fotos).
+            conn.execute(
+                "UPDATE edicion_fotos SET orden = %s, es_principal = %s "
+                "WHERE id = %s AND edicion_id = %s "
+                "AND (orden IS DISTINCT FROM %s OR es_principal IS DISTINCT FROM %s)",
+                (f.orden, f.es_principal, f.id, edicion_id, f.orden, f.es_principal),
+            )
+        conn.commit()
+        fotos = _get_edicion_fotos(conn, edicion_id)
+
+    return {"fotos": fotos}
 
 
 # ── Inscripciones (admin) ─────────────────────────────────────────────────────

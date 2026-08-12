@@ -530,6 +530,20 @@ export type Taller = {
   faqs: { pregunta: string; respuesta: string }[];
   trabajos: { id: number; titulo: string; youtube_url: string; poster_url: string }[];
   fecha_cierre_inscripcion: string | null;
+  // Portada + galería de ESTA edición (no del concepto) — cada edición
+  // (fechas/instructor/grupo distintos) tiene su propia tanda de fotos.
+  // [] = sin cargar, `TallerHero` cae a la variante de texto/video.
+  fotos: TallerFoto[];
+};
+
+export type TallerFoto = {
+  id: number;
+  url: string;
+  url_sm: string | null;
+  url_avif: string | null;
+  url_sm_avif: string | null;
+  orden: number;
+  es_principal: boolean;
 };
 
 export type InscripcionBody = {

@@ -10,11 +10,11 @@ import { ModalBackdrop } from "@/design-system/ui/modal-backdrop";
 import { WorkshopInscripcionForm } from "@/components/talleres/WorkshopInscripcionForm";
 import { DescripcionRica } from "@/components/talleres/DescripcionRica";
 import { TallerHero } from "@/components/talleres/TallerHero";
+import { TallerGaleria } from "@/components/talleres/TallerGaleria";
 import { TallerCalendario } from "@/components/talleres/TallerCalendario";
 import { ProgramaSection } from "@/components/talleres/ProgramaSection";
 import { InstructorCard } from "@/components/talleres/InstructorCard";
 import { InstitucionesRow } from "@/components/talleres/InstitucionesRow";
-import { PrecioCard } from "@/components/talleres/PrecioCard";
 import { TallerTrabajos } from "@/components/talleres/TallerTrabajos";
 import { TallerFAQ } from "@/components/talleres/TallerFAQ";
 import { TallerCTABar } from "@/components/talleres/TallerCTABar";
@@ -238,14 +238,23 @@ function TallerLandingPage() {
             horarioResumen={horarioResumen}
           />
 
+          <TallerGaleria fotos={formTaller.fotos} alt={taller.nombre} />
+
           {/* ── Cuerpo ─────────────────────────────────────────────────────── */}
           <div className="max-w-[1100px] mx-auto px-4 sm:px-6 py-12 sm:py-16">
             <div className="grid lg:grid-cols-[1fr_380px] gap-10 lg:gap-16 items-start">
               {/* Columna principal */}
               <div className="flex flex-col gap-12">
-                {/* Orden: a quién está orientado → cuándo es (chequeo rápido
-                    antes de invertir tiempo en leer) → el desarrollo completo
-                    del programa. */}
+                {/* Orden: de qué se trata → a quién está orientado → cuándo es
+                    (chequeo rápido antes de invertir tiempo en leer) → el
+                    desarrollo completo del programa. */}
+                <section>
+                  <DescripcionRica
+                    texto={taller.descripcion}
+                    className="text-lg sm:text-xl text-muted-foreground"
+                  />
+                </section>
+
                 {taller.publico_objetivo && (
                   <section className="rounded-xl bg-muted/30 border border-border/50 px-5 py-4">
                     <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground mb-2">
@@ -267,12 +276,6 @@ function TallerLandingPage() {
                   </section>
                 )}
 
-                <section>
-                  <DescripcionRica
-                    texto={taller.descripcion}
-                    className="text-lg sm:text-xl text-muted-foreground"
-                  />
-                </section>
                 <ProgramaSection clases={clases} />
                 <InstitucionesRow taller={taller} />
                 <InstructorCard taller={taller} />
@@ -281,8 +284,6 @@ function TallerLandingPage() {
 
               {/* Sidebar sticky */}
               <div className="lg:sticky lg:top-20">
-                <PrecioCard taller={formTaller} />
-
                 {/* Formulario de inscripción */}
                 <div id="inscripcion" className="scroll-mt-20">
                   {isFrozen ? (

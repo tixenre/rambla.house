@@ -19,6 +19,7 @@ import {
   PedidosGeneradosSection,
   PreciosSection,
 } from "./EdicionTabs";
+import { GaleriaEdicionSection } from "./GaleriaEdicionSection";
 import { InscripcionesSection } from "./InscripcionesSection";
 import { updateEdicionInCache } from "./cache";
 
@@ -53,7 +54,9 @@ export function EdicionSubRow({
   const confirm = useConfirm();
   const badge = badgeEstadoEdicion(edicion);
   const [expanded, setExpanded] = useState(false);
-  const [activeTab, setActiveTab] = useState<"clases" | "precios" | "inscripciones">("clases");
+  const [activeTab, setActiveTab] = useState<"clases" | "precios" | "galeria" | "inscripciones">(
+    "clases",
+  );
   // Mismo caso que el tab-strip del concepto (TallerConceptoRow): en mobile
   // "Inscripciones (N)" puede quedar cortado sin que nada avise que hay que
   // scrollear.
@@ -194,11 +197,12 @@ export function EdicionSubRow({
               [
                 { id: "clases", label: "Fechas y clases" },
                 { id: "precios", label: "Precios y pago" },
+                { id: "galeria", label: "Portada y galería" },
                 {
                   id: "inscripciones",
                   label: `Inscripciones${edicion.cupos_confirmados > 0 ? ` (${edicion.cupos_confirmados})` : ""}`,
                 },
-              ] as { id: "clases" | "precios" | "inscripciones"; label: string }[]
+              ] as { id: "clases" | "precios" | "galeria" | "inscripciones"; label: string }[]
             ).map((tab) => (
               <button
                 key={tab.id}
@@ -253,6 +257,13 @@ export function EdicionSubRow({
                   <PedidosGeneradosSection edicion={edicion} />
                 </div>
               </div>
+            )}
+            {activeTab === "galeria" && (
+              <GaleriaEdicionSection
+                edicionId={edicion.id}
+                fotos={edicion.fotos}
+                onChanged={() => qc.invalidateQueries({ queryKey: ["admin", "talleres"] })}
+              />
             )}
             {activeTab === "inscripciones" && (
               <InscripcionesSection

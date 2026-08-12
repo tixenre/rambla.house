@@ -2712,4 +2712,31 @@ def _init_db_schema(conn):
         )
     """)
 
+    # ── Galería de fotos por EDICIÓN de taller (portada + galería pública) ──
+    # Espejo exacto de `estudio_fotos` (2026-05-E1) pero scoped a `edicion_id`
+    # en vez de al singleton Estudio — una edición puntual tiene su propia
+    # tanda de fotos (no el concepto `talleres`, a diferencia de `video_url`/
+    # `video_poster_url` que sí viven a nivel taller): confirmado con el dueño,
+    # cada edición (fechas/instructor/grupo distintos) amerita su propia
+    # portada+galería. `es_principal` marca la portada del hero público.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS edicion_fotos (
+            id           SERIAL PRIMARY KEY,
+            edicion_id   INTEGER NOT NULL REFERENCES ediciones_taller(id) ON DELETE CASCADE,
+            url          TEXT NOT NULL,
+            url_sm       TEXT,
+            url_avif     TEXT,
+            url_sm_avif  TEXT,
+            path         TEXT,
+            media_id     BIGINT REFERENCES media_assets(id) ON DELETE SET NULL,
+            orden        INTEGER NOT NULL DEFAULT 0,
+            es_principal BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_edicion_fotos_edicion_orden "
+        "ON edicion_fotos(edicion_id, orden)"
+    )
+
     conn.commit()
