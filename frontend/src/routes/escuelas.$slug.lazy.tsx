@@ -10,7 +10,7 @@ import { ModalBackdrop } from "@/design-system/ui/modal-backdrop";
 import { WorkshopInscripcionForm } from "@/components/talleres/WorkshopInscripcionForm";
 import { DescripcionRica } from "@/components/talleres/DescripcionRica";
 import { TallerHero } from "@/components/talleres/TallerHero";
-import { TallerGaleria } from "@/components/talleres/TallerGaleria";
+import { TallerGaleria, TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
 import { TallerCalendario } from "@/components/talleres/TallerCalendario";
 import { ProgramaSection } from "@/components/talleres/ProgramaSection";
 import { InstructorCard } from "@/components/talleres/InstructorCard";
@@ -241,7 +241,7 @@ function TallerLandingPage() {
           <TallerGaleria fotos={formTaller.fotos} alt={taller.nombre} />
 
           {/* ── Cuerpo ─────────────────────────────────────────────────────── */}
-          <div className="max-w-[1100px] mx-auto px-4 sm:px-6 py-12 sm:py-16">
+          <div className="mx-auto py-12 sm:py-16" style={{ width: TALLER_CONTENT_WIDTH }}>
             <div className="grid lg:grid-cols-[1fr_380px] gap-10 lg:gap-16 items-start">
               {/* Columna principal */}
               <div className="flex flex-col gap-12">

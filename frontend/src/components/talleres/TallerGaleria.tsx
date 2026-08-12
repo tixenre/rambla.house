@@ -10,6 +10,12 @@ const AUTOPLAY_MS = 4500;
 // Ancho de la foto activa dentro del carrusel — el resto (~11% por lado)
 // deja asomar la foto anterior/siguiente, como un carrusel de verdad.
 const SLIDE_WIDTH = 78;
+// Exportado: el carrusel queda full-bleed (pedido explícito del dueño), pero
+// el título/data del hero y el cuerpo de la página (descripción, programa)
+// usan este MISMO ancho — así el texto queda alineado con el borde de la
+// foto que se muestra, en vez de una columna angosta centrada aparte. Resta
+// el `px-1` (0.25rem por lado) que tiene cada slide.
+export const TALLER_CONTENT_WIDTH = `calc(${SLIDE_WIDTH}% - 0.5rem)`;
 
 /**
  * Portada + galería de una EDICIÓN de taller — arriba de todo en la landing
