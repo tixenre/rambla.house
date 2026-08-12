@@ -2,6 +2,8 @@ import { authedFetch, authedJson, authedPostJson } from "@/lib/authedFetch";
 import type {
   ClaseBody,
   EdicionAdmin,
+  EdicionFoto,
+  EdicionFotoOrdenItem,
   EdicionKpis,
   TallerConcepto,
   Inscripcion,
@@ -54,6 +56,20 @@ export const talleresAdminApi = {
 
   deleteEdicion: (edicionId: number) =>
     authedJson<{ ok: boolean }>(`/api/admin/ediciones/${edicionId}`, { method: "DELETE" }),
+
+  // Portada + galería de una EDICIÓN (mismo patrón que estudioAdminApi
+  // deleteFoto/reorderFotos, scoped a edicionId). El upload en sí va por
+  // uploadEdicionFile (src/lib/talleres/photos.ts) — mismo split que Estudio
+  // (multipart no pasa por authedJson).
+  deleteFotoEdicion: (fotoId: number) =>
+    authedJson<{ ok: boolean }>(`/api/admin/ediciones/fotos/${fotoId}`, { method: "DELETE" }),
+
+  reorderFotosEdicion: (edicionId: number, fotos: EdicionFotoOrdenItem[]) =>
+    authedJson<{ fotos: EdicionFoto[] }>(`/api/admin/ediciones/${edicionId}/fotos/orden`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ fotos }),
+    }),
 
   // F2: portada de una clase (solo clases guardadas — necesitan id).
   uploadPortadaClase: (claseId: number, file: File) => {

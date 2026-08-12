@@ -10,6 +10,7 @@ import { ModalBackdrop } from "@/design-system/ui/modal-backdrop";
 import { WorkshopInscripcionForm } from "@/components/talleres/WorkshopInscripcionForm";
 import { DescripcionRica } from "@/components/talleres/DescripcionRica";
 import { TallerHero } from "@/components/talleres/TallerHero";
+import { TallerGaleria } from "@/components/talleres/TallerGaleria";
 import { TallerCalendario } from "@/components/talleres/TallerCalendario";
 import { ProgramaSection } from "@/components/talleres/ProgramaSection";
 import { InstructorCard } from "@/components/talleres/InstructorCard";
@@ -230,6 +231,8 @@ function TallerLandingPage() {
               Borrador — solo visible para vos. Publicalo desde el admin cuando esté listo.
             </div>
           )}
+
+          <TallerGaleria fotos={formTaller.fotos} alt={taller.nombre} />
 
           <TallerHero
             taller={taller}
