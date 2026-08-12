@@ -146,8 +146,18 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
           // gigante en desktop/tablet. No-op a propósito, no agrega mode.
           onDayClick={() => {}}
           modifiers={{ sesion: sesionDates }}
+          // El modifier de react-day-picker pinta la clase en la CELDA
+          // (<td>, `aspect-square h-full w-full` — una fracción flex del
+          // ancho de la fila, ~80-100px en desktop/tablet), no en el botón:
+          // correcto para un range-picker (barra continua entre días
+          // seleccionados, ver DateRangePickerModal), pero acá cada sesión
+          // es un círculo suelto — pintarlo en la celda daba un óvalo gigante
+          // que se pisaba con la fila de abajo. `[&_button]:` redirige el
+          // color/forma al <button> interno, que sí está acotado a
+          // `--cell-size` (44px) vía `day_button` más abajo.
           modifiersClassNames={{
-            sesion: "bg-rosa text-ink font-bold !opacity-100 rounded-full",
+            sesion:
+              "[&_button]:!bg-rosa [&_button]:!text-ink [&_button]:font-bold [&_button]:!opacity-100 [&_button]:!rounded-full",
           }}
           className="[--cell-size:2.75rem]"
           classNames={{
