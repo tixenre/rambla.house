@@ -6,6 +6,7 @@ import { PublicLayout } from "@/components/rental/shell/PublicLayout";
 import { SectionBanner } from "@/components/rental/landing/SectionBanner";
 import { EmptyState } from "@/design-system/composites/EmptyState";
 import { Grain } from "@/components/common/Grain";
+import { LogoMark } from "@/components/rental/shell/LogoMark";
 import { apiGetTalleres, type Taller } from "@/lib/api";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
 import { heroImgProps } from "@/lib/studio/hero-photos";
@@ -57,18 +58,27 @@ function WorkshopCard({ taller }: { taller: Taller }) {
       }`}
     >
       {/* Bloque visual izquierdo: portada de la edición si hay, si no el
-          fondo ink+grain de siempre (el título vive en el cuerpo derecho). */}
+          fondo ink+grain de siempre (el título vive en el cuerpo derecho).
+          La foto NO se estira a la altura de la columna (quedaba con
+          proporciones arbitrarias, a veces más alta que ancha) — mantiene
+          3:2 (misma proporción que TallerGaleria) ancladada arriba; el
+          ink de fondo llena lo que sobra si la columna de texto es más alta. */}
       <div className="relative sm:w-64 shrink-0 overflow-hidden min-h-[130px] sm:min-h-0 bg-ink">
         {imgProps ? (
           <img
             key={portada!.id}
             {...imgProps}
             alt={taller.nombre}
-            className="absolute inset-0 h-full w-full object-cover"
+            className="w-full aspect-[3/2] object-cover"
             draggable={false}
           />
         ) : (
-          <Grain color="white" opacity={6} />
+          <>
+            <Grain color="white" opacity={6} />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <LogoMark className="h-28 w-28 text-rosa/40" />
+            </div>
+          </>
         )}
         {soldOut && (
           <span className="absolute left-4 top-4 inline-block rounded-full border border-background/30 bg-ink/40 text-background/80 text-2xs font-mono tracking-widest uppercase px-3 py-1 backdrop-blur-sm">

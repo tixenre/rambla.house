@@ -1,3 +1,4 @@
+import { useId } from "react";
 import isologoMonoSvgRaw from "@/assets/rambla-isologo-mono.svg?raw";
 
 /**
@@ -12,10 +13,17 @@ import isologoMonoSvgRaw from "@/assets/rambla-isologo-mono.svg?raw";
  * derivados (favicon, ícono iOS, imagen para compartir) vía el backend, no acá.
  */
 export function LogoMark({ className = "" }: { className?: string }) {
+  // El SVG fuente trae un <mask id="rambla-r-cut"> fijo — dos instancias en la
+  // misma página (ej. el logo mobile del topbar + un placeholder en otra
+  // sección) colisionan por id duplicado y el navegador deja de aplicar el
+  // mask (queda un cuadrado sólido, sin el recorte de la R). `useId()` lo
+  // hace único por instancia.
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const svg = isologoMonoSvgRaw.replaceAll("rambla-r-cut", `rambla-r-cut-${uid}`);
   return (
     <span
       className={`inline-block shrink-0 ${className || "h-8 w-8"}`}
-      dangerouslySetInnerHTML={{ __html: isologoMonoSvgRaw }}
+      dangerouslySetInnerHTML={{ __html: svg }}
       role="img"
       aria-label="Rambla"
     />
