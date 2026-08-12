@@ -165,6 +165,16 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
           startMonth={sesionDates[0]}
           endMonth={lastDate}
           showOutsideDays={false}
+          // Default de la librería: "septiembre 2026" — con 4 meses angostos
+          // envolvía en 2 líneas ("septiembre" / "2026"). El año no aporta acá
+          // (las fechas completas ya están en el hero y en las píldoras de
+          // abajo) — solo el nombre del mes, en las dos vistas (1 y N meses).
+          formatters={{
+            formatCaption: (m) => {
+              const s = m.toLocaleDateString("es-AR", { month: "long" });
+              return s.charAt(0).toUpperCase() + s.slice(1);
+            },
+          }}
           // No hay selección real (es un calendario de solo lectura) — pero
           // react-day-picker solo renderiza el día vía el <DayButton> con su
           // tamaño acotado (`min-w-(--cell-size)`) cuando `mode` u
