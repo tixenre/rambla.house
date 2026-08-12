@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { TallerFoto } from "@/lib/api";
 import { heroImgProps, type HeroPhoto } from "@/lib/studio/hero-photos";
 import { Lightbox } from "@/components/rental/Lightbox";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
+
+// Misma cadencia que el hero rotante del catálogo (HeroSection/HeroBanner).
+const AUTOPLAY_MS = 4500;
 
 /**
  * Portada + galería de una EDICIÓN de taller — arriba de todo en la landing
@@ -14,6 +18,20 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [selected, setSelected] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const reducedMotion = useReducedMotion();
+
+  // Auto-avanza como un carrusel; se detiene con el mouse encima, con el
+  // lightbox abierto (no pelear con la navegación de ahí) o con reduced
+  // motion. `selected` en las deps reinicia el conteo tras un click manual
+  // en una miniatura, en vez de saltar a la próxima segundos después.
+  useEffect(() => {
+    if (fotos.length <= 1 || paused || reducedMotion || lightboxOpen) return;
+    const id = setInterval(() => {
+      setSelected((i) => (i + 1) % fotos.length);
+    }, AUTOPLAY_MS);
+    return () => clearInterval(id);
+  }, [fotos.length, paused, reducedMotion, lightboxOpen, selected]);
 
   if (fotos.length === 0) return null;
 
@@ -32,7 +50,11 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
   const imgProps = heroImgProps(toHeroPhoto(portada), { eager: true });
 
   return (
-    <div className="bg-ink">
+    <div
+      className="bg-ink"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
       <button
         type="button"
         className="block w-full cursor-zoom-in"
@@ -43,6 +65,13 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
         aria-label="Ver en pantalla completa"
       >
         <img
+          // `key` fuerza un DOM node nuevo por foto: el `onError` de
+          // `heroImgProps` marca `dataset.fellBack` en el <img> para no
+          // loopear si AVIF falla — pero ese flag vive en el elemento, no en
+          // React state. Sin `key`, clickear miniaturas reusa el mismo nodo
+          // y, tras el primer fallback, el guard bloquea el fallback de
+          // CUALQUIER foto siguiente cuyo AVIF también falle (queda rota).
+          key={portada.id}
           {...imgProps}
           alt={alt}
           // Antes h-[vh] puro: en pantallas anchas la altura no seguía el
