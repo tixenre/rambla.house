@@ -45,7 +45,12 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
         <img
           {...imgProps}
           alt={alt}
-          className="w-full h-[42vh] sm:h-[56vh] max-h-[640px] object-cover"
+          // Antes h-[vh] puro: en pantallas anchas la altura no seguía el
+          // ancho, así que el recorte se iba mucho más allá de panorámico
+          // (una foto vertical/cuadrada quedaba irreconocible). aspect-ratio
+          // real: 3:2 (el más común en fotografía) achicándose hasta 16:9 en
+          // pantallas anchas — nunca más ancho que eso.
+          className="w-full aspect-[3/2] sm:aspect-video object-cover"
           draggable={false}
         />
       </button>
