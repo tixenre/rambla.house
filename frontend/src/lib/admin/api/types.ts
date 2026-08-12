@@ -1798,7 +1798,19 @@ export type EdicionAdmin = {
   usa_equipos: boolean;
   valor_equipos: number;
   valor_equipos_modo: "mensual" | "total";
+  // Portada + galería de ESTA edición (mismo patrón que `EstudioFoto`, pero
+  // scoped a la edición — cada edición tiene su propia tanda de fotos).
+  fotos: EdicionFoto[];
 };
+
+export type EdicionFoto = {
+  id: number;
+  url: string;
+  orden: number;
+  es_principal: boolean;
+};
+
+export type EdicionFotoOrdenItem = { id: number; orden: number; es_principal: boolean };
 
 // F4c: mini-KPIs de una edición — plata ya resuelta por el backend (el front
 // solo la muestra, nunca la calcula).
