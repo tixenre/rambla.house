@@ -59,22 +59,21 @@ function WorkshopCard({ taller }: { taller: Taller }) {
     >
       {/* Bloque visual izquierdo: portada de la edición si hay, si no el
           fondo ink+grain de siempre (el título vive en el cuerpo derecho).
-          Con foto: contenedor 4:5 (vertical, formato IG) que la foto llena
-          entera vía object-cover; `self-start` para que el bloque NO se
-          estire a la altura de la columna de texto (con `items-stretch` por
-          defecto, forzar una altura distinta a la del aspect-ratio dejaba
-          un tramo de ink liso abajo que se leía como la foto recortada/rota).
-          Sin foto: sigue estirándose (el ink+grain+isologo llena todo el
-          alto, se ve bien sin un "final" natural que respetar). */}
-      <div
-        className={`relative sm:w-64 shrink-0 overflow-hidden min-h-[130px] sm:min-h-0 bg-ink ${imgProps ? "self-start" : ""}`}
-      >
+          Ningún aspect-ratio fijo probó calzar bien contra un texto de
+          longitud variable (3:2 quedaba corto — tramo de ink liso abajo
+          que se leía como foto rota; 4:5 quedaba largo — mucho aire entre
+          la descripción y "Ver taller"). La foto llena el alto REAL de la
+          columna de texto (items-stretch, sin self-start) — cero aire de
+          sobra en cualquier dirección, sea cual sea el largo del texto.
+          sm:w-80 (más ancho que el w-64 original) para que ese alto
+          variable no vuelva a leerse como un cartel angosto/alto. */}
+      <div className="relative sm:w-80 shrink-0 overflow-hidden min-h-[130px] sm:min-h-0 bg-ink">
         {imgProps ? (
           <img
             key={portada!.id}
             {...imgProps}
             alt={taller.nombre}
-            className="w-full aspect-[4/5] object-cover"
+            className="absolute inset-0 h-full w-full object-cover"
             draggable={false}
           />
         ) : (
