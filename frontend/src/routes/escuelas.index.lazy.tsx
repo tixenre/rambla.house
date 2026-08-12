@@ -59,11 +59,15 @@ function WorkshopCard({ taller }: { taller: Taller }) {
     >
       {/* Bloque visual izquierdo: portada de la edición si hay, si no el
           fondo ink+grain de siempre (el título vive en el cuerpo derecho).
-          La foto NO se estira a la altura de la columna (quedaba con
-          proporciones arbitrarias, a veces más alta que ancha) — mantiene
-          3:2 (misma proporción que TallerGaleria) ancladada arriba; el
-          ink de fondo llena lo que sobra si la columna de texto es más alta. */}
-      <div className="relative sm:w-64 shrink-0 overflow-hidden min-h-[130px] sm:min-h-0 bg-ink">
+          Con foto: `self-start` — el bloque NO se estira a la altura de la
+          columna de texto (con `items-stretch` por defecto, forzar la
+          altura de una foto 3:2 dejaba un tramo de ink liso abajo que se
+          leía como la foto recortada/rota, no como fondo). Sin foto: sigue
+          estirándose (el ink+grain+isologo llena todo el alto, se ve bien
+          sin un "final" natural que respetar). */}
+      <div
+        className={`relative sm:w-64 shrink-0 overflow-hidden min-h-[130px] sm:min-h-0 bg-ink ${imgProps ? "self-start" : ""}`}
+      >
         {imgProps ? (
           <img
             key={portada!.id}
