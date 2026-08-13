@@ -49,10 +49,17 @@ export function ModalidadSelector({
 
   if (modalidades.length === 1) {
     const m = modalidades[0];
+    // Rambla solo acepta transferencia para talleres (el comprobante de
+    // transferencia del form, más abajo, es obligatorio) — nunca varía por
+    // taller, así que "Transferencia" es texto fijo acá, nunca tipeado por
+    // el admin. Con "En N cuotas" el label ya repetiría lo que dice
+    // MontoModalidad ("N cuotas de $X") al lado, así que queda solo
+    // "Transferencia"; "Pago único" no repite ningún número, se compone.
+    const nombreVisible = m.n_cuotas > 1 ? "Transferencia" : `Transferencia · ${m.label}`;
     return (
       <div className="flex items-center justify-between gap-3 rounded-xl border border-border/60 px-4 py-3">
         <div className="min-w-0">
-          <p className="text-sm font-semibold text-ink">{m.label}</p>
+          <p className="text-sm font-semibold text-ink">{nombreVisible}</p>
           {m.nota && <p className="text-xs text-rosa">{m.nota}</p>}
         </div>
         <MontoModalidad m={m} />
@@ -63,7 +70,7 @@ export function ModalidadSelector({
   return (
     <div className="flex flex-col gap-1.5">
       <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-        Modalidad de pago
+        Modalidad de pago — por transferencia
       </p>
       <RadioGroup value={value} onValueChange={onChange} className="gap-2">
         {modalidades.map((m) => (

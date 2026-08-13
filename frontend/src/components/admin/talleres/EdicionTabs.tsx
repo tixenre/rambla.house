@@ -1,13 +1,14 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Save } from "lucide-react";
+import { Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { talleresAdminApi } from "@/lib/admin/api/talleres";
 import type { ClaseBody, EdicionAdmin, ModalidadPagoBody } from "@/lib/admin/api/types";
 import { Button } from "@/design-system/ui/button";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
+import { IconButton } from "@/design-system/ui/icon-button";
 import { Input } from "@/design-system/ui/input";
 import {
   Select,
@@ -152,21 +153,16 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
   const [usaEquipos, setUsaEquipos] = useState(edicion.usa_equipos);
   const [valorEquipos, setValorEquipos] = useState(String(edicion.valor_equipos));
   const [valorEquiposModo, setValorEquiposModo] = useState(edicion.valor_equipos_modo);
-  // Modalidad de pago: UNA sola (no una lista) — pedido explícito del dueño
-  // tras confundirse con "Costo total del plan" como un campo aparte del
-  // Precio total de arriba ("por qué debería ponerle manualmente el valor de
-  // la cuota si ya tenemos el total"). El monto SIEMPRE es `precioTotal`; acá
-  // solo se elige único-pago vs. cuotas y, si es cuotas, la cantidad — el
-  // monto por cuota lo deriva el backend (nunca se tipea un total aparte).
-  // Confirmado contra los 3 talleres reales de staging (2026-08-13): ninguno
-  // usaba 2+ modalidades ni un monto de modalidad distinto al Precio total,
-  // así que esta simplificación no pierde configuración real de nadie.
-  const modalidadExistente = edicion.modalidades?.[0];
-  const [pagoTipo, setPagoTipo] = useState<"unico" | "cuotas">(
-    (modalidadExistente?.n_cuotas ?? 1) > 1 ? "cuotas" : "unico",
+  // Formas de pagar: lista de planes (0+, el dueño puede ofrecer "pago único"
+  // Y "en cuotas" a la vez para que el cliente elija) — pero NINGUNO tipea un
+  // total: el monto de cada plan sale siempre del Precio total de arriba
+  // ("por qué debería ponerle manualmente el valor de la cuota si ya tenemos
+  // el total"), salvo el % de descuento opcional del pago único, que resta
+  // sobre ese mismo total en vez de pedir un segundo número absoluto. El
+  // monto por cuota lo sigue derivando el backend, nunca se tipea.
+  const [planes, setPlanes] = useState<PlanForm[]>(
+    (edicion.modalidades ?? []).map((m) => planToForm(m, edicion.precio_total)),
   );
-  const [nCuotas, setNCuotas] = useState(String(modalidadExistente?.n_cuotas ?? 2));
-  const [modalidadNota, setModalidadNota] = useState(modalidadExistente?.nota ?? "");
 
   useEffect(() => {
     setPrecioTotal(String(edicion.precio_total));
@@ -178,10 +174,7 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
     setUsaEquipos(edicion.usa_equipos);
     setValorEquipos(String(edicion.valor_equipos));
     setValorEquiposModo(edicion.valor_equipos_modo);
-    const m = edicion.modalidades?.[0];
-    setPagoTipo((m?.n_cuotas ?? 1) > 1 ? "cuotas" : "unico");
-    setNCuotas(String(m?.n_cuotas ?? 2));
-    setModalidadNota(m?.nota ?? "");
+    setPlanes((edicion.modalidades ?? []).map((m) => planToForm(m, edicion.precio_total)));
   }, [edicion.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const mut = useMutation({
@@ -192,6 +185,18 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
     },
     onError: (e) => toast.error((e as Error).message),
   });
+
+  function agregarPlan() {
+    setPlanes((p) => [...p, { tipoPago: "unico", nCuotas: "2", descuentoPct: "", nota: "" }]);
+  }
+
+  function quitarPlan(idx: number) {
+    setPlanes((p) => p.filter((_, i) => i !== idx));
+  }
+
+  function actualizarPlan(idx: number, patch: Partial<PlanForm>) {
+    setPlanes((p) => p.map((plan, i) => (i === idx ? { ...plan, ...patch } : plan)));
+  }
 
   function handleSave() {
     const total = parseInt(precioTotal, 10);
@@ -211,21 +216,45 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
       toast.error("Ingresá un valor válido para lo que usa el taller");
       return;
     }
-    const cuotas = pagoTipo === "cuotas" ? parseInt(nCuotas, 10) : 1;
-    if (pagoTipo === "cuotas" && (isNaN(cuotas) || cuotas < 2)) {
-      toast.error("La cantidad de cuotas tiene que ser 2 o más");
+    const modalidades: ModalidadPagoBody[] = [];
+    for (const plan of planes) {
+      if (plan.tipoPago === "unico") {
+        const pct = plan.descuentoPct.trim() === "" ? 0 : parseFloat(plan.descuentoPct);
+        if (isNaN(pct) || pct < 0 || pct >= 100) {
+          toast.error("El % de descuento tiene que estar entre 0 y 99");
+          return;
+        }
+        modalidades.push({
+          id: plan.id ?? null,
+          codigo: "total",
+          label: "Pago único",
+          nota: plan.nota.trim(),
+          monto_total: pct > 0 ? Math.round(total * (1 - pct / 100)) : total,
+          n_cuotas: 1,
+        });
+      } else {
+        const cuotas = parseInt(plan.nCuotas, 10);
+        if (isNaN(cuotas) || cuotas < 2) {
+          toast.error("La cantidad de cuotas tiene que ser 2 o más");
+          return;
+        }
+        modalidades.push({
+          id: plan.id ?? null,
+          codigo: `cuotas-${cuotas}`,
+          label: `En ${cuotas} cuotas`,
+          nota: plan.nota.trim(),
+          monto_total: total,
+          n_cuotas: cuotas,
+        });
+      }
+    }
+    const codigos = modalidades.map((m) => m.codigo);
+    if (new Set(codigos).size !== codigos.length) {
+      toast.error(
+        "Hay dos formas de pago iguales — no repitas 'Pago único' o la misma cantidad de cuotas",
+      );
       return;
     }
-    const modalidades: ModalidadPagoBody[] = [
-      {
-        id: modalidadExistente?.id ?? null,
-        codigo: pagoTipo === "cuotas" ? "cuotas" : "total",
-        label: pagoTipo === "cuotas" ? `${cuotas} cuotas` : "Pago total",
-        nota: modalidadNota.trim(),
-        monto_total: total,
-        n_cuotas: cuotas,
-      },
-    ];
     mut.mutate({
       precio_total: total,
       precio_sena: sena,
@@ -283,57 +312,96 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
         </div>
       </div>
 
-      <div className="border-t border-border/40 pt-5 flex flex-col gap-3">
+      <div className="border-t border-border/40 pt-5 flex flex-col gap-4">
         <div>
-          <p className="text-sm font-medium text-ink">Forma de pago</p>
+          <p className="text-sm font-medium text-ink">Formas de pagar</p>
           <p className="text-xs text-muted-foreground">
-            El monto es siempre el Precio total de arriba — acá solo se elige cómo se paga.
+            El monto sale siempre del Precio total de arriba — podés ofrecer más de una forma (ej:
+            pago único con descuento Y en cuotas) para que el cliente elija.
           </p>
         </div>
-        <div className="grid sm:grid-cols-[180px_140px_1fr] gap-2 items-end">
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Modalidad
-            </label>
-            <Select value={pagoTipo} onValueChange={(v) => setPagoTipo(v as "unico" | "cuotas")}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="unico">Pago único</SelectItem>
-                <SelectItem value="cuotas">En cuotas</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {pagoTipo === "cuotas" && (
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Cantidad de cuotas
-              </label>
-              <Input
-                type="number"
-                min={2}
-                value={nCuotas}
-                onChange={(e) => setNCuotas(e.target.value)}
-              />
-            </div>
-          )}
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Nota (opcional)
-            </label>
-            <Input
-              value={modalidadNota}
-              onChange={(e) => setModalidadNota(e.target.value)}
-              placeholder="ej: 10% off, efectivo"
-            />
-          </div>
-        </div>
-        {previewModalidad(precioTotal, pagoTipo === "cuotas" ? nCuotas : "1") && (
-          <p className="text-xs text-rosa-ink">
-            {previewModalidad(precioTotal, pagoTipo === "cuotas" ? nCuotas : "1")}
+        {planes.length === 0 && (
+          <p className="text-sm text-muted-foreground italic">
+            Sin formas configuradas — el público paga el Precio total de arriba de una sola vez.
           </p>
         )}
+        {planes.map((plan, idx) => (
+          <div key={plan.id ?? `nuevo-${idx}`} className="flex flex-col gap-1.5">
+            <div className="grid sm:grid-cols-[160px_120px_1fr_auto] gap-2 items-end">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  Modalidad
+                </label>
+                <Select
+                  value={plan.tipoPago}
+                  onValueChange={(v) => actualizarPlan(idx, { tipoPago: v as "unico" | "cuotas" })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unico">Pago único</SelectItem>
+                    <SelectItem value="cuotas">En cuotas</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {plan.tipoPago === "cuotas" ? (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                    Cantidad
+                  </label>
+                  <Input
+                    type="number"
+                    min={2}
+                    value={plan.nCuotas}
+                    onChange={(e) => actualizarPlan(idx, { nCuotas: e.target.value })}
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                    % descuento
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={99}
+                    placeholder="0"
+                    value={plan.descuentoPct}
+                    onChange={(e) => actualizarPlan(idx, { descuentoPct: e.target.value })}
+                  />
+                </div>
+              )}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  Nota (opcional)
+                </label>
+                <Input
+                  value={plan.nota}
+                  onChange={(e) => actualizarPlan(idx, { nota: e.target.value })}
+                  placeholder="ej: transferencia, efectivo"
+                />
+              </div>
+              <IconButton
+                aria-label="Quitar forma de pago"
+                size="sm"
+                onClick={() => quitarPlan(idx)}
+                className="text-muted-foreground hover:text-destructive mb-0.5"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </IconButton>
+            </div>
+            {previewPlan(plan, precioTotal) && (
+              <p className="text-xs text-rosa-ink pl-0.5">{previewPlan(plan, precioTotal)}</p>
+            )}
+          </div>
+        ))}
+        <div>
+          <Button variant="outline" size="sm" onClick={agregarPlan} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" />
+            Agregar forma de pago
+          </Button>
+        </div>
       </div>
 
       {/* Economía del taller: si usa el Estudio y/o equipos de alquiler, para
@@ -493,20 +561,53 @@ export function PagosSection({ edicion }: { edicion: EdicionAdmin }) {
   );
 }
 
-// F4a/F4b: modalidad de pago — el monto SIEMPRE es el Precio total de la
-// edición (una sola fuente, nunca un segundo campo a mano); acá solo se
-// decide único-pago vs. cuotas y, si es cuotas, la cantidad. El monto POR
-// cuota lo deriva el backend (`monto_total / n_cuotas`), nunca se tipea.
-/** Preview EN VIVO de qué va a ver el público con este Precio total + Cuotas
- * — no se manda al backend (es el que ya recalcula al guardar), es solo
- * para que el admin vea el resultado ANTES de guardar. */
-function previewModalidad(montoStr: string, cuotasStr: string): string | null {
-  const monto = parseInt(montoStr, 10);
-  if (isNaN(monto) || monto <= 0) return null;
-  const cuotas = parseInt(cuotasStr, 10);
-  if (isNaN(cuotas) || cuotas <= 1) return `El público ve: ${fmtArs(monto)}, un solo pago`;
-  const porCuota = Math.round(monto / cuotas);
-  return `El público ve: ${cuotas} cuotas de ${fmtArs(porCuota)} (total ${fmtArs(monto)})`;
+// F4a/F4b: formas de pagar — el monto de CADA plan sale del Precio total de
+// la edición (una sola fuente, nunca un segundo campo a mano); el único
+// número propio de un plan es el % de descuento del pago único (opcional,
+// resta sobre ese mismo total). El monto POR cuota lo deriva el backend
+// (`monto_total / n_cuotas`), nunca se tipea.
+type PlanForm = {
+  id?: number | null;
+  tipoPago: "unico" | "cuotas";
+  nCuotas: string;
+  descuentoPct: string;
+  nota: string;
+};
+
+/** Reconstruye el form de un plan ya guardado. Un pago único cuyo monto
+ * quedó por debajo del Precio total se interpreta como "traía un % de
+ * descuento" y se repuebla ese campo (redondeado) — nunca al revés, el
+ * descuento no se persiste aparte, solo el monto ya resuelto. */
+function planToForm(m: ModalidadPagoBody, precioTotalActual: number): PlanForm {
+  const esUnico = (m.n_cuotas ?? 1) <= 1;
+  let descuentoPct = "";
+  if (esUnico && precioTotalActual > 0 && m.monto_total < precioTotalActual) {
+    descuentoPct = String(Math.round((1 - m.monto_total / precioTotalActual) * 100));
+  }
+  return {
+    id: m.id,
+    tipoPago: esUnico ? "unico" : "cuotas",
+    nCuotas: String(m.n_cuotas ?? 2),
+    descuentoPct,
+    nota: m.nota ?? "",
+  };
+}
+
+/** Preview EN VIVO de qué va a ver el público con este plan — no se manda al
+ * backend (es el que ya recalcula al guardar), es solo para que el admin vea
+ * el resultado ANTES de guardar. */
+function previewPlan(plan: PlanForm, precioTotalStr: string): string | null {
+  const total = parseInt(precioTotalStr, 10);
+  if (isNaN(total) || total <= 0) return null;
+  if (plan.tipoPago === "unico") {
+    const pct = plan.descuentoPct.trim() === "" ? 0 : parseFloat(plan.descuentoPct);
+    const monto = !isNaN(pct) && pct > 0 && pct < 100 ? Math.round(total * (1 - pct / 100)) : total;
+    return `El público ve: ${fmtArs(monto)}, un solo pago`;
+  }
+  const cuotas = parseInt(plan.nCuotas, 10);
+  if (isNaN(cuotas) || cuotas < 2) return null;
+  const porCuota = Math.round(total / cuotas);
+  return `El público ve: ${cuotas} cuotas de ${fmtArs(porCuota)} (total ${fmtArs(total)})`;
 }
 
 // Puente Talleres → Pedidos (Fase 1, #1308): antes había que buscar a mano en
