@@ -32,7 +32,12 @@ def test_estudio_og_inyecta_titulo_y_desc(tmp_path, monkeypatch):
     index = tmp_path / "index.html"
     index.write_text(STATIC_INDEX)
 
-    fake_cfg = {"nombre": "El Estudio", "tagline": "", "descripcion": "Estudio profesional en MdP"}
+    fake_cfg = {
+        "nombre": "El Estudio",
+        "tagline": "",
+        "descripcion": "Estudio profesional en MdP",
+        "faq_json": None,
+    }
     fake_foto = {"img_url": "https://cdn.example/foto.jpg"}
 
     conn = MagicMock()
@@ -61,7 +66,7 @@ def test_estudio_og_fallback_sin_descripcion(tmp_path, monkeypatch):
 
     conn = MagicMock()
     conn.execute.return_value.fetchone.side_effect = [
-        {"nombre": "El Estudio", "tagline": "", "descripcion": ""},
+        {"nombre": "El Estudio", "tagline": "", "descripcion": "", "faq_json": None},
         {"img_url": "https://cdn.example/foto.jpg"},
     ]
     conn.close = MagicMock()
@@ -76,6 +81,62 @@ def test_estudio_og_fallback_sin_descripcion(tmp_path, monkeypatch):
 
     assert resp.status_code == 200
     assert "Mar del Plata" in resp.text
+
+
+def test_estudio_faqpage_inyectada_si_hay_faq_json(tmp_path):
+    """Si `estudio.faq_json` tiene contenido, se inyecta un FAQPage server-side
+    (mismas FAQ que ya muestra la página, editables desde el admin)."""
+    index = tmp_path / "index.html"
+    index.write_text(STATIC_INDEX)
+
+    fake_cfg = {
+        "nombre": "El Estudio",
+        "tagline": "",
+        "descripcion": "Estudio profesional en MdP",
+        "faq_json": '[{"q": "¿Cuál es el mínimo?", "a": "3 horas."}]',
+    }
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.side_effect = [
+        fake_cfg,
+        {"img_url": "https://cdn.example/foto.jpg"},
+    ]
+    conn.close = MagicMock()
+
+    with (
+        patch("main.FRONT_NEW", tmp_path),
+        patch("main.get_db", return_value=conn),
+        patch("main.SITE_URL", "https://rambla.house"),
+    ):
+        client = _make_app()
+        resp = client.get("/estudio")
+
+    assert resp.status_code == 200
+    body = resp.text
+    assert '"@type": "FAQPage"' in body
+    assert "¿Cuál es el mínimo?" in body
+    assert 'data-ssr-jsonld="1"' in body
+
+
+def test_estudio_sin_faqpage_si_no_hay_faq_json(tmp_path):
+    """Sin `faq_json` (o vacío), no se inyecta FAQPage — nada que estructurar."""
+    index = tmp_path / "index.html"
+    index.write_text(STATIC_INDEX)
+
+    fake_cfg = {"nombre": "El Estudio", "tagline": "", "descripcion": "x", "faq_json": None}
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.side_effect = [fake_cfg, None]
+    conn.close = MagicMock()
+
+    with (
+        patch("main.FRONT_NEW", tmp_path),
+        patch("main.get_db", return_value=conn),
+        patch("main.SITE_URL", "https://rambla.house"),
+    ):
+        client = _make_app()
+        resp = client.get("/estudio")
+
+    assert resp.status_code == 200
+    assert "FAQPage" not in resp.text
 
 
 def test_estudio_og_fallback_sin_index(tmp_path):
@@ -102,6 +163,7 @@ def test_workshop_og_inyecta_nombre_e_instructor(tmp_path):
         "fecha_fin": None,
         "precio_total": None,
         "direccion": "",
+        "faqs": [],
     }
     fake_instructor = {
         "nombre": "Juana García",
@@ -164,6 +226,7 @@ def test_workshop_og_usa_media_variant_si_tiene_media_id(tmp_path):
         "fecha_fin": None,
         "precio_total": None,
         "direccion": "",
+        "faqs": [],
     }
     fake_instructor = {
         "nombre": "Pedro López",
@@ -187,6 +250,81 @@ def test_workshop_og_usa_media_variant_si_tiene_media_id(tmp_path):
 
     assert resp.status_code == 200
     assert "https://cdn.example/og-variant.jpg" in resp.text
+
+
+def test_workshop_faqpage_inyectada_junto_a_course_si_hay_faqs(tmp_path):
+    """Si el taller tiene FAQs cargadas (FaqSection del admin), se inyecta un
+    FAQPage AL LADO del Course schema — ninguno reemplaza al otro."""
+    index = tmp_path / "index.html"
+    index.write_text(STATIC_INDEX)
+
+    fake_taller = {
+        "id": 3,
+        "nombre": "Taller con FAQ",
+        "descripcion": "Tiene preguntas frecuentes",
+        "taller_id": 3,
+        "fecha_inicio": None,
+        "fecha_fin": None,
+        "precio_total": None,
+        "direccion": "",
+        "faqs": [
+            {"pregunta": "¿Necesito experiencia previa?", "respuesta": "No, es para todo nivel."},
+            {"pregunta": "", "respuesta": "se filtra por vacía"},
+        ],
+    }
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, None, None]
+    conn.close = MagicMock()
+
+    with (
+        patch("main.FRONT_NEW", tmp_path),
+        patch("main.get_db", return_value=conn),
+        patch("main.SITE_URL", "https://rambla.house"),
+    ):
+        client = _make_app()
+        resp = client.get("/workshops/taller-con-faq")
+
+    assert resp.status_code == 200
+    body = resp.text
+    assert '"@type": "Course"' in body
+    assert '"@type": "FAQPage"' in body
+    assert "¿Necesito experiencia previa?" in body
+    assert "se filtra por vacía" not in body  # el par con pregunta vacía no entra
+
+
+def test_workshop_sin_faqpage_si_no_hay_faqs(tmp_path):
+    """Sin FAQs cargadas (el caso de HOY para los talleres reales), no se
+    inyecta FAQPage — solo el Course schema, sin schema vacío."""
+    index = tmp_path / "index.html"
+    index.write_text(STATIC_INDEX)
+
+    fake_taller = {
+        "id": 4,
+        "nombre": "Taller sin FAQ",
+        "descripcion": "Todavía no cargó FAQs",
+        "taller_id": 4,
+        "fecha_inicio": None,
+        "fecha_fin": None,
+        "precio_total": None,
+        "direccion": "",
+        "faqs": [],
+    }
+    conn = MagicMock()
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, None, None]
+    conn.close = MagicMock()
+
+    with (
+        patch("main.FRONT_NEW", tmp_path),
+        patch("main.get_db", return_value=conn),
+        patch("main.SITE_URL", "https://rambla.house"),
+    ):
+        client = _make_app()
+        resp = client.get("/workshops/taller-sin-faq")
+
+    assert resp.status_code == 200
+    body = resp.text
+    assert '"@type": "Course"' in body
+    assert "FAQPage" not in body
 
 
 def test_workshop_og_fallback_ante_error_bd(tmp_path):
@@ -220,7 +358,7 @@ def test_workshop_og_borrador_sin_bypass_filtra_por_activo(tmp_path):
         "id": 5,
         "nombre": "Taller Sin Publicar", "descripcion": "En preparación",
         "taller_id": 5, "fecha_inicio": None, "fecha_fin": None, "precio_total": None,
-        "direccion": "",
+        "direccion": "", "faqs": [],
     }
     conn = MagicMock()
     conn.execute.return_value.fetchone.side_effect = [fake_taller, None, None]
@@ -253,7 +391,7 @@ def test_workshop_og_borrador_visible_con_dev_bypass(tmp_path):
         "id": 5,
         "nombre": "Taller Sin Publicar", "descripcion": "En preparación",
         "taller_id": 5, "fecha_inicio": None, "fecha_fin": None, "precio_total": None,
-        "direccion": "",
+        "direccion": "", "faqs": [],
     }
     fake_instructor = {
         "nombre": "Instructor Preview", "foto_url": "https://cdn.example/preview.jpg",

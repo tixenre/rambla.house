@@ -859,6 +859,33 @@ function EstudioPage() {
   const faq = data?.faq ?? STUDIO.faq;
   const features = data?.features ?? STUDIO.features;
 
+  // Structured data FAQPage (rich snippets de Google), mismo patrón que
+  // /preguntas-frecuentes: inyectado client-side desde las FAQ en vivo (así
+  // refleja lo editado en el back-office). El backend (`estudio_page` en
+  // main.py) ya lo sirve server-side para crawlers sin JS con el mismo
+  // `estudio.faq_json` — esto es lo que ve un lector que SÍ ejecuta JS.
+  useEffect(() => {
+    const items = faq.filter((f) => f.q.trim() && f.a.trim());
+    if (items.length === 0) return;
+    const schema = {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      mainEntity: items.map((it) => ({
+        "@type": "Question",
+        name: it.q,
+        acceptedAnswer: { "@type": "Answer", text: it.a },
+      })),
+    };
+    const el = document.createElement("script");
+    el.type = "application/ld+json";
+    el.dataset.estudioFaqJsonld = "true";
+    el.textContent = JSON.stringify(schema);
+    document.head.appendChild(el);
+    return () => {
+      el.remove();
+    };
+  }, [faq]);
+
   // Ubicación — admin primero, fallback a coordenadas fijas MDQ
   const direccion = data?.direccion ?? "Mar del Plata, Buenos Aires, Argentina";
   const iframeSrc = data?.mapa_embed_url || MAPA_EMBED_DEFAULT;

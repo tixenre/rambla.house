@@ -86,6 +86,23 @@ export const Route = createFileRoute("/escuelas/$slug")({
       },
     };
 
+    // FAQPage — mismas FAQs que muestra <TallerFAQ> (editables desde el admin,
+    // FaqSection). Condicionado a que haya al menos una completa: no emitir un
+    // schema vacío mientras el taller no tenga FAQ cargada todavía.
+    const faqItems = (taller.faqs ?? []).filter((f) => f.pregunta.trim() && f.respuesta.trim());
+    const faqJsonLd =
+      faqItems.length > 0
+        ? {
+            "@context": "https://schema.org",
+            "@type": "FAQPage",
+            mainEntity: faqItems.map((f) => ({
+              "@type": "Question",
+              name: f.pregunta,
+              acceptedAnswer: { "@type": "Answer", text: f.respuesta },
+            })),
+          }
+        : null;
+
     return {
       meta: [
         { title },
@@ -105,6 +122,9 @@ export const Route = createFileRoute("/escuelas/$slug")({
           type: "application/ld+json",
           children: JSON.stringify(courseJsonLd),
         },
+        ...(faqJsonLd
+          ? [{ type: "application/ld+json", children: JSON.stringify(faqJsonLd) }]
+          : []),
       ],
     };
   },

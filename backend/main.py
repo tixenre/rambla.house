@@ -85,7 +85,7 @@ from routes.calendar         import router as calendar_router
 from routes.inventario       import router as inventario_router
 from routes.email_templates  import router as email_templates_router
 from routes.dataio           import router as dataio_router
-from routes.estudio          import router as estudio_router
+from routes.estudio          import router as estudio_router, _parse_json_field
 from routes.didit            import router as didit_router
 from routes.facturacion      import router as facturacion_router
 from routes.whatsapp         import router as whatsapp_router
@@ -689,6 +689,26 @@ def _inject_json_ld(html_text: str, *schemas: dict) -> str:
     return html_text.replace("</head>", tags + "</head>", 1)
 
 
+def _faq_page_schema(qa_pairs: list[tuple[str, str]]) -> dict | None:
+    """Arma el JSON-LD `FAQPage` a partir de pares (pregunta, respuesta) ya
+    resueltos por el caller (cada fuente de FAQ tiene su propia forma —
+    grupos anidados en `app_settings.faq_json`, plano en `estudio.faq_json`/
+    `talleres.faqs` — normalizarla es responsabilidad de quien llama).
+    Filtra pares vacíos; `None` si no queda ninguno (nada que inyectar)."""
+    items = [
+        {
+            "@type": "Question",
+            "name": q.strip(),
+            "acceptedAnswer": {"@type": "Answer", "text": a.strip()},
+        }
+        for q, a in qa_pairs
+        if q and q.strip() and a and a.strip()
+    ]
+    if not items:
+        return None
+    return {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": items}
+
+
 def _get_initial_catalog(conn) -> dict:
     """Serializa equipos visibles + categorías para el script __INITIAL__ del catálogo.
 
@@ -1085,7 +1105,7 @@ def estudio_page():
         conn = get_db()
         try:
             cfg = conn.execute(
-                "SELECT nombre, tagline, descripcion FROM estudio WHERE id = 1"
+                "SELECT nombre, tagline, descripcion, faq_json FROM estudio WHERE id = 1"
             ).fetchone()
             # Foto principal del estudio — preferir variante OG (jpg); fallback a url
             foto_row = conn.execute(
@@ -1116,6 +1136,14 @@ def estudio_page():
             index_file.read_text(encoding="utf-8"),
             title=title, description=desc, image=img, url=f"{SITE_URL}/estudio",
         )
+        # FAQPage — mismo `faq_json` que ya muestra la página (editable desde
+        # el admin); condicionado a que haya contenido real, no un schema vacío.
+        faq_items = _parse_json_field(cfg["faq_json"]) if cfg else None
+        faq_schema = _faq_page_schema(
+            [(it.get("q", ""), it.get("a", "")) for it in (faq_items or [])]
+        )
+        if faq_schema:
+            html_text = _inject_json_ld(html_text, faq_schema)
         return HTMLResponse(content=html_text)
     except Exception:
         logger.warning("OG injection falló para /estudio — sirvo index plano", exc_info=True)
@@ -1267,10 +1295,60 @@ def workshop_page(slug: str, request: Request):
                 "url": taller_url,
                 "category": "Free" if taller["precio_total"] == 0 else "Paid",
             }
-        html_text = _inject_json_ld(html_text, course_schema)
+        schemas = [course_schema]
+        # FAQPage — condicionado a que el taller tenga FAQs cargadas (hoy
+        # ninguno las tiene todavía, ver FaqSection del admin): empieza a
+        # inyectarse solo apenas se cargue contenido, sin tocar código de nuevo.
+        faq_schema = _faq_page_schema(
+            [(f.get("pregunta", ""), f.get("respuesta", "")) for f in (taller["faqs"] or [])]
+        )
+        if faq_schema:
+            schemas.append(faq_schema)
+        html_text = _inject_json_ld(html_text, *schemas)
         return HTMLResponse(content=html_text)
     except Exception:
         logger.warning("OG injection falló para el taller %s — sirvo index plano", slug, exc_info=True)
+        return _serve_frontend("index.html")
+
+
+@app.get("/preguntas-frecuentes", include_in_schema=False)
+def preguntas_frecuentes_page():
+    """Sirve el SPA de preguntas frecuentes, inyectando FAQPage JSON-LD
+    server-side cuando el setting `faq_json` (app_settings, editable desde
+    /admin/settings → Preguntas frecuentes) está configurado — mismo
+    contenido que ya ve un lector con JS (`useFaqGroups`, `data/faq.ts`).
+
+    Si el setting no está seteado, no inyecta nada acá: el fallback
+    hardcodeado (`FAQ_GROUPS` en `data/faq.ts`) solo existe del lado
+    cliente — duplicarlo acá crearía una segunda copia del mismo texto que
+    puede divergir con el tiempo (dos verdades). Ante cualquier error sirve
+    el index.html plano — nunca rompe la página.
+    """
+    try:
+        index_file = FRONT_NEW / "index.html"
+        if not index_file.exists():
+            return _serve_frontend("index.html")
+        conn = get_db()
+        try:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key = %s", ("faq_json",)
+            ).fetchone()
+        finally:
+            conn.close()
+        groups = _parse_json_field(row["value"]) if row else None
+        faq_schema = _faq_page_schema(
+            [
+                (it.get("q", ""), it.get("a", ""))
+                for g in (groups or [])
+                for it in g.get("items", [])
+            ]
+        )
+        if not faq_schema:
+            return _serve_frontend("index.html")
+        html_text = _inject_json_ld(index_file.read_text(encoding="utf-8"), faq_schema)
+        return HTMLResponse(content=html_text)
+    except Exception:
+        logger.warning("preguntas_frecuentes_page: inyección falló — sirvo index plano", exc_info=True)
         return _serve_frontend("index.html")
 
 
