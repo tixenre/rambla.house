@@ -261,6 +261,15 @@ _STATIC_EXT_RE = re.compile(
 async def security_headers(request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
+    # Fuera de prod (dev/staging/preview/local), nunca indexable — sin esto,
+    # cualquier cosa que un crawler encuentre en dev-rambla.up.railway.app
+    # (compartido, linkeado, o simplemente rastreado) podía entrar al índice
+    # como contenido duplicado. Header, no depende de que el crawler respete
+    # robots.txt (Google puede igual listar una URL bloqueada por robots.txt
+    # si la encuentra linkeada — `X-Robots-Tag` es la señal que sí lo evita).
+    # `robots.txt` (routes/seo.py) es la segunda capa: bloquea el CRAWL mismo.
+    if not settings.is_production:
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
     # Cache-Control por path (no se toca /api/* ni respuestas que ya fijan el suyo —
     # sitemap/calendar/doc-preview usan setdefault, así que su valor gana). Arregla
     # el "Use efficient cache lifetimes" de Lighthouse: el backend servía todo sin TTL.
