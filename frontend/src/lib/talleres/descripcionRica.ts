@@ -73,3 +73,23 @@ export function parseDescripcionRica(texto: string): BloqueDescripcion[] {
   cerrarLista();
   return bloques;
 }
+
+/** Separa los bloques en "antes" y "programa" — el corte es un título
+ * "# Programa" (case-insensitive) dentro del texto libre de la descripción,
+ * para que la página del taller pueda mostrarlos en dos cards separadas en
+ * vez de una sola (pedido explícito del dueño). El bloque-título se
+ * descarta de los dos lados: la card que recibe `programa` ya pone
+ * "Programa" como su propio eyebrow, repetirlo adentro sería redundante.
+ * Sin ese título, `programa` es `null` — el caso común (la mayoría de los
+ * talleres no traen un programa embebido en el texto libre, usan la vista
+ * de clases estructurada de `ProgramaSection` en su lugar). */
+export function splitEnPrograma(bloques: BloqueDescripcion[]): {
+  antes: BloqueDescripcion[];
+  programa: BloqueDescripcion[] | null;
+} {
+  const idx = bloques.findIndex(
+    (b) => b.tipo === "titulo" && b.texto.trim().toLowerCase() === "programa",
+  );
+  if (idx === -1) return { antes: bloques, programa: null };
+  return { antes: bloques.slice(0, idx), programa: bloques.slice(idx + 1) };
+}

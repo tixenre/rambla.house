@@ -8,8 +8,9 @@ import { Button } from "@/design-system/ui/button";
 import { IconButton } from "@/design-system/ui/icon-button";
 import { ModalBackdrop } from "@/design-system/ui/modal-backdrop";
 import { WorkshopInscripcionForm } from "@/components/talleres/WorkshopInscripcionForm";
-import { DescripcionRica } from "@/components/talleres/DescripcionRica";
+import { DescripcionRica, DescripcionBloques } from "@/components/talleres/DescripcionRica";
 import { SeccionCard } from "@/components/talleres/SeccionCard";
+import { parseDescripcionRica, splitEnPrograma } from "@/lib/talleres/descripcionRica";
 import { TallerHero } from "@/components/talleres/TallerHero";
 import { TallerGaleria, TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
 import { TallerCalendario } from "@/components/talleres/TallerCalendario";
@@ -211,6 +212,14 @@ function TallerLandingPage() {
   const fechasResumen = resumenFechas(clases, fechaInicioStr, fechaFinStr);
   const horarioResumen = resumenHorario(clases, formTaller.horario);
 
+  // El programa a veces viene redactado como parte del texto libre de la
+  // descripción (un título "# Programa" seguido de la lista), en vez de
+  // cargado clase-por-clase (`ProgramaSection`, más abajo) — separado en su
+  // propia card en vez de mezclado con "De qué se trata" (pedido explícito).
+  const { antes: bloquesDescripcion, programa: bloquesPrograma } = splitEnPrograma(
+    parseDescripcionRica(taller.descripcion),
+  );
+
   return (
     <>
       {switchToProxima && !soldOutModalDismissed && (
@@ -250,8 +259,8 @@ function TallerLandingPage() {
                     (chequeo rápido antes de invertir tiempo en leer) → el
                     desarrollo completo del programa. */}
                 <SeccionCard eyebrow="De qué se trata">
-                  <DescripcionRica
-                    texto={taller.descripcion}
+                  <DescripcionBloques
+                    bloques={bloquesDescripcion}
                     className="text-lg sm:text-xl text-muted-foreground"
                   />
                 </SeccionCard>
@@ -269,6 +278,14 @@ function TallerLandingPage() {
                   <TallerCalendario sesiones={formTaller.sesiones} horario={formTaller.horario} />
                 )}
 
+                {bloquesPrograma && bloquesPrograma.length > 0 && (
+                  <SeccionCard eyebrow="Programa">
+                    <DescripcionBloques
+                      bloques={bloquesPrograma}
+                      className="text-base text-muted-foreground"
+                    />
+                  </SeccionCard>
+                )}
                 <ProgramaSection clases={clases} />
                 <InstitucionesRow taller={taller} />
                 <InstructorCard taller={taller} />
