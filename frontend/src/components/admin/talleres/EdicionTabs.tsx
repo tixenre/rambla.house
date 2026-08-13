@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Plus, Save, Trash2 } from "lucide-react";
+import { Save } from "lucide-react";
 import { toast } from "sonner";
 
 import { talleresAdminApi } from "@/lib/admin/api/talleres";
 import type { ClaseBody, EdicionAdmin, ModalidadPagoBody } from "@/lib/admin/api/types";
 import { Button } from "@/design-system/ui/button";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
-import { IconButton } from "@/design-system/ui/icon-button";
 import { Input } from "@/design-system/ui/input";
 import {
   Select,
@@ -153,13 +152,21 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
   const [usaEquipos, setUsaEquipos] = useState(edicion.usa_equipos);
   const [valorEquipos, setValorEquipos] = useState(String(edicion.valor_equipos));
   const [valorEquiposModo, setValorEquiposModo] = useState(edicion.valor_equipos_modo);
-  // Modalidades de pago viven en esta misma sección/guardado (antes eran una
-  // pestaña aparte con su propio botón — confusión real del dueño: tipeaba el
-  // monto por cuota en "Total" sin saber que había un segundo "Costo total"
-  // en otra caja). Ver `previewModalidad` para el preview en vivo por fila.
-  const [rows, setRows] = useState<ModalidadForm[]>(
-    (edicion.modalidades ?? []).map(toModalidadForm),
+  // Modalidad de pago: UNA sola (no una lista) — pedido explícito del dueño
+  // tras confundirse con "Costo total del plan" como un campo aparte del
+  // Precio total de arriba ("por qué debería ponerle manualmente el valor de
+  // la cuota si ya tenemos el total"). El monto SIEMPRE es `precioTotal`; acá
+  // solo se elige único-pago vs. cuotas y, si es cuotas, la cantidad — el
+  // monto por cuota lo deriva el backend (nunca se tipea un total aparte).
+  // Confirmado contra los 3 talleres reales de staging (2026-08-13): ninguno
+  // usaba 2+ modalidades ni un monto de modalidad distinto al Precio total,
+  // así que esta simplificación no pierde configuración real de nadie.
+  const modalidadExistente = edicion.modalidades?.[0];
+  const [pagoTipo, setPagoTipo] = useState<"unico" | "cuotas">(
+    (modalidadExistente?.n_cuotas ?? 1) > 1 ? "cuotas" : "unico",
   );
+  const [nCuotas, setNCuotas] = useState(String(modalidadExistente?.n_cuotas ?? 2));
+  const [modalidadNota, setModalidadNota] = useState(modalidadExistente?.nota ?? "");
 
   useEffect(() => {
     setPrecioTotal(String(edicion.precio_total));
@@ -171,7 +178,10 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
     setUsaEquipos(edicion.usa_equipos);
     setValorEquipos(String(edicion.valor_equipos));
     setValorEquiposModo(edicion.valor_equipos_modo);
-    setRows((edicion.modalidades ?? []).map(toModalidadForm));
+    const m = edicion.modalidades?.[0];
+    setPagoTipo((m?.n_cuotas ?? 1) > 1 ? "cuotas" : "unico");
+    setNCuotas(String(m?.n_cuotas ?? 2));
+    setModalidadNota(m?.nota ?? "");
   }, [edicion.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const mut = useMutation({
@@ -182,21 +192,6 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
     },
     onError: (e) => toast.error((e as Error).message),
   });
-
-  function agregarModalidad() {
-    setRows((r) => [
-      ...r,
-      { codigo: "", label: "", nota: "", monto_total: precioTotal || "", n_cuotas: "1" },
-    ]);
-  }
-
-  function quitarModalidad(idx: number) {
-    setRows((r) => r.filter((_, i) => i !== idx));
-  }
-
-  function actualizarModalidad(idx: number, patch: Partial<ModalidadForm>) {
-    setRows((r) => r.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
-  }
 
   function handleSave() {
     const total = parseInt(precioTotal, 10);
@@ -216,38 +211,21 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
       toast.error("Ingresá un valor válido para lo que usa el taller");
       return;
     }
-    const modalidades: ModalidadPagoBody[] = [];
-    for (const row of rows) {
-      const codigo = row.codigo.trim();
-      const label = row.label.trim();
-      const monto = parseInt(row.monto_total, 10);
-      const nCuotas = parseInt(row.n_cuotas, 10);
-      if (!codigo || !label) {
-        toast.error("Cada modalidad necesita código y label");
-        return;
-      }
-      if (isNaN(monto) || monto <= 0) {
-        toast.error(`La modalidad "${label}" necesita un monto válido`);
-        return;
-      }
-      if (isNaN(nCuotas) || nCuotas < 1) {
-        toast.error(`La modalidad "${label}" necesita al menos 1 cuota`);
-        return;
-      }
-      modalidades.push({
-        id: row.id,
-        codigo,
-        label,
-        nota: row.nota.trim(),
-        monto_total: monto,
-        n_cuotas: nCuotas,
-      });
-    }
-    const codigos = modalidades.map((m) => m.codigo);
-    if (new Set(codigos).size !== codigos.length) {
-      toast.error("Hay códigos de modalidad repetidos");
+    const cuotas = pagoTipo === "cuotas" ? parseInt(nCuotas, 10) : 1;
+    if (pagoTipo === "cuotas" && (isNaN(cuotas) || cuotas < 2)) {
+      toast.error("La cantidad de cuotas tiene que ser 2 o más");
       return;
     }
+    const modalidades: ModalidadPagoBody[] = [
+      {
+        id: modalidadExistente?.id ?? null,
+        codigo: pagoTipo === "cuotas" ? "cuotas" : "total",
+        label: pagoTipo === "cuotas" ? `${cuotas} cuotas` : "Pago total",
+        nota: modalidadNota.trim(),
+        monto_total: total,
+        n_cuotas: cuotas,
+      },
+    ];
     mut.mutate({
       precio_total: total,
       precio_sena: sena,
@@ -305,96 +283,57 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
         </div>
       </div>
 
-      <div className="border-t border-border/40 pt-5 flex flex-col gap-4">
+      <div className="border-t border-border/40 pt-5 flex flex-col gap-3">
         <div>
-          <p className="text-sm font-medium text-ink">Formas de pagar</p>
+          <p className="text-sm font-medium text-ink">Forma de pago</p>
           <p className="text-xs text-muted-foreground">
-            Un pago único, en cuotas, con descuento para ex alumnos, etc. Cada plan tiene su propio
-            costo — normalmente el mismo que el Precio total de arriba, salvo que quieras ofrecer un
-            descuento.
+            El monto es siempre el Precio total de arriba — acá solo se elige cómo se paga.
           </p>
         </div>
-        {rows.length === 0 && (
-          <p className="text-sm text-muted-foreground italic">
-            Sin planes configurados — el público paga el Precio total de arriba de una sola vez.
+        <div className="grid sm:grid-cols-[180px_140px_1fr] gap-2 items-end">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+              Modalidad
+            </label>
+            <Select value={pagoTipo} onValueChange={(v) => setPagoTipo(v as "unico" | "cuotas")}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unico">Pago único</SelectItem>
+                <SelectItem value="cuotas">En cuotas</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {pagoTipo === "cuotas" && (
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Cantidad de cuotas
+              </label>
+              <Input
+                type="number"
+                min={2}
+                value={nCuotas}
+                onChange={(e) => setNCuotas(e.target.value)}
+              />
+            </div>
+          )}
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+              Nota (opcional)
+            </label>
+            <Input
+              value={modalidadNota}
+              onChange={(e) => setModalidadNota(e.target.value)}
+              placeholder="ej: 10% off, efectivo"
+            />
+          </div>
+        </div>
+        {previewModalidad(precioTotal, pagoTipo === "cuotas" ? nCuotas : "1") && (
+          <p className="text-xs text-rosa-ink">
+            {previewModalidad(precioTotal, pagoTipo === "cuotas" ? nCuotas : "1")}
           </p>
         )}
-        {rows.map((row, idx) => (
-          <div key={row.id ?? `nueva-${idx}`} className="flex flex-col gap-1.5">
-            <div className="grid sm:grid-cols-[1fr_1fr_1fr_140px_90px_auto] gap-2 items-end">
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                  Código
-                </label>
-                <Input
-                  value={row.codigo}
-                  onChange={(e) => actualizarModalidad(idx, { codigo: e.target.value })}
-                  placeholder="3-cuotas"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                  Label
-                </label>
-                <Input
-                  value={row.label}
-                  onChange={(e) => actualizarModalidad(idx, { label: e.target.value })}
-                  placeholder="3 cuotas"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                  Nota
-                </label>
-                <Input
-                  value={row.nota}
-                  onChange={(e) => actualizarModalidad(idx, { nota: e.target.value })}
-                  placeholder="10% off"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                  Costo total del plan (ARS)
-                </label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={row.monto_total}
-                  onChange={(e) => actualizarModalidad(idx, { monto_total: e.target.value })}
-                  placeholder="ej: 320000 (el costo COMPLETO, no por cuota)"
-                />
-              </div>
-              <div className="flex flex-col gap-1.5">
-                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                  Cuotas
-                </label>
-                <Input
-                  type="number"
-                  min={1}
-                  value={row.n_cuotas}
-                  onChange={(e) => actualizarModalidad(idx, { n_cuotas: e.target.value })}
-                />
-              </div>
-              <IconButton
-                aria-label="Quitar modalidad"
-                size="sm"
-                onClick={() => quitarModalidad(idx)}
-                className="text-muted-foreground hover:text-destructive mb-0.5"
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </IconButton>
-            </div>
-            {previewModalidad(row) && (
-              <p className="text-xs text-rosa-ink pl-0.5">{previewModalidad(row)}</p>
-            )}
-          </div>
-        ))}
-        <div>
-          <Button variant="outline" size="sm" onClick={agregarModalidad} className="gap-1.5">
-            <Plus className="h-3.5 w-3.5" />
-            Agregar modalidad
-          </Button>
-        </div>
       </div>
 
       {/* Economía del taller: si usa el Estudio y/o equipos de alquiler, para
@@ -554,41 +493,17 @@ export function PagosSection({ edicion }: { edicion: EdicionAdmin }) {
   );
 }
 
-// F4a: modalidades de pago — sin motor de descuentos, el admin carga el
-// costo TOTAL del plan a mano ("3 cuotas", "un pago con descuento", "ex
-// alumnos"); los "%" de ahorro son texto libre en `nota`. `n_cuotas` (1 =
-// pago único) también lo carga el admin — el monto POR cuota lo deriva el
-// backend (`monto_total / n_cuotas`), nunca se tipea acá. Sin ninguna
-// modalidad configurada, el público ve 1 sola opción sintética ("Pago total").
-type ModalidadForm = {
-  id?: number | null;
-  codigo: string;
-  label: string;
-  nota: string;
-  monto_total: string;
-  n_cuotas: string;
-};
-
-function toModalidadForm(m: ModalidadPagoBody): ModalidadForm {
-  return {
-    id: m.id,
-    codigo: m.codigo,
-    label: m.label,
-    nota: m.nota ?? "",
-    monto_total: String(m.monto_total),
-    n_cuotas: String(m.n_cuotas ?? 1),
-  };
-}
-
-/** Preview EN VIVO de qué va a ver el público con este Costo total + Cuotas
+// F4a/F4b: modalidad de pago — el monto SIEMPRE es el Precio total de la
+// edición (una sola fuente, nunca un segundo campo a mano); acá solo se
+// decide único-pago vs. cuotas y, si es cuotas, la cantidad. El monto POR
+// cuota lo deriva el backend (`monto_total / n_cuotas`), nunca se tipea.
+/** Preview EN VIVO de qué va a ver el público con este Precio total + Cuotas
  * — no se manda al backend (es el que ya recalcula al guardar), es solo
- * para que el admin vea el resultado ANTES de guardar y no confunda el
- * costo total del plan con el monto por cuota (confusión real: se tipeó
- * "80000" pensando en el monto mensual, con Cuotas en 1 sin cambiar). */
-function previewModalidad(row: ModalidadForm): string | null {
-  const monto = parseInt(row.monto_total, 10);
+ * para que el admin vea el resultado ANTES de guardar. */
+function previewModalidad(montoStr: string, cuotasStr: string): string | null {
+  const monto = parseInt(montoStr, 10);
   if (isNaN(monto) || monto <= 0) return null;
-  const cuotas = parseInt(row.n_cuotas, 10);
+  const cuotas = parseInt(cuotasStr, 10);
   if (isNaN(cuotas) || cuotas <= 1) return `El público ve: ${fmtArs(monto)}, un solo pago`;
   const porCuota = Math.round(monto / cuotas);
   return `El público ve: ${cuotas} cuotas de ${fmtArs(porCuota)} (total ${fmtArs(monto)})`;
