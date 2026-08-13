@@ -116,8 +116,11 @@ def _validar_clases(clases: list) -> list[dict]:
 
 def _validar_modalidades(modalidades: list) -> list[dict]:
     """Valida y normaliza una lista de modalidades de pago. Sin motor de
-    descuentos: `monto_total` lo carga el admin a mano; los "%" de ahorro son
-    texto libre en `nota`. Lanza 400 si hay errores."""
+    descuentos: `monto_total` (costo total del plan) lo carga el admin a
+    mano; los "%" de ahorro son texto libre en `nota`. `n_cuotas` (default 1
+    = pago único) también lo carga el admin — el monto POR cuota se DERIVA
+    en `_modalidad_dict` (routes/talleres.py), nunca se tipea a mano, para
+    que no pueda desincronizarse del total. Lanza 400 si hay errores."""
     result = []
     seen_codigos = set()
     for m in modalidades:
@@ -127,12 +130,17 @@ def _validar_modalidades(modalidades: list) -> list[dict]:
         codigo = str(_campo("codigo") or "").strip()
         label = str(_campo("label") or "").strip()
         monto = _campo("monto_total", 0)
+        n_cuotas = _campo("n_cuotas", 1)
+        if n_cuotas is None:
+            n_cuotas = 1
         if not codigo:
             raise HTTPException(400, "Cada modalidad de pago necesita un código")
         if not label:
             raise HTTPException(400, f"La modalidad '{codigo}' necesita un label")
         if not isinstance(monto, int) or monto <= 0:
             raise HTTPException(400, f"La modalidad '{codigo}' necesita un monto_total > 0")
+        if not isinstance(n_cuotas, int) or n_cuotas < 1:
+            raise HTTPException(400, f"La modalidad '{codigo}' necesita n_cuotas >= 1")
         if codigo in seen_codigos:
             raise HTTPException(400, f"Código de modalidad duplicado: '{codigo}'")
         seen_codigos.add(codigo)
@@ -142,5 +150,6 @@ def _validar_modalidades(modalidades: list) -> list[dict]:
             "label": label,
             "nota": str(_campo("nota") or "").strip(),
             "monto_total": monto,
+            "n_cuotas": n_cuotas,
         })
     return result

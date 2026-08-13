@@ -518,12 +518,19 @@ export type Taller = {
   video: { youtube_id: string; embed_url: string; poster: string | null } | null;
   // F4a: modalidades de pago. NUNCA vacío para el público — sin configurar
   // ninguna, el backend sintetiza 1 sola opción ("Pago total" = precio_total).
+  // `monto_cuota`/`monto_cuota_str` = monto_total derivado por n_cuotas (el
+  // backend ya lo calcula — nunca se recalcula acá, ver 2026-06-29 "el front
+  // no calcula plata"). n_cuotas=1 (pago único) = mismo display que siempre.
   modalidades: {
+    id: number | null;
     codigo: string;
     label: string;
     nota: string;
     monto_total: number;
     monto_total_str: string;
+    n_cuotas: number;
+    monto_cuota: number;
+    monto_cuota_str: string;
   }[];
   // F4c: FAQ del concepto, trabajos pasados (solo YouTube, sin testimonios) y
   // cierre de inscripciones de ESTA edición (null = sin cierre).

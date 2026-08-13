@@ -417,15 +417,18 @@ export function PagosSection({ edicion }: { edicion: EdicionAdmin }) {
 }
 
 // F4a: modalidades de pago — sin motor de descuentos, el admin carga el
-// monto final de cada opción a mano ("3 cuotas", "un pago con descuento",
-// "ex alumnos"); los "%" de ahorro son texto libre en `nota`. Sin ninguna
-// configurada, el público ve 1 sola opción sintética ("Pago total").
+// costo TOTAL del plan a mano ("3 cuotas", "un pago con descuento", "ex
+// alumnos"); los "%" de ahorro son texto libre en `nota`. `n_cuotas` (1 =
+// pago único) también lo carga el admin — el monto POR cuota lo deriva el
+// backend (`monto_total / n_cuotas`), nunca se tipea acá. Sin ninguna
+// modalidad configurada, el público ve 1 sola opción sintética ("Pago total").
 type ModalidadForm = {
   id?: number | null;
   codigo: string;
   label: string;
   nota: string;
   monto_total: string;
+  n_cuotas: string;
 };
 
 function toModalidadForm(m: ModalidadPagoBody): ModalidadForm {
@@ -435,6 +438,7 @@ function toModalidadForm(m: ModalidadPagoBody): ModalidadForm {
     label: m.label,
     nota: m.nota ?? "",
     monto_total: String(m.monto_total),
+    n_cuotas: String(m.n_cuotas ?? 1),
   };
 }
 
@@ -461,7 +465,13 @@ export function ModalidadesSection({ edicion }: { edicion: EdicionAdmin }) {
   function agregar() {
     setRows((r) => [
       ...r,
-      { codigo: "", label: "", nota: "", monto_total: String(edicion.precio_total || "") },
+      {
+        codigo: "",
+        label: "",
+        nota: "",
+        monto_total: String(edicion.precio_total || ""),
+        n_cuotas: "1",
+      },
     ]);
   }
 
@@ -479,6 +489,7 @@ export function ModalidadesSection({ edicion }: { edicion: EdicionAdmin }) {
       const codigo = row.codigo.trim();
       const label = row.label.trim();
       const monto = parseInt(row.monto_total, 10);
+      const nCuotas = parseInt(row.n_cuotas, 10);
       if (!codigo || !label) {
         toast.error("Cada modalidad necesita código y label");
         return;
@@ -487,7 +498,18 @@ export function ModalidadesSection({ edicion }: { edicion: EdicionAdmin }) {
         toast.error(`La modalidad "${label}" necesita un monto válido`);
         return;
       }
-      parsed.push({ id: row.id, codigo, label, nota: row.nota.trim(), monto_total: monto });
+      if (isNaN(nCuotas) || nCuotas < 1) {
+        toast.error(`La modalidad "${label}" necesita al menos 1 cuota`);
+        return;
+      }
+      parsed.push({
+        id: row.id,
+        codigo,
+        label,
+        nota: row.nota.trim(),
+        monto_total: monto,
+        n_cuotas: nCuotas,
+      });
     }
     const codigos = parsed.map((m) => m.codigo);
     if (new Set(codigos).size !== codigos.length) {
@@ -508,7 +530,7 @@ export function ModalidadesSection({ edicion }: { edicion: EdicionAdmin }) {
       {rows.map((row, idx) => (
         <div
           key={row.id ?? `nueva-${idx}`}
-          className="grid sm:grid-cols-[1fr_1fr_1fr_140px_auto] gap-2 items-end"
+          className="grid sm:grid-cols-[1fr_1fr_1fr_140px_90px_auto] gap-2 items-end"
         >
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
@@ -542,13 +564,24 @@ export function ModalidadesSection({ edicion }: { edicion: EdicionAdmin }) {
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Monto (ARS)
+              Total (ARS)
             </label>
             <Input
               type="number"
               min={1}
               value={row.monto_total}
               onChange={(e) => actualizar(idx, { monto_total: e.target.value })}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+              Cuotas
+            </label>
+            <Input
+              type="number"
+              min={1}
+              value={row.n_cuotas}
+              onChange={(e) => actualizar(idx, { n_cuotas: e.target.value })}
             />
           </div>
           <IconButton

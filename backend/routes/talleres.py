@@ -96,6 +96,15 @@ def _fmt_pesos(n: int) -> str:
     return "$" + f"{n:,}".replace(",", ".")
 
 
+def _monto_por_cuota(monto_total: int, n_cuotas: int) -> int:
+    """Monto de UNA cuota — derivado de `monto_total`/`n_cuotas`, redondeado
+    al peso. Es texto informativo ("N cuotas de $X"), no una cobranza real
+    (la seña/comprobante siguen siendo el mecanismo de pago) — por eso
+    redondeo simple en vez del reparto con remanente-en-la-última-cuota que
+    usa `services/talleres/commands/economia.py::_partes` para plata real."""
+    return round(monto_total / n_cuotas)
+
+
 # ── Helpers de lectura ────────────────────────────────────────────────────────
 
 _EDICION_JOIN_SELECT = """
@@ -197,8 +206,12 @@ def _get_trabajos_taller(conn, taller_id: int) -> list[dict]:
 def _modalidad_dict(row) -> dict:
     """F4a: una modalidad de pago (row de DB o dict normalizado de
     _validar_modalidades). `monto_total_str` resuelto acá — el front no
-    formatea plata a mano."""
+    formatea plata a mano. `monto_cuota`/`monto_cuota_str` = `monto_total`
+    derivado por `n_cuotas` (default 1, pago único) — el público nunca ve
+    un monto por cuota tipeado a mano, solo el calculado."""
     monto = _row_get(row, "monto_total", 0) or 0
+    n_cuotas = _row_get(row, "n_cuotas", 1) or 1
+    monto_cuota = _monto_por_cuota(monto, n_cuotas)
     return {
         "id": _row_get(row, "id"),
         "codigo": row["codigo"],
@@ -206,12 +219,15 @@ def _modalidad_dict(row) -> dict:
         "nota": _row_get(row, "nota", ""),
         "monto_total": monto,
         "monto_total_str": _fmt_pesos(monto),
+        "n_cuotas": n_cuotas,
+        "monto_cuota": monto_cuota,
+        "monto_cuota_str": _fmt_pesos(monto_cuota),
     }
 
 
 def _get_modalidades(conn, edicion_id: int) -> list[dict]:
     rows = conn.execute(
-        "SELECT id, codigo, label, nota, monto_total FROM edicion_modalidades_pago "
+        "SELECT id, codigo, label, nota, monto_total, n_cuotas FROM edicion_modalidades_pago "
         "WHERE edicion_id = %s ORDER BY orden, id",
         (edicion_id,),
     ).fetchall()
@@ -907,6 +923,9 @@ class ModalidadPagoBody(BaseModel):
     label: str
     nota: str = ""
     monto_total: int = Field(..., gt=0)
+    # Default 1 = pago único. El monto POR cuota se deriva de monto_total/
+    # n_cuotas en `_modalidad_dict` — nunca se manda ni se guarda a mano.
+    n_cuotas: int = Field(default=1, ge=1)
 
 
 class ClaseBody(BaseModel):

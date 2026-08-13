@@ -2,6 +2,33 @@ import { RadioGroup, RadioGroupItem } from "@/design-system/ui/radio-group";
 import type { Taller } from "@/lib/api";
 
 /**
+ * El lado del monto de una modalidad — con más de 1 cuota, el monto POR
+ * cuota (ya calculado por el backend, `monto_total / n_cuotas`) es lo
+ * prominente y el total queda como dato secundario más chico, para que "4
+ * cuotas de $80.000" no se confunda con "$80.000 en total" (pedido explícito
+ * del dueño: nunca calcular acá, solo mostrar lo que ya viene resuelto).
+ * `n_cuotas === 1` (pago único, el caso más común) se ve exactamente igual
+ * que siempre — cero regresión visual para "Pago total".
+ */
+function MontoModalidad({ m }: { m: Taller["modalidades"][number] }) {
+  if (m.n_cuotas > 1) {
+    return (
+      <div className="text-right shrink-0">
+        <p className="font-display text-sm font-bold text-ink tabular-nums">
+          {m.n_cuotas} cuotas de {m.monto_cuota_str}
+        </p>
+        <p className="text-2xs text-muted-foreground tabular-nums">Total {m.monto_total_str}</p>
+      </div>
+    );
+  }
+  return (
+    <p className="font-display text-sm font-bold text-ink tabular-nums shrink-0">
+      {m.monto_total_str}
+    </p>
+  );
+}
+
+/**
  * Selector de modalidad de pago en el form de inscripción. 0 modalidades no
  * debería pasar (el backend siempre sintetiza "Pago total" si la edición no
  * configuró ninguna) — defensivo, sin nada que mostrar. 1 sola → el monto se
@@ -28,9 +55,7 @@ export function ModalidadSelector({
           <p className="text-sm font-semibold text-ink">{m.label}</p>
           {m.nota && <p className="text-xs text-rosa">{m.nota}</p>}
         </div>
-        <p className="font-display text-sm font-bold text-ink tabular-nums shrink-0">
-          {m.monto_total_str}
-        </p>
+        <MontoModalidad m={m} />
       </div>
     );
   }
@@ -53,9 +78,7 @@ export function ModalidadSelector({
               <p className="text-sm font-semibold text-ink">{m.label}</p>
               {m.nota && <p className="text-xs text-rosa">{m.nota}</p>}
             </div>
-            <p className="font-display text-sm font-bold text-ink tabular-nums shrink-0">
-              {m.monto_total_str}
-            </p>
+            <MontoModalidad m={m} />
           </label>
         ))}
       </RadioGroup>

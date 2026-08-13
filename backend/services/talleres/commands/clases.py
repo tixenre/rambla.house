@@ -77,17 +77,34 @@ def _upsert_modalidades(conn, edicion_id: int, modalidades: list) -> None:
         if mid and mid in existentes:
             conn.execute(
                 "UPDATE edicion_modalidades_pago SET orden = %s, codigo = %s, "
-                "label = %s, nota = %s, monto_total = %s "
+                "label = %s, nota = %s, monto_total = %s, n_cuotas = %s "
                 "WHERE id = %s AND edicion_id = %s",
-                (orden, m["codigo"], m["label"], m["nota"], m["monto_total"], mid, edicion_id),
+                (
+                    orden,
+                    m["codigo"],
+                    m["label"],
+                    m["nota"],
+                    m["monto_total"],
+                    m["n_cuotas"],
+                    mid,
+                    edicion_id,
+                ),
             )
             vistos.add(mid)
         else:
             conn.execute(
                 "INSERT INTO edicion_modalidades_pago "
-                "(edicion_id, orden, codigo, label, nota, monto_total) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (edicion_id, orden, m["codigo"], m["label"], m["nota"], m["monto_total"]),
+                "(edicion_id, orden, codigo, label, nota, monto_total, n_cuotas) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (
+                    edicion_id,
+                    orden,
+                    m["codigo"],
+                    m["label"],
+                    m["nota"],
+                    m["monto_total"],
+                    m["n_cuotas"],
+                ),
             )
     sobrantes = existentes - vistos
     for mid in sobrantes:

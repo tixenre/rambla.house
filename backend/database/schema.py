@@ -2148,11 +2148,16 @@ def _init_db_schema(conn):
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_poster_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL")
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_poster_url TEXT NOT NULL DEFAULT ''")
 
-    # Escuela v2 F4a: modalidades de pago por edición — montos finales
-    # cargados a mano por el admin (cero motor de descuentos/cuotas real; los
-    # "%" de ahorro son display en `nota`). Sin modalidades configuradas, el
-    # público ve un fallback sintético de 1 sola opción ("Pago total" =
-    # precio_total) — cero ruptura para ediciones que no las configuran.
+    # Escuela v2 F4a: modalidades de pago por edición — `monto_total` (costo
+    # total del plan) y `n_cuotas` cargados a mano por el admin; el monto POR
+    # cuota se deriva (`monto_total / n_cuotas`, redondeado) — nunca se tipea
+    # a mano, así no puede desincronizarse del total (fix #: comunicación de
+    # cuotas, antes el "N cuotas de $X" era texto libre en `label`/`nota` sin
+    # ninguna relación aritmética con `monto_total`). `n_cuotas=1` = pago
+    # único (default; el fallback sintético de abajo no lo setea, cae acá).
+    # Sin modalidades configuradas, el público ve un fallback sintético de 1
+    # sola opción ("Pago total" = precio_total) — cero ruptura para
+    # ediciones que no las configuran.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS edicion_modalidades_pago (
             id          SERIAL PRIMARY KEY,
@@ -2162,10 +2167,14 @@ def _init_db_schema(conn):
             label       TEXT NOT NULL,
             nota        TEXT NOT NULL DEFAULT '',
             monto_total INTEGER NOT NULL,
+            n_cuotas    INTEGER NOT NULL DEFAULT 1,
             created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(edicion_id, codigo)
         )
     """)
+    conn.execute(
+        "ALTER TABLE edicion_modalidades_pago ADD COLUMN IF NOT EXISTS n_cuotas INTEGER NOT NULL DEFAULT 1"
+    )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_edicion_modalidades_pago_edicion "
         "ON edicion_modalidades_pago(edicion_id, orden)"

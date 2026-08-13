@@ -1752,8 +1752,11 @@ export type ClaseBody = {
 
 // F4a: modalidad de pago de una edición. `id` presente al escribir = editar
 // esa fila (preserva su posición salvo reorden); ausente = nueva. Sin motor
-// de descuentos: `monto_total` lo carga el admin a mano, los "%" son texto
-// libre en `nota`. `monto_total_str` viene resuelto del backend en lecturas.
+// de descuentos: `monto_total` (costo total del plan) lo carga el admin a
+// mano, los "%" son texto libre en `nota`. `n_cuotas` (default 1 = pago
+// único) también lo carga el admin — el monto POR cuota se deriva en el
+// backend, nunca se manda ni se tipea a mano. `monto_total_str`/
+// `monto_cuota`/`monto_cuota_str` vienen resueltos del backend en lecturas.
 export type ModalidadPagoBody = {
   id?: number | null;
   codigo: string;
@@ -1761,6 +1764,9 @@ export type ModalidadPagoBody = {
   nota?: string;
   monto_total: number;
   monto_total_str?: string;
+  n_cuotas?: number;
+  monto_cuota?: number;
+  monto_cuota_str?: string;
 };
 
 export type EdicionAdmin = {
