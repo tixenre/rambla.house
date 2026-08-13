@@ -76,7 +76,11 @@ from routes.cliente_portal   import router as cliente_portal_router
 from routes.marcas           import router as marcas_router
 from routes.specs            import router as specs_router
 from routes.unidades         import router as unidades_router
-from routes.seo              import router as seo_router, _build_categoria_slug as _cat_slug
+from routes.seo              import (
+    router as seo_router,
+    _build_categoria_slug as _cat_slug,
+    _build_equipo_slug as _eq_slug,
+)
 from routes.calendar         import router as calendar_router
 from routes.inventario       import router as inventario_router
 from routes.email_templates  import router as email_templates_router
@@ -734,6 +738,19 @@ def rental_page():
         return _serve_frontend("index.html")
 
 
+def _nombre_equipo_publico(d: dict) -> str:
+    """Nombre público a mostrar de un equipo: `nombre_publico` si está cargado,
+    si no `marca + nombre` (sin duplicar la marca cuando ya forma parte del
+    nombre base). Fuente única — usado por `equipo_page` y `categoria_page`
+    para que el nombre en JSON-LD/OG sea el mismo en ambas rutas."""
+    nombre = (d.get("nombre_publico") or "").strip()
+    if nombre:
+        return nombre
+    marca = (d.get("marca") or "").strip()
+    base = (d.get("nombre") or "").strip()
+    return f"{marca} {base}".strip() if marca and marca.lower() not in base.lower() else base
+
+
 @app.get("/equipo/{id_or_slug}", include_in_schema=False)
 def equipo_page(id_or_slug: str):
     """Sirve el SPA para la ficha del equipo.
@@ -786,11 +803,7 @@ def equipo_page(id_or_slug: str):
         if not row:
             return _serve_frontend("index.html")
         d = row_to_dict(row)
-        nombre = (d.get("nombre_publico") or "").strip()
-        if not nombre:
-            marca = (d.get("marca") or "").strip()
-            base = (d.get("nombre") or "").strip()
-            nombre = f"{marca} {base}".strip() if marca and marca.lower() not in base.lower() else base
+        nombre = _nombre_equipo_publico(d)
         title = f"{nombre} — Rambla Rental" if nombre else "Rambla Rental"
         desc = (d.get("descripcion") or "").strip()
         if len(desc) > 200:
@@ -862,6 +875,98 @@ def equipo_page(id_or_slug: str):
     except Exception:
         logger.warning("OG injection falló para /equipo/%s — sirvo index plano", id_or_slug, exc_info=True)
         return _serve_frontend("index.html")
+
+
+@app.get("/categoria/{slug}", include_in_schema=False)
+def categoria_page(slug: str):
+    """Sirve el SPA para la página de categoría (ej. /categoria/lentes).
+
+    Antes esta ruta dependía 100% de dos fetches client-side (/api/categorias
+    + /api/equipos) para título/OG/JSON-LD Y el listado visible — invisible
+    para cualquier bot que no ejecuta JS (la mayoría de los crawlers de IA) y
+    también para el pase de render de Google, al que `robots.txt` le bloquea
+    justamente `/api/`. Mismo patrón que `equipo_page`/`workshop_page`:
+    inyecta OG/Twitter + CollectionPage/BreadcrumbList server-side, sin
+    depender de JS. Ante cualquier error o slug inexistente cae al index.html
+    plano — el SPA (`categoria.$slug.tsx`) resuelve normal.
+    """
+    try:
+        index_file = FRONT_NEW / "index.html"
+        if not index_file.exists():
+            return _serve_frontend("index.html")
+        conn = get_db()
+        try:
+            categorias = conn.execute(
+                "SELECT id, nombre FROM categorias WHERE COALESCE(visible, true) = true"
+            ).fetchall()
+            categoria = next(
+                (c for c in categorias if _cat_slug(c["nombre"]) == slug), None
+            )
+            if not categoria:
+                return _serve_frontend("index.html")
+            equipos = conn.execute(
+                f"""
+                SELECT e.id, {MARCA_SUBQUERY}, e.nombre, e.nombre_publico
+                FROM equipos e
+                JOIN equipo_categorias ec ON ec.equipo_id = e.id
+                WHERE ec.categoria_id = %s
+                  AND e.visible_catalogo = 1 AND e.estado != 'fuera_servicio'
+                  AND e.es_recurso_interno = FALSE
+                ORDER BY e.relevancia_manual ASC, e.popularidad_score DESC, e.nombre ASC
+                """,
+                (categoria["id"],),
+            ).fetchall()
+        finally:
+            conn.close()
+        nombre = categoria["nombre"]
+        url = f"{SITE_URL}/categoria/{slug}"
+        title = f"Alquiler de {nombre} — Rambla Rental"
+        desc = (
+            f"Alquilá {nombre.lower()} para tu próxima producción en Rambla Rental, Mar del Plata. "
+            f"Más de {len(equipos)} equipos disponibles, por jornada."
+        )
+        image = f"{SITE_URL}/icon-512.png"
+        html_text = _inject_og_meta(
+            index_file.read_text(encoding="utf-8"),
+            title=title, description=desc[:160], image=image, url=url,
+        )
+        breadcrumb_schema = {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {"@type": "ListItem", "position": 1, "name": "Inicio", "item": f"{SITE_URL}/"},
+                {"@type": "ListItem", "position": 2, "name": nombre, "item": url},
+            ],
+        }
+        item_list = []
+        for i, r in enumerate(equipos[:20]):
+            d = row_to_dict(r)
+            eq_nombre = _nombre_equipo_publico(d)
+            eq_slug = _eq_slug(d.get("marca"), d.get("nombre"), d["id"])
+            item_list.append({
+                "@type": "ListItem",
+                "position": i + 1,
+                "url": f"{SITE_URL}/equipo/{eq_slug}",
+                "name": eq_nombre,
+            })
+        collection_schema = {
+            "@context": "https://schema.org",
+            "@type": "CollectionPage",
+            "name": title,
+            "description": desc,
+            "url": url,
+            "mainEntity": {
+                "@type": "ItemList",
+                "numberOfItems": len(equipos),
+                "itemListElement": item_list,
+            },
+        }
+        html_text = _inject_json_ld(html_text, breadcrumb_schema, collection_schema)
+        return HTMLResponse(content=html_text)
+    except Exception:
+        logger.warning("categoria_page: inyección falló para /categoria/%s — sirvo index plano", slug, exc_info=True)
+        return _serve_frontend("index.html")
+
 
 @app.get("/c/{token}", include_in_schema=False)
 def compartido_page(token: str):
