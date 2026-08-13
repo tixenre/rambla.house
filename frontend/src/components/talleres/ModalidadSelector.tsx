@@ -14,8 +14,9 @@ function MontoModalidad({ m }: { m: Taller["modalidades"][number] }) {
   if (m.n_cuotas > 1) {
     return (
       <div className="text-right shrink-0">
-        <p className="font-display text-sm font-bold text-ink tabular-nums">
-          {m.n_cuotas} cuotas de {m.monto_cuota_str}
+        <p className="font-display text-ink tabular-nums leading-tight">
+          <span className="text-xs font-semibold">{m.n_cuotas} cuotas de </span>
+          <span className="text-lg font-bold">{m.monto_cuota_str}</span>
         </p>
         <p className="text-2xs text-muted-foreground tabular-nums">Total {m.monto_total_str}</p>
       </div>
@@ -47,8 +48,15 @@ export function ModalidadSelector({
 }) {
   if (modalidades.length === 0) return null;
 
-  if (modalidades.length === 1) {
-    const m = modalidades[0];
+  // En cuotas primero, pago único después (pedido explícito del dueño) —
+  // sort estable: entre 2+ opciones en cuotas, conserva el orden en que el
+  // admin las cargó.
+  const ordenadas = [...modalidades].sort(
+    (a, b) => Number(b.n_cuotas > 1) - Number(a.n_cuotas > 1),
+  );
+
+  if (ordenadas.length === 1) {
+    const m = ordenadas[0];
     // Rambla solo acepta transferencia para talleres (el comprobante de
     // transferencia del form, más abajo, es obligatorio) — nunca varía por
     // taller, así que "Transferencia" es texto fijo acá, nunca tipeado por
@@ -73,7 +81,7 @@ export function ModalidadSelector({
         Modalidad de pago — por transferencia
       </p>
       <RadioGroup value={value} onValueChange={onChange} className="gap-2">
-        {modalidades.map((m) => (
+        {ordenadas.map((m) => (
           <label
             key={m.codigo}
             className={`flex items-center gap-3 rounded-xl border px-4 py-3 cursor-pointer transition-colors ${
