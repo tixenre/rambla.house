@@ -4,23 +4,39 @@ import { formatARS } from "@/lib/format";
 import type { Taller } from "@/lib/api";
 
 /**
- * Barra sticky mobile — aparece cuando el CTA del hero sale del viewport y se
- * oculta cuando el form de inscripción (#inscripcion) entra. Mismo patrón que
- * MobileBookBar (estudio.lazy.tsx): IntersectionObserver sobre el target,
- * toggle por transform (no unmount) + safe-area.
+ * Barra sticky mobile — visible solo en el hueco entre que el CTA del hero
+ * (#hero-cta) sale del viewport y que el form de inscripción (#inscripcion)
+ * todavía no entra; oculta mientras cualquiera de los dos esté visible. Dos
+ * IntersectionObserver (uno por target, no uno compartido con `entries[0]` —
+ * el orden/batching de un observer con 2+ targets no está garantizado) +
+ * toggle por transform (no unmount) + safe-area. Mismo patrón base que
+ * MobileBookBar (estudio.lazy.tsx).
  */
 export function TallerCTABar({ taller, label }: { taller: Taller; label: string }) {
-  const [hidden, setHidden] = useState(true);
+  const [heroCtaVisible, setHeroCtaVisible] = useState(true);
+  const [inscripcionVisible, setInscripcionVisible] = useState(false);
 
   useEffect(() => {
-    const target = document.getElementById("inscripcion");
-    if (!target) return;
-    const obs = new IntersectionObserver((entries) => setHidden(entries[0].isIntersecting), {
+    const heroCta = document.getElementById("hero-cta");
+    const inscripcion = document.getElementById("inscripcion");
+    if (!heroCta || !inscripcion) return;
+
+    const heroObs = new IntersectionObserver(([entry]) => setHeroCtaVisible(entry.isIntersecting), {
       threshold: 0,
     });
-    obs.observe(target);
-    return () => obs.disconnect();
+    const inscripcionObs = new IntersectionObserver(
+      ([entry]) => setInscripcionVisible(entry.isIntersecting),
+      { threshold: 0 },
+    );
+    heroObs.observe(heroCta);
+    inscripcionObs.observe(inscripcion);
+    return () => {
+      heroObs.disconnect();
+      inscripcionObs.disconnect();
+    };
   }, []);
+
+  const hidden = heroCtaVisible || inscripcionVisible;
 
   return (
     <div

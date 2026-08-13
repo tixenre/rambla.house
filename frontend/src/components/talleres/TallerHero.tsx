@@ -124,6 +124,7 @@ type Props = {
 export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }: Props) {
   const cta = (
     <a
+      id="hero-cta"
       href="#inscripcion"
       className="inline-flex items-center gap-2 rounded-full bg-rosa text-ink px-7 py-3.5 text-base font-bold hover:brightness-110 active:scale-[0.97] transition-all"
     >
