@@ -89,10 +89,19 @@ def taller_base(monkeypatch):
         conn.close()
 
 
+def _fecha_mes_actual() -> str:
+    """`_regenerar_pedidos_taller` (2026-08-13) solo genera el pedido del mes
+    ACTUAL — una edición fechada en el pasado/futuro no genera nada. La clase
+    de prueba tiene que caer DENTRO del mes real de hoy, no una fecha fija."""
+    from services.fechas import mes_actual_ar
+
+    return f"{mes_actual_ar()}-05"
+
+
 def _crear_edicion(t, **ov):
     kwargs = dict(
         clases=[
-            t.ClaseBody(fecha="2099-03-06", hora_inicio_min=510, hora_fin_min=750, titulo="Clase 1"),
+            t.ClaseBody(fecha=_fecha_mes_actual(), hora_inicio_min=510, hora_fin_min=750, titulo="Clase 1"),
         ],
         numero_edicion=1,
         precio_total=100_000,

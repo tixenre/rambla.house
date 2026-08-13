@@ -16,11 +16,24 @@ from services.talleres.queries.economia import _revenue_inscriptos, _valor_efect
 
 
 def _regenerar_pedidos_taller(conn, edicion: dict, taller_nombre: str, *, numero_pedido_fn) -> None:
-    """(Re)genera un pedido `tipo='taller'` por mes del rango de la edición.
+    """(Re)genera el pedido `tipo='taller'` del MES ACTUAL de la edición —
+    nunca los meses futuros por adelantado (pedido explícito del dueño,
+    2026-08-13: no quiere N pedidos abiertos en simultáneo mucho antes de que
+    corresponda cobrarlos). El disparador de "que aparezca el del mes nuevo"
+    es el barrido diario `jobs/regenerar_pedidos_talleres.py`, que llama a
+    ESTA MISMA función — no hay una segunda implementación.
+
     Espeja `_regenerar_pedidos_slot`: preserva pasados/pagados, borra y recrea
-    futuros impagos. Fix propio: también preserva un mes cuyo pedido tiene MÁS
-    ítems que los que este generador crearía — protege la línea de matrícula
-    que el admin tipeó a mano de un borrado silencioso en el próximo recálculo.
+    el actual si no está pagado (ej. el admin cambió la Economía a mitad de
+    mes). Fix propio: también preserva un mes cuyo pedido tiene MÁS ítems que
+    los que este generador crearía — protege la línea de matrícula que el
+    admin tipeó a mano de un borrado silencioso en el próximo recálculo.
+
+    `_partes`/`_modo`/`_tipo` (fijo/porcentaje) siguen calculando el reparto
+    completo entre TODOS los meses del rango (sin eso el remanente de "total"
+    no ancla bien al mes calendario) — lo único que cambia es que acá solo se
+    INSERTA la fila del mes actual; el resto del dict `valores_estudio`/
+    `valores_equipos` se calcula pero no se usa todavía, hasta que le toque.
 
     `numero_pedido_fn`: inyectado en vez de importar `_next_numero_pedido` de
     `routes.alquileres` (el paquete no importa de `routes.*` — mismo patrón
@@ -90,7 +103,7 @@ def _regenerar_pedidos_taller(conn, edicion: dict, taller_nombre: str, *, numero
 
     for (y, m) in meses:
         mes = f"{y:04d}-{m:02d}"
-        if mes < mes_actual or mes in conservados:
+        if mes != mes_actual or mes in conservados:
             continue
         _, last_day = _cal.monthrange(y, m)
         fd = max(_dt_date(y, m, 1), fecha_inicio)
