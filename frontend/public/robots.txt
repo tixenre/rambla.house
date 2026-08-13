@@ -3,7 +3,7 @@ Allow: /
 Allow: /equipo/
 Allow: /categoria/
 Allow: /estudio
-Allow: /escuela/
+Allow: /escuelas/
 Allow: /preguntas-frecuentes
 
 # Bloquear back-office y portal cliente (info privada).

@@ -4,6 +4,7 @@ import { Grain } from "@/components/common/Grain";
 import { YouTubeEmbed } from "@/components/common/YouTubeEmbed";
 import { TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
 import { ordinalEdicion } from "@/lib/talleres/formato";
+import { trackClickInscribirseTaller } from "@/lib/analytics";
 import type { Taller } from "@/lib/api";
 
 function Titulo({ taller }: { taller: Taller }) {
@@ -126,6 +127,7 @@ export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }
     <a
       id="hero-cta"
       href="#inscripcion"
+      onClick={() => trackClickInscribirseTaller(taller.id)}
       className="inline-flex items-center gap-2 rounded-full bg-rosa text-ink px-7 py-3.5 text-base font-bold hover:brightness-110 active:scale-[0.97] transition-all"
     >
       Quiero inscribirme

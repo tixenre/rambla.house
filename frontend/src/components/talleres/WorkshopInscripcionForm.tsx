@@ -25,7 +25,7 @@ import {
 } from "@/lib/api";
 import { formatARS } from "@/lib/format";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
-import { trackEvent } from "@/lib/analytics";
+import { trackTallerInscripcion } from "@/lib/analytics";
 import { DatosPago } from "./DatosPago";
 import { ModalidadSelector } from "./ModalidadSelector";
 
@@ -210,10 +210,7 @@ export function WorkshopInscripcionForm({ taller, onSuccess }: Props) {
         acepta_terminos: aceptaTerminos,
         session_id: sessionIdRef.current,
       });
-      trackEvent("taller_inscripcion", {
-        taller_id: taller.id,
-        en_lista_espera: result.en_lista_espera,
-      });
+      trackTallerInscripcion({ tallerId: taller.id, enListaEspera: result.en_lista_espera });
       setSubmitState(result.en_lista_espera ? "success_espera" : "success_normal");
       onSuccess?.(result.en_lista_espera);
     } catch (err) {

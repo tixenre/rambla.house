@@ -8,7 +8,7 @@ Rambla es un negocio audiovisual en Mar del Plata (Argentina) con tres servicios
 
 1. **Rental** — alquiler de equipos audiovisuales por jornada (cámaras, lentes, iluminación, audio, soportes, accesorios). Catálogo completo en `/rental`.
 2. **El Estudio** — estudio de foto y video por horas. Espacio equipado para producción profesional. Detalles en `/estudio`.
-3. **Escuela** — talleres de producción audiovisual con instructores especializados. Listado en `/escuela`.
+3. **Escuela** — talleres de producción audiovisual con instructores especializados. Listado en `/escuelas`.
 
 ## Navegación
 
@@ -16,7 +16,7 @@ Rambla es un negocio audiovisual en Mar del Plata (Argentina) con tres servicios
 - Detalle de equipo: `/equipo/{slug}` (ej. `/equipo/sony-fx3-cuerpo-47`)
 - Categorías: `/categoria/{slug}` (ej. `/categoria/camaras`)
 - Estudio: `/estudio`
-- Escuela: `/escuela` y `/escuela/{slug}`
+- Escuela: `/escuelas` y `/escuelas/{slug}`
 - Preguntas frecuentes: `/preguntas-frecuentes`
 - Sitemap completo: `/sitemap.xml`
 

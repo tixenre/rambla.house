@@ -1005,8 +1005,9 @@ def estudio_page():
 @app.get("/escuela/{slug}", include_in_schema=False)  # alias viejo (singular): el front lo redirige a /escuelas, acá sirve OG para scrapers
 @app.get("/workshops/{slug}", include_in_schema=False)  # alias más viejo: el front lo redirige a /escuelas, acá sirve OG para scrapers
 def workshop_page(slug: str, request: Request):
-    """Sirve el SPA del taller con OG tags dinámicos (foto del instructor).
-    Ante cualquier error sirve el index.html plano — nunca rompe la página.
+    """Sirve el SPA del taller con OG tags dinámicos (foto del instructor),
+    JSON-LD `Course` y el preload del hero (LCP). Ante cualquier error sirve
+    el index.html plano — nunca rompe la página.
 
     `slug` es el de la EDICIÓN (mismo que resuelve `GET /talleres/{slug}` vía
     `ediciones_taller.slug` — no `talleres.slug`, el del CONCEPTO, que solo
@@ -1059,6 +1060,15 @@ def workshop_page(slug: str, request: Request):
                 og_img = (mv["url"] if mv else "") or ""
             if not og_img and instructor_row:
                 og_img = instructor_row["foto_url"] or ""
+            # Hero preload — misma fuente y orden que TallerGaleria.tsx
+            # (es_principal DESC, orden ASC, id ASC): la portada de la
+            # galería es el LCP de la página del taller, igual que
+            # estudio_fotos lo es para la home/rental.
+            hero_row = conn.execute(
+                "SELECT url, url_sm, url_avif, url_sm_avif FROM edicion_fotos "
+                "WHERE edicion_id = %s ORDER BY es_principal DESC, orden ASC, id ASC LIMIT 1",
+                (taller["id"],),
+            ).fetchone()
         finally:
             conn.close()
         nombre = (taller["nombre"] or "").strip()
@@ -1082,41 +1092,61 @@ def workshop_page(slug: str, request: Request):
             index_file.read_text(encoding="utf-8"),
             title=title, description=desc_raw, image=og_img, url=taller_url,
         )
-        # JSON-LD Event schema — visible para crawlers/agentes sin JS.
-        event_schema: dict = {
-            "@context": "https://schema.org",
-            "@type": "Event",
-            "name": nombre,
-            "description": desc_raw,
-            "url": taller_url,
-            "image": og_img,
+        hero_url = (hero_row["url"].strip() if hero_row and hero_row["url"] else "")
+        hero_sm = (hero_row["url_sm"].strip() if hero_row and hero_row["url_sm"] else "")
+        hero_avif = (hero_row["url_avif"].strip() if hero_row and hero_row["url_avif"] else "")
+        hero_sm_avif = (hero_row["url_sm_avif"].strip() if hero_row and hero_row["url_sm_avif"] else "")
+        if hero_url.startswith("http"):
+            html_text = _inject_hero_preload(
+                html_text, hero_url, hero_sm or None,
+                hero_avif or None, hero_sm_avif or None,
+            )
+        # JSON-LD Course schema — visible para crawlers/agentes sin JS. `Course`
+        # (no `Event`) porque es el tipo que Google trata distinto cuando alguien
+        # busca "cursos"/"talleres" (rich result propio); `CourseInstance` sigue
+        # llevando fecha/lugar/instructor (es subtipo de Event, no se pierde nada).
+        direccion = (taller["direccion"] or "").strip() or "Chaco 1392"
+        course_instance: dict = {
+            "@type": "CourseInstance",
+            "courseMode": "Onsite",
             "location": {
                 "@type": "Place",
                 "name": "Rambla",
                 "address": {
                     "@type": "PostalAddress",
+                    "streetAddress": direccion,
                     "addressLocality": "Mar del Plata",
                     "addressRegion": "Buenos Aires",
                     "addressCountry": "AR",
                 },
             },
-            "organizer": {"@type": "Organization", "name": "Rambla", "url": SITE_URL},
         }
         if instructor:
-            event_schema["performer"] = {"@type": "Person", "name": instructor}
+            course_instance["instructor"] = {"@type": "Person", "name": instructor}
         if taller["fecha_inicio"]:
-            event_schema["startDate"] = str(taller["fecha_inicio"])[:10]
+            course_instance["startDate"] = str(taller["fecha_inicio"])[:10]
         if taller["fecha_fin"]:
-            event_schema["endDate"] = str(taller["fecha_fin"])[:10]
+            course_instance["endDate"] = str(taller["fecha_fin"])[:10]
+        course_schema: dict = {
+            "@context": "https://schema.org",
+            "@type": "Course",
+            "name": nombre,
+            "description": desc_raw,
+            "url": taller_url,
+            "image": og_img,
+            "provider": {"@type": "Organization", "name": "Rambla", "sameAs": SITE_URL},
+            "hasCourseInstance": course_instance,
+        }
         if taller["precio_total"] is not None:
-            event_schema["offers"] = {
+            course_schema["offers"] = {
                 "@type": "Offer",
                 "price": taller["precio_total"],
                 "priceCurrency": "ARS",
                 "availability": "https://schema.org/InStock",
                 "url": taller_url,
+                "category": "Free" if taller["precio_total"] == 0 else "Paid",
             }
-        html_text = _inject_json_ld(html_text, event_schema)
+        html_text = _inject_json_ld(html_text, course_schema)
         return HTMLResponse(content=html_text)
     except Exception:
         logger.warning("OG injection falló para el taller %s — sirvo index plano", slug, exc_info=True)
