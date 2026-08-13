@@ -70,13 +70,23 @@ el otro paquete.
   del dueño: no quiere N pedidos abiertos en simultáneo antes de que corresponda). El disparador de
   "que aparezca el del mes nuevo" es el job diario `jobs/regenerar_pedidos_talleres.py` (registrado en
   `jobs/scheduler.py`, mismo patrón 1×/día que el resto) — llama a ESTA MISMA función, no hay una
-  segunda implementación del cálculo. El job trae su PROPIO guard anti-churn: solo llama al motor para
-  una edición si todavía no existe un pedido con `fecha_desde` en el mes actual — así un pedido ya
-  nacido no le cambia el `id`/`numero_pedido` cada vez que el job corre (el motor, llamado por un admin
-  editando la Economía, sigue recalculando/recreando el mes actual sin pagar como siempre — ese
-  comportamiento no cambió). El supervisor marca: un `mes < mes_actual`/creación de meses futuros
-  reintroducida en el loop de `_regenerar_pedidos_taller`, o un segundo lugar que decida "cuándo generar
-  el pedido del mes" fuera del guard del job.
+  segunda implementación del cálculo. El job trae su PROPIO guard anti-churn con **2 casos** (bug real
+  encontrado el mismo día: el caso (a) solo no alcanzaba — una edición que YA tenía el pedido del mes
+  actual, pero además arrastraba pedidos futuros de ANTES de este cambio, quedaba tapada para siempre):
+  llama al motor si **(a)** todavía no existe un pedido con `fecha_desde` en el mes actual, **O (b)**
+  existe un pedido con `fecha_desde` DESPUÉS del mes actual (caso de limpieza — el motor ya borra solo
+  cualquier pedido no conservado, al guard solo le faltaba dejar pasar la edición). Costo aceptado del
+  caso (b): la ÚNICA vez que dispara para una edición, el pedido del mes actual también se recrea como
+  side-effect del mismo borrado (le cambia `id`/`numero_pedido` una vez) — evento de transición, no
+  recurrente; una vez limpio no vuelve a disparar. Límite aceptado sin resolver: si el rango de la
+  edición se acortó DESPUÉS de dejar pedidos futuros colgando (`fecha_fin` ya no cubre el mes actual),
+  el pre-filtro del job no la alcanza — no ampliar el `WHERE` sin un caso real que lo pida. Fuera de
+  esos 2 casos, un pedido ya nacido no le cambia el `id`/`numero_pedido` cada vez que el job corre (el
+  motor, llamado por un admin editando la Economía, sigue recalculando/recreando el mes actual sin
+  pagar como siempre — ese comportamiento no cambió). El supervisor marca: un `mes < mes_actual`/
+  creación de meses futuros reintroducida en el loop de `_regenerar_pedidos_taller`, un segundo lugar
+  que decida "cuándo generar el pedido del mes" fuera del guard del job, o el guard vuelto a un único
+  caso `NOT EXISTS` (regresión del bug de acá).
 - **`valor_estudio_tipo`/`valor_equipos_tipo` ('fijo'|'porcentaje') es un eje ortogonal a `_modo`**
   (2026-08-13): `_modo` sigue decidiendo "cómo se reparte entre meses"; `_tipo` decide "de dónde sale
   el total ANTES de repartirlo" — 'fijo' = tipeado (`valor_estudio`/`valor_equipos`, de siempre);

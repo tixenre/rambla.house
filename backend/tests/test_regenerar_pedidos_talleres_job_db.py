@@ -106,7 +106,7 @@ def _insertar_edicion(
 
 def _pedidos_de(conn, edicion_id):
     return conn.execute(
-        "SELECT id, monto_total, numero_pedido FROM alquileres WHERE taller_edicion_id = %s",
+        "SELECT id, monto_total, numero_pedido, fecha_desde FROM alquileres WHERE taller_edicion_id = %s",
         (edicion_id,),
     ).fetchall()
 
@@ -154,6 +154,64 @@ def test_no_toca_edicion_que_ya_tiene_el_pedido_del_mes(conn):
     assert len(pedidos) == 1
     assert pedidos[0]["id"] == pedido_id, "mismo id — cero churn"
     assert pedidos[0]["numero_pedido"] == 999001, "mismo numero_pedido — cero churn"
+
+
+def test_limpia_pedidos_futuros_aunque_ya_tenga_el_del_mes_actual(conn):
+    """Caso real que motivó este test: una edición con pedidos futuros
+    dejados de ANTES de este cambio (o de cualquier causa rara) — aunque YA
+    tenga el pedido del mes actual, el job tiene que engancharla igual para
+    que el motor limpie los futuros que sobran (si no, quedan ahí para
+    siempre: el guard anti-churn los tapaba)."""
+    from jobs.regenerar_pedidos_talleres import regenerar_pedidos_talleres_del_mes
+
+    y, m = _mes_actual_ar()
+    # Rango de 4 meses (actual + 3 futuros) para poder dejar pedidos "de más"
+    # en meses que el motor ya no debería generar de antemano.
+    fin_rango_y, fin_rango_m = y, m + 3
+    if fin_rango_m > 12:
+        fin_rango_y += 1
+        fin_rango_m -= 12
+    edicion_id = _insertar_edicion(
+        conn, 1,
+        fecha_inicio=f"{y:04d}-{m:02d}-01",
+        fecha_fin=f"{fin_rango_y:04d}-{fin_rango_m:02d}-28",
+    )
+    # El mes actual YA tiene su pedido (dispararía el guard anti-churn solo).
+    conn.execute(
+        """
+        INSERT INTO alquileres
+            (cliente_nombre, fecha_desde, fecha_hasta, monto_total, estado, fuente, tipo,
+             numero_pedido, taller_edicion_id)
+        VALUES ('Taller test — mes actual', %s, %s, 30000, 'confirmado', 'taller', 'taller', 999002, %s)
+        """,
+        (f"{y:04d}-{m:02d}-01", f"{y:04d}-{m:02d}-28", edicion_id),
+    )
+    # 2 meses futuros con pedido "de más" (el escenario real que se vio en
+    # producción: quedaron de antes de este cambio).
+    mes_futuro_y, mes_futuro_m = y, m + 1
+    if mes_futuro_m > 12:
+        mes_futuro_y += 1
+        mes_futuro_m -= 12
+    conn.execute(
+        """
+        INSERT INTO alquileres
+            (cliente_nombre, fecha_desde, fecha_hasta, monto_total, estado, fuente, tipo,
+             numero_pedido, taller_edicion_id)
+        VALUES ('Taller test — mes futuro de más', %s, %s, 30000, 'confirmado', 'taller', 'taller', 999003, %s)
+        """,
+        (f"{mes_futuro_y:04d}-{mes_futuro_m:02d}-01", f"{mes_futuro_y:04d}-{mes_futuro_m:02d}-28", edicion_id),
+    )
+    conn.commit()
+    assert len(_pedidos_de(conn, edicion_id)) == 2, "sanity: arrancamos con el actual + 1 futuro de más"
+
+    generadas = regenerar_pedidos_talleres_del_mes()
+    assert generadas == 1, "la edición SÍ se engancha (tiene un futuro que limpiar), aunque ya tenga el actual"
+
+    pedidos = _pedidos_de(conn, edicion_id)
+    assert len(pedidos) == 1, "el futuro de más desapareció; el mes actual sigue existiendo (recreado)"
+    from database import to_datetime
+    fd = to_datetime(pedidos[0]["fecha_desde"])
+    assert (fd.year, fd.month) == (y, m), "el sobreviviente es el mes ACTUAL, no el futuro que se limpió"
 
 
 def test_no_genera_para_edicion_inactiva(conn):
