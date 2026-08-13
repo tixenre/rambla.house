@@ -140,6 +140,14 @@ export function useFacturacionArca(
     onSuccess: () => {
       toast.success("Factura emitida");
       qc.invalidateQueries({ queryKey: ["admin", "facturas", pedidoId] });
+      // Si esto emitió una Factura C, el Desglose/Cobranza (`useCotizacion`,
+      // queryKey ["cotizar", ...]) tiene que dejar de sumar el 21% que el
+      // perfil fiscal del cliente sugeriría — `factura_c_vigente` ya lo hace
+      // en el backend (2026-07-27), pero sin invalidar acá el panel se
+      // quedaba con el desglose CON IVA de antes de facturar (bug real:
+      // "Emitida" se actualizaba, el total al lado no). Mismo patrón que
+      // usePedidoDraft/TurnosEstudioSection ya usan para este mismo query.
+      qc.invalidateQueries({ queryKey: ["cotizar"] });
       setShowPreview(false);
     },
     onError: (e: Error) => toast.error(e.message),
@@ -150,6 +158,9 @@ export function useFacturacionArca(
     onSuccess: () => {
       toast.success("Nota de crédito emitida");
       qc.invalidateQueries({ queryKey: ["admin", "facturas", pedidoId] });
+      // Simétrico al de arriba: anular la Factura C vuelve a activar el 21%
+      // (factura_c_vigente pasa a False), el Desglose tiene que reflejarlo.
+      qc.invalidateQueries({ queryKey: ["cotizar"] });
     },
     onError: (e: Error) => toast.error(e.message),
   });
