@@ -966,7 +966,19 @@ function PedidoEditorPage() {
                         <ItemRow
                           key={it.uid}
                           it={it}
-                          stock={it.equipo_id != null ? stockMap[String(it.equipo_id)] : undefined}
+                          // Taller: el mismo motivo por el que el badge de
+                          // "stock OK"/"revisar stock" de la Section (arriba)
+                          // ya se suprime para esTaller — el rango del pedido
+                          // es el mes contable completo, no un evento real, así
+                          // que el draft-stock computado sobre ese rango ancho
+                          // no representa una disponibilidad real (el bloqueo
+                          // real es _taller_bloqueante, por clase puntual). Acá
+                          // faltaba la misma supresión a nivel de fila.
+                          stock={
+                            esTaller || it.equipo_id == null
+                              ? undefined
+                              : stockMap[String(it.equipo_id)]
+                          }
                           jornadas={jornadas}
                           updateItem={esEstudio ? () => {} : updateItem}
                           removeItem={esEstudio ? () => {} : removeItem}
