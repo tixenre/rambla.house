@@ -2055,12 +2055,6 @@ def _init_db_schema(conn):
         "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_equipos_pct_check "
         "CHECK (valor_equipos_pct BETWEEN 0 AND 100)"
     )
-    # Sirve la query de `_revenue_inscriptos` (WHERE edicion_id = ... AND
-    # en_lista_espera = FALSE) — antes solo había índice por `taller_id`.
-    conn.execute(
-        "CREATE INDEX IF NOT EXISTS idx_taller_inscripciones_edicion_lista "
-        "ON taller_inscripciones(edicion_id, en_lista_espera)"
-    )
     # Vincula cada pedido mensual generado con su edición, para regenerar
     # futuros sin tocar pasados/pagados (mismo patrón que `estudio_slot_id`).
     # NULL en todo pedido normal → cero impacto.
@@ -2289,6 +2283,16 @@ def _init_db_schema(conn):
     conn.execute(
         "ALTER TABLE taller_inscripciones "
         "ADD COLUMN IF NOT EXISTS edicion_id INTEGER REFERENCES ediciones_taller(id)"
+    )
+    # Sirve la query de `_revenue_inscriptos` (WHERE edicion_id = ... AND
+    # en_lista_espera = FALSE) — antes solo había índice por `taller_id`. Va
+    # ACÁ (no arriba, junto a `valor_estudio_pct`) porque `edicion_id` recién
+    # existe en la tabla desde la línea anterior — un CREATE INDEX que la
+    # referencie antes de esa ALTER TABLE rompe `init_db()` en una base
+    # nueva (bug real, cazado por `test_alembic_upgrade_db.py` en CI).
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_inscripciones_edicion_lista "
+        "ON taller_inscripciones(edicion_id, en_lista_espera)"
     )
     conn.execute(
         "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS estado TEXT"
