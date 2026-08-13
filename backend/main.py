@@ -941,6 +941,7 @@ def categoria_page(slug: str):
                 WHERE ec.categoria_id = %s
                   AND e.visible_catalogo = 1 AND e.estado != 'fuera_servicio'
                   AND e.es_recurso_interno = FALSE
+                  AND e.eliminado_at IS NULL
                 ORDER BY e.relevancia_manual ASC, e.popularidad_score DESC, e.nombre ASC
                 """,
                 (categoria["id"],),

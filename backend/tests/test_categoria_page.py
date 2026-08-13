@@ -73,6 +73,29 @@ def test_categoria_page_inyecta_titulo_og_y_jsonld(tmp_path):
     assert "Canon 24-70mm f/2.8" in body  # sin nombre_publico → marca + nombre
 
 
+def test_categoria_page_query_de_equipos_excluye_soft_deleted(tmp_path):
+    """Auditoría (supervisor, previo al PR dev→main): la query de equipos por
+    categoría le faltaba `eliminado_at IS NULL` — el mismo filtro que ya usa
+    `services/catalogo/proyeccion.py`. Un equipo borrado pero con
+    `visible_catalogo=1` colgado podía seguir apareciendo en el JSON-LD que
+    ve un crawler para esa categoría (nadie real lo ve, la query oficial del
+    catálogo sí filtra bien — es otro camino)."""
+    index = tmp_path / "index.html"
+    index.write_text(STATIC_INDEX)
+
+    conn = _conn_con_categoria([{"id": 5, "nombre": "Lentes"}], [])
+
+    with (
+        patch("main.FRONT_NEW", tmp_path),
+        patch("main.get_db", return_value=conn),
+    ):
+        client = _make_app()
+        client.get("/categoria/lentes")
+
+    sql_equipos = conn.execute.call_args_list[1].args[0]
+    assert "e.eliminado_at IS NULL" in sql_equipos
+
+
 def test_categoria_page_slug_inexistente_cae_a_index_plano(tmp_path):
     index = tmp_path / "index.html"
     index.write_text(STATIC_INDEX)
