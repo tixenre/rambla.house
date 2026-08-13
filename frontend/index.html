@@ -4,15 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-    <!-- SEO básico — fallback antes de que React monte (o para una ruta que no
-         define su propio `head()`). Título: React 19 dedupea `<title>` sola
-         (la de la ruta gana) — se puede dejar estática sin riesgo. Canonical y
-         description NO se dedupean solos contra este HTML estático (el bug
-         real, 2026-08-13): `HeadContent` (montado en __root.tsx) los agrega,
-         no los reemplaza, así que quedaban DOS tags — uno siempre apuntando acá
-         (la home) — confundiendo a cualquier crawler que ejecute JS. Se sacan
-         de acá para que la ruta sea la única fuente; una ruta sin `head()`
-         propio simplemente no lleva canonical/description (mejor que uno
+    <!-- SEO básico — el fallback que ve un crawler que NO ejecuta JS (o el
+         backend server-injecta un valor específico por regex sobre ESTOS
+         tags para /, /rental, /estudio, /escuelas/{slug} — ver
+         `_inject_og_meta` en backend/main.py). NO se puede sacar de acá:
+         además del fallback, son el target literal de ese regex.
+
+         Para un lector que SÍ ejecuta JS (browser, Googlebot render pass,
+         agentes de IA con JS): `HeadContent` (montado en __root.tsx) agrega
+         el head() de la ruta pero NO reemplaza lo que ya estaba en el HTML
+         al cargar — dos <title>/og:title/... a la vez, confuso para un
+         parser que no haga "el último gana" (bug real, 2026-08-13). Fix:
+         `main.tsx` los barre ANTES de montar React, y `__root.tsx` repone el
+         mismo copy vía head() (así una ruta sin el suyo propio no se queda
+         sin nada). `og:image`/`twitter:image`/`og:site_name` quedan afuera
+         de ese barrido — ninguna ruta cliente los declara, la imagen
+         dinámica que el backend inyecta (foto del equipo/taller) es la
+         única fuente y no debe pisarse con la genérica.
+
+         Canonical y description NO están acá — una ruta sin `head()` propio
+         simplemente no lleva canonical/description (mejor que uno
          incorrecto — Google infiere solo si falta). -->
     <title>Rambla — Rental, estudio y workshops audiovisuales</title>
     <meta
