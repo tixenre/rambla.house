@@ -2349,6 +2349,33 @@ def _init_db_schema(conn):
         "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS eliminado_por TEXT"
     )
 
+    # Borradores de inscripción a un taller (2026-08-13, pedido del dueño):
+    # mirror de `carritos_activos` para el funnel de talleres — heartbeat
+    # mientras alguien tipea en WorkshopInscripcionForm, así el admin ve (y
+    # puede contactar) a quien no llegó a enviar el formulario, no solo un
+    # número agregado de GA4. `eliminado_at`/`eliminado_por` NO aplica acá:
+    # no hay acción de borrado manual sobre esta tabla — mismo criterio que
+    # `carritos_activos` (que tampoco tiene soft-delete ni job de purga), se
+    # acota por ventana de tiempo en la query (`horas`), no se elimina.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS taller_inscripciones_borrador (
+            id              SERIAL PRIMARY KEY,
+            session_id      TEXT NOT NULL UNIQUE,
+            edicion_id      INTEGER NOT NULL REFERENCES ediciones_taller(id) ON DELETE CASCADE,
+            nombre          TEXT,
+            email           TEXT,
+            telefono        TEXT,
+            confirmado      BOOLEAN NOT NULL DEFAULT FALSE,
+            abandonado_en   TIMESTAMPTZ,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_insc_borrador_edicion "
+        "ON taller_inscripciones_borrador(edicion_id)"
+    )
+
     # ── Carritos activos (#280 Fase 1): persistencia server-side ──────────────
     # Cada heartbeat del frontend hace upsert por session_id (UUID v4 generado
     # en el cliente). cliente_id se asocia automáticamente si hay sesión activa.

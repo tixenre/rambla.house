@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Upload, CheckCircle2, AlertCircle, X } from "lucide-react";
 import { Spinner } from "@/design-system/ui/spinner";
 import { toast } from "sonner";
@@ -17,8 +17,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/design-system/ui/dialog";
-import { apiUploadComprobante, apiCrearInscripcion, type Taller } from "@/lib/api";
+import {
+  apiUploadComprobante,
+  apiCrearInscripcion,
+  apiHeartbeatInscripcion,
+  type Taller,
+} from "@/lib/api";
 import { formatARS } from "@/lib/format";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { trackEvent } from "@/lib/analytics";
 import { DatosPago } from "./DatosPago";
 import { ModalidadSelector } from "./ModalidadSelector";
 
@@ -79,6 +86,32 @@ export function WorkshopInscripcionForm({ taller, onSuccess }: Props) {
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  // Un id propio de ESTA carga del form (no del cliente/dispositivo) — mismo
+  // rol que el session_id del carrito, pero acá alcanza con que sobreviva
+  // mientras la persona está completando el formulario.
+  const sessionIdRef = useRef<string>(crypto.randomUUID());
+
+  // Heartbeat de borrador (mirror de useCartHeartbeat): mientras haya algo
+  // tipeado en contacto, se manda al backend debounced — si la persona no
+  // llega a enviar, el admin la ve igual en "Inscripciones". Se apaga en
+  // cuanto el envío tiene éxito (pasa a success_*), para no seguir mandando
+  // heartbeats de un form que ya cumplió su función. Los valores viajan por
+  // ref (no como dependencia del effect) para que el efecto dispare por el
+  // valor YA debounced, no en cada tecla.
+  const camposRef = useRef({ nombre, email, telefono, slug: taller.slug });
+  camposRef.current = { nombre, email, telefono, slug: taller.slug };
+  const debouncedHeartbeatKey = useDebouncedValue(`${nombre}|${email}|${telefono}`, 2000);
+  useEffect(() => {
+    if (submitState !== "idle") return;
+    const c = camposRef.current;
+    if (!c.nombre.trim() && !c.email.trim() && !c.telefono.trim()) return;
+    apiHeartbeatInscripcion(c.slug, {
+      session_id: sessionIdRef.current,
+      nombre: c.nombre.trim() || undefined,
+      email: c.email.trim() || undefined,
+      telefono: c.telefono.trim() || undefined,
+    });
+  }, [debouncedHeartbeatKey, submitState]);
 
   const cuposDisponibles = Math.max(0, taller.cupos_total - taller.cupos_confirmados);
   const enListaActual = cuposDisponibles === 0;
@@ -175,6 +208,11 @@ export function WorkshopInscripcionForm({ taller, onSuccess }: Props) {
         comprobante_key: upload.status === "done" ? upload.key : undefined,
         modalidad_codigo: modalidadCodigo || undefined,
         acepta_terminos: aceptaTerminos,
+        session_id: sessionIdRef.current,
+      });
+      trackEvent("taller_inscripcion", {
+        taller_id: taller.id,
+        en_lista_espera: result.en_lista_espera,
       });
       setSubmitState(result.en_lista_espera ? "success_espera" : "success_normal");
       onSuccess?.(result.en_lista_espera);

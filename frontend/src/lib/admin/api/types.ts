@@ -1971,6 +1971,27 @@ export type Inscripcion = {
   modalidad_monto: number | null;
 };
 
+// Borrador de inscripción sin enviar (heartbeat de WorkshopInscripcionForm,
+// 2026-08-13) — mirror de `Carrito` para el funnel de talleres.
+export type Borrador = {
+  id: number;
+  session_id: string;
+  nombre: string | null;
+  email: string | null;
+  telefono: string | null;
+  /** Sin actividad por más de 24h (estampado en backend). */
+  abandonado: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BorradoresResp = {
+  borradores: Borrador[];
+  total: number;
+  con_contacto: number;
+  abandonados: number;
+};
+
 // F4b: interesado (lead sin cupo en su momento). notificado_at = ya se le avisó
 // de una nueva edición (el admin puede re-avisar, no queda bloqueado).
 export type Interesado = {

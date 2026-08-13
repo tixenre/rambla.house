@@ -576,6 +576,9 @@ export type InscripcionBody = {
   modalidad_codigo?: string;
   /** F2: checkbox "Acepto los términos" — el form v2 (F5) lo manda siempre. */
   acepta_terminos?: boolean;
+  /** session_id del heartbeat de borrador (ver apiHeartbeatInscripcion) —
+   *  cierra ese funnel al confirmarse la inscripción real. */
+  session_id?: string;
 };
 
 export type InscripcionResult = {
@@ -607,6 +610,25 @@ export async function apiUploadComprobante(
     throw new Error(err?.detail ?? `No se pudo subir el comprobante (${res.status})`);
   }
   return res.json() as Promise<{ url: string; key: string }>;
+}
+
+/**
+ * Heartbeat de borrador (mirror de `syncCartHeartbeat`): lo que la persona
+ * lleva tipeado en WorkshopInscripcionForm, para que el admin vea a quién no
+ * llegó a enviar el formulario. Fire-and-forget — nunca bloquea ni rompe la
+ * UX del form si la red falla.
+ */
+export function apiHeartbeatInscripcion(
+  slug: string,
+  body: { session_id: string; nombre?: string; email?: string; telefono?: string },
+) {
+  fetch(`${API_BASE}/api/talleres/${slug}/inscripcion/heartbeat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).catch(() => {
+    // Silencioso — es telemetría, no una acción del usuario.
+  });
 }
 
 export function apiCrearInscripcion(slug: string, body: InscripcionBody) {

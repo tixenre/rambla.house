@@ -66,6 +66,11 @@ from services.talleres.commands.clases import (
 from services.talleres.commands.ediciones import _gate_conflicto_estudio, crear_edicion
 from services.talleres.commands.economia import _regenerar_pedidos_taller
 from services.talleres.queries.economia import _revenue_inscriptos, _valor_efectivo
+from services.talleres_borrador import (
+    heartbeat_upsert as _borrador_heartbeat_upsert,
+    listar_borradores_admin as _listar_borradores_admin,
+    marcar_confirmado as _borrador_marcar_confirmado,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -642,6 +647,17 @@ class InscripcionBody(BaseModel):
     # CABLEADO-APAGADO: el form v1 no manda el campo — default a la primera
     # modalidad configurada (o al fallback sintético "Pago total").
     modalidad_codigo: str | None = None
+    # session_id del heartbeat de borrador (services.talleres_borrador) — si
+    # viene, cierra ese funnel al confirmarse la inscripción real. Opcional:
+    # un front viejo sin el heartbeat wireado sigue funcionando igual.
+    session_id: str | None = None
+
+
+class InscripcionBorradorBody(BaseModel):
+    session_id: str
+    nombre: str | None = None
+    email: str | None = None
+    telefono: str | None = None
 
 
 def _comprobante_url_para_email(key: str | None, fallback_url: str | None) -> str:
@@ -675,6 +691,40 @@ def _ics_adjunto_taller(
     except Exception:
         logger.warning("No se pudo generar el .ics del taller %s", slug, exc_info=True)
         return None
+
+
+@router.post("/talleres/{slug}/inscripcion/heartbeat")
+@limiter.limit("60/minute")
+def inscripcion_heartbeat(slug: str, body: InscripcionBorradorBody, request: Request):
+    """Persiste lo que la persona lleva tipeado en WorkshopInscripcionForm
+    (services.talleres_borrador — mirror de POST /cart/heartbeat). Anónimo,
+    sin auth: mismo criterio que el resto de los endpoints públicos de
+    talleres. Silencioso ante slug/edición inválida (404 no aporta nada acá
+    — es telemetría, no una acción del usuario) en vez de romper el form."""
+    with get_db() as conn:
+        try:
+            edicion_row = _get_edicion_row(conn, slug)
+        except HTTPException:
+            return {"ok": True}
+        _borrador_heartbeat_upsert(
+            conn,
+            session_id=body.session_id,
+            edicion_id=edicion_row["id"],
+            nombre=body.nombre,
+            email=body.email,
+            telefono=body.telefono,
+        )
+        conn.commit()
+    return {"ok": True}
+
+
+@router.get("/admin/ediciones/{edicion_id}/borradores")
+def admin_listar_borradores(edicion_id: int, request: Request, horas: int = 72):
+    """Borradores de inscripción sin enviar de una edición — quién estuvo por
+    anotarse y no llegó, para que el admin pueda hacer seguimiento."""
+    require_admin(request)
+    with get_db() as conn:
+        return _listar_borradores_admin(conn, edicion_id, horas)
 
 
 @router.post("/talleres/{slug}/inscripcion")
@@ -783,6 +833,8 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
                     "WHERE id = %s",
                     (edicion_id,),
                 )
+            if body.session_id:
+                _borrador_marcar_confirmado(conn, body.session_id)
             conn.commit()
         except Exception:
             conn.rollback()
