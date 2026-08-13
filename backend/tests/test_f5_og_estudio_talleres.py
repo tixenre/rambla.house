@@ -94,12 +94,14 @@ def test_workshop_og_inyecta_nombre_e_instructor(tmp_path):
     index.write_text(STATIC_INDEX)
 
     fake_taller = {
+        "id": 1,
         "nombre": "Dirección de Arte",
         "descripcion": "El taller más copado del mundo",
         "taller_id": 1,
         "fecha_inicio": None,
         "fecha_fin": None,
         "precio_total": None,
+        "direccion": "",
     }
     fake_instructor = {
         "nombre": "Juana García",
@@ -108,7 +110,9 @@ def test_workshop_og_inyecta_nombre_e_instructor(tmp_path):
     }
 
     conn = MagicMock()
-    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor]
+    # 3er valor = hero_row (fotos de la edición) — None = sin fotos subidas
+    # todavía, el preload se saltea (mismo caso real que un taller recién creado).
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor, None]
     conn.close = MagicMock()
 
     with (
@@ -152,12 +156,14 @@ def test_workshop_og_usa_media_variant_si_tiene_media_id(tmp_path):
     index.write_text(STATIC_INDEX)
 
     fake_taller = {
+        "id": 2,
         "nombre": "Taller de Foto",
         "descripcion": "Aprende fotografía",
         "taller_id": 2,
         "fecha_inicio": None,
         "fecha_fin": None,
         "precio_total": None,
+        "direccion": "",
     }
     fake_instructor = {
         "nombre": "Pedro López",
@@ -167,7 +173,8 @@ def test_workshop_og_usa_media_variant_si_tiene_media_id(tmp_path):
     fake_mv = {"url": "https://cdn.example/og-variant.jpg"}
 
     conn = MagicMock()
-    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor, fake_mv]
+    # 4to valor = hero_row (fotos de la edición) — None = sin fotos subidas.
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor, fake_mv, None]
     conn.close = MagicMock()
 
     with (
@@ -210,11 +217,13 @@ def test_workshop_og_borrador_sin_bypass_filtra_por_activo(tmp_path):
     index.write_text(STATIC_INDEX)
 
     fake_taller = {
+        "id": 5,
         "nombre": "Taller Sin Publicar", "descripcion": "En preparación",
         "taller_id": 5, "fecha_inicio": None, "fecha_fin": None, "precio_total": None,
+        "direccion": "",
     }
     conn = MagicMock()
-    conn.execute.return_value.fetchone.side_effect = [fake_taller, None]
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, None, None]
     conn.close = MagicMock()
 
     with (
@@ -241,15 +250,17 @@ def test_workshop_og_borrador_visible_con_dev_bypass(tmp_path):
     index.write_text(STATIC_INDEX)
 
     fake_taller = {
+        "id": 5,
         "nombre": "Taller Sin Publicar", "descripcion": "En preparación",
         "taller_id": 5, "fecha_inicio": None, "fecha_fin": None, "precio_total": None,
+        "direccion": "",
     }
     fake_instructor = {
         "nombre": "Instructor Preview", "foto_url": "https://cdn.example/preview.jpg",
         "foto_media_id": None,
     }
     conn = MagicMock()
-    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor]
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor, None]
     conn.close = MagicMock()
 
     with (
