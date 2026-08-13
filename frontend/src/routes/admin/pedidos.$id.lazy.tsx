@@ -61,6 +61,7 @@ import {
   AlertDialogTitle,
 } from "@/design-system/ui/alert-dialog";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
+import { Pill } from "@/design-system/ui/Pill";
 import { estadoClase, ESTADO_TEXT } from "@/design-system/ui/estado-color";
 import { WhatsAppButton } from "@/components/admin/WhatsAppButton";
 import {
@@ -532,6 +533,13 @@ function PedidoEditorPage() {
             <span className="shrink-0">
               <EstadoBadge estado={p.estado} label={ESTADO_LABEL[p.estado]} />
             </span>
+            {p.progreso_taller && (
+              <span className="hidden shrink-0 sm:inline-flex">
+                <Pill tone="neutral">
+                  Mes {p.progreso_taller.indice}/{p.progreso_taller.total}
+                </Pill>
+              </span>
+            )}
           </div>
           {creadoHace(p.created_at) && (
             <div className="mt-1 font-mono text-xs text-muted-foreground">

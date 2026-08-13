@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 from database import row_to_dict, to_datetime, MARCA_SUBQUERY
 from services.contenido import contenido_de_batch
+from services.fechas import iter_meses
 from services.pedidos_enriquecimiento import _enriquecer_pedido_con_cliente
 from services.talleres.queries.clases import clases_de_edicion
 
@@ -90,6 +91,10 @@ def _get_alquiler_detail(conn, id: int) -> dict:
     pedido["clases_taller"] = (
         _clases_del_taller(conn, pedido["taller_edicion_id"], pedido["fecha_desde"], pedido["fecha_hasta"])
         if pedido.get("taller_edicion_id") else []
+    )
+    pedido["progreso_taller"] = (
+        _progreso_taller(conn, pedido["taller_edicion_id"], pedido["fecha_desde"])
+        if pedido.get("taller_edicion_id") else None
     )
     pedido["pedido_principal"] = (
         _pedido_principal_liviano(conn, pedido["pedido_principal_id"])
@@ -275,6 +280,32 @@ def _clases_del_taller(conn, edicion_id: int, fecha_desde, fecha_hasta) -> list[
     desde = to_datetime(fecha_desde).date().isoformat()
     hasta = to_datetime(fecha_hasta).date().isoformat()
     return [c for c in clases if desde <= c["fecha"] <= hasta]
+
+
+def _progreso_taller(conn, edicion_id: int, fecha_desde) -> dict | None:
+    """'2/4' — en qué mes de la edición está este pedido, sobre el total de
+    meses que dura la edición completa (mismo `iter_meses` que usa
+    `_regenerar_pedidos_taller` para decidir el rango). Antes se veían los N
+    pedidos de la edición juntos en la lista — esa vista de conjunto daba la
+    foto completa sola; desde que el pedido mensual se genera solo al llegar
+    el mes (2026-08-13, un pedido a la vez), esta pieza da esa misma foto sin
+    necesitar ver los otros pedidos. `None` si la edición no existe, dura 1
+    solo mes (no aporta información), o el pedido no cae en ningún mes de su
+    propio rango (dato inconsistente — no se inventa un índice)."""
+    row = conn.execute(
+        "SELECT fecha_inicio, fecha_fin FROM ediciones_taller WHERE id = %s", (edicion_id,)
+    ).fetchone()
+    if not row:
+        return None
+    inicio, fin = row["fecha_inicio"], row["fecha_fin"]
+    meses = list(iter_meses(f"{inicio.year:04d}-{inicio.month:02d}", f"{fin.year:04d}-{fin.month:02d}"))
+    if len(meses) <= 1:
+        return None
+    fd = to_datetime(fecha_desde).date()
+    mes_pedido = (fd.year, fd.month)
+    if mes_pedido not in meses:
+        return None
+    return {"indice": meses.index(mes_pedido) + 1, "total": len(meses)}
 
 
 def _enriquecer_pedido_con_total(conn, pedido: dict) -> dict:

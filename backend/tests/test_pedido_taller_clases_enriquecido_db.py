@@ -232,3 +232,36 @@ def test_pedido_de_un_mes_no_trae_las_clases_de_otros_meses_de_la_misma_edicion(
     assert [c["fecha"] for c in pedido_dic["clases_taller"]] == ["2026-12-03", "2026-12-10"], (
         "el pedido de diciembre no debe traer las clases de septiembre"
     )
+
+
+def test_progreso_taller_none_si_edicion_de_un_solo_mes(db_setup):
+    """Una edición de 1 solo mes (el caso viejo, #445) no aporta información
+    de "N/M" — un único pedido cubre toda la edición, mostrarlo sería ruido."""
+    from database import get_db
+    from routes.alquileres.detalle import _get_alquiler_detail
+
+    conn = get_db()
+    try:
+        pedido = _get_alquiler_detail(conn, PEDIDO_TALLER_ID)
+    finally:
+        conn.close()
+
+    assert pedido["progreso_taller"] is None
+
+
+def test_progreso_taller_indice_y_total_en_edicion_multimes(db_setup_multimes):
+    """Pedido a la vista del dueño (2026-08-13): con un solo pedido visible a
+    la vez, "Mes 1/4"/"Mes 4/4" da la foto de conjunto que antes daba ver los
+    4 pedidos juntos en la lista."""
+    from database import get_db
+    from routes.alquileres.detalle import _get_alquiler_detail
+
+    conn = get_db()
+    try:
+        pedido_sep = _get_alquiler_detail(conn, PEDIDO_SEP_ID)
+        pedido_dic = _get_alquiler_detail(conn, PEDIDO_DIC_ID)
+    finally:
+        conn.close()
+
+    assert pedido_sep["progreso_taller"] == {"indice": 1, "total": 4}
+    assert pedido_dic["progreso_taller"] == {"indice": 4, "total": 4}

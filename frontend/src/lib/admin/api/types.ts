@@ -1429,6 +1429,14 @@ export type Pedido = {
    *  temporal que `fecha_desde`/`fecha_hasta` no representan (esas son el mes
    *  contable completo). Vacío para cualquier otro tipo. Bug real #445. */
   clases_taller?: ClaseTallerPedido[];
+  /** Solo presente en el detalle de un pedido de taller cuya edición dura más
+   *  de 1 mes: en qué mes de la serie está este pedido (`indice`, 1-based)
+   *  sobre el total de meses de la edición (`total`) — ej. {indice:2,total:4}
+   *  = "2/4". Desde que el pedido mensual se genera solo al llegar el mes
+   *  (2026-08-13, un pedido a la vez en vez de los N juntos), esta pieza
+   *  reemplaza la foto de conjunto que daba ver los N pedidos a la vez.
+   *  `null`/ausente = no aplica (edición de 1 solo mes, o no es taller). */
+  progreso_taller?: { indice: number; total: number } | null;
   /** Presente solo en la respuesta de crear/editar un turno del Estudio: si
    *  la promo (combo) se reservó con algún componente sin stock — best-effort,
    *  nunca bloquea la reserva, pero el admin/cliente debe saberlo. `null`/
