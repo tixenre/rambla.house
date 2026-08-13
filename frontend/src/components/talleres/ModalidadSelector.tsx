@@ -90,7 +90,12 @@ export function ModalidadSelector({
           >
             <RadioGroupItem value={m.codigo} />
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-ink">{m.label}</p>
+              {/* "En N cuotas" repetiría el número que ya dice MontoModalidad
+                  ("N cuotas de $X") a la derecha — acá va genérico. "Pago
+                  único" no repite ningún número, se muestra tal cual. */}
+              <p className="text-sm font-semibold text-ink">
+                {m.n_cuotas > 1 ? "En cuotas" : m.label}
+              </p>
               {m.nota && <p className="text-xs text-rosa">{m.nota}</p>}
             </div>
             <MontoModalidad m={m} />
