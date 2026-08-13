@@ -214,6 +214,62 @@ def test_limpia_pedidos_futuros_aunque_ya_tenga_el_del_mes_actual(conn):
     assert (fd.year, fd.month) == (y, m), "el sobreviviente es el mes ACTUAL, no el futuro que se limpió"
 
 
+def test_limpia_pedidos_futuros_de_edicion_que_todavia_no_arranco(conn):
+    """Caso real reportado por el dueño en staging (screenshot tras el primer
+    fix): una edición publicada CON ANTICIPACIÓN — `fecha_inicio` en un mes
+    FUTURO respecto a hoy, ej. arranca en septiembre y hoy es agosto — ya
+    tenía 4 pedidos (sep/oct/nov/dic) de ANTES de este cambio. Como el rango
+    de la edición no toca el mes actual (agosto), el primer intento de fix
+    (case (b) anidado dentro del chequeo de rango) no la enganchaba nunca.
+    Ahora (b) es independiente del rango: se limpia igual, aunque la edición
+    todavía no haya arrancado — y no se genera nada nuevo (no le toca
+    todavía)."""
+    from jobs.regenerar_pedidos_talleres import regenerar_pedidos_talleres_del_mes
+
+    y, m = _mes_actual_ar()
+    # La edición arranca el mes QUE VIENE (no toca el mes actual en absoluto).
+    inicio_y, inicio_m = y, m + 1
+    if inicio_m > 12:
+        inicio_y += 1
+        inicio_m -= 12
+    fin_y, fin_m = y, m + 4
+    while fin_m > 12:
+        fin_y += 1
+        fin_m -= 12
+    edicion_id = _insertar_edicion(
+        conn, 1,
+        fecha_inicio=f"{inicio_y:04d}-{inicio_m:02d}-01",
+        fecha_fin=f"{fin_y:04d}-{fin_m:02d}-28",
+    )
+    # 4 pedidos "de más" — todos en meses futuros, ninguno en el mes actual
+    # (la edición ni siquiera arrancó todavía).
+    mes_y, mes_m = inicio_y, inicio_m
+    for i in range(4):
+        conn.execute(
+            """
+            INSERT INTO alquileres
+                (cliente_nombre, fecha_desde, fecha_hasta, monto_total, estado, fuente, tipo,
+                 numero_pedido, taller_edicion_id)
+            VALUES ('Taller test — no arranco aun', %s, %s, 30000, 'confirmado', 'taller', 'taller', %s, %s)
+            """,
+            (f"{mes_y:04d}-{mes_m:02d}-01", f"{mes_y:04d}-{mes_m:02d}-28", 999010 + i, edicion_id),
+        )
+        mes_m += 1
+        if mes_m > 12:
+            mes_y += 1
+            mes_m -= 12
+    conn.commit()
+    assert len(_pedidos_de(conn, edicion_id)) == 4, "sanity: arrancamos con los 4 pedidos de más"
+
+    generadas = regenerar_pedidos_talleres_del_mes()
+    assert generadas == 1, "se engancha por (b) — tiene futuros que limpiar, aunque no haya arrancado"
+
+    pedidos = _pedidos_de(conn, edicion_id)
+    assert pedidos == [], (
+        "los 4 se borran y no se crea ninguno nuevo — todavía no le toca ningún mes a esta edición"
+    )
+
+
 def test_no_genera_para_edicion_inactiva(conn):
     from jobs.regenerar_pedidos_talleres import regenerar_pedidos_talleres_del_mes
 
