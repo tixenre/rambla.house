@@ -269,6 +269,58 @@ def _get_cuentas_pago(conn, edicion_id: int) -> list[dict]:
     return [_cuenta_pago_dict(r) for r in rows]
 
 
+def _cuentas_pago_para_mail(cuentas: list[dict]) -> tuple[str, str]:
+    """Fragmentos (HTML + texto plano) de "Datos de pago" para el mail de
+    inscripción (`taller_inscripcion_cliente`) — inyectados con `{{
+    cuentas_pago_html|safe }}`/`{{ cuentas_pago_text }}`, mismo patrón que
+    `items_html`/`items_text` en `services/comunicacion/despacho.py` (evita
+    loopear en Jinja: sin `trim_blocks`, un `{% for %}` en el body de texto
+    plano deja saltos de línea sueltos que sí se ven en un mail).
+
+    Mismo criterio que `DatosPago`/`UnaCuenta` del frontend
+    (`frontend/src/components/talleres/WorkshopInscripcionForm.tsx`): salta
+    los campos vacíos (nunca un separador colgando) — con 1 sola cuenta (el
+    caso común) el render queda igual al de siempre; con 2+, un bloque por
+    cuenta. Values escapados a mano (mismo patrón que
+    `services/comunicacion/despacho.py`) — el HTML se inyecta con `|safe`,
+    así que no pasa por el autoescape de Jinja."""
+    from markupsafe import escape
+
+    con_datos = [c for c in cuentas if c.get("alias") or c.get("cbu") or c.get("banco")]
+    if not con_datos:
+        return "", ""
+
+    bloques_html, bloques_text = [], []
+    for c in con_datos:
+        campos = [
+            (label, valor)
+            for label, valor in (("Alias", c.get("alias")), ("CBU", c.get("cbu")), ("Banco", c.get("banco")))
+            if valor
+        ]
+        bloques_html.append(
+            "<br>".join(f"<strong>{label}:</strong> {escape(valor)}" for label, valor in campos)
+        )
+        bloques_text.append("\n".join(f"  {label}: {valor}" for label, valor in campos))
+
+    html = "".join(f'<p style="margin:0 0 4px;">{b}</p>' for b in bloques_html)
+    text = "\n\n".join(bloques_text)
+    return html, text
+
+
+def _cuentas_pago_efectivas(
+    cuentas: list[dict], *, pago_alias: str, pago_cbu: str, pago_banco: str
+) -> list[dict]:
+    """`cuentas` (de `_get_cuentas_pago`) si trae algo; si no, una sintetizada
+    desde los 3 campos viejos — defensa en profundidad para una edición que,
+    por lo que sea, no pasó por el traspaso de `crear_edicion`/la migración
+    `cu3nt4sp4g0`. No debería hacer falta en el camino normal."""
+    if cuentas:
+        return cuentas
+    if pago_alias or pago_cbu or pago_banco:
+        return [{"alias": pago_alias, "cbu": pago_cbu, "banco": pago_banco}]
+    return []
+
+
 def _video_dict(row) -> dict | None:
     """Shape público del video hero: None si no hay URL o no se pudo extraer
     un video_id (URL mal pegada) — la landing no debe romper por esto."""
@@ -646,6 +698,10 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
             taller_id = edicion_row["taller_id"]
             # Clases reales (para el adjunto .ics del mail — ver más abajo).
             clases = _get_clases(conn, edicion_id)
+            # Cuentas de cobro (para el mail — ver ctx_cliente más abajo).
+            # Fetch DENTRO del `with`, mismo motivo que `clases`: se usa
+            # después de que el context manager cierra la conexión.
+            cuentas_pago_ctx = _get_cuentas_pago(conn, edicion_id)
 
             # F4c: cierre de inscripciones por fecha (NULL = siempre abierto).
             cierre = edicion_row["fecha_cierre_inscripcion"]
@@ -752,6 +808,17 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
             taller_nombre=edicion_row["nombre"], direccion=edicion_row["direccion"],
             slug=edicion_row["slug"], clases=clases,
         )
+    # `cuentas_pago_ctx` es la fuente real (0+ cuentas, lo que edita el admin
+    # desde "Precios y forma de pago"); `_cuentas_pago_efectivas` cae a los 3
+    # campos viejos SOLO si esa lista vino vacía (defensa en profundidad —
+    # no debería pasar tras el fix de `crear_edicion`).
+    cuentas_pago_html, cuentas_pago_text = _cuentas_pago_para_mail(
+        _cuentas_pago_efectivas(
+            cuentas_pago_ctx,
+            pago_alias=edicion_row["pago_alias"], pago_cbu=edicion_row["pago_cbu"],
+            pago_banco=edicion_row["pago_banco"],
+        )
+    )
     ctx_cliente = {
         "taller_nombre": edicion_row["nombre"],
         "nombre_pila": nombre_pila,
@@ -761,9 +828,8 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
         "horario": edicion_row["horario"],
         "direccion": edicion_row["direccion"],
         "precio_sena_str": _fmt_pesos(edicion_row["precio_sena"]),
-        "pago_alias": edicion_row["pago_alias"],
-        "pago_cbu": edicion_row["pago_cbu"],
-        "pago_banco": edicion_row["pago_banco"],
+        "cuentas_pago_html": cuentas_pago_html,
+        "cuentas_pago_text": cuentas_pago_text,
         "tipo_taller": edicion_row["tipo_taller"],
         "tiene_ics": bool(attachments),
     }
@@ -827,7 +893,8 @@ def get_oferta_cupo(token: str, request: Request):
     with get_db() as conn:
         row = conn.execute(
             """
-            SELECT ti.id, ti.nombre, ti.estado, e.fecha_inicio, e.fecha_fin, e.horario,
+            SELECT ti.id, ti.nombre, ti.estado, e.id AS edicion_id,
+                   e.fecha_inicio, e.fecha_fin, e.horario,
                    e.direccion, e.precio_sena, e.pago_alias, e.pago_cbu, e.pago_banco,
                    t.nombre AS taller_nombre
             FROM taller_inscripciones ti
@@ -837,10 +904,17 @@ def get_oferta_cupo(token: str, request: Request):
             """,
             (insid,),
         ).fetchone()
-    if row is None:
-        raise HTTPException(404, "Este link no es válido o venció.")
-    if row["estado"] != "cupo_ofrecido":
-        raise HTTPException(410, "Esta oferta ya no está disponible.")
+        if row is None:
+            raise HTTPException(404, "Este link no es válido o venció.")
+        if row["estado"] != "cupo_ofrecido":
+            raise HTTPException(410, "Esta oferta ya no está disponible.")
+        # Efectivas (fallback a los 3 campos viejos si la lista vino vacía —
+        # mismo criterio defensivo que el mail, ver _cuentas_pago_efectivas):
+        # el front (`DatosPago`) solo lee `cuentas_pago`, sin fallback propio.
+        cuentas_pago = _cuentas_pago_efectivas(
+            _get_cuentas_pago(conn, row["edicion_id"]),
+            pago_alias=row["pago_alias"], pago_cbu=row["pago_cbu"], pago_banco=row["pago_banco"],
+        )
     return {
         "taller_nombre": row["taller_nombre"],
         "nombre_pila": row["nombre"].split()[0],
@@ -849,9 +923,7 @@ def get_oferta_cupo(token: str, request: Request):
         "horario": row["horario"],
         "direccion": row["direccion"],
         "precio_sena_str": _fmt_pesos(row["precio_sena"]),
-        "pago_alias": row["pago_alias"],
-        "pago_cbu": row["pago_cbu"],
-        "pago_banco": row["pago_banco"],
+        "cuentas_pago": cuentas_pago,
     }
 
 
@@ -926,6 +998,8 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
             ).fetchone()
             # Clases reales (para el adjunto .ics del mail — ver más abajo).
             clases = _get_clases(conn, ins["edicion_id"])
+            # Cuentas de cobro (para el mail — mismo criterio que crear_inscripcion).
+            cuentas_pago_ctx = _get_cuentas_pago(conn, ins["edicion_id"])
         except Exception:
             conn.rollback()
             raise
@@ -934,6 +1008,13 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
     attachments = _ics_adjunto_taller(
         taller_nombre=edicion_row["taller_nombre"], direccion=edicion_row["direccion"],
         slug=edicion_row["slug"], clases=clases,
+    )
+    cuentas_pago_html, cuentas_pago_text = _cuentas_pago_para_mail(
+        _cuentas_pago_efectivas(
+            cuentas_pago_ctx,
+            pago_alias=edicion_row["pago_alias"], pago_cbu=edicion_row["pago_cbu"],
+            pago_banco=edicion_row["pago_banco"],
+        )
     )
     ctx_cliente = {
         "taller_nombre": edicion_row["taller_nombre"],
@@ -944,9 +1025,8 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
         "horario": edicion_row["horario"],
         "direccion": edicion_row["direccion"],
         "precio_sena_str": _fmt_pesos(edicion_row["precio_sena"]),
-        "pago_alias": edicion_row["pago_alias"],
-        "pago_cbu": edicion_row["pago_cbu"],
-        "pago_banco": edicion_row["pago_banco"],
+        "cuentas_pago_html": cuentas_pago_html,
+        "cuentas_pago_text": cuentas_pago_text,
         "tipo_taller": edicion_row["tipo_taller"],
         "tiene_ics": bool(attachments),
     }
@@ -1329,6 +1409,11 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
             # bloquea el próximo `ALTER TABLE`/lock de otra sesión (candado:
             # test_talleres_f2_db.py, se colgaba justo por esto).
             clases_out = _get_clases(conn, e_row["id"])
+            # `_get_cuentas_pago`, no `[]`: `crear_edicion` puede haber
+            # sembrado una fila desde pago_alias/cbu/banco (ver su docstring)
+            # — devolver `[]` a ciegas le mentiría al admin sobre lo que
+            # realmente quedó guardado.
+            cuentas_pago_out = _get_cuentas_pago(conn, e_row["id"])
             instructores_out = _get_instructores_taller(conn, taller_id)
             instituciones_out = _get_instituciones_taller(conn, taller_id)
         except Exception:
@@ -1337,7 +1422,9 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
 
     return _concepto_to_admin_dict(
         t_row,
-        [_edicion_to_admin_dict(e_row, clases_out, fotos=[], cuentas_pago=[], inscriptos_revenue=0)],
+        [_edicion_to_admin_dict(
+            e_row, clases_out, fotos=[], cuentas_pago=cuentas_pago_out, inscriptos_revenue=0,
+        )],
         instructores_out,
         instituciones=instituciones_out,
     )
@@ -1421,11 +1508,17 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
             # lo necesita para subir portadas / upsert sin refetch). DENTRO del
             # `with` — ver comentario gemelo en admin_create_taller.
             clases_out = _get_clases(conn, e_row["id"])
+            # `_get_cuentas_pago`, no `[]` — ver comentario gemelo en
+            # admin_create_taller (`crear_edicion` puede haber sembrado una
+            # fila desde pago_alias/cbu/banco).
+            cuentas_pago_out = _get_cuentas_pago(conn, e_row["id"])
         except Exception:
             conn.rollback()
             raise
 
-    return _edicion_to_admin_dict(e_row, clases_out, fotos=[], cuentas_pago=[], inscriptos_revenue=0)
+    return _edicion_to_admin_dict(
+        e_row, clases_out, fotos=[], cuentas_pago=cuentas_pago_out, inscriptos_revenue=0,
+    )
 
 
 @router.patch("/admin/talleres/{taller_id}")

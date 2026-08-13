@@ -79,6 +79,25 @@ def crear_edicion(
         ),
     )
     _insert_clases(conn, edicion_id, clases)
+
+    # Traspaso a `edicion_cuentas_pago` (2026-08-13, hallazgo del supervisor):
+    # esta función no recibe `cuentas_pago` — el alta (UI admin o
+    # `scripts/importar_taller.py`) solo tipea pago_alias/pago_cbu/pago_banco,
+    # y `cuentas_pago` recién se completa en una edición POSTERIOR (PATCH,
+    # `admin_update_edicion`). Pero el público (`WorkshopInscripcionForm`,
+    # el mail de confirmación y "completá tu seña") ya leen SOLO
+    # `cuentas_pago` — sin esta fila, una edición recién creada con datos de
+    # pago cargados no muestra nada hasta que alguien la edite a mano.
+    # Mismo criterio de traspaso que la migración `cu3nt4sp4g0_edicion_
+    # cuentas_pago.py` (una fila si hay algún dato) — no reimplementar
+    # distinto acá.
+    if campos["pago_alias"] or campos["pago_cbu"] or campos["pago_banco"]:
+        conn.execute(
+            "INSERT INTO edicion_cuentas_pago (edicion_id, orden, alias, cbu, banco) "
+            "VALUES (%s, 0, %s, %s, %s)",
+            (edicion_id, campos["pago_alias"], campos["pago_cbu"], campos["pago_banco"]),
+        )
+
     e_row = conn.execute(
         "SELECT * FROM ediciones_taller WHERE id = %s", (edicion_id,)
     ).fetchone()

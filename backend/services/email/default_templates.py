@@ -267,7 +267,8 @@ Fecha: {{ fecha }}""",
 <p style="margin:0 0 4px;"><strong>Clase teórica:</strong> {{{{ fecha_inicio_str }}}}, {{{{ horario }}}}<br><strong>Clase práctica:</strong> {{{{ fecha_fin_str }}}}, {{{{ horario }}}}<br><strong>Lugar:</strong> {{{{ direccion }}}}</p>
 {{% endif %}}
 <p {b.LBL}>Datos de pago (seña)</p>
-<p style="margin:0 0 4px;"><strong>Alias:</strong> {{{{ pago_alias }}}}<br><strong>CBU:</strong> {{{{ pago_cbu }}}}<br><strong>Banco:</strong> {{{{ pago_banco }}}}<br><strong>Monto:</strong> {{{{ precio_sena_str }}}}</p>
+{{{{ cuentas_pago_html|safe }}}}
+<p style="margin:0 0 4px;"><strong>Monto:</strong> {{{{ precio_sena_str }}}}</p>
 {{% if tiene_ics %}}
 <p {b.MUTED_P}>📅 Te adjuntamos un calendario para agregar {{% if tipo_taller == 'semanal' %}}todas las clases{{% else %}}las clases{{% endif %}} a tu agenda.</p>
 {{% endif %}}
@@ -293,9 +294,7 @@ Lugar: {{ direccion }}
 {%- endif %}
 
 Datos de pago (seña):
-  Alias: {{ pago_alias }}
-  CBU: {{ pago_cbu }}
-  Banco: {{ pago_banco }}
+{{ cuentas_pago_text }}
   Monto: {{ precio_sena_str }}
 {% if tiene_ics %}
 Te adjuntamos un calendario (.ics) para agregar las clases a tu agenda.

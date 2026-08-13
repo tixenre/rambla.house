@@ -453,6 +453,12 @@ export type Sesion = {
   portada_url: string;
 };
 
+/** Una cuenta de cobro (alias/cbu/banco) de una edición de taller — mismo
+ *  shape que `services.talleres.queries.clases._cuenta_pago_dict` (backend).
+ *  `id` ausente en una entrada sintetizada desde los 3 campos viejos
+ *  (`_cuentas_pago_efectivas`, backend) — nunca se manda de vuelta al editar. */
+export type CuentaPago = { id?: number | null; alias: string; cbu: string; banco: string };
+
 export type Taller = {
   id: number;
   slug: string;
@@ -536,7 +542,7 @@ export type Taller = {
   // modalidad de pago; el público ve todas y elige a cuál transferir. Sin
   // fallback sintético (a diferencia de modalidades arriba): [] = ninguna
   // cargada.
-  cuentas_pago: { id: number | null; alias: string; cbu: string; banco: string }[];
+  cuentas_pago: CuentaPago[];
   // F4c: FAQ del concepto, trabajos pasados (solo YouTube, sin testimonios) y
   // cierre de inscripciones de ESTA edición (null = sin cierre).
   faqs: { pregunta: string; respuesta: string }[];
@@ -617,9 +623,7 @@ export type OfertaCupo = {
   horario: string;
   direccion: string;
   precio_sena_str: string;
-  pago_alias: string;
-  pago_cbu: string;
-  pago_banco: string;
+  cuentas_pago: CuentaPago[];
 };
 
 class ApiStatusError extends Error {
