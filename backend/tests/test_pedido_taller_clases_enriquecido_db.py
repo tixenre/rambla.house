@@ -143,3 +143,125 @@ def test_detalle_pedido_rental_normal_no_trae_clases(db_setup):
         conn.close()
 
     assert pedido["clases_taller"] == []
+
+
+EDICION_MULTIMES_ID = 9_452_102
+PEDIDO_SEP_ID = 9_452_203
+PEDIDO_DIC_ID = 9_452_204
+
+
+def _limpiar_multimes(conn):
+    conn.execute("DELETE FROM alquiler_items WHERE pedido_id IN (%s,%s)", (PEDIDO_SEP_ID, PEDIDO_DIC_ID))
+    conn.execute("DELETE FROM alquileres WHERE id IN (%s,%s)", (PEDIDO_SEP_ID, PEDIDO_DIC_ID))
+    conn.execute("DELETE FROM clases_taller WHERE edicion_id = %s", (EDICION_MULTIMES_ID,))
+    conn.execute("DELETE FROM ediciones_taller WHERE id = %s", (EDICION_MULTIMES_ID,))
+
+
+@pytest.fixture
+def db_setup_multimes(db_setup):
+    """Reusa la limpieza/taller de `db_setup` (mismo TALLER_ID) y agrega una
+    SEGUNDA edición que abarca varios meses — el escenario real reportado por
+    el dueño: 16 clases semanales de sep a dic, con un pedido de sep y otro de
+    dic apuntando a la MISMA edición (2026-08-13, un pedido por mes)."""
+    from database import get_db
+
+    conn = get_db()
+    try:
+        _limpiar_multimes(conn)
+        conn.execute(
+            "INSERT INTO ediciones_taller (id, taller_id, numero_edicion, slug, fecha_inicio, fecha_fin) "
+            "VALUES (%s,%s,2,%s,'2026-09-01','2026-12-31')",
+            (EDICION_MULTIMES_ID, TALLER_ID, SLUG + "-ed2"),
+        )
+        # 2 clases en septiembre, 2 en diciembre — mismo patrón semanal real.
+        for i, fecha in enumerate(["2026-09-03", "2026-09-10"]):
+            conn.execute(
+                "INSERT INTO clases_taller (edicion_id, fecha, hora_inicio_min, hora_fin_min, titulo, orden) "
+                "VALUES (%s,%s,1140,1260,%s,%s)",
+                (EDICION_MULTIMES_ID, fecha, f"Clase sep {i + 1}", i),
+            )
+        for i, fecha in enumerate(["2026-12-03", "2026-12-10"]):
+            conn.execute(
+                "INSERT INTO clases_taller (edicion_id, fecha, hora_inicio_min, hora_fin_min, titulo, orden) "
+                "VALUES (%s,%s,1140,1260,%s,%s)",
+                (EDICION_MULTIMES_ID, fecha, f"Clase dic {i + 1}", i + 10),
+            )
+        # 2 pedidos mensuales apuntando a la MISMA edición (_regenerar_pedidos_taller
+        # nunca los crea juntos, pero un mes ya generado + el mes actual conviven).
+        conn.execute(
+            "INSERT INTO alquileres (id, cliente_nombre, estado, tipo, fecha_desde, fecha_hasta, "
+            "monto_total, taller_edicion_id) "
+            "VALUES (%s,'Taller test multimes','confirmado','taller','2026-09-01T00:00:00',"
+            "'2026-09-30T23:59:59',30000,%s)",
+            (PEDIDO_SEP_ID, EDICION_MULTIMES_ID),
+        )
+        conn.execute(
+            "INSERT INTO alquileres (id, cliente_nombre, estado, tipo, fecha_desde, fecha_hasta, "
+            "monto_total, taller_edicion_id) "
+            "VALUES (%s,'Taller test multimes','confirmado','taller','2026-12-01T00:00:00',"
+            "'2026-12-31T23:59:59',30000,%s)",
+            (PEDIDO_DIC_ID, EDICION_MULTIMES_ID),
+        )
+        conn.commit()
+        yield
+    finally:
+        _limpiar_multimes(conn)
+        conn.commit()
+        conn.close()
+
+
+def test_pedido_de_un_mes_no_trae_las_clases_de_otros_meses_de_la_misma_edicion(db_setup_multimes):
+    """Caso real reportado por el dueño: una edición de varios meses (2026-08-13,
+    un pedido por mes) tiene VARIOS pedidos apuntando a la misma edición_id — el
+    pedido de diciembre mostraba las 16 clases de TODA la edición (sep a dic) en
+    vez de solo las 2-3 de diciembre. Cada pedido tiene que traer solo SUS
+    propias clases, filtradas por su `fecha_desde`/`fecha_hasta`."""
+    from database import get_db
+    from routes.alquileres.detalle import _get_alquiler_detail
+
+    conn = get_db()
+    try:
+        pedido_sep = _get_alquiler_detail(conn, PEDIDO_SEP_ID)
+        pedido_dic = _get_alquiler_detail(conn, PEDIDO_DIC_ID)
+    finally:
+        conn.close()
+
+    assert [c["fecha"] for c in pedido_sep["clases_taller"]] == ["2026-09-03", "2026-09-10"], (
+        "el pedido de septiembre no debe traer las clases de diciembre"
+    )
+    assert [c["fecha"] for c in pedido_dic["clases_taller"]] == ["2026-12-03", "2026-12-10"], (
+        "el pedido de diciembre no debe traer las clases de septiembre"
+    )
+
+
+def test_progreso_taller_none_si_edicion_de_un_solo_mes(db_setup):
+    """Una edición de 1 solo mes (el caso viejo, #445) no aporta información
+    de "N/M" — un único pedido cubre toda la edición, mostrarlo sería ruido."""
+    from database import get_db
+    from routes.alquileres.detalle import _get_alquiler_detail
+
+    conn = get_db()
+    try:
+        pedido = _get_alquiler_detail(conn, PEDIDO_TALLER_ID)
+    finally:
+        conn.close()
+
+    assert pedido["progreso_taller"] is None
+
+
+def test_progreso_taller_indice_y_total_en_edicion_multimes(db_setup_multimes):
+    """Pedido a la vista del dueño (2026-08-13): con un solo pedido visible a
+    la vez, "Mes 1/4"/"Mes 4/4" da la foto de conjunto que antes daba ver los
+    4 pedidos juntos en la lista."""
+    from database import get_db
+    from routes.alquileres.detalle import _get_alquiler_detail
+
+    conn = get_db()
+    try:
+        pedido_sep = _get_alquiler_detail(conn, PEDIDO_SEP_ID)
+        pedido_dic = _get_alquiler_detail(conn, PEDIDO_DIC_ID)
+    finally:
+        conn.close()
+
+    assert pedido_sep["progreso_taller"] == {"indice": 1, "total": 4}
+    assert pedido_dic["progreso_taller"] == {"indice": 4, "total": 4}

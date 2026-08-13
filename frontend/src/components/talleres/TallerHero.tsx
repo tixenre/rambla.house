@@ -2,6 +2,7 @@ import { Calendar, Clock, MapPin, Users } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { Grain } from "@/components/common/Grain";
 import { YouTubeEmbed } from "@/components/common/YouTubeEmbed";
+import { TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
 import { ordinalEdicion } from "@/lib/talleres/formato";
 import type { Taller } from "@/lib/api";
 
@@ -123,6 +124,7 @@ type Props = {
 export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }: Props) {
   const cta = (
     <a
+      id="hero-cta"
       href="#inscripcion"
       className="inline-flex items-center gap-2 rounded-full bg-rosa text-ink px-7 py-3.5 text-base font-bold hover:brightness-110 active:scale-[0.97] transition-all"
     >
@@ -134,7 +136,10 @@ export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }
     return (
       <section className="relative bg-ink overflow-hidden">
         <Grain opacity={10} />
-        <div className="relative max-w-[1100px] mx-auto px-4 sm:px-6 py-16 sm:py-24 grid lg:grid-cols-[1.1fr_1fr] gap-10 lg:gap-12 items-center">
+        <div
+          className="relative mx-auto py-16 sm:py-24 grid lg:grid-cols-[1.1fr_1fr] gap-10 lg:gap-12 items-center"
+          style={{ width: TALLER_CONTENT_WIDTH }}
+        >
           <div>
             <Titulo taller={taller} />
             <EdicionesContexto taller={taller} />
@@ -160,7 +165,7 @@ export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }
   return (
     <section className="relative bg-ink overflow-hidden">
       <Grain opacity={10} />
-      <div className="relative max-w-[1100px] mx-auto px-4 sm:px-6 py-16 sm:py-24">
+      <div className="relative mx-auto py-16 sm:py-24" style={{ width: TALLER_CONTENT_WIDTH }}>
         <Titulo taller={taller} />
         <EdicionesContexto taller={taller} />
         <MetaRow

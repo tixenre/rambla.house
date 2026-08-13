@@ -22,6 +22,15 @@
     color: var(--color-ink);
   }
 
+  /* Scroll suave para cualquier ancla (`href="#..."` / `scrollIntoView` sin
+     `behavior` explícito) — el CTA "Quiero inscribirme" saltaba de un salto
+     al form en vez de desplazarse. Global, no por-link: una sola forma.
+     El bloque prefers-reduced-motion de abajo ya lo pisa a "auto" — este es
+     el único lado que faltaba prender. */
+  html {
+    scroll-behavior: smooth;
+  }
+
   /* Focus visible ring global — teclado + screen readers */
   :focus-visible {
     outline: 2px solid var(--color-amber);

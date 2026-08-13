@@ -1429,6 +1429,14 @@ export type Pedido = {
    *  temporal que `fecha_desde`/`fecha_hasta` no representan (esas son el mes
    *  contable completo). Vacío para cualquier otro tipo. Bug real #445. */
   clases_taller?: ClaseTallerPedido[];
+  /** Solo presente en el detalle de un pedido de taller cuya edición dura más
+   *  de 1 mes: en qué mes de la serie está este pedido (`indice`, 1-based)
+   *  sobre el total de meses de la edición (`total`) — ej. {indice:2,total:4}
+   *  = "2/4". Desde que el pedido mensual se genera solo al llegar el mes
+   *  (2026-08-13, un pedido a la vez en vez de los N juntos), esta pieza
+   *  reemplaza la foto de conjunto que daba ver los N pedidos a la vez.
+   *  `null`/ausente = no aplica (edición de 1 solo mes, o no es taller). */
+  progreso_taller?: { indice: number; total: number } | null;
   /** Presente solo en la respuesta de crear/editar un turno del Estudio: si
    *  la promo (combo) se reservó con algún componente sin stock — best-effort,
    *  nunca bloquea la reserva, pero el admin/cliente debe saberlo. `null`/
@@ -1752,8 +1760,11 @@ export type ClaseBody = {
 
 // F4a: modalidad de pago de una edición. `id` presente al escribir = editar
 // esa fila (preserva su posición salvo reorden); ausente = nueva. Sin motor
-// de descuentos: `monto_total` lo carga el admin a mano, los "%" son texto
-// libre en `nota`. `monto_total_str` viene resuelto del backend en lecturas.
+// de descuentos: `monto_total` (costo total del plan) lo carga el admin a
+// mano, los "%" son texto libre en `nota`. `n_cuotas` (default 1 = pago
+// único) también lo carga el admin — el monto POR cuota se deriva en el
+// backend, nunca se manda ni se tipea a mano. `monto_total_str`/
+// `monto_cuota`/`monto_cuota_str` vienen resueltos del backend en lecturas.
 export type ModalidadPagoBody = {
   id?: number | null;
   codigo: string;
@@ -1761,6 +1772,19 @@ export type ModalidadPagoBody = {
   nota?: string;
   monto_total: number;
   monto_total_str?: string;
+  n_cuotas?: number;
+  monto_cuota?: number;
+  monto_cuota_str?: string;
+};
+
+// Cuenta de cobro (alias/cbu/banco) de una edición — lista, independiente de
+// la modalidad de pago (el público ve todas juntas, elige a cuál
+// transferir). `id` presente al escribir = editar esa fila; ausente = nueva.
+export type CuentaPagoBody = {
+  id?: number | null;
+  alias?: string;
+  cbu?: string;
+  banco?: string;
 };
 
 export type EdicionAdmin = {
@@ -1786,18 +1810,31 @@ export type EdicionAdmin = {
   clases: ClaseBody[];
   // F4a: RAW (sin fallback sintético — [] = "no configuradas todavía").
   modalidades: ModalidadPagoBody[];
+  // Cuentas de cobro RAW — mismo criterio que modalidades arriba.
+  cuentas_pago: CuentaPagoBody[];
   // F4c: NULL = sin cierre (siempre abierto).
   fecha_cierre_inscripcion: string | null;
   // Economía del taller (ver `_regenerar_pedidos_taller`, backend): si la
   // edición usa el espacio del Estudio y/o equipos de alquiler, con un valor
-  // que el admin tipea a mano — 'mensual' (mismo valor cada mes) o 'total'
-  // (se reparte en partes iguales entre los meses de la edición).
+  // — 'mensual' (mismo valor cada mes) o 'total' (se reparte en partes
+  // iguales entre los meses). `_tipo` decide CÓMO se determina el valor:
+  // 'fijo' = `valor_estudio`/`valor_equipos` tal cual (el admin lo tipea);
+  // 'porcentaje' = `_pct` (0-100) sobre `inscriptos_revenue`. `_efectivo` y
+  // `inscriptos_revenue` los resuelve SIEMPRE el backend (nunca se
+  // recalculan acá) — son el preview de lo que se va a cobrar.
   usa_estudio: boolean;
   valor_estudio: number;
   valor_estudio_modo: "mensual" | "total";
+  valor_estudio_tipo: "fijo" | "porcentaje";
+  valor_estudio_pct: number;
   usa_equipos: boolean;
   valor_equipos: number;
   valor_equipos_modo: "mensual" | "total";
+  valor_equipos_tipo: "fijo" | "porcentaje";
+  valor_equipos_pct: number;
+  inscriptos_revenue: number;
+  valor_estudio_efectivo: number;
+  valor_equipos_efectivo: number;
   // Portada + galería de ESTA edición (mismo patrón que `EstudioFoto`, pero
   // scoped a la edición — cada edición tiene su propia tanda de fotos).
   fotos: EdicionFoto[];

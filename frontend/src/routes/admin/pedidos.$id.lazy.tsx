@@ -61,6 +61,7 @@ import {
   AlertDialogTitle,
 } from "@/design-system/ui/alert-dialog";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
+import { Pill } from "@/design-system/ui/Pill";
 import { estadoClase, ESTADO_TEXT } from "@/design-system/ui/estado-color";
 import { WhatsAppButton } from "@/components/admin/WhatsAppButton";
 import {
@@ -308,6 +309,22 @@ function PedidoEditorPage() {
   // ítems (matrícula), así que solo el control de fecha se neutraliza acá.
   const esTaller = esPedidoTaller(p);
   const fechaNoEditable = esPedidoDerivado(p);
+  // Monto de cada clase real cuando el Estudio del taller generó un turno
+  // embebido POR CLASE (2026-08-13) — `p.turnos_estudio_embebidos` y
+  // `p.clases_taller` salen de las MISMAS clases reales de la edición
+  // (`_crear_turnos_taller_del_mes`/`_clases_del_taller`, ambas ordenadas por
+  // fecha), así que se emparejan por posición. Si no calzan 1:1 (usa_estudio
+  // apagado → 0 turnos; o el fallback plano de "sin clases cargadas" en el
+  // último recálculo → 0 turnos igual; o una clase nueva sumada después del
+  // último recálculo) no se muestra ningún monto, en vez de arriesgar un
+  // emparejado incorrecto — mismo criterio conservador que el resto de esta
+  // pantalla ante datos que no calzan.
+  const turnosTaller = p.turnos_estudio_embebidos ?? [];
+  const clasesTaller = p.clases_taller ?? [];
+  const montoPorClaseTaller =
+    esTaller && turnosTaller.length === clasesTaller.length && turnosTaller.length > 0
+      ? turnosTaller.map((t) => t.monto_total)
+      : null;
 
   const clienteSinVerificar = !!p.cliente_id && !p.cliente_dni_validado_at;
   const ESTADOS_CON_AVISO: PedidoEstado[] = ["confirmado", "retirado"];
@@ -532,6 +549,13 @@ function PedidoEditorPage() {
             <span className="shrink-0">
               <EstadoBadge estado={p.estado} label={ESTADO_LABEL[p.estado]} />
             </span>
+            {p.progreso_taller && (
+              <span className="hidden shrink-0 sm:inline-flex">
+                <Pill tone="neutral">
+                  Mes {p.progreso_taller.indice}/{p.progreso_taller.total}
+                </Pill>
+              </span>
+            )}
           </div>
           {creadoHace(p.created_at) && (
             <div className="mt-1 font-mono text-xs text-muted-foreground">
@@ -840,9 +864,9 @@ function PedidoEditorPage() {
               }
             >
               {esTaller ? (
-                (p.clases_taller ?? []).length > 0 ? (
+                clasesTaller.length > 0 ? (
                   <ul className="space-y-2">
-                    {(p.clases_taller ?? []).map((c) => (
+                    {clasesTaller.map((c, i) => (
                       <li
                         key={c.id}
                         className="flex items-center gap-3 rounded-lg border hairline bg-surface-elevated px-3.5 py-2.5 min-h-[44px]"
@@ -859,6 +883,15 @@ function PedidoEditorPage() {
                             {c.titulo ? ` · ${c.titulo}` : ""}
                           </div>
                         </div>
+                        {/* Solo lectura a propósito (2026-08-13): la fuente de
+                            verdad de la clase/franja es Talleres, no acá —
+                            reprogramar/editar el turno desde este pedido está
+                            bloqueado server-side (409, ver reserva.py). */}
+                        {montoPorClaseTaller && (
+                          <span className="shrink-0 font-mono text-sm tabular-nums text-muted-foreground">
+                            {fmtArs(montoPorClaseTaller[i])}
+                          </span>
+                        )}
                       </li>
                     ))}
                   </ul>
@@ -958,7 +991,19 @@ function PedidoEditorPage() {
                         <ItemRow
                           key={it.uid}
                           it={it}
-                          stock={it.equipo_id != null ? stockMap[String(it.equipo_id)] : undefined}
+                          // Taller: el mismo motivo por el que el badge de
+                          // "stock OK"/"revisar stock" de la Section (arriba)
+                          // ya se suprime para esTaller — el rango del pedido
+                          // es el mes contable completo, no un evento real, así
+                          // que el draft-stock computado sobre ese rango ancho
+                          // no representa una disponibilidad real (el bloqueo
+                          // real es _taller_bloqueante, por clase puntual). Acá
+                          // faltaba la misma supresión a nivel de fila.
+                          stock={
+                            esTaller || it.equipo_id == null
+                              ? undefined
+                              : stockMap[String(it.equipo_id)]
+                          }
                           jornadas={jornadas}
                           updateItem={esEstudio ? () => {} : updateItem}
                           removeItem={esEstudio ? () => {} : removeItem}

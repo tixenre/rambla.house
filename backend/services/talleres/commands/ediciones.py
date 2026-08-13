@@ -41,9 +41,11 @@ def crear_edicion(
     `campos` = dict ya armado por el caller (valores ya `.strip()`eados donde
     corresponde) con: tipo_taller, horario, cupos_total, precio_total,
     precio_sena, pago_alias, pago_cbu, pago_banco, direccion, activo,
-    usa_estudio, valor_estudio, valor_estudio_modo, usa_equipos, valor_equipos,
-    valor_equipos_modo. `fecha_inicio`/`fecha_fin` se derivan acá de `clases`
-    (no los pide `campos` — evita que caller y función puedan desincronizarse).
+    usa_estudio, valor_estudio, valor_estudio_modo, valor_estudio_tipo,
+    valor_estudio_pct, usa_equipos, valor_equipos, valor_equipos_modo,
+    valor_equipos_tipo, valor_equipos_pct. `fecha_inicio`/`fecha_fin` se
+    derivan acá de `clases` (no los pide `campos` — evita que caller y
+    función puedan desincronizarse).
 
     No commitea — responsabilidad del caller (route)."""
     fecha_inicio = min(c["fecha"] for c in clases)
@@ -57,9 +59,12 @@ def crear_edicion(
             cupos_total, precio_total, precio_sena,
             pago_alias, pago_cbu, pago_banco,
             direccion, activo,
-            usa_estudio, valor_estudio, valor_estudio_modo,
-            usa_equipos, valor_equipos, valor_equipos_modo
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            usa_estudio, valor_estudio, valor_estudio_modo, valor_estudio_tipo, valor_estudio_pct,
+            usa_equipos, valor_equipos, valor_equipos_modo, valor_equipos_tipo, valor_equipos_pct
+        ) VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
         """,
         (
             taller_id, ed_numero, slug_edicion, campos["tipo_taller"],
@@ -68,10 +73,31 @@ def crear_edicion(
             campos["pago_alias"], campos["pago_cbu"], campos["pago_banco"],
             campos["direccion"], campos["activo"],
             campos["usa_estudio"], campos["valor_estudio"], campos["valor_estudio_modo"],
+            campos["valor_estudio_tipo"], campos["valor_estudio_pct"],
             campos["usa_equipos"], campos["valor_equipos"], campos["valor_equipos_modo"],
+            campos["valor_equipos_tipo"], campos["valor_equipos_pct"],
         ),
     )
     _insert_clases(conn, edicion_id, clases)
+
+    # Traspaso a `edicion_cuentas_pago` (2026-08-13, hallazgo del supervisor):
+    # esta función no recibe `cuentas_pago` — el alta (UI admin o
+    # `scripts/importar_taller.py`) solo tipea pago_alias/pago_cbu/pago_banco,
+    # y `cuentas_pago` recién se completa en una edición POSTERIOR (PATCH,
+    # `admin_update_edicion`). Pero el público (`WorkshopInscripcionForm`,
+    # el mail de confirmación y "completá tu seña") ya leen SOLO
+    # `cuentas_pago` — sin esta fila, una edición recién creada con datos de
+    # pago cargados no muestra nada hasta que alguien la edite a mano.
+    # Mismo criterio de traspaso que la migración `cu3nt4sp4g0_edicion_
+    # cuentas_pago.py` (una fila si hay algún dato) — no reimplementar
+    # distinto acá.
+    if campos["pago_alias"] or campos["pago_cbu"] or campos["pago_banco"]:
+        conn.execute(
+            "INSERT INTO edicion_cuentas_pago (edicion_id, orden, alias, cbu, banco) "
+            "VALUES (%s, 0, %s, %s, %s)",
+            (edicion_id, campos["pago_alias"], campos["pago_cbu"], campos["pago_banco"]),
+        )
+
     e_row = conn.execute(
         "SELECT * FROM ediciones_taller WHERE id = %s", (edicion_id,)
     ).fetchone()

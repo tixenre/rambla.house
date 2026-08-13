@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Clock } from "lucide-react";
 import { es } from "date-fns/locale";
-import { Calendar } from "@/design-system/ui/calendar";
+import { Calendar, CalendarDayButton } from "@/design-system/ui/calendar";
 import { fmtHhmm } from "@/lib/talleres/formato";
 
 // Minutos desde medianoche (Escuela v2 F1). `_str` viene resuelto del backend
@@ -85,8 +85,13 @@ function GrupoPill({ grupo }: { grupo: Grupo }) {
       ? `${dDesde.toLocaleDateString("es-AR", optsCorto)} – ${dHasta.toLocaleDateString("es-AR", optsCorto)}`
       : null;
 
+  // Sin card propia (border/bg): el chip vive DENTRO de la card única del
+  // calendario — antes cada grupo era una card aparte (rounded-xl bg-muted
+  // border), así que el bloque completo se leía como dos diseños pegados en
+  // vez de uno (pedido explícito: "unir el calendario y esto en un mismo
+  // diseño"). El divide-y del padre dibuja el separador entre grupos.
   return (
-    <div className="flex items-center gap-3 rounded-xl bg-muted/40 border border-border/50 px-5 py-4">
+    <div className="flex items-center gap-3 py-3">
       <div className="w-1 self-stretch rounded-full bg-rosa flex-none" />
       <div className="flex flex-col gap-1 min-w-0">
         <span className="font-semibold text-ink text-base sm:text-lg">
@@ -110,9 +115,12 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
   if (sorted.length === 0) {
     if (!horario) return null;
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Clock className="h-4 w-4 shrink-0 text-rosa" />
-        <span>{horario}</span>
+      <div className="flex flex-col gap-3">
+        <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa">Cuándo</p>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Clock className="h-4 w-4 shrink-0 text-rosa" />
+          <span>{horario}</span>
+        </div>
       </div>
     );
   }
@@ -154,9 +162,13 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
   const grupos = agruparPorPatron(sorted);
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* Calendario en card con tinte rosa */}
-      <div className="rounded-2xl bg-rosa/5 border border-rosa/20 overflow-hidden flex justify-center py-2">
+    <div className="rounded-2xl bg-rosa/5 border border-rosa/20 overflow-hidden">
+      {/* Eyebrow ADENTRO de la card (no arriba, suelta contra el fondo) —
+          mismo criterio que "Orientado a"/"Sobre"/"Programa" (SeccionCard):
+          cada bloque de la página es autocontenido, con su título como parte
+          del mismo diseño en vez de una etiqueta flotando aparte. */}
+      <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa px-5 pt-5">Cuándo</p>
+      <div className="flex justify-center py-2">
         <Calendar
           locale={es}
           month={month}
@@ -183,6 +195,16 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
           // de ancho — cada celda terminaba tan ancha como le dejara la fila,
           // gigante en desktop/tablet. No-op a propósito, no agrega mode.
           onDayClick={() => {}}
+          // El día NO es seleccionable — es un dato mostrado, no un control
+          // (pedido explícito: "es meramente una imagen"). `pointer-events-none`
+          // en el botón mata cursor/hover sin tocar el `disabled` semántico de
+          // react-day-picker (ese sí atenuaría la opacidad — pisaría el círculo
+          // rosa de "sesion"); `tabIndex={-1}` lo saca del tab order. Reusa
+          // `CalendarDayButton` tal cual (mismo tamaño/estilo ya afinado), solo
+          // le agrega el prop.
+          components={{
+            DayButton: (props) => <CalendarDayButton {...props} tabIndex={-1} />,
+          }}
           modifiers={{ sesion: sesionDates }}
           // El modifier de react-day-picker pinta la clase en la CELDA
           // (<td>, `aspect-square h-full w-full` — una fracción flex del
@@ -235,14 +257,16 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
             // sea real en los dos sentidos, no solo la altura. `text-sm`
             // heredado (14-15px) no entra en una celda de 16-24px con 2
             // dígitos sin pisar la celda de al lado — de ahí dayTextClass.
-            day_button: `!h-(--cell-size) !w-(--cell-size) ${dayTextClass}`,
+            day_button: `!h-(--cell-size) !w-(--cell-size) pointer-events-none ${dayTextClass}`,
             weekday: `text-muted-foreground flex-1 select-none rounded-md text-xs font-normal ${weekdayTextClass}`,
           }}
         />
       </div>
 
-      {/* Píldoras agrupadas por patrón (día de semana + horario) */}
-      <div className="flex flex-col gap-2">
+      {/* Resumen agrupado por patrón (día de semana + horario) — misma card
+          que el calendario, separado por una línea en vez de ser su propio
+          bloque aparte. */}
+      <div className="flex flex-col divide-y divide-rosa/15 border-t border-rosa/20 px-5">
         {grupos.map((g) => (
           <GrupoPill key={g.fechaDesde} grupo={g} />
         ))}

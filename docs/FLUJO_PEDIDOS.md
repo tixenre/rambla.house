@@ -152,7 +152,7 @@ inline (guard: `test_tipos_pedido_source_scan.py`).
 | `diaria` | Rango real de jornadas del alquiler (el caso rental clásico). | La página del pedido, libremente. | — |
 | `estudio` | Franja horaria real de un turno (mismo día, hora de inicio/fin dentro del rango). | La agenda del Estudio (franja + tarifa + ítems); el pedido muestra pero no re-edita la franja. | `backend/services/estudio/` |
 | `estudio_fijo` | Una muestra de una recurrencia semanal (el slot gobierna, el pedido es un reflejo). | El slot fijo, no el pedido. | `backend/services/estudio/` |
-| `taller` | **Mes calendario contable** de la edición — NO un evento puntual (la verdad temporal real vive en `clases_taller`, con fecha + franja de cada clase). | La edición del taller (economía); el pedido solo admite **agregar** líneas manuales (ej. una matrícula) — no puede editar fechas ni borrar el ítem que generó la edición. | `backend/services/talleres/` |
+| `taller` | **Mes calendario contable** de la edición — NO un evento puntual (la verdad temporal real vive en `clases_taller`, con fecha + franja de cada clase). | La edición del taller (economía); el pedido solo admite **agregar** líneas manuales (ej. una matrícula) — no puede editar fechas ni borrar el/los ítem(s) que generó la edición. | `backend/services/talleres/` |
 
 **Por qué el pedido de taller "impone días" que no son reales:** `_regenerar_pedidos_taller`
 (`services/talleres/commands/economia.py`) arma un pedido de resumen por mes con
@@ -162,14 +162,29 @@ La UI del pedido lo refleja **honestamente**: en vez de "7 jornadas", la card de
 lista de clases reales (`clases_taller`, enriquecida vía `taller_edicion_id` en el detalle del
 pedido) con su día y franja — nunca el rango contable ni un conteo de jornadas.
 
+**El Estudio de un taller genera un turno embebido POR CLASE real (2026-08-13), no una línea plana.**
+Si la edición usa el Estudio (`usa_estudio`) y el mes ya tiene clases cargadas,
+`_crear_turnos_taller_del_mes` reparte el valor mensual en partes iguales entre las clases reales de
+ese mes e inserta **un turno por clase** (`alquiler_turnos_estudio` + su ítem centinela con
+`turno_estudio_id`, mismo mecanismo "turno como ítem" de #1308 — antes exclusivo de pedidos
+`tipo='diaria'`) con la fecha/hora real de la clase, en vez del ítem plano único de antes. Si el mes
+todavía no tiene clases cargadas, cae al ítem plano de siempre (fallback, la plata no se pierde). La
+card de Fechas del pedido muestra el monto de cada clase junto a su día/franja cuando el
+emparejamiento es 1:1 con `clases_taller`. **Estos turnos NO se editan/borran desde el pedido** — su
+fuente de verdad sigue siendo Talleres (ver Blindaje).
+
 **Blindaje:** `estudio` / `estudio_fijo` / `taller` son pedidos **derivados** (`es_pedido_derivado()`)
 — sus fechas no se editan desde el pedido (409 si se intenta) y su(s) ítem(s) auto-generados
-(centinela del Estudio / "Uso de equipos" de la edición) no se pueden quitar ni reemplazar por PATCH
-genérico, aunque sí se puede **agregar** una línea nueva (matrícula, extra) sobre un pedido de
-taller. `_revalidar_stock` salta taller (su disponibilidad ya la garantiza el gate de la edición, no
-el motor de reservas genérico), y ningún derivado sin retiro real (`TIPOS_SIN_RETIRO`) dispara
-"salió"/"volvió" ni recordatorios de retiro (`estudio` sí, porque puede tener un retiro físico real
-de equipos sueltos).
+(centinela del Estudio, plano o por-clase / "Uso de equipos" de la edición) no se pueden quitar ni
+reemplazar por PATCH genérico (`_validar_reemplazo_items_taller` protege solo las filas SIN
+`turno_estudio_id` — las de turno-por-clase ni siquiera viajan en ese PATCH, viven aparte), aunque sí
+se puede **agregar** una línea nueva (matrícula, extra) sobre un pedido de taller.
+`editar_turno_embebido`/`eliminar_turno_embebido` (el mecanismo genérico que sí puede tocar un turno
+de un `diaria`) rechazan con 409 si el contenedor es `tipo='taller'` — mismo blindaje que ya tenía
+`estudio_fijo`. `_revalidar_stock` salta taller (su disponibilidad ya la garantiza el gate de la
+edición, no el motor de reservas genérico), y ningún derivado sin retiro real (`TIPOS_SIN_RETIRO`)
+dispara "salió"/"volvió" ni recordatorios de retiro (`estudio` sí, porque puede tener un retiro
+físico real de equipos sueltos).
 
 **Puente Talleres → Pedidos:** la pestaña "Precios y pago" de una edición de taller lista los
 pedidos mensuales que generó (`GET /admin/ediciones/{id}/pedidos`), cada uno linkeando de vuelta a

@@ -8,9 +8,11 @@ import { Button } from "@/design-system/ui/button";
 import { IconButton } from "@/design-system/ui/icon-button";
 import { ModalBackdrop } from "@/design-system/ui/modal-backdrop";
 import { WorkshopInscripcionForm } from "@/components/talleres/WorkshopInscripcionForm";
-import { DescripcionRica } from "@/components/talleres/DescripcionRica";
+import { DescripcionRica, DescripcionBloques } from "@/components/talleres/DescripcionRica";
+import { SeccionCard } from "@/components/talleres/SeccionCard";
+import { parseDescripcionRica, splitEnPrograma } from "@/lib/talleres/descripcionRica";
 import { TallerHero } from "@/components/talleres/TallerHero";
-import { TallerGaleria } from "@/components/talleres/TallerGaleria";
+import { TallerGaleria, TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
 import { TallerCalendario } from "@/components/talleres/TallerCalendario";
 import { ProgramaSection } from "@/components/talleres/ProgramaSection";
 import { InstructorCard } from "@/components/talleres/InstructorCard";
@@ -210,6 +212,14 @@ function TallerLandingPage() {
   const fechasResumen = resumenFechas(clases, fechaInicioStr, fechaFinStr);
   const horarioResumen = resumenHorario(clases, formTaller.horario);
 
+  // El programa a veces viene redactado como parte del texto libre de la
+  // descripción (un título "# Programa" seguido de la lista), en vez de
+  // cargado clase-por-clase (`ProgramaSection`, más abajo) — separado en su
+  // propia card en vez de mezclado con "De qué se trata" (pedido explícito).
+  const { antes: bloquesDescripcion, programa: bloquesPrograma } = splitEnPrograma(
+    parseDescripcionRica(taller.descripcion),
+  );
+
   return (
     <>
       {switchToProxima && !soldOutModalDismissed && (
@@ -241,41 +251,41 @@ function TallerLandingPage() {
           <TallerGaleria fotos={formTaller.fotos} alt={taller.nombre} />
 
           {/* ── Cuerpo ─────────────────────────────────────────────────────── */}
-          <div className="max-w-[1100px] mx-auto px-4 sm:px-6 py-12 sm:py-16">
+          <div className="mx-auto py-12 sm:py-16" style={{ width: TALLER_CONTENT_WIDTH }}>
             <div className="grid lg:grid-cols-[1fr_380px] gap-10 lg:gap-16 items-start">
               {/* Columna principal */}
               <div className="flex flex-col gap-12">
                 {/* Orden: de qué se trata → a quién está orientado → cuándo es
                     (chequeo rápido antes de invertir tiempo en leer) → el
                     desarrollo completo del programa. */}
-                <section>
-                  <DescripcionRica
-                    texto={taller.descripcion}
+                <SeccionCard eyebrow="De qué se trata">
+                  <DescripcionBloques
+                    bloques={bloquesDescripcion}
                     className="text-lg sm:text-xl text-muted-foreground"
                   />
-                </section>
+                </SeccionCard>
 
                 {taller.publico_objetivo && (
-                  <section className="rounded-xl bg-muted/30 border border-border/50 px-5 py-4">
-                    <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground mb-2">
-                      Orientado a
-                    </p>
+                  <SeccionCard eyebrow="Orientado a">
                     <DescripcionRica
                       texto={taller.publico_objetivo}
                       className="text-base text-muted-foreground"
                     />
-                  </section>
+                  </SeccionCard>
                 )}
 
                 {formTaller.sesiones.length > 0 && (
-                  <section>
-                    <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa mb-4">
-                      Cuándo
-                    </p>
-                    <TallerCalendario sesiones={formTaller.sesiones} horario={formTaller.horario} />
-                  </section>
+                  <TallerCalendario sesiones={formTaller.sesiones} horario={formTaller.horario} />
                 )}
 
+                {bloquesPrograma && bloquesPrograma.length > 0 && (
+                  <SeccionCard eyebrow="Programa">
+                    <DescripcionBloques
+                      bloques={bloquesPrograma}
+                      className="text-base text-muted-foreground"
+                    />
+                  </SeccionCard>
+                )}
                 <ProgramaSection clases={clases} />
                 <InstitucionesRow taller={taller} />
                 <InstructorCard taller={taller} />

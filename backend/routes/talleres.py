@@ -54,12 +54,18 @@ from services import telefono as telefono_svc
 from services.talleres.queries.clases import (
     _row_get,
     _validar_clases,
+    _validar_cuentas_pago,
     _validar_modalidades,
     clases_de_edicion as _get_clases,
 )
-from services.talleres.commands.clases import _upsert_clases, _upsert_modalidades
+from services.talleres.commands.clases import (
+    _upsert_clases,
+    _upsert_cuentas_pago,
+    _upsert_modalidades,
+)
 from services.talleres.commands.ediciones import _gate_conflicto_estudio, crear_edicion
 from services.talleres.commands.economia import _regenerar_pedidos_taller
+from services.talleres.queries.economia import _revenue_inscriptos, _valor_efectivo
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +100,15 @@ def _leer_token_cupo(token: str) -> int | None:
 
 def _fmt_pesos(n: int) -> str:
     return "$" + f"{n:,}".replace(",", ".")
+
+
+def _monto_por_cuota(monto_total: int, n_cuotas: int) -> int:
+    """Monto de UNA cuota — derivado de `monto_total`/`n_cuotas`, redondeado
+    al peso. Es texto informativo ("N cuotas de $X"), no una cobranza real
+    (la seña/comprobante siguen siendo el mecanismo de pago) — por eso
+    redondeo simple en vez del reparto con remanente-en-la-última-cuota que
+    usa `services/talleres/commands/economia.py::_partes` para plata real."""
+    return round(monto_total / n_cuotas)
 
 
 # ── Helpers de lectura ────────────────────────────────────────────────────────
@@ -197,8 +212,12 @@ def _get_trabajos_taller(conn, taller_id: int) -> list[dict]:
 def _modalidad_dict(row) -> dict:
     """F4a: una modalidad de pago (row de DB o dict normalizado de
     _validar_modalidades). `monto_total_str` resuelto acá — el front no
-    formatea plata a mano."""
+    formatea plata a mano. `monto_cuota`/`monto_cuota_str` = `monto_total`
+    derivado por `n_cuotas` (default 1, pago único) — el público nunca ve
+    un monto por cuota tipeado a mano, solo el calculado."""
     monto = _row_get(row, "monto_total", 0) or 0
+    n_cuotas = _row_get(row, "n_cuotas", 1) or 1
+    monto_cuota = _monto_por_cuota(monto, n_cuotas)
     return {
         "id": _row_get(row, "id"),
         "codigo": row["codigo"],
@@ -206,12 +225,15 @@ def _modalidad_dict(row) -> dict:
         "nota": _row_get(row, "nota", ""),
         "monto_total": monto,
         "monto_total_str": _fmt_pesos(monto),
+        "n_cuotas": n_cuotas,
+        "monto_cuota": monto_cuota,
+        "monto_cuota_str": _fmt_pesos(monto_cuota),
     }
 
 
 def _get_modalidades(conn, edicion_id: int) -> list[dict]:
     rows = conn.execute(
-        "SELECT id, codigo, label, nota, monto_total FROM edicion_modalidades_pago "
+        "SELECT id, codigo, label, nota, monto_total, n_cuotas FROM edicion_modalidades_pago "
         "WHERE edicion_id = %s ORDER BY orden, id",
         (edicion_id,),
     ).fetchall()
@@ -225,6 +247,78 @@ def _modalidades_publicas(modalidades: list[dict] | None, precio_total: int) -> 
     if modalidades:
         return modalidades
     return [_modalidad_dict({"codigo": "total", "label": "Pago total", "nota": "", "monto_total": precio_total})]
+
+
+def _cuenta_pago_dict(row) -> dict:
+    """Una cuenta de cobro (row de DB o dict normalizado de
+    _validar_cuentas_pago) — sin plata derivada, passthrough directo."""
+    return {
+        "id": _row_get(row, "id"),
+        "alias": _row_get(row, "alias", ""),
+        "cbu": _row_get(row, "cbu", ""),
+        "banco": _row_get(row, "banco", ""),
+    }
+
+
+def _get_cuentas_pago(conn, edicion_id: int) -> list[dict]:
+    rows = conn.execute(
+        "SELECT id, alias, cbu, banco FROM edicion_cuentas_pago "
+        "WHERE edicion_id = %s ORDER BY orden, id",
+        (edicion_id,),
+    ).fetchall()
+    return [_cuenta_pago_dict(r) for r in rows]
+
+
+def _cuentas_pago_para_mail(cuentas: list[dict]) -> tuple[str, str]:
+    """Fragmentos (HTML + texto plano) de "Datos de pago" para el mail de
+    inscripción (`taller_inscripcion_cliente`) — inyectados con `{{
+    cuentas_pago_html|safe }}`/`{{ cuentas_pago_text }}`, mismo patrón que
+    `items_html`/`items_text` en `services/comunicacion/despacho.py` (evita
+    loopear en Jinja: sin `trim_blocks`, un `{% for %}` en el body de texto
+    plano deja saltos de línea sueltos que sí se ven en un mail).
+
+    Mismo criterio que `DatosPago`/`UnaCuenta` del frontend
+    (`frontend/src/components/talleres/WorkshopInscripcionForm.tsx`): salta
+    los campos vacíos (nunca un separador colgando) — con 1 sola cuenta (el
+    caso común) el render queda igual al de siempre; con 2+, un bloque por
+    cuenta. Values escapados a mano (mismo patrón que
+    `services/comunicacion/despacho.py`) — el HTML se inyecta con `|safe`,
+    así que no pasa por el autoescape de Jinja."""
+    from markupsafe import escape
+
+    con_datos = [c for c in cuentas if c.get("alias") or c.get("cbu") or c.get("banco")]
+    if not con_datos:
+        return "", ""
+
+    bloques_html, bloques_text = [], []
+    for c in con_datos:
+        campos = [
+            (label, valor)
+            for label, valor in (("Alias", c.get("alias")), ("CBU", c.get("cbu")), ("Banco", c.get("banco")))
+            if valor
+        ]
+        bloques_html.append(
+            "<br>".join(f"<strong>{label}:</strong> {escape(valor)}" for label, valor in campos)
+        )
+        bloques_text.append("\n".join(f"  {label}: {valor}" for label, valor in campos))
+
+    html = "".join(f'<p style="margin:0 0 4px;">{b}</p>' for b in bloques_html)
+    text = "\n\n".join(bloques_text)
+    return html, text
+
+
+def _cuentas_pago_efectivas(
+    cuentas: list[dict], *, pago_alias: str, pago_cbu: str, pago_banco: str
+) -> list[dict]:
+    """`cuentas` (de `_get_cuentas_pago`) si trae algo; si no, una sintetizada
+    desde los 3 campos viejos — defensa en profundidad para una edición que,
+    por lo que sea, no pasó por el traspaso de `crear_edicion`/la migración
+    `cu3nt4sp4g0`. No debería hacer falta en el camino normal."""
+    if cuentas:
+        return cuentas
+    if pago_alias or pago_cbu or pago_banco:
+        return [{"alias": pago_alias, "cbu": pago_cbu, "banco": pago_banco}]
+    return []
 
 
 def _video_dict(row) -> dict | None:
@@ -265,7 +359,7 @@ def _edicion_lite(row) -> dict:
 
 def _edicion_to_public_dict(
     row, clases=None, instructores=None, modalidades=None, trabajos=None, instituciones=None,
-    fotos=None,
+    fotos=None, cuentas_pago=None,
 ) -> dict:
     """Convierte edicion_row (JOIN talleres) al shape plano del API público."""
     return {
@@ -317,6 +411,10 @@ def _edicion_to_public_dict(
         # sintético — ver _modalidades_publicas).
         "video": _video_dict(row),
         "modalidades": _modalidades_publicas(modalidades, row["precio_total"]),
+        # Cuentas de cobro (alias/cbu/banco) — lista, independiente de la
+        # modalidad de pago (el público ve todas, elige a cuál transferir).
+        # Sin fallback sintético: [] = sin cuentas cargadas.
+        "cuentas_pago": cuentas_pago if cuentas_pago is not None else [],
         # F4c: FAQ del concepto + cierre de inscripciones de ESTA edición +
         # trabajos pasados del concepto (solo YouTube, sin testimonios —
         # antes solo se servían al admin; F5 los muestra públicamente).
@@ -331,7 +429,10 @@ def _edicion_to_public_dict(
     }
 
 
-def _edicion_to_admin_dict(edicion_row, clases=None, modalidades=None, fotos=None) -> dict:
+def _edicion_to_admin_dict(
+    edicion_row, clases=None, modalidades=None, fotos=None, cuentas_pago=None,
+    inscriptos_revenue: int = 0,
+) -> dict:
     """Convierte una fila de ediciones_taller al shape de admin (anidado en concepto)."""
     return {
         "id": edicion_row["id"],
@@ -357,6 +458,8 @@ def _edicion_to_admin_dict(edicion_row, clases=None, modalidades=None, fotos=Non
         # F4a: modalidades RAW (sin fallback sintético — el admin ve el
         # estado real: lista vacía = "no configuradas todavía").
         "modalidades": modalidades if modalidades is not None else [],
+        # Cuentas de cobro RAW — mismo criterio que modalidades arriba.
+        "cuentas_pago": cuentas_pago if cuentas_pago is not None else [],
         # F4c: NULL = sin cierre (default, siempre abierto).
         "fecha_cierre_inscripcion": (
             str(edicion_row["fecha_cierre_inscripcion"])
@@ -365,9 +468,27 @@ def _edicion_to_admin_dict(edicion_row, clases=None, modalidades=None, fotos=Non
         "usa_estudio": bool(edicion_row["usa_estudio"]),
         "valor_estudio": edicion_row["valor_estudio"],
         "valor_estudio_modo": edicion_row["valor_estudio_modo"],
+        "valor_estudio_tipo": edicion_row["valor_estudio_tipo"],
+        "valor_estudio_pct": edicion_row["valor_estudio_pct"],
         "usa_equipos": bool(edicion_row["usa_equipos"]),
         "valor_equipos": edicion_row["valor_equipos"],
         "valor_equipos_modo": edicion_row["valor_equipos_modo"],
+        "valor_equipos_tipo": edicion_row["valor_equipos_tipo"],
+        "valor_equipos_pct": edicion_row["valor_equipos_pct"],
+        # Preview resuelto por el backend (nunca el front): cuánto pagan HOY
+        # los inscriptos no en lista de espera + el valor efectivo que
+        # `_regenerar_pedidos_taller` aplicaría con la config actual — en
+        # 'fijo' es un espejo de `valor_estudio`/`valor_equipos`, en
+        # 'porcentaje' es `revenue * pct / 100` ya calculado.
+        "inscriptos_revenue": inscriptos_revenue,
+        "valor_estudio_efectivo": _valor_efectivo(
+            edicion_row["valor_estudio_tipo"], edicion_row["valor_estudio"],
+            edicion_row["valor_estudio_pct"], inscriptos_revenue,
+        ),
+        "valor_equipos_efectivo": _valor_efectivo(
+            edicion_row["valor_equipos_tipo"], edicion_row["valor_equipos"],
+            edicion_row["valor_equipos_pct"], inscriptos_revenue,
+        ),
         "fotos": fotos if fotos is not None else [],
     }
 
@@ -415,6 +536,7 @@ def list_talleres():
                 _get_modalidades(conn, r["id"]),
                 instituciones=_get_instituciones_taller(conn, r["taller_id"]),
                 fotos=_get_edicion_fotos(conn, r["id"]),
+                cuentas_pago=_get_cuentas_pago(conn, r["id"]),
             )
             for r in rows
         ]
@@ -439,6 +561,7 @@ def get_taller(slug: str, request: Request):
             _get_modalidades(conn, row["id"]), _get_trabajos_taller(conn, row["taller_id"]),
             instituciones=_get_instituciones_taller(conn, row["taller_id"]),
             fotos=_get_edicion_fotos(conn, row["id"]),
+            cuentas_pago=_get_cuentas_pago(conn, row["id"]),
         )
 
         # Próxima edición: misma concepto (taller_id), numero_edicion mayor
@@ -575,6 +698,10 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
             taller_id = edicion_row["taller_id"]
             # Clases reales (para el adjunto .ics del mail — ver más abajo).
             clases = _get_clases(conn, edicion_id)
+            # Cuentas de cobro (para el mail — ver ctx_cliente más abajo).
+            # Fetch DENTRO del `with`, mismo motivo que `clases`: se usa
+            # después de que el context manager cierra la conexión.
+            cuentas_pago_ctx = _get_cuentas_pago(conn, edicion_id)
 
             # F4c: cierre de inscripciones por fecha (NULL = siempre abierto).
             cierre = edicion_row["fecha_cierre_inscripcion"]
@@ -681,6 +808,17 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
             taller_nombre=edicion_row["nombre"], direccion=edicion_row["direccion"],
             slug=edicion_row["slug"], clases=clases,
         )
+    # `cuentas_pago_ctx` es la fuente real (0+ cuentas, lo que edita el admin
+    # desde "Precios y forma de pago"); `_cuentas_pago_efectivas` cae a los 3
+    # campos viejos SOLO si esa lista vino vacía (defensa en profundidad —
+    # no debería pasar tras el fix de `crear_edicion`).
+    cuentas_pago_html, cuentas_pago_text = _cuentas_pago_para_mail(
+        _cuentas_pago_efectivas(
+            cuentas_pago_ctx,
+            pago_alias=edicion_row["pago_alias"], pago_cbu=edicion_row["pago_cbu"],
+            pago_banco=edicion_row["pago_banco"],
+        )
+    )
     ctx_cliente = {
         "taller_nombre": edicion_row["nombre"],
         "nombre_pila": nombre_pila,
@@ -690,9 +828,8 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
         "horario": edicion_row["horario"],
         "direccion": edicion_row["direccion"],
         "precio_sena_str": _fmt_pesos(edicion_row["precio_sena"]),
-        "pago_alias": edicion_row["pago_alias"],
-        "pago_cbu": edicion_row["pago_cbu"],
-        "pago_banco": edicion_row["pago_banco"],
+        "cuentas_pago_html": cuentas_pago_html,
+        "cuentas_pago_text": cuentas_pago_text,
         "tipo_taller": edicion_row["tipo_taller"],
         "tiene_ics": bool(attachments),
     }
@@ -756,7 +893,8 @@ def get_oferta_cupo(token: str, request: Request):
     with get_db() as conn:
         row = conn.execute(
             """
-            SELECT ti.id, ti.nombre, ti.estado, e.fecha_inicio, e.fecha_fin, e.horario,
+            SELECT ti.id, ti.nombre, ti.estado, e.id AS edicion_id,
+                   e.fecha_inicio, e.fecha_fin, e.horario,
                    e.direccion, e.precio_sena, e.pago_alias, e.pago_cbu, e.pago_banco,
                    t.nombre AS taller_nombre
             FROM taller_inscripciones ti
@@ -766,10 +904,17 @@ def get_oferta_cupo(token: str, request: Request):
             """,
             (insid,),
         ).fetchone()
-    if row is None:
-        raise HTTPException(404, "Este link no es válido o venció.")
-    if row["estado"] != "cupo_ofrecido":
-        raise HTTPException(410, "Esta oferta ya no está disponible.")
+        if row is None:
+            raise HTTPException(404, "Este link no es válido o venció.")
+        if row["estado"] != "cupo_ofrecido":
+            raise HTTPException(410, "Esta oferta ya no está disponible.")
+        # Efectivas (fallback a los 3 campos viejos si la lista vino vacía —
+        # mismo criterio defensivo que el mail, ver _cuentas_pago_efectivas):
+        # el front (`DatosPago`) solo lee `cuentas_pago`, sin fallback propio.
+        cuentas_pago = _cuentas_pago_efectivas(
+            _get_cuentas_pago(conn, row["edicion_id"]),
+            pago_alias=row["pago_alias"], pago_cbu=row["pago_cbu"], pago_banco=row["pago_banco"],
+        )
     return {
         "taller_nombre": row["taller_nombre"],
         "nombre_pila": row["nombre"].split()[0],
@@ -778,9 +923,7 @@ def get_oferta_cupo(token: str, request: Request):
         "horario": row["horario"],
         "direccion": row["direccion"],
         "precio_sena_str": _fmt_pesos(row["precio_sena"]),
-        "pago_alias": row["pago_alias"],
-        "pago_cbu": row["pago_cbu"],
-        "pago_banco": row["pago_banco"],
+        "cuentas_pago": cuentas_pago,
     }
 
 
@@ -855,6 +998,8 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
             ).fetchone()
             # Clases reales (para el adjunto .ics del mail — ver más abajo).
             clases = _get_clases(conn, ins["edicion_id"])
+            # Cuentas de cobro (para el mail — mismo criterio que crear_inscripcion).
+            cuentas_pago_ctx = _get_cuentas_pago(conn, ins["edicion_id"])
         except Exception:
             conn.rollback()
             raise
@@ -863,6 +1008,13 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
     attachments = _ics_adjunto_taller(
         taller_nombre=edicion_row["taller_nombre"], direccion=edicion_row["direccion"],
         slug=edicion_row["slug"], clases=clases,
+    )
+    cuentas_pago_html, cuentas_pago_text = _cuentas_pago_para_mail(
+        _cuentas_pago_efectivas(
+            cuentas_pago_ctx,
+            pago_alias=edicion_row["pago_alias"], pago_cbu=edicion_row["pago_cbu"],
+            pago_banco=edicion_row["pago_banco"],
+        )
     )
     ctx_cliente = {
         "taller_nombre": edicion_row["taller_nombre"],
@@ -873,9 +1025,8 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
         "horario": edicion_row["horario"],
         "direccion": edicion_row["direccion"],
         "precio_sena_str": _fmt_pesos(edicion_row["precio_sena"]),
-        "pago_alias": edicion_row["pago_alias"],
-        "pago_cbu": edicion_row["pago_cbu"],
-        "pago_banco": edicion_row["pago_banco"],
+        "cuentas_pago_html": cuentas_pago_html,
+        "cuentas_pago_text": cuentas_pago_text,
         "tipo_taller": edicion_row["tipo_taller"],
         "tiene_ics": bool(attachments),
     }
@@ -907,6 +1058,19 @@ class ModalidadPagoBody(BaseModel):
     label: str
     nota: str = ""
     monto_total: int = Field(..., gt=0)
+    # Default 1 = pago único. El monto POR cuota se deriva de monto_total/
+    # n_cuotas en `_modalidad_dict` — nunca se manda ni se guarda a mano.
+    n_cuotas: int = Field(default=1, ge=1)
+
+
+class CuentaPagoBody(BaseModel):
+    # `id` presente = actualizar esa cuenta; ausente = nueva. `orden` es la
+    # posición en la lista recibida (no viaja como campo propio). Sin plata
+    # ni codigo — independiente de la modalidad de pago.
+    id: int | None = None
+    alias: str = ""
+    cbu: str = ""
+    banco: str = ""
 
 
 class ClaseBody(BaseModel):
@@ -943,15 +1107,22 @@ class EdicionCreateBody(BaseModel):
     activo: bool = False
     numero_edicion: int = 1
     # Economía del taller (ver `_regenerar_pedidos_taller`): si la edición usa
-    # el espacio del Estudio y/o equipos de alquiler, con un valor que el
-    # admin tipea a mano — 'mensual' (mismo valor cada mes) o 'total' (se
-    # reparte en partes iguales entre los meses de la edición).
+    # el espacio del Estudio y/o equipos de alquiler, con un valor — 'mensual'
+    # (mismo valor cada mes) o 'total' (se reparte en partes iguales entre los
+    # meses de la edición). `_tipo` decide CÓMO se determina ese valor: 'fijo'
+    # = lo tipea el admin (`valor_estudio`/`valor_equipos`, comportamiento de
+    # siempre); 'porcentaje' = un % (`valor_estudio_pct`/`valor_equipos_pct`,
+    # 0-100) sobre lo que van a pagar los inscriptos no en lista de espera.
     usa_estudio: bool = False
     valor_estudio: int = 0
     valor_estudio_modo: str = "mensual"
+    valor_estudio_tipo: str = "fijo"
+    valor_estudio_pct: int = 0
     usa_equipos: bool = False
     valor_equipos: int = 0
     valor_equipos_modo: str = "mensual"
+    valor_equipos_tipo: str = "fijo"
+    valor_equipos_pct: int = 0
 
 
 class TallerConceptoCreateBody(BaseModel):
@@ -1052,6 +1223,11 @@ class EdicionUpdateBody(BaseModel):
     activo: bool | None = None
     clases: list[ClaseBody] | None = None
     modalidades: list[ModalidadPagoBody] | None = None
+    # Cuentas de cobro (alias/cbu/banco) — lista, independiente de
+    # `modalidades`. Reemplaza a pago_alias/pago_cbu/pago_banco de arriba
+    # como lo que el admin edita; esos 3 campos quedan sin tocar por
+    # compatibilidad pero ya no los escribe la UI (ver PreciosSection).
+    cuentas_pago: list[CuentaPagoBody] | None = None
     # F4c: cierre de inscripciones. '' → borra el cierre (siempre abierto).
     fecha_cierre_inscripcion: str | None = None
     # Corrige el número de edición (ej. al cargar un taller con historia previa
@@ -1062,9 +1238,13 @@ class EdicionUpdateBody(BaseModel):
     usa_estudio: bool | None = None
     valor_estudio: int | None = None
     valor_estudio_modo: str | None = None
+    valor_estudio_tipo: str | None = None
+    valor_estudio_pct: int | None = None
     usa_equipos: bool | None = None
     valor_equipos: int | None = None
     valor_equipos_modo: str | None = None
+    valor_equipos_tipo: str | None = None
+    valor_equipos_pct: int | None = None
 
 
 @router.get("/admin/talleres")
@@ -1092,6 +1272,8 @@ def admin_list_talleres(request: Request):
                 _edicion_to_admin_dict(
                     e, _get_clases(conn, e["id"]), _get_modalidades(conn, e["id"]),
                     fotos=_get_edicion_fotos(conn, e["id"]),
+                    cuentas_pago=_get_cuentas_pago(conn, e["id"]),
+                    inscriptos_revenue=_revenue_inscriptos(conn, e["id"]),
                 )
                 for e in edicion_rows
             ]
@@ -1132,6 +1314,14 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
         raise HTTPException(400, "valor_estudio_modo debe ser 'mensual' o 'total'")
     if ed.valor_equipos_modo not in ("mensual", "total"):
         raise HTTPException(400, "valor_equipos_modo debe ser 'mensual' o 'total'")
+    if ed.valor_estudio_tipo not in ("fijo", "porcentaje"):
+        raise HTTPException(400, "valor_estudio_tipo debe ser 'fijo' o 'porcentaje'")
+    if not (0 <= ed.valor_estudio_pct <= 100):
+        raise HTTPException(400, "valor_estudio_pct debe estar entre 0 y 100")
+    if ed.valor_equipos_tipo not in ("fijo", "porcentaje"):
+        raise HTTPException(400, "valor_equipos_tipo debe ser 'fijo' o 'porcentaje'")
+    if not (0 <= ed.valor_equipos_pct <= 100):
+        raise HTTPException(400, "valor_equipos_pct debe estar entre 0 y 100")
 
     with get_db() as conn:
         try:
@@ -1203,8 +1393,10 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
                     "activo": ed.activo,
                     "usa_estudio": ed.usa_estudio, "valor_estudio": ed.valor_estudio,
                     "valor_estudio_modo": ed.valor_estudio_modo,
+                    "valor_estudio_tipo": ed.valor_estudio_tipo, "valor_estudio_pct": ed.valor_estudio_pct,
                     "usa_equipos": ed.usa_equipos, "valor_equipos": ed.valor_equipos,
                     "valor_equipos_modo": ed.valor_equipos_modo,
+                    "valor_equipos_tipo": ed.valor_equipos_tipo, "valor_equipos_pct": ed.valor_equipos_pct,
                 },
             )
             conn.commit()
@@ -1217,6 +1409,11 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
             # bloquea el próximo `ALTER TABLE`/lock de otra sesión (candado:
             # test_talleres_f2_db.py, se colgaba justo por esto).
             clases_out = _get_clases(conn, e_row["id"])
+            # `_get_cuentas_pago`, no `[]`: `crear_edicion` puede haber
+            # sembrado una fila desde pago_alias/cbu/banco (ver su docstring)
+            # — devolver `[]` a ciegas le mentiría al admin sobre lo que
+            # realmente quedó guardado.
+            cuentas_pago_out = _get_cuentas_pago(conn, e_row["id"])
             instructores_out = _get_instructores_taller(conn, taller_id)
             instituciones_out = _get_instituciones_taller(conn, taller_id)
         except Exception:
@@ -1224,7 +1421,11 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
             raise
 
     return _concepto_to_admin_dict(
-        t_row, [_edicion_to_admin_dict(e_row, clases_out, fotos=[])], instructores_out,
+        t_row,
+        [_edicion_to_admin_dict(
+            e_row, clases_out, fotos=[], cuentas_pago=cuentas_pago_out, inscriptos_revenue=0,
+        )],
+        instructores_out,
         instituciones=instituciones_out,
     )
 
@@ -1244,6 +1445,14 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
         raise HTTPException(400, "valor_estudio_modo debe ser 'mensual' o 'total'")
     if body.valor_equipos_modo not in ("mensual", "total"):
         raise HTTPException(400, "valor_equipos_modo debe ser 'mensual' o 'total'")
+    if body.valor_estudio_tipo not in ("fijo", "porcentaje"):
+        raise HTTPException(400, "valor_estudio_tipo debe ser 'fijo' o 'porcentaje'")
+    if not (0 <= body.valor_estudio_pct <= 100):
+        raise HTTPException(400, "valor_estudio_pct debe estar entre 0 y 100")
+    if body.valor_equipos_tipo not in ("fijo", "porcentaje"):
+        raise HTTPException(400, "valor_equipos_tipo debe ser 'fijo' o 'porcentaje'")
+    if not (0 <= body.valor_equipos_pct <= 100):
+        raise HTTPException(400, "valor_equipos_pct debe estar entre 0 y 100")
 
     with get_db() as conn:
         try:
@@ -1288,8 +1497,10 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
                     "activo": body.activo,
                     "usa_estudio": body.usa_estudio, "valor_estudio": body.valor_estudio,
                     "valor_estudio_modo": body.valor_estudio_modo,
+                    "valor_estudio_tipo": body.valor_estudio_tipo, "valor_estudio_pct": body.valor_estudio_pct,
                     "usa_equipos": body.usa_equipos, "valor_equipos": body.valor_equipos,
                     "valor_equipos_modo": body.valor_equipos_modo,
+                    "valor_equipos_tipo": body.valor_equipos_tipo, "valor_equipos_pct": body.valor_equipos_pct,
                 },
             )
             conn.commit()
@@ -1297,11 +1508,17 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
             # lo necesita para subir portadas / upsert sin refetch). DENTRO del
             # `with` — ver comentario gemelo en admin_create_taller.
             clases_out = _get_clases(conn, e_row["id"])
+            # `_get_cuentas_pago`, no `[]` — ver comentario gemelo en
+            # admin_create_taller (`crear_edicion` puede haber sembrado una
+            # fila desde pago_alias/cbu/banco).
+            cuentas_pago_out = _get_cuentas_pago(conn, e_row["id"])
         except Exception:
             conn.rollback()
             raise
 
-    return _edicion_to_admin_dict(e_row, clases_out, fotos=[])
+    return _edicion_to_admin_dict(
+        e_row, clases_out, fotos=[], cuentas_pago=cuentas_pago_out, inscriptos_revenue=0,
+    )
 
 
 @router.patch("/admin/talleres/{taller_id}")
@@ -1383,6 +1600,8 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
                 _edicion_to_admin_dict(
                     e, _get_clases(conn, e["id"]), _get_modalidades(conn, e["id"]),
                     fotos=_get_edicion_fotos(conn, e["id"]),
+                    cuentas_pago=_get_cuentas_pago(conn, e["id"]),
+                    inscriptos_revenue=_revenue_inscriptos(conn, e["id"]),
                 )
                 for e in edicion_rows
             ]
@@ -1449,6 +1668,14 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
         if body.valor_estudio_modo not in ("mensual", "total"):
             raise HTTPException(400, "valor_estudio_modo debe ser 'mensual' o 'total'")
         sets.append("valor_estudio_modo = %s"); params.append(body.valor_estudio_modo)
+    if body.valor_estudio_tipo is not None:
+        if body.valor_estudio_tipo not in ("fijo", "porcentaje"):
+            raise HTTPException(400, "valor_estudio_tipo debe ser 'fijo' o 'porcentaje'")
+        sets.append("valor_estudio_tipo = %s"); params.append(body.valor_estudio_tipo)
+    if body.valor_estudio_pct is not None:
+        if not (0 <= body.valor_estudio_pct <= 100):
+            raise HTTPException(400, "valor_estudio_pct debe estar entre 0 y 100")
+        sets.append("valor_estudio_pct = %s"); params.append(body.valor_estudio_pct)
     if body.usa_equipos is not None:
         sets.append("usa_equipos = %s"); params.append(body.usa_equipos)
     if body.valor_equipos is not None:
@@ -1457,6 +1684,14 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
         if body.valor_equipos_modo not in ("mensual", "total"):
             raise HTTPException(400, "valor_equipos_modo debe ser 'mensual' o 'total'")
         sets.append("valor_equipos_modo = %s"); params.append(body.valor_equipos_modo)
+    if body.valor_equipos_tipo is not None:
+        if body.valor_equipos_tipo not in ("fijo", "porcentaje"):
+            raise HTTPException(400, "valor_equipos_tipo debe ser 'fijo' o 'porcentaje'")
+        sets.append("valor_equipos_tipo = %s"); params.append(body.valor_equipos_tipo)
+    if body.valor_equipos_pct is not None:
+        if not (0 <= body.valor_equipos_pct <= 100):
+            raise HTTPException(400, "valor_equipos_pct debe estar entre 0 y 100")
+        sets.append("valor_equipos_pct = %s"); params.append(body.valor_equipos_pct)
 
     new_clases = None
     if body.clases is not None:
@@ -1466,7 +1701,16 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
     if body.modalidades is not None:
         new_modalidades = _validar_modalidades(body.modalidades)
 
-    if not sets and new_clases is None and new_modalidades is None:
+    new_cuentas_pago = None
+    if body.cuentas_pago is not None:
+        new_cuentas_pago = _validar_cuentas_pago(body.cuentas_pago)
+
+    if (
+        not sets
+        and new_clases is None
+        and new_modalidades is None
+        and new_cuentas_pago is None
+    ):
         raise HTTPException(400, "No hay campos para actualizar")
 
     with get_db() as conn:
@@ -1532,6 +1776,9 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
             if new_modalidades is not None:
                 _upsert_modalidades(conn, edicion_id, new_modalidades)
 
+            if new_cuentas_pago is not None:
+                _upsert_cuentas_pago(conn, edicion_id, new_cuentas_pago)
+
             if sets:
                 sets.append("updated_at = NOW()")
                 params.append(edicion_id)
@@ -1550,11 +1797,16 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
             # DENTRO del `with` — ver comentario gemelo en admin_create_taller.
             clases_out = _get_clases(conn, edicion_id)
             modalidades_out = _get_modalidades(conn, edicion_id)
+            cuentas_pago_out = _get_cuentas_pago(conn, edicion_id)
             fotos_out = _get_edicion_fotos(conn, edicion_id)
+            inscriptos_revenue_out = _revenue_inscriptos(conn, edicion_id)
         except Exception:
             conn.rollback()
             raise
-    return _edicion_to_admin_dict(e_row, clases_out, modalidades_out, fotos=fotos_out)
+    return _edicion_to_admin_dict(
+        e_row, clases_out, modalidades_out, fotos=fotos_out, cuentas_pago=cuentas_pago_out,
+        inscriptos_revenue=inscriptos_revenue_out,
+    )
 
 
 @router.delete("/admin/talleres/{taller_id}", status_code=200)

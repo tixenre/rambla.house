@@ -77,21 +77,73 @@ def _upsert_modalidades(conn, edicion_id: int, modalidades: list) -> None:
         if mid and mid in existentes:
             conn.execute(
                 "UPDATE edicion_modalidades_pago SET orden = %s, codigo = %s, "
-                "label = %s, nota = %s, monto_total = %s "
+                "label = %s, nota = %s, monto_total = %s, n_cuotas = %s "
                 "WHERE id = %s AND edicion_id = %s",
-                (orden, m["codigo"], m["label"], m["nota"], m["monto_total"], mid, edicion_id),
+                (
+                    orden,
+                    m["codigo"],
+                    m["label"],
+                    m["nota"],
+                    m["monto_total"],
+                    m["n_cuotas"],
+                    mid,
+                    edicion_id,
+                ),
             )
             vistos.add(mid)
         else:
             conn.execute(
                 "INSERT INTO edicion_modalidades_pago "
-                "(edicion_id, orden, codigo, label, nota, monto_total) "
-                "VALUES (%s, %s, %s, %s, %s, %s)",
-                (edicion_id, orden, m["codigo"], m["label"], m["nota"], m["monto_total"]),
+                "(edicion_id, orden, codigo, label, nota, monto_total, n_cuotas) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                (
+                    edicion_id,
+                    orden,
+                    m["codigo"],
+                    m["label"],
+                    m["nota"],
+                    m["monto_total"],
+                    m["n_cuotas"],
+                ),
             )
     sobrantes = existentes - vistos
     for mid in sobrantes:
         conn.execute(
             "DELETE FROM edicion_modalidades_pago WHERE id = %s AND edicion_id = %s",
             (mid, edicion_id),
+        )
+
+
+def _upsert_cuentas_pago(conn, edicion_id: int, cuentas: list) -> None:
+    """Sincroniza las cuentas de cobro de una edición (mismo patrón que
+    _upsert_modalidades): con `id` → UPDATE; sin `id` → INSERT; ids que no
+    vienen en la lista → DELETE. El `orden` es la posición en la lista
+    recibida."""
+    existentes = {
+        r["id"]
+        for r in conn.execute(
+            "SELECT id FROM edicion_cuentas_pago WHERE edicion_id = %s", (edicion_id,)
+        ).fetchall()
+    }
+    vistos: set[int] = set()
+    for orden, c in enumerate(cuentas):
+        cid = c.get("id")
+        if cid and cid in existentes:
+            conn.execute(
+                "UPDATE edicion_cuentas_pago SET orden = %s, alias = %s, "
+                "cbu = %s, banco = %s WHERE id = %s AND edicion_id = %s",
+                (orden, c["alias"], c["cbu"], c["banco"], cid, edicion_id),
+            )
+            vistos.add(cid)
+        else:
+            conn.execute(
+                "INSERT INTO edicion_cuentas_pago (edicion_id, orden, alias, cbu, banco) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (edicion_id, orden, c["alias"], c["cbu"], c["banco"]),
+            )
+    sobrantes = existentes - vistos
+    for cid in sobrantes:
+        conn.execute(
+            "DELETE FROM edicion_cuentas_pago WHERE id = %s AND edicion_id = %s",
+            (cid, edicion_id),
         )

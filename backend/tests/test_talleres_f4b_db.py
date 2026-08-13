@@ -216,6 +216,38 @@ def test_claim_cupo_via_token_reclama_y_suma_cupo(taller_base):
     assert r_post2.status_code == 410, r_post2.text
 
 
+def test_get_oferta_cupo_incluye_cuentas_pago(taller_base):
+    """Hallazgo del supervisor (2026-08-13): la página pública "completá tu
+    seña" (`GET /talleres/sena/{token}`) seguía devolviendo los 3 campos
+    viejos (`pago_alias`/`pago_cbu`/`pago_banco`) en vez de `cuentas_pago` —
+    el front (`DatosPago`) solo lee `cuentas_pago`, así que un cambio de
+    cuenta desde "Precios y forma de pago" no se reflejaba acá."""
+    from fastapi.testclient import TestClient
+    import main
+    t = taller_base
+
+    ed = _crear_edicion_activa(t, cupos_total=5, cupos_confirmados=3)
+    t.admin_update_edicion(
+        ed["id"],
+        t.EdicionUpdateBody(cuentas_pago=[
+            t.CuentaPagoBody(alias="rambla.f4b", cbu="", banco="Galicia"),
+        ]),
+        None,
+    )
+    ins_id = _insertar_inscripcion(ed["id"], en_lista_espera=True, estado="en_espera")
+    t.admin_ofrecer_cupo(TALLER_ID, ins_id, None)
+    token = t._generar_token_cupo(ins_id)
+
+    client = TestClient(main.app)
+    r = client.get(f"/api/talleres/sena/{token}")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["cuentas_pago"] == [
+        {"id": data["cuentas_pago"][0]["id"], "alias": "rambla.f4b", "cbu": "", "banco": "Galicia"}
+    ]
+    assert "pago_alias" not in data, "los 3 campos viejos ya no se exponen acá"
+
+
 def test_upload_comprobante_sena_no_necesita_slug(taller_base, monkeypatch):
     """F5: la página pública 'completá tu seña' solo tiene el token — el
     upload de comprobante tiene que resolver todo por ahí, sin slug."""

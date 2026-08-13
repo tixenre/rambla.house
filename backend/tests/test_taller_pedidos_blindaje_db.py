@@ -49,6 +49,7 @@ pytestmark = [
 
 PEDIDO_TALLER_ID = 9_451_101
 PEDIDO_TURNO_REAL_ID = 9_451_102  # turno real de estudio, SOLO para el test de _revalidar_stock
+PEDIDO_TALLER_TURNOS_ID = 9_451_103  # taller con turnos-embebidos por clase (2026-08-13)
 NOMBRE_EQUIPOS = "Uso de equipos — Test blindaje taller"
 FD, FH = "2026-09-01T00:00:00", "2026-09-30T23:59:59"
 VALOR_ESTUDIO = 30_000
@@ -275,6 +276,95 @@ def test_put_items_taller_permite_agregar_matricula_conservando_el_auto(db_setup
     assert NOMBRE_EQUIPOS in nombres
     assert any(it["equipo_id"] == centinela_id for it in pedido["items"])
     assert pedido["monto_total"] == VALOR_ESTUDIO + VALOR_EQUIPOS + 15_000
+
+
+def test_put_items_taller_con_turnos_por_clase_permite_agregar_matricula(db_setup):
+    """Bug real encontrado en la auditoría de consumidores del turno-embebido-
+    por-clase (2026-08-13, `_crear_turnos_taller_del_mes`): con el modelo
+    NUEVO (N turnos embebidos, uno por clase real, `turno_estudio_id IS NOT
+    NULL`) — a diferencia del fixture plano de `db_setup` arriba (un único
+    ítem con `turno_estudio_id IS NULL`) — el front (`pedidoToItems`) NUNCA
+    manda de vuelta esas filas: viven en su propia sección, no en el array
+    genérico de ítems. Antes del fix, `_validar_reemplazo_items_taller`
+    contaba esas filas igual en `actuales` (sin filtrar `turno_estudio_id`) y
+    exigía que el centinela reapareciera en `items_nuevos` — algo que este
+    endpoint NUNCA recibe para una fila de turno — así que CUALQUIER
+    guardado de ítems (incluida la única vía real de agregar una matrícula)
+    rechazaba con 409 en un taller con clases cargadas."""
+    from database import get_db
+    from routes.alquileres.core import _apply_pedido_items
+    from routes.alquileres.modelos import PedidoItem
+
+    centinela_id = db_setup
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO alquileres (id, cliente_nombre, estado, tipo, fecha_desde, fecha_hasta, "
+            "monto_total) VALUES (%s,'Taller test turnos por clase','confirmado','taller',%s,%s,%s)",
+            (PEDIDO_TALLER_TURNOS_ID, FD, FH, VALOR_ESTUDIO + VALOR_EQUIPOS),
+        )
+        for desde, hasta in [
+            ("2026-09-06 10:00", "2026-09-06 13:00"),
+            ("2026-09-13 10:00", "2026-09-13 13:00"),
+        ]:
+            turno_id = conn.execute(
+                "INSERT INTO alquiler_turnos_estudio (pedido_id, fecha_desde, fecha_hasta) "
+                "VALUES (%s,%s,%s) RETURNING id",
+                (PEDIDO_TALLER_TURNOS_ID, desde, hasta),
+            ).fetchone()["id"]
+            conn.execute(
+                "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, "
+                "subtotal, cobro_modo, turno_estudio_id) VALUES (%s,%s,1,%s,%s,'fijo',%s)",
+                (
+                    PEDIDO_TALLER_TURNOS_ID, centinela_id,
+                    VALOR_ESTUDIO // 2, VALOR_ESTUDIO // 2, turno_id,
+                ),
+            )
+        conn.execute(
+            "INSERT INTO alquiler_items (pedido_id, equipo_id, nombre_libre, cantidad, "
+            "precio_jornada, subtotal, cobro_modo) "
+            "VALUES (%s,NULL,%s,1,%s,%s,'fijo')",
+            (PEDIDO_TALLER_TURNOS_ID, NOMBRE_EQUIPOS, VALOR_EQUIPOS, VALOR_EQUIPOS),
+        )
+        conn.commit()
+
+        # Mismo shape que `pedidoToItems` (front) manda de vuelta: SIN las
+        # filas de turno, la línea "Uso de equipos" tal cual estaba, más una
+        # matrícula nueva — no debe rechazar.
+        pedido = _apply_pedido_items(
+            conn, PEDIDO_TALLER_TURNOS_ID,
+            [
+                PedidoItem(
+                    equipo_id=None, nombre_libre=NOMBRE_EQUIPOS, cantidad=1,
+                    precio_jornada=VALOR_EQUIPOS, cobro_modo="fijo",
+                ),
+                PedidoItem(
+                    equipo_id=None, nombre_libre="Matrícula Juan Pérez", cantidad=1,
+                    precio_jornada=15_000, cobro_modo="fijo",
+                ),
+            ],
+        )
+        conn.commit()
+
+        nombres = {it["nombre_libre"] for it in pedido["items"] if it["equipo_id"] is None}
+        assert "Matrícula Juan Pérez" in nombres
+        assert NOMBRE_EQUIPOS in nombres
+
+        # Las 2 filas de turno sobreviven intactas — este endpoint no las toca.
+        n_turnos = conn.execute(
+            "SELECT COUNT(*) AS n FROM alquiler_items "
+            "WHERE pedido_id=%s AND turno_estudio_id IS NOT NULL",
+            (PEDIDO_TALLER_TURNOS_ID,),
+        ).fetchone()["n"]
+        assert n_turnos == 2
+    finally:
+        conn.execute("DELETE FROM alquiler_items WHERE pedido_id=%s", (PEDIDO_TALLER_TURNOS_ID,))
+        conn.execute(
+            "DELETE FROM alquiler_turnos_estudio WHERE pedido_id=%s", (PEDIDO_TALLER_TURNOS_ID,)
+        )
+        conn.execute("DELETE FROM alquileres WHERE id=%s", (PEDIDO_TALLER_TURNOS_ID,))
+        conn.commit()
+        conn.close()
 
 
 def test_revalidar_stock_taller_se_saltea(db_setup):

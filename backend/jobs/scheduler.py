@@ -78,6 +78,7 @@ def _loop() -> None:
     from jobs.purgar_logs_comunicacion import purgar_logs_comunicacion_viejos
     from jobs.reconciliacion import chequear_reconciliacion_y_alertar
     from jobs.ipc import actualizar_ipc_job
+    from jobs.regenerar_pedidos_talleres import regenerar_pedidos_talleres_del_mes
 
     ultima_manana = None      # recordatorios de retiro, pasada de la mañana
     ultima_vispera = None     # recordatorios de retiro, pasada de la víspera
@@ -90,6 +91,7 @@ def _loop() -> None:
     ultima_purga_logs_comunicacion = None  # retención de emails_log/whatsapp_log (independiente)
     ultima_reconciliacion = None  # alerta de reconciliación de plata (#1184 Fase 2 — dormida hasta ahora)
     ultima_actualizacion_ipc = None  # refresh de la serie de IPC/INDEC (Estadísticas ajustadas)
+    ultima_regen_talleres = None  # pedido mensual de talleres: recién al llegar el mes (2026-08-13)
     while True:
         ahora = now_ar()
         try:
@@ -200,6 +202,15 @@ def _loop() -> None:
                 actualizar_ipc_job()
         except Exception:
             logger.exception("Falló el refresh de la serie de IPC")
+        try:
+            # Pedido mensual de talleres: 1×/día, independiente de los demás.
+            # Idempotente por diseño (el propio job solo genera lo que falta,
+            # ver su docstring) — un reinicio no duplica ni churnea nada.
+            if ahora.date() != ultima_regen_talleres:
+                ultima_regen_talleres = ahora.date()
+                regenerar_pedidos_talleres_del_mes()
+        except Exception:
+            logger.exception("Falló el barrido mensual de pedidos de talleres")
         time.sleep(_CHECK_EVERY_S)
 
 

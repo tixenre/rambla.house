@@ -453,6 +453,12 @@ export type Sesion = {
   portada_url: string;
 };
 
+/** Una cuenta de cobro (alias/cbu/banco) de una edición de taller — mismo
+ *  shape que `services.talleres.queries.clases._cuenta_pago_dict` (backend).
+ *  `id` ausente en una entrada sintetizada desde los 3 campos viejos
+ *  (`_cuentas_pago_efectivas`, backend) — nunca se manda de vuelta al editar. */
+export type CuentaPago = { id?: number | null; alias: string; cbu: string; banco: string };
+
 export type Taller = {
   id: number;
   slug: string;
@@ -518,13 +524,25 @@ export type Taller = {
   video: { youtube_id: string; embed_url: string; poster: string | null } | null;
   // F4a: modalidades de pago. NUNCA vacío para el público — sin configurar
   // ninguna, el backend sintetiza 1 sola opción ("Pago total" = precio_total).
+  // `monto_cuota`/`monto_cuota_str` = monto_total derivado por n_cuotas (el
+  // backend ya lo calcula — nunca se recalcula acá, ver 2026-06-29 "el front
+  // no calcula plata"). n_cuotas=1 (pago único) = mismo display que siempre.
   modalidades: {
+    id: number | null;
     codigo: string;
     label: string;
     nota: string;
     monto_total: number;
     monto_total_str: string;
+    n_cuotas: number;
+    monto_cuota: number;
+    monto_cuota_str: string;
   }[];
+  // Cuentas de cobro (alias/cbu/banco) — lista, independiente de la
+  // modalidad de pago; el público ve todas y elige a cuál transferir. Sin
+  // fallback sintético (a diferencia de modalidades arriba): [] = ninguna
+  // cargada.
+  cuentas_pago: CuentaPago[];
   // F4c: FAQ del concepto, trabajos pasados (solo YouTube, sin testimonios) y
   // cierre de inscripciones de ESTA edición (null = sin cierre).
   faqs: { pregunta: string; respuesta: string }[];
@@ -605,9 +623,7 @@ export type OfertaCupo = {
   horario: string;
   direccion: string;
   precio_sena_str: string;
-  pago_alias: string;
-  pago_cbu: string;
-  pago_banco: string;
+  cuentas_pago: CuentaPago[];
 };
 
 class ApiStatusError extends Error {

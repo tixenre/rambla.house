@@ -1,4 +1,4 @@
-import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
+import { HeadContent, Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 import { QueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Toaster } from "@/design-system/ui/sonner";
@@ -80,12 +80,15 @@ function CartSync() {
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   component: () => (
-    <RootErrorBoundary>
-      <FaviconSync />
-      <CartSync />
-      <Outlet />
-      <Toaster richColors position="top-right" />
-    </RootErrorBoundary>
+    <>
+      <HeadContent />
+      <RootErrorBoundary>
+        <FaviconSync />
+        <CartSync />
+        <Outlet />
+        <Toaster richColors position="top-right" />
+      </RootErrorBoundary>
+    </>
   ),
   notFoundComponent: NotFoundComponent,
 });

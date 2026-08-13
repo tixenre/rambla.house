@@ -209,6 +209,31 @@ def test_modalidades_upsert_sincroniza(taller_base):
     assert d2["modalidades"][0]["id"] == id_3_cuotas, "el update preserva el id (no fue delete+insert)"
 
 
+def test_modalidades_n_cuotas_deriva_monto_cuota(taller_base):
+    """n_cuotas > 1 -> el backend deriva monto_cuota = monto_total/n_cuotas
+    (nunca se manda ni se guarda a mano). n_cuotas ausente (no lo manda un
+    caller viejo) -> default 1, mismo comportamiento que siempre."""
+    t = taller_base
+    ed = _crear_edicion(t)
+
+    d = t.admin_update_edicion(
+        ed["id"],
+        t.EdicionUpdateBody(modalidades=[
+            t.ModalidadPagoBody(codigo="mensual", label="Mensual", monto_total=320_000, n_cuotas=4),
+            t.ModalidadPagoBody(codigo="total", label="Pago total", monto_total=300_000),
+        ]),
+        None,
+    )
+    mensual, total = d["modalidades"]
+    assert mensual["n_cuotas"] == 4
+    assert mensual["monto_cuota"] == 80_000
+    assert mensual["monto_cuota_str"] == "$80.000"
+    assert mensual["monto_total_str"] == "$320.000"
+    # sin n_cuotas explícito -> default 1, monto_cuota == monto_total
+    assert total["n_cuotas"] == 1
+    assert total["monto_cuota"] == 300_000
+
+
 @pytest.mark.parametrize("kwargs,fragment", [
     ({"codigo": "", "label": "x", "monto_total": 100}, "código"),
     ({"codigo": "x", "label": "", "monto_total": 100}, "label"),

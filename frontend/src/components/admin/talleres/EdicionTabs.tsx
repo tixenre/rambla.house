@@ -5,7 +5,12 @@ import { Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { talleresAdminApi } from "@/lib/admin/api/talleres";
-import type { ClaseBody, EdicionAdmin, ModalidadPagoBody } from "@/lib/admin/api/types";
+import type {
+  ClaseBody,
+  CuentaPagoBody,
+  EdicionAdmin,
+  ModalidadPagoBody,
+} from "@/lib/admin/api/types";
 import { Button } from "@/design-system/ui/button";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
 import { IconButton } from "@/design-system/ui/icon-button";
@@ -150,9 +155,28 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
   const [usaEstudio, setUsaEstudio] = useState(edicion.usa_estudio);
   const [valorEstudio, setValorEstudio] = useState(String(edicion.valor_estudio));
   const [valorEstudioModo, setValorEstudioModo] = useState(edicion.valor_estudio_modo);
+  const [valorEstudioTipo, setValorEstudioTipo] = useState(edicion.valor_estudio_tipo);
+  const [valorEstudioPct, setValorEstudioPct] = useState(String(edicion.valor_estudio_pct));
   const [usaEquipos, setUsaEquipos] = useState(edicion.usa_equipos);
   const [valorEquipos, setValorEquipos] = useState(String(edicion.valor_equipos));
   const [valorEquiposModo, setValorEquiposModo] = useState(edicion.valor_equipos_modo);
+  const [valorEquiposTipo, setValorEquiposTipo] = useState(edicion.valor_equipos_tipo);
+  const [valorEquiposPct, setValorEquiposPct] = useState(String(edicion.valor_equipos_pct));
+  // Formas de pagar: lista de planes (0+, el dueño puede ofrecer "pago único"
+  // Y "en cuotas" a la vez para que el cliente elija) — pero NINGUNO tipea un
+  // total: el monto de cada plan sale siempre del Precio total de arriba
+  // ("por qué debería ponerle manualmente el valor de la cuota si ya tenemos
+  // el total"), salvo el % de descuento opcional del pago único, que resta
+  // sobre ese mismo total en vez de pedir un segundo número absoluto. El
+  // monto por cuota lo sigue derivando el backend, nunca se tipea.
+  const [planes, setPlanes] = useState<PlanForm[]>(
+    (edicion.modalidades ?? []).map((m) => planToForm(m, edicion.precio_total)),
+  );
+  // Cuentas de cobro: lista independiente de las formas de pago — el
+  // cliente ve todas juntas y elige a cuál transferir (pedido explícito del
+  // dueño). Sin plata derivada, así que reusa `CuentaPagoBody` directo, sin
+  // un "Form" intermedio como en modalidades.
+  const [cuentas, setCuentas] = useState<CuentaPagoBody[]>(edicion.cuentas_pago ?? []);
 
   useEffect(() => {
     setPrecioTotal(String(edicion.precio_total));
@@ -161,29 +185,53 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
     setUsaEstudio(edicion.usa_estudio);
     setValorEstudio(String(edicion.valor_estudio));
     setValorEstudioModo(edicion.valor_estudio_modo);
+    setValorEstudioTipo(edicion.valor_estudio_tipo);
+    setValorEstudioPct(String(edicion.valor_estudio_pct));
     setUsaEquipos(edicion.usa_equipos);
     setValorEquipos(String(edicion.valor_equipos));
     setValorEquiposModo(edicion.valor_equipos_modo);
+    setValorEquiposTipo(edicion.valor_equipos_tipo);
+    setValorEquiposPct(String(edicion.valor_equipos_pct));
+    setPlanes((edicion.modalidades ?? []).map((m) => planToForm(m, edicion.precio_total)));
+    setCuentas(edicion.cuentas_pago ?? []);
   }, [edicion.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const mut = useMutation({
-    mutationFn: (body: {
-      precio_total: number;
-      precio_sena: number;
-      cupos_total: number;
-      usa_estudio: boolean;
-      valor_estudio: number;
-      valor_estudio_modo: "mensual" | "total";
-      usa_equipos: boolean;
-      valor_equipos: number;
-      valor_equipos_modo: "mensual" | "total";
-    }) => talleresAdminApi.updateEdicion(edicion.id, body),
+    mutationFn: (body: object) => talleresAdminApi.updateEdicion(edicion.id, body),
     onSuccess: (updated) => {
-      toast.success("Precios actualizados");
+      toast.success("Precio y forma de pago actualizados");
       updateEdicionInCache(qc, updated);
+      // Guardar acá SIEMPRE re-corre `_regenerar_pedidos_taller` en el
+      // backend (cambie o no la Economía) — sin esto, "Pedidos generados"
+      // se queda mostrando el monto viejo hasta el próximo refetch.
+      qc.invalidateQueries({ queryKey: ["admin", "ediciones", edicion.id, "pedidos"] });
     },
     onError: (e) => toast.error((e as Error).message),
   });
+
+  function agregarPlan() {
+    setPlanes((p) => [...p, { tipoPago: "unico", nCuotas: "2", descuentoPct: "", nota: "" }]);
+  }
+
+  function quitarPlan(idx: number) {
+    setPlanes((p) => p.filter((_, i) => i !== idx));
+  }
+
+  function actualizarPlan(idx: number, patch: Partial<PlanForm>) {
+    setPlanes((p) => p.map((plan, i) => (i === idx ? { ...plan, ...patch } : plan)));
+  }
+
+  function agregarCuenta() {
+    setCuentas((c) => [...c, { alias: "", cbu: "", banco: "" }]);
+  }
+
+  function quitarCuenta(idx: number) {
+    setCuentas((c) => c.filter((_, i) => i !== idx));
+  }
+
+  function actualizarCuenta(idx: number, patch: Partial<CuentaPagoBody>) {
+    setCuentas((c) => c.map((cuenta, i) => (i === idx ? { ...cuenta, ...patch } : cuenta)));
+  }
 
   function handleSave() {
     const total = parseInt(precioTotal, 10);
@@ -191,6 +239,8 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
     const cupos = parseInt(cuposTotal, 10);
     const valEstudio = parseInt(valorEstudio, 10);
     const valEquipos = parseInt(valorEquipos, 10);
+    const pctEstudio = parseInt(valorEstudioPct, 10);
+    const pctEquipos = parseInt(valorEquiposPct, 10);
     if (isNaN(total) || isNaN(sena) || isNaN(cupos) || cupos < 1) {
       toast.error("Ingresá números válidos");
       return;
@@ -199,9 +249,79 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
       toast.error(`No podés bajar cupos a ${cupos}: hay ${edicion.cupos_confirmados} confirmados`);
       return;
     }
-    if ((usaEstudio && isNaN(valEstudio)) || (usaEquipos && isNaN(valEquipos))) {
+    if (usaEstudio && valorEstudioTipo === "fijo" && isNaN(valEstudio)) {
       toast.error("Ingresá un valor válido para lo que usa el taller");
       return;
+    }
+    if (usaEquipos && valorEquiposTipo === "fijo" && isNaN(valEquipos)) {
+      toast.error("Ingresá un valor válido para lo que usa el taller");
+      return;
+    }
+    if (
+      usaEstudio &&
+      valorEstudioTipo === "porcentaje" &&
+      (isNaN(pctEstudio) || pctEstudio < 0 || pctEstudio > 100)
+    ) {
+      toast.error("El % del Estudio tiene que estar entre 0 y 100");
+      return;
+    }
+    if (
+      usaEquipos &&
+      valorEquiposTipo === "porcentaje" &&
+      (isNaN(pctEquipos) || pctEquipos < 0 || pctEquipos > 100)
+    ) {
+      toast.error("El % de equipos tiene que estar entre 0 y 100");
+      return;
+    }
+    const modalidades: ModalidadPagoBody[] = [];
+    for (const plan of planes) {
+      if (plan.tipoPago === "unico") {
+        const pct = plan.descuentoPct.trim() === "" ? 0 : parseFloat(plan.descuentoPct);
+        if (isNaN(pct) || pct < 0 || pct >= 100) {
+          toast.error("El % de descuento tiene que estar entre 0 y 99");
+          return;
+        }
+        modalidades.push({
+          id: plan.id ?? null,
+          codigo: "total",
+          label: "Pago único",
+          nota: plan.nota.trim(),
+          monto_total: pct > 0 ? Math.round(total * (1 - pct / 100)) : total,
+          n_cuotas: 1,
+        });
+      } else {
+        const cuotas = parseInt(plan.nCuotas, 10);
+        if (isNaN(cuotas) || cuotas < 2) {
+          toast.error("La cantidad de cuotas tiene que ser 2 o más");
+          return;
+        }
+        modalidades.push({
+          id: plan.id ?? null,
+          codigo: `cuotas-${cuotas}`,
+          label: `En ${cuotas} cuotas`,
+          nota: plan.nota.trim(),
+          monto_total: total,
+          n_cuotas: cuotas,
+        });
+      }
+    }
+    const codigos = modalidades.map((m) => m.codigo);
+    if (new Set(codigos).size !== codigos.length) {
+      toast.error(
+        "Hay dos formas de pago iguales — no repitas 'Pago único' o la misma cantidad de cuotas",
+      );
+      return;
+    }
+    const cuentasOut: CuentaPagoBody[] = [];
+    for (const c of cuentas) {
+      const alias = (c.alias ?? "").trim();
+      const cbu = (c.cbu ?? "").trim();
+      const banco = (c.banco ?? "").trim();
+      if (!alias && !cbu && !banco) {
+        toast.error("Cada cuenta de cobro necesita al menos alias, CBU o banco");
+        return;
+      }
+      cuentasOut.push({ id: c.id ?? null, alias, cbu, banco });
     }
     mut.mutate({
       precio_total: total,
@@ -210,9 +330,15 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
       usa_estudio: usaEstudio,
       valor_estudio: isNaN(valEstudio) ? 0 : valEstudio,
       valor_estudio_modo: valorEstudioModo,
+      valor_estudio_tipo: valorEstudioTipo,
+      valor_estudio_pct: isNaN(pctEstudio) ? 0 : pctEstudio,
       usa_equipos: usaEquipos,
       valor_equipos: isNaN(valEquipos) ? 0 : valEquipos,
       valor_equipos_modo: valorEquiposModo,
+      valor_equipos_tipo: valorEquiposTipo,
+      valor_equipos_pct: isNaN(pctEquipos) ? 0 : pctEquipos,
+      modalidades,
+      cuentas_pago: cuentasOut,
     });
   }
 
@@ -259,6 +385,161 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
         </div>
       </div>
 
+      <div className="border-t border-border/40 pt-5 flex flex-col gap-4">
+        <div>
+          <p className="text-sm font-medium text-ink">Formas de pagar</p>
+          <p className="text-xs text-muted-foreground">
+            El monto sale siempre del Precio total de arriba — podés ofrecer más de una forma (ej:
+            pago único con descuento Y en cuotas) para que el cliente elija.
+          </p>
+        </div>
+        {planes.length === 0 && (
+          <p className="text-sm text-muted-foreground italic">
+            Sin formas configuradas — el público paga el Precio total de arriba de una sola vez.
+          </p>
+        )}
+        {planes.map((plan, idx) => (
+          <div key={plan.id ?? `nuevo-${idx}`} className="flex flex-col gap-1.5">
+            <div className="grid sm:grid-cols-[160px_120px_1fr_auto] gap-2 items-end">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  Modalidad
+                </label>
+                <Select
+                  value={plan.tipoPago}
+                  onValueChange={(v) => actualizarPlan(idx, { tipoPago: v as "unico" | "cuotas" })}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="unico">Pago único</SelectItem>
+                    <SelectItem value="cuotas">En cuotas</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {plan.tipoPago === "cuotas" ? (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                    Cantidad
+                  </label>
+                  <Input
+                    type="number"
+                    min={2}
+                    value={plan.nCuotas}
+                    onChange={(e) => actualizarPlan(idx, { nCuotas: e.target.value })}
+                  />
+                </div>
+              ) : (
+                <div className="flex flex-col gap-1.5">
+                  <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                    % descuento
+                  </label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={99}
+                    placeholder="0"
+                    value={plan.descuentoPct}
+                    onChange={(e) => actualizarPlan(idx, { descuentoPct: e.target.value })}
+                  />
+                </div>
+              )}
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  Nota (opcional)
+                </label>
+                <Input
+                  value={plan.nota}
+                  onChange={(e) => actualizarPlan(idx, { nota: e.target.value })}
+                  placeholder="ej: transferencia, efectivo"
+                />
+              </div>
+              <IconButton
+                aria-label="Quitar forma de pago"
+                size="sm"
+                onClick={() => quitarPlan(idx)}
+                className="text-muted-foreground hover:text-destructive mb-0.5"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </IconButton>
+            </div>
+            {previewPlan(plan, precioTotal) && (
+              <p className="text-xs text-rosa-ink pl-0.5">{previewPlan(plan, precioTotal)}</p>
+            )}
+          </div>
+        ))}
+        <div>
+          <Button variant="outline" size="sm" onClick={agregarPlan} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" />
+            Agregar forma de pago
+          </Button>
+        </div>
+      </div>
+
+      <div className="border-t border-border/40 pt-5 flex flex-col gap-4">
+        <div>
+          <p className="text-sm font-medium text-ink">Cuentas de cobro</p>
+          <p className="text-xs text-muted-foreground">
+            Alias/CBU/banco para transferir — podés cargar más de una, el cliente ve todas y elige a
+            cuál transferir.
+          </p>
+        </div>
+        {cuentas.length === 0 && (
+          <p className="text-sm text-muted-foreground italic">
+            Sin cuentas cargadas — el cliente no va a ver dónde transferir.
+          </p>
+        )}
+        {cuentas.map((cuenta, idx) => (
+          <div
+            key={cuenta.id ?? `nueva-${idx}`}
+            className="grid sm:grid-cols-[1fr_1fr_1fr_auto] gap-2 items-end"
+          >
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Alias
+              </label>
+              <Input
+                value={cuenta.alias ?? ""}
+                onChange={(e) => actualizarCuenta(idx, { alias: e.target.value })}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                CBU
+              </label>
+              <Input
+                value={cuenta.cbu ?? ""}
+                onChange={(e) => actualizarCuenta(idx, { cbu: e.target.value })}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Banco
+              </label>
+              <Input
+                value={cuenta.banco ?? ""}
+                onChange={(e) => actualizarCuenta(idx, { banco: e.target.value })}
+              />
+            </div>
+            <IconButton
+              aria-label="Quitar cuenta"
+              size="sm"
+              onClick={() => quitarCuenta(idx)}
+              className="text-muted-foreground hover:text-destructive mb-0.5"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </IconButton>
+          </div>
+        ))}
+        <div>
+          <Button variant="outline" size="sm" onClick={agregarCuenta} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" />
+            Agregar cuenta
+          </Button>
+        </div>
+      </div>
+
       {/* Economía del taller: si usa el Estudio y/o equipos de alquiler, para
           que el pedido mensual auto-generado atribuya esa plata (Estudio →
           caja Estudio, equipos → Rental) — ver `_regenerar_pedidos_taller`. */}
@@ -271,71 +552,141 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
           <Switch checked={usaEstudio} onCheckedChange={setUsaEstudio} />
         </div>
         {usaEstudio && (
-          <div className="flex items-end gap-3 pl-1">
-            <div className="flex flex-col gap-1.5 flex-1">
-              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Valor Estudio (ARS)
-              </label>
-              <Input
-                type="number"
-                min={0}
-                value={valorEstudio}
-                onChange={(e) => setValorEstudio(e.target.value)}
-              />
-            </div>
-            <Select
-              value={valorEstudioModo}
-              onValueChange={(v) => setValorEstudioModo(v as "mensual" | "total")}
-            >
-              <SelectTrigger className="w-[130px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="mensual">por mes</SelectItem>
-                <SelectItem value="total">total</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <EconomiaCampo
+            label="Valor Estudio"
+            tipo={valorEstudioTipo}
+            onTipoChange={setValorEstudioTipo}
+            valor={valorEstudio}
+            onValorChange={setValorEstudio}
+            pct={valorEstudioPct}
+            onPctChange={setValorEstudioPct}
+            modo={valorEstudioModo}
+            onModoChange={setValorEstudioModo}
+            revenue={edicion.inscriptos_revenue}
+            pctGuardado={edicion.valor_estudio_pct}
+            efectivo={edicion.valor_estudio_efectivo}
+            cuposConfirmados={edicion.cupos_confirmados}
+          />
         )}
         <div className="flex items-center justify-between gap-3 pt-2 border-t border-border/40">
           <label className="text-sm">Usa equipos de alquiler</label>
           <Switch checked={usaEquipos} onCheckedChange={setUsaEquipos} />
         </div>
         {usaEquipos && (
-          <div className="flex items-end gap-3 pl-1">
-            <div className="flex flex-col gap-1.5 flex-1">
-              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Valor equipos (ARS)
-              </label>
-              <Input
-                type="number"
-                min={0}
-                value={valorEquipos}
-                onChange={(e) => setValorEquipos(e.target.value)}
-              />
-            </div>
-            <Select
-              value={valorEquiposModo}
-              onValueChange={(v) => setValorEquiposModo(v as "mensual" | "total")}
-            >
-              <SelectTrigger className="w-[130px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="mensual">por mes</SelectItem>
-                <SelectItem value="total">total</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <EconomiaCampo
+            label="Valor equipos"
+            tipo={valorEquiposTipo}
+            onTipoChange={setValorEquiposTipo}
+            valor={valorEquipos}
+            onValorChange={setValorEquipos}
+            pct={valorEquiposPct}
+            onPctChange={setValorEquiposPct}
+            modo={valorEquiposModo}
+            onModoChange={setValorEquiposModo}
+            revenue={edicion.inscriptos_revenue}
+            pctGuardado={edicion.valor_equipos_pct}
+            efectivo={edicion.valor_equipos_efectivo}
+            cuposConfirmados={edicion.cupos_confirmados}
+          />
         )}
       </div>
 
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={mut.isPending} className="gap-2">
           {mut.isPending ? <Spinner size="sm" /> : <Save className="h-4 w-4" />}
-          Guardar precios
+          Guardar
         </Button>
       </div>
+    </div>
+  );
+}
+
+// Un campo de "Economía del taller" (Estudio o equipos): 'fijo' = ARS tipeado
+// a mano (de siempre); 'porcentaje' = % sobre lo que pagan los inscriptos no
+// en lista de espera. El preview ("hoy esto da $X") viene SIEMPRE resuelto
+// por el backend (`efectivo`/`revenue`, props ya calculadas) — refleja el
+// último % GUARDADO, no lo que se está tipeando ahora mismo (el front no
+// calcula plata, ver MEMORIA 2026-06-29); se actualiza recién al guardar.
+function EconomiaCampo({
+  label,
+  tipo,
+  onTipoChange,
+  valor,
+  onValorChange,
+  pct,
+  onPctChange,
+  modo,
+  onModoChange,
+  revenue,
+  pctGuardado,
+  efectivo,
+  cuposConfirmados,
+}: {
+  label: string;
+  tipo: "fijo" | "porcentaje";
+  onTipoChange: (v: "fijo" | "porcentaje") => void;
+  valor: string;
+  onValorChange: (v: string) => void;
+  pct: string;
+  onPctChange: (v: string) => void;
+  modo: "mensual" | "total";
+  onModoChange: (v: "mensual" | "total") => void;
+  revenue: number;
+  pctGuardado: number;
+  efectivo: number;
+  cuposConfirmados: number;
+}) {
+  return (
+    <div className="flex flex-col gap-3 pl-1">
+      <Select value={tipo} onValueChange={(v) => onTipoChange(v as "fijo" | "porcentaje")}>
+        <SelectTrigger className="w-[210px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="fijo">Monto fijo</SelectItem>
+          <SelectItem value="porcentaje">% de los inscriptos</SelectItem>
+        </SelectContent>
+      </Select>
+      <div className="flex items-end gap-3">
+        <div className="flex flex-col gap-1.5 flex-1">
+          <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+            {tipo === "porcentaje" ? `${label} (%)` : `${label} (ARS)`}
+          </label>
+          {tipo === "porcentaje" ? (
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={pct}
+              onChange={(e) => onPctChange(e.target.value)}
+            />
+          ) : (
+            <Input
+              type="number"
+              min={0}
+              value={valor}
+              onChange={(e) => onValorChange(e.target.value)}
+            />
+          )}
+        </div>
+        <Select value={modo} onValueChange={(v) => onModoChange(v as "mensual" | "total")}>
+          <SelectTrigger className="w-[130px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="mensual">por mes</SelectItem>
+            <SelectItem value="total">total</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {tipo === "porcentaje" && (
+        <p className="text-2xs text-muted-foreground">
+          {cuposConfirmados} inscripto{cuposConfirmados === 1 ? "" : "s"} anotados suman{" "}
+          {fmtArs(revenue)}. Con el {pctGuardado}% guardado, hoy esto da{" "}
+          <span className="text-ink font-semibold">{fmtArs(efectivo)}</span> — se recalcula al
+          guardar.
+        </p>
+      )}
     </div>
   );
 }
@@ -343,18 +694,12 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
 export function PagosSection({ edicion }: { edicion: EdicionAdmin }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
-    pago_alias: edicion.pago_alias ?? "",
-    pago_cbu: edicion.pago_cbu ?? "",
-    pago_banco: edicion.pago_banco ?? "",
     direccion: edicion.direccion ?? "",
     fecha_cierre_inscripcion: edicion.fecha_cierre_inscripcion ?? "",
   });
 
   useEffect(() => {
     setForm({
-      pago_alias: edicion.pago_alias ?? "",
-      pago_cbu: edicion.pago_cbu ?? "",
-      pago_banco: edicion.pago_banco ?? "",
       direccion: edicion.direccion ?? "",
       fecha_cierre_inscripcion: edicion.fecha_cierre_inscripcion ?? "",
     });
@@ -369,25 +714,18 @@ export function PagosSection({ edicion }: { edicion: EdicionAdmin }) {
     onError: (e) => toast.error((e as Error).message),
   });
 
-  const tf = (label: string, key: keyof typeof form) => (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-        {label}
-      </label>
-      <Input
-        value={form[key]}
-        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-      />
-    </div>
-  );
-
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid sm:grid-cols-2 gap-4">{tf("Dirección", "direccion")}</div>
-      <div className="grid sm:grid-cols-3 gap-4">
-        {tf("Alias de pago", "pago_alias")}
-        {tf("CBU", "pago_cbu")}
-        {tf("Banco", "pago_banco")}
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+            Dirección
+          </label>
+          <Input
+            value={form.direccion}
+            onChange={(e) => setForm((f) => ({ ...f, direccion: e.target.value }))}
+          />
+        </div>
       </div>
       <div className="border-t border-border/40 pt-4">
         <div className="grid sm:grid-cols-2 gap-4">
@@ -409,170 +747,60 @@ export function PagosSection({ edicion }: { edicion: EdicionAdmin }) {
       <div className="flex justify-end">
         <Button onClick={() => mut.mutate(form)} disabled={mut.isPending} className="gap-2">
           {mut.isPending ? <Spinner size="sm" /> : <Save className="h-4 w-4" />}
-          Guardar datos de pago
+          Guardar
         </Button>
       </div>
     </div>
   );
 }
 
-// F4a: modalidades de pago — sin motor de descuentos, el admin carga el
-// monto final de cada opción a mano ("3 cuotas", "un pago con descuento",
-// "ex alumnos"); los "%" de ahorro son texto libre en `nota`. Sin ninguna
-// configurada, el público ve 1 sola opción sintética ("Pago total").
-type ModalidadForm = {
+// F4a/F4b: formas de pagar — el monto de CADA plan sale del Precio total de
+// la edición (una sola fuente, nunca un segundo campo a mano); el único
+// número propio de un plan es el % de descuento del pago único (opcional,
+// resta sobre ese mismo total). El monto POR cuota lo deriva el backend
+// (`monto_total / n_cuotas`), nunca se tipea.
+type PlanForm = {
   id?: number | null;
-  codigo: string;
-  label: string;
+  tipoPago: "unico" | "cuotas";
+  nCuotas: string;
+  descuentoPct: string;
   nota: string;
-  monto_total: string;
 };
 
-function toModalidadForm(m: ModalidadPagoBody): ModalidadForm {
+/** Reconstruye el form de un plan ya guardado. Un pago único cuyo monto
+ * quedó por debajo del Precio total se interpreta como "traía un % de
+ * descuento" y se repuebla ese campo (redondeado) — nunca al revés, el
+ * descuento no se persiste aparte, solo el monto ya resuelto. */
+function planToForm(m: ModalidadPagoBody, precioTotalActual: number): PlanForm {
+  const esUnico = (m.n_cuotas ?? 1) <= 1;
+  let descuentoPct = "";
+  if (esUnico && precioTotalActual > 0 && m.monto_total < precioTotalActual) {
+    descuentoPct = String(Math.round((1 - m.monto_total / precioTotalActual) * 100));
+  }
   return {
     id: m.id,
-    codigo: m.codigo,
-    label: m.label,
+    tipoPago: esUnico ? "unico" : "cuotas",
+    nCuotas: String(m.n_cuotas ?? 2),
+    descuentoPct,
     nota: m.nota ?? "",
-    monto_total: String(m.monto_total),
   };
 }
 
-export function ModalidadesSection({ edicion }: { edicion: EdicionAdmin }) {
-  const qc = useQueryClient();
-  const [rows, setRows] = useState<ModalidadForm[]>(
-    (edicion.modalidades ?? []).map(toModalidadForm),
-  );
-
-  useEffect(() => {
-    setRows((edicion.modalidades ?? []).map(toModalidadForm));
-  }, [edicion.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const mut = useMutation({
-    mutationFn: (modalidades: ModalidadPagoBody[]) =>
-      talleresAdminApi.updateEdicion(edicion.id, { modalidades }),
-    onSuccess: (updated) => {
-      toast.success("Modalidades guardadas");
-      updateEdicionInCache(qc, updated);
-    },
-    onError: (e) => toast.error((e as Error).message),
-  });
-
-  function agregar() {
-    setRows((r) => [
-      ...r,
-      { codigo: "", label: "", nota: "", monto_total: String(edicion.precio_total || "") },
-    ]);
+/** Preview EN VIVO de qué va a ver el público con este plan — no se manda al
+ * backend (es el que ya recalcula al guardar), es solo para que el admin vea
+ * el resultado ANTES de guardar. */
+function previewPlan(plan: PlanForm, precioTotalStr: string): string | null {
+  const total = parseInt(precioTotalStr, 10);
+  if (isNaN(total) || total <= 0) return null;
+  if (plan.tipoPago === "unico") {
+    const pct = plan.descuentoPct.trim() === "" ? 0 : parseFloat(plan.descuentoPct);
+    const monto = !isNaN(pct) && pct > 0 && pct < 100 ? Math.round(total * (1 - pct / 100)) : total;
+    return `El público ve: ${fmtArs(monto)}, un solo pago`;
   }
-
-  function quitar(idx: number) {
-    setRows((r) => r.filter((_, i) => i !== idx));
-  }
-
-  function actualizar(idx: number, patch: Partial<ModalidadForm>) {
-    setRows((r) => r.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
-  }
-
-  function handleSave() {
-    const parsed: ModalidadPagoBody[] = [];
-    for (const row of rows) {
-      const codigo = row.codigo.trim();
-      const label = row.label.trim();
-      const monto = parseInt(row.monto_total, 10);
-      if (!codigo || !label) {
-        toast.error("Cada modalidad necesita código y label");
-        return;
-      }
-      if (isNaN(monto) || monto <= 0) {
-        toast.error(`La modalidad "${label}" necesita un monto válido`);
-        return;
-      }
-      parsed.push({ id: row.id, codigo, label, nota: row.nota.trim(), monto_total: monto });
-    }
-    const codigos = parsed.map((m) => m.codigo);
-    if (new Set(codigos).size !== codigos.length) {
-      toast.error("Hay códigos de modalidad repetidos");
-      return;
-    }
-    mut.mutate(parsed);
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      {rows.length === 0 && (
-        <p className="text-sm text-muted-foreground italic">
-          Sin modalidades configuradas — el público ve 1 sola opción ("Pago total", el precio de
-          arriba). Agregá modalidades si querés ofrecer cuotas o descuentos por forma de pago.
-        </p>
-      )}
-      {rows.map((row, idx) => (
-        <div
-          key={row.id ?? `nueva-${idx}`}
-          className="grid sm:grid-cols-[1fr_1fr_1fr_140px_auto] gap-2 items-end"
-        >
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Código
-            </label>
-            <Input
-              value={row.codigo}
-              onChange={(e) => actualizar(idx, { codigo: e.target.value })}
-              placeholder="3-cuotas"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Label
-            </label>
-            <Input
-              value={row.label}
-              onChange={(e) => actualizar(idx, { label: e.target.value })}
-              placeholder="3 cuotas"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Nota
-            </label>
-            <Input
-              value={row.nota}
-              onChange={(e) => actualizar(idx, { nota: e.target.value })}
-              placeholder="10% off"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Monto (ARS)
-            </label>
-            <Input
-              type="number"
-              min={1}
-              value={row.monto_total}
-              onChange={(e) => actualizar(idx, { monto_total: e.target.value })}
-            />
-          </div>
-          <IconButton
-            aria-label="Quitar modalidad"
-            size="sm"
-            onClick={() => quitar(idx)}
-            className="text-muted-foreground hover:text-destructive mb-0.5"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </IconButton>
-        </div>
-      ))}
-      <div className="flex justify-between pt-1">
-        <Button variant="outline" size="sm" onClick={agregar} className="gap-1.5">
-          <Plus className="h-3.5 w-3.5" />
-          Agregar modalidad
-        </Button>
-        <Button onClick={handleSave} disabled={mut.isPending} className="gap-2">
-          {mut.isPending ? <Spinner size="sm" /> : <Save className="h-4 w-4" />}
-          Guardar modalidades
-        </Button>
-      </div>
-    </div>
-  );
+  const cuotas = parseInt(plan.nCuotas, 10);
+  if (isNaN(cuotas) || cuotas < 2) return null;
+  const porCuota = Math.round(total / cuotas);
+  return `El público ve: ${cuotas} cuotas de ${fmtArs(porCuota)} (total ${fmtArs(total)})`;
 }
 
 // Puente Talleres → Pedidos (Fase 1, #1308): antes había que buscar a mano en

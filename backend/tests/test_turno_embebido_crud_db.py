@@ -47,6 +47,7 @@ EQ_RENTAL_ID = 9_488_010
 EQ_SUELTO_ID = 9_488_011
 PEDIDO_ID = 9_488_020          # pedido diaria mixto (contenedor)
 PEDIDO_ESTUDIO_ID = 9_488_021  # standalone, para el conflicto de espacio
+PEDIDO_TALLER_ID = 9_488_022   # taller con turno embebido por clase (2026-08-13)
 
 
 @pytest.fixture
@@ -452,6 +453,67 @@ def test_eliminar_un_turno_deja_intacto_a_su_hermano(conn):
 
 
 # ── Listado (services/alquileres/queries/detalle.py::_turnos_embebidos) ──────
+
+# ── Taller: editar/eliminar rechazan el contenedor (2026-08-13) ──────────────
+# `_crear_turnos_taller_del_mes` (services/talleres/commands/economia.py) crea
+# turnos embebidos por clase para un pedido `tipo='taller'` sin pasar por
+# `agregar_turno_embebido` (que los rechazaría) — la fuente de verdad de esas
+# clases/franjas es Talleres (`clases_taller`), no este pedido. Editar/borrar
+# un turno de taller por esta vía (defensa en profundidad — el front tampoco
+# lo expone, ver `TurnosEstudioSection`) desincronizaría la fila del
+# `alquiler_turnos_estudio` de la clase real sin que nada lo note.
+
+
+def _crear_pedido_taller_con_turno(conn):
+    estudio = _centinela(conn)
+    conn.execute(
+        "INSERT INTO alquileres (id, cliente_nombre, estado, tipo, "
+        "fecha_desde, fecha_hasta, monto_total) "
+        "VALUES (%s,'Taller CRUD turno','confirmado','taller','2032-04-01','2032-04-30',15000)",
+        (PEDIDO_TALLER_ID,),
+    )
+    turno_id = conn.execute(
+        "INSERT INTO alquiler_turnos_estudio (pedido_id, fecha_desde, fecha_hasta) "
+        "VALUES (%s,'2032-04-11 10:00','2032-04-11 13:00') RETURNING id",
+        (PEDIDO_TALLER_ID,),
+    ).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, precio_jornada, subtotal, "
+        "cobro_modo, turno_estudio_id) VALUES (%s,%s,1,15000,15000,'fijo',%s)",
+        (PEDIDO_TALLER_ID, estudio["equipo_id"], turno_id),
+    )
+    return turno_id
+
+
+def test_editar_turno_rechaza_pedido_taller(conn):
+    from fastapi import HTTPException
+    from services.estudio.commands.reserva import editar_turno_embebido
+
+    turno_id = _crear_pedido_taller_con_turno(conn)
+    with pytest.raises(HTTPException) as exc:
+        editar_turno_embebido(conn, turno_id, fecha="2032-04-11", start="15:00", horas=2)
+    assert exc.value.status_code == 409
+
+    # No se tocó nada: la franja original sigue igual.
+    turno = conn.execute(
+        "SELECT * FROM alquiler_turnos_estudio WHERE id=%s", (turno_id,)
+    ).fetchone()
+    assert turno["fecha_desde"].strftime("%H:%M") == "10:00"
+
+
+def test_eliminar_turno_rechaza_pedido_taller(conn):
+    from fastapi import HTTPException
+    from services.estudio.commands.reserva import eliminar_turno_embebido
+
+    turno_id = _crear_pedido_taller_con_turno(conn)
+    with pytest.raises(HTTPException) as exc:
+        eliminar_turno_embebido(conn, turno_id)
+    assert exc.value.status_code == 409
+
+    assert conn.execute(
+        "SELECT COUNT(*) AS n FROM alquiler_turnos_estudio WHERE id=%s", (turno_id,)
+    ).fetchone()["n"] == 1
+
 
 def test_get_alquiler_detail_incluye_turnos_embebidos(conn):
     from datetime import datetime

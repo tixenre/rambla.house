@@ -1,11 +1,16 @@
-import { parseDescripcionRica } from "@/lib/talleres/descripcionRica";
+import { parseDescripcionRica, type BloqueDescripcion } from "@/lib/talleres/descripcionRica";
 
-/** Renderiza descripción/público objetivo del taller con jerarquía real
- * (títulos, párrafos, listas numeradas con sub-viñetas) en vez de un bloque
- * de texto plano — ver `lib/talleres/descripcionRica.ts` para el formato. */
-export function DescripcionRica({ texto, className = "" }: { texto: string; className?: string }) {
-  if (!texto) return null;
-  const bloques = parseDescripcionRica(texto);
+/** Renderiza una lista de bloques YA parseados — separado de `DescripcionRica`
+ * para que la página del taller pueda partir el contenido en más de una card
+ * (ver `splitEnPrograma`) sin duplicar el switch de renderizado. */
+export function DescripcionBloques({
+  bloques,
+  className = "",
+}: {
+  bloques: BloqueDescripcion[];
+  className?: string;
+}) {
+  if (bloques.length === 0) return null;
 
   return (
     <div className={`flex flex-col gap-4 ${className}`}>
@@ -51,4 +56,12 @@ export function DescripcionRica({ texto, className = "" }: { texto: string; clas
       })}
     </div>
   );
+}
+
+/** Renderiza descripción/público objetivo del taller con jerarquía real
+ * (títulos, párrafos, listas numeradas con sub-viñetas) en vez de un bloque
+ * de texto plano — ver `lib/talleres/descripcionRica.ts` para el formato. */
+export function DescripcionRica({ texto, className = "" }: { texto: string; className?: string }) {
+  if (!texto) return null;
+  return <DescripcionBloques bloques={parseDescripcionRica(texto)} className={className} />;
 }

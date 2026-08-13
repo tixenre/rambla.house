@@ -6,9 +6,10 @@ import { PublicLayout } from "@/components/rental/shell/PublicLayout";
 import { SectionBanner } from "@/components/rental/landing/SectionBanner";
 import { EmptyState } from "@/design-system/composites/EmptyState";
 import { Grain } from "@/components/common/Grain";
+import { LogoMark } from "@/components/rental/shell/LogoMark";
 import { apiGetTalleres, type Taller } from "@/lib/api";
-import { formatARS } from "@/lib/format";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
+import { heroImgProps } from "@/lib/studio/hero-photos";
 
 export const Route = createLazyFileRoute("/escuelas/")({
   component: TalleresPage,
@@ -30,6 +31,22 @@ function WorkshopCard({ taller }: { taller: Taller }) {
       ? `${taller.cupos_disponibles} lugar${taller.cupos_disponibles === 1 ? "" : "es"} disponible${taller.cupos_disponibles === 1 ? "" : "s"}`
       : "Lista de espera";
 
+  // Portada: mismo criterio que TallerGaleria (principal primero, después orden).
+  const portada = [...taller.fotos].sort(
+    (a, b) => Number(b.es_principal) - Number(a.es_principal) || a.orden - b.orden || a.id - b.id,
+  )[0] as (typeof taller.fotos)[number] | undefined;
+  const imgProps = portada
+    ? heroImgProps(
+        {
+          url: portada.url,
+          urlSm: portada.url_sm ?? undefined,
+          urlAvif: portada.url_avif ?? undefined,
+          urlSmAvif: portada.url_sm_avif ?? undefined,
+        },
+        { eager: false },
+      )
+    : null;
+
   return (
     <Link
       to="/escuelas/$slug"
@@ -40,28 +57,52 @@ function WorkshopCard({ taller }: { taller: Taller }) {
           : "border-border/60 bg-background hover:border-rosa/40 hover:shadow-md"
       }`}
     >
-      {/* Bloque oscuro izquierdo */}
-      <div className="relative bg-ink sm:w-64 shrink-0 px-6 pt-7 pb-6 flex flex-col justify-between overflow-hidden min-h-[130px] sm:min-h-0">
-        <Grain color="white" opacity={6} />
-        <div className="relative">
-          <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa mb-3">Taller</p>
-          <h2
-            className="font-display font-black lowercase leading-[0.9] tracking-[-0.015em] text-background"
-            style={{ fontSize: "clamp(1.2rem, 2vw, 1.5rem)" }}
-          >
-            {taller.nombre}
-          </h2>
-          <p className="text-background/55 mt-1.5 text-sm">{taller.subtitulo}</p>
-        </div>
+      {/* Bloque visual izquierdo: portada de la edición si hay, si no el
+          fondo ink+grain de siempre (el título vive en el cuerpo derecho).
+          Ningún aspect-ratio fijo probó calzar bien contra un texto de
+          longitud variable (3:2 quedaba corto — tramo de ink liso abajo
+          que se leía como foto rota; 4:5 quedaba largo — mucho aire entre
+          la descripción y "Ver taller"). La foto llena el alto REAL de la
+          columna de texto (items-stretch, sin self-start) — cero aire de
+          sobra en cualquier dirección, sea cual sea el largo del texto.
+          sm:w-80 (más ancho que el w-64 original) para que ese alto
+          variable no vuelva a leerse como un cartel angosto/alto. */}
+      <div className="relative sm:w-80 shrink-0 overflow-hidden min-h-[130px] sm:min-h-0 bg-ink">
+        {imgProps ? (
+          <img
+            key={portada!.id}
+            {...imgProps}
+            alt={taller.nombre}
+            className="absolute inset-0 h-full w-full object-cover"
+            draggable={false}
+          />
+        ) : (
+          <>
+            <Grain color="white" opacity={6} />
+            <div className="absolute inset-0 flex items-center justify-center">
+              <LogoMark className="h-28 w-28 text-rosa/40" />
+            </div>
+          </>
+        )}
         {soldOut && (
-          <span className="relative self-start mt-4 inline-block rounded-full border border-background/30 text-background/60 text-2xs font-mono tracking-widest uppercase px-3 py-1">
+          <span className="absolute left-4 top-4 inline-block rounded-full border border-background/30 bg-ink/40 text-background/80 text-2xs font-mono tracking-widest uppercase px-3 py-1 backdrop-blur-sm">
             Sold out
           </span>
         )}
       </div>
 
       {/* Cuerpo derecho */}
-      <div className="flex-1 px-6 sm:px-8 py-5 flex flex-col justify-between gap-3">
+      <div className="flex-1 px-6 sm:px-8 py-5 flex flex-col gap-3">
+        <div>
+          <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa mb-2">Taller</p>
+          <h2
+            className="font-display font-black lowercase leading-[0.95] tracking-[-0.015em] text-ink"
+            style={{ fontSize: "clamp(1.2rem, 2vw, 1.5rem)" }}
+          >
+            {taller.nombre}
+          </h2>
+          <p className="text-muted-foreground mt-1 text-sm">{taller.subtitulo}</p>
+        </div>
         <div className="flex flex-col gap-3 text-sm">
           <span className="flex items-baseline gap-1.5 font-semibold text-ink">
             <Calendar className="h-4 w-4 shrink-0" />
@@ -82,10 +123,7 @@ function WorkshopCard({ taller }: { taller: Taller }) {
         <p className="text-sm text-muted-foreground line-clamp-3">
           {taller.resumen || taller.descripcion}
         </p>
-        <div className="flex items-center justify-between pt-1">
-          <p className="text-xl font-bold text-ink tabular-nums">
-            {formatARS(taller.precio_total)}
-          </p>
+        <div className="flex items-center justify-end pt-1 mt-auto">
           <span className="inline-flex items-center gap-1.5 text-sm font-semibold text-ink group-hover:gap-3 transition-[gap]">
             Ver taller <ArrowRight className="h-4 w-4" />
           </span>

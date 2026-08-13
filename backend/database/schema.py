@@ -2022,6 +2022,39 @@ def _init_db_schema(conn):
         "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_equipos_modo_check "
         "CHECK (valor_equipos_modo IN ('mensual','total'))"
     )
+    # `_tipo` ('fijo'|'porcentaje') es un eje NUEVO y ortogonal a `_modo`
+    # (mensual/total sigue siendo "cómo se reparte entre los meses" — esto es
+    # "cómo se determina el valor"). 'fijo' = el admin tipea el monto directo
+    # (comportamiento de siempre, `valor_estudio`/`valor_equipos`). 'porcentaje'
+    # = el admin tipea un % (`valor_estudio_pct`/`valor_equipos_pct`, 0-100) y
+    # `_regenerar_pedidos_taller` deriva el monto de ESE % sobre el total que
+    # los inscriptos (no en lista de espera) de la edición van a pagar —
+    # `SUM(modalidad_monto)`, nunca un número tipeado a mano. Pedido explícito
+    # del dueño: "si se anotan 6 vamos al 50%".
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_estudio_tipo TEXT NOT NULL DEFAULT 'fijo'")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_estudio_pct INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_equipos_tipo TEXT NOT NULL DEFAULT 'fijo'")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_equipos_pct INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_estudio_tipo_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_estudio_tipo_check "
+        "CHECK (valor_estudio_tipo IN ('fijo','porcentaje'))"
+    )
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_equipos_tipo_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_equipos_tipo_check "
+        "CHECK (valor_equipos_tipo IN ('fijo','porcentaje'))"
+    )
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_estudio_pct_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_estudio_pct_check "
+        "CHECK (valor_estudio_pct BETWEEN 0 AND 100)"
+    )
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_equipos_pct_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_equipos_pct_check "
+        "CHECK (valor_equipos_pct BETWEEN 0 AND 100)"
+    )
     # Vincula cada pedido mensual generado con su edición, para regenerar
     # futuros sin tocar pasados/pagados (mismo patrón que `estudio_slot_id`).
     # NULL en todo pedido normal → cero impacto.
@@ -2148,11 +2181,16 @@ def _init_db_schema(conn):
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_poster_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL")
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_poster_url TEXT NOT NULL DEFAULT ''")
 
-    # Escuela v2 F4a: modalidades de pago por edición — montos finales
-    # cargados a mano por el admin (cero motor de descuentos/cuotas real; los
-    # "%" de ahorro son display en `nota`). Sin modalidades configuradas, el
-    # público ve un fallback sintético de 1 sola opción ("Pago total" =
-    # precio_total) — cero ruptura para ediciones que no las configuran.
+    # Escuela v2 F4a: modalidades de pago por edición — `monto_total` (costo
+    # total del plan) y `n_cuotas` cargados a mano por el admin; el monto POR
+    # cuota se deriva (`monto_total / n_cuotas`, redondeado) — nunca se tipea
+    # a mano, así no puede desincronizarse del total (fix #: comunicación de
+    # cuotas, antes el "N cuotas de $X" era texto libre en `label`/`nota` sin
+    # ninguna relación aritmética con `monto_total`). `n_cuotas=1` = pago
+    # único (default; el fallback sintético de abajo no lo setea, cae acá).
+    # Sin modalidades configuradas, el público ve un fallback sintético de 1
+    # sola opción ("Pago total" = precio_total) — cero ruptura para
+    # ediciones que no las configuran.
     conn.execute("""
         CREATE TABLE IF NOT EXISTS edicion_modalidades_pago (
             id          SERIAL PRIMARY KEY,
@@ -2162,13 +2200,40 @@ def _init_db_schema(conn):
             label       TEXT NOT NULL,
             nota        TEXT NOT NULL DEFAULT '',
             monto_total INTEGER NOT NULL,
+            n_cuotas    INTEGER NOT NULL DEFAULT 1,
             created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(edicion_id, codigo)
         )
     """)
     conn.execute(
+        "ALTER TABLE edicion_modalidades_pago ADD COLUMN IF NOT EXISTS n_cuotas INTEGER NOT NULL DEFAULT 1"
+    )
+    conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_edicion_modalidades_pago_edicion "
         "ON edicion_modalidades_pago(edicion_id, orden)"
+    )
+
+    # Cuentas de cobro por edición — lista (0+), mismo patrón que
+    # edicion_modalidades_pago pero SIN atarse a una forma de pago en
+    # particular: el cliente ve todas las opciones y elige a cuál
+    # transferir (pedido explícito del dueño, taller de Ariel). Reemplaza a
+    # ediciones_taller.pago_alias/pago_cbu/pago_banco (esas 3 columnas
+    # quedan sin tocar por compatibilidad — ver migración cu3nt4sp4g0 para
+    # el traspaso de datos existentes — pero el admin ya no las edita).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS edicion_cuentas_pago (
+            id          SERIAL PRIMARY KEY,
+            edicion_id  INTEGER NOT NULL REFERENCES ediciones_taller(id) ON DELETE CASCADE,
+            orden       INTEGER NOT NULL DEFAULT 0,
+            alias       TEXT NOT NULL DEFAULT '',
+            cbu         TEXT NOT NULL DEFAULT '',
+            banco       TEXT NOT NULL DEFAULT '',
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_edicion_cuentas_pago_edicion "
+        "ON edicion_cuentas_pago(edicion_id, orden)"
     )
 
     # Escuela v2 F4c: cierre de inscripciones por fecha. NULL = sin cierre
@@ -2218,6 +2283,16 @@ def _init_db_schema(conn):
     conn.execute(
         "ALTER TABLE taller_inscripciones "
         "ADD COLUMN IF NOT EXISTS edicion_id INTEGER REFERENCES ediciones_taller(id)"
+    )
+    # Sirve la query de `_revenue_inscriptos` (WHERE edicion_id = ... AND
+    # en_lista_espera = FALSE) — antes solo había índice por `taller_id`. Va
+    # ACÁ (no arriba, junto a `valor_estudio_pct`) porque `edicion_id` recién
+    # existe en la tabla desde la línea anterior — un CREATE INDEX que la
+    # referencie antes de esa ALTER TABLE rompe `init_db()` en una base
+    # nueva (bug real, cazado por `test_alembic_upgrade_db.py` en CI).
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_inscripciones_edicion_lista "
+        "ON taller_inscripciones(edicion_id, en_lista_espera)"
     )
     conn.execute(
         "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS estado TEXT"

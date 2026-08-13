@@ -46,15 +46,16 @@ import main  # noqa: E402 — importado después del gating, mismo patrón que l
 # Ids altos dedicados (bloque 9_484_xxx, sin uso en otros *_db.py).
 PEDIDO_A_ID = 9_484_101   # turno embebido HOY
 PEDIDO_B_ID = 9_484_102   # turno embebido MAÑANA
+PEDIDO_TALLER_ID = 9_484_103  # taller con turno embebido por clase HOY (2026-08-13)
 EQ_RENTAL_A = 9_484_201
 EQ_RENTAL_B = 9_484_202
 
 
 def _limpiar(conn):
-    ids = (PEDIDO_A_ID, PEDIDO_B_ID)
-    conn.execute("DELETE FROM alquiler_items WHERE pedido_id IN (%s,%s)", ids)
-    conn.execute("DELETE FROM alquiler_turnos_estudio WHERE pedido_id IN (%s,%s)", ids)
-    conn.execute("DELETE FROM alquileres WHERE id IN (%s,%s)", ids)
+    ids = (PEDIDO_A_ID, PEDIDO_B_ID, PEDIDO_TALLER_ID)
+    conn.execute("DELETE FROM alquiler_items WHERE pedido_id IN (%s,%s,%s)", ids)
+    conn.execute("DELETE FROM alquiler_turnos_estudio WHERE pedido_id IN (%s,%s,%s)", ids)
+    conn.execute("DELETE FROM alquileres WHERE id IN (%s,%s,%s)", ids)
     conn.execute("DELETE FROM equipos WHERE id IN (%s,%s)", (EQ_RENTAL_A, EQ_RENTAL_B))
 
 
@@ -146,6 +147,28 @@ def setup(monkeypatch):
             (PEDIDO_B_ID, centinela_id, turno_b_id),
         )
 
+        # Pedido TALLER: turno embebido por clase (2026-08-13) también HOY —
+        # mismo día que el pedido A, para probar que NO se cuela en ninguna de
+        # las listas junto a él (bug real: las queries de arriba joineaban
+        # `alquiler_turnos_estudio` → `alquileres` sin filtrar `a.tipo`).
+        conn.execute(
+            "INSERT INTO alquileres (id, cliente_nombre, estado, tipo, "
+            "fecha_desde, fecha_hasta, monto_total) "
+            "VALUES (%s,'Taller test dashboard turno','confirmado','taller',%s,%s,18000)",
+            (PEDIDO_TALLER_ID, hoy.date().replace(day=1).isoformat(), lejos_hasta),
+        )
+        turno_taller_id = conn.execute(
+            "INSERT INTO alquiler_turnos_estudio (pedido_id, fecha_desde, fecha_hasta) "
+            "VALUES (%s,%s,%s) RETURNING id",
+            (PEDIDO_TALLER_ID, hoy.replace(hour=9, minute=0, second=0, microsecond=0).isoformat(),
+             hoy.replace(hour=12, minute=0, second=0, microsecond=0).isoformat()),
+        ).fetchone()["id"]
+        conn.execute(
+            "INSERT INTO alquiler_items (pedido_id, equipo_id, cantidad, subtotal, "
+            "cobro_modo, turno_estudio_id) VALUES (%s,%s,1,18000,'fijo',%s)",
+            (PEDIDO_TALLER_ID, centinela_id, turno_taller_id),
+        )
+
         conn.commit()
         yield {"hoy": hoy, "centinela_nombre": centinela_nombre}
     finally:
@@ -172,6 +195,12 @@ def test_turno_embebido_hoy_aparece_en_salen_y_devuelven_hoy(client_con_db, setu
     # El pedido B (turno mañana, no hoy) NO debe aparecer hoy.
     assert not any(p["id"] == PEDIDO_B_ID for p in data["salen_hoy"])
     assert not any(p["id"] == PEDIDO_B_ID for p in data["devuelven_hoy"])
+
+    # El taller (turno embebido por clase, también HOY) NO debe aparecer acá
+    # — taller vive en Talleres, no en este dashboard de rental/Estudio (bug
+    # real 2026-08-13: la query no filtraba `a.tipo`).
+    assert not any(p["id"] == PEDIDO_TALLER_ID for p in data["salen_hoy"])
+    assert not any(p["id"] == PEDIDO_TALLER_ID for p in data["devuelven_hoy"])
 
 
 def test_turno_embebido_manana_aparece_en_devuelven_manana(client_con_db, setup):
@@ -232,3 +261,10 @@ def test_calendario_muestra_equipo_y_turno_como_filas_separadas(client_con_db, s
     )
     assert fila_turno_b is not None, eventos
     assert fila_turno_b["monto_total"] == 12000
+
+    # El taller NO debe aparecer en ninguna forma — ni como fila de equipo
+    # (`TIPOS_SIN_RETIRO_SQL` ya lo excluye, control preexistente) ni,
+    # sobre todo, como fila de turno sintético 'estudio' (bug real
+    # 2026-08-13: `rows_turnos` no filtraba `a.tipo`, así que la clase del
+    # taller se coloreaba/contaba como un turno real del Estudio acá).
+    assert not any(e["id"] == PEDIDO_TALLER_ID for e in eventos)
