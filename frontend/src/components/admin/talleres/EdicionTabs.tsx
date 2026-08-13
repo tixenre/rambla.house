@@ -442,6 +442,20 @@ function toModalidadForm(m: ModalidadPagoBody): ModalidadForm {
   };
 }
 
+/** Preview EN VIVO de qué va a ver el público con este Costo total + Cuotas
+ * — no se manda al backend (es el que ya recalcula al guardar), es solo
+ * para que el admin vea el resultado ANTES de guardar y no confunda el
+ * costo total del plan con el monto por cuota (confusión real: se tipeó
+ * "80000" pensando en el monto mensual, con Cuotas en 1 sin cambiar). */
+function previewModalidad(row: ModalidadForm): string | null {
+  const monto = parseInt(row.monto_total, 10);
+  if (isNaN(monto) || monto <= 0) return null;
+  const cuotas = parseInt(row.n_cuotas, 10);
+  if (isNaN(cuotas) || cuotas <= 1) return `El público ve: ${fmtArs(monto)}, un solo pago`;
+  const porCuota = Math.round(monto / cuotas);
+  return `El público ve: ${cuotas} cuotas de ${fmtArs(porCuota)} (total ${fmtArs(monto)})`;
+}
+
 export function ModalidadesSection({ edicion }: { edicion: EdicionAdmin }) {
   const qc = useQueryClient();
   const [rows, setRows] = useState<ModalidadForm[]>(
@@ -521,77 +535,85 @@ export function ModalidadesSection({ edicion }: { edicion: EdicionAdmin }) {
 
   return (
     <div className="flex flex-col gap-4">
+      <p className="text-xs text-muted-foreground -mt-1">
+        Formas de pagar este taller — un pago único, en cuotas, con descuento para ex alumnos, etc.
+        Cada plan tiene su propio costo (normalmente el mismo que el Precio total de arriba, salvo
+        que quieras ofrecer un descuento).
+      </p>
       {rows.length === 0 && (
         <p className="text-sm text-muted-foreground italic">
           Sin modalidades configuradas — el público ve 1 sola opción ("Pago total", el precio de
-          arriba). Agregá modalidades si querés ofrecer cuotas o descuentos por forma de pago.
+          arriba).
         </p>
       )}
       {rows.map((row, idx) => (
-        <div
-          key={row.id ?? `nueva-${idx}`}
-          className="grid sm:grid-cols-[1fr_1fr_1fr_140px_90px_auto] gap-2 items-end"
-        >
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Código
-            </label>
-            <Input
-              value={row.codigo}
-              onChange={(e) => actualizar(idx, { codigo: e.target.value })}
-              placeholder="3-cuotas"
-            />
+        <div key={row.id ?? `nueva-${idx}`} className="flex flex-col gap-1.5">
+          <div className="grid sm:grid-cols-[1fr_1fr_1fr_140px_90px_auto] gap-2 items-end">
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Código
+              </label>
+              <Input
+                value={row.codigo}
+                onChange={(e) => actualizar(idx, { codigo: e.target.value })}
+                placeholder="3-cuotas"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Label
+              </label>
+              <Input
+                value={row.label}
+                onChange={(e) => actualizar(idx, { label: e.target.value })}
+                placeholder="3 cuotas"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Nota
+              </label>
+              <Input
+                value={row.nota}
+                onChange={(e) => actualizar(idx, { nota: e.target.value })}
+                placeholder="10% off"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Costo total del plan (ARS)
+              </label>
+              <Input
+                type="number"
+                min={1}
+                value={row.monto_total}
+                onChange={(e) => actualizar(idx, { monto_total: e.target.value })}
+                placeholder="ej: 320000 (el costo COMPLETO, no por cuota)"
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Cuotas
+              </label>
+              <Input
+                type="number"
+                min={1}
+                value={row.n_cuotas}
+                onChange={(e) => actualizar(idx, { n_cuotas: e.target.value })}
+              />
+            </div>
+            <IconButton
+              aria-label="Quitar modalidad"
+              size="sm"
+              onClick={() => quitar(idx)}
+              className="text-muted-foreground hover:text-destructive mb-0.5"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </IconButton>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Label
-            </label>
-            <Input
-              value={row.label}
-              onChange={(e) => actualizar(idx, { label: e.target.value })}
-              placeholder="3 cuotas"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Nota
-            </label>
-            <Input
-              value={row.nota}
-              onChange={(e) => actualizar(idx, { nota: e.target.value })}
-              placeholder="10% off"
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Total (ARS)
-            </label>
-            <Input
-              type="number"
-              min={1}
-              value={row.monto_total}
-              onChange={(e) => actualizar(idx, { monto_total: e.target.value })}
-            />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Cuotas
-            </label>
-            <Input
-              type="number"
-              min={1}
-              value={row.n_cuotas}
-              onChange={(e) => actualizar(idx, { n_cuotas: e.target.value })}
-            />
-          </div>
-          <IconButton
-            aria-label="Quitar modalidad"
-            size="sm"
-            onClick={() => quitar(idx)}
-            className="text-muted-foreground hover:text-destructive mb-0.5"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </IconButton>
+          {previewModalidad(row) && (
+            <p className="text-xs text-rosa-ink pl-0.5">{previewModalidad(row)}</p>
+          )}
         </div>
       ))}
       <div className="flex justify-between pt-1">
