@@ -11,7 +11,7 @@ los call-sites existentes (`core.py`, `transiciones.py`, tests).
 """
 from fastapi import HTTPException
 
-from database import row_to_dict, MARCA_SUBQUERY
+from database import row_to_dict, to_datetime, MARCA_SUBQUERY
 from services.contenido import contenido_de_batch
 from services.pedidos_enriquecimiento import _enriquecer_pedido_con_cliente
 from services.talleres.queries.clases import clases_de_edicion
@@ -88,7 +88,7 @@ def _get_alquiler_detail(conn, id: int) -> dict:
     pedido["items"] = _get_alquiler_items(conn, id)
     pedido["pagos"] = _get_alquiler_pagos(conn, id)
     pedido["clases_taller"] = (
-        _clases_del_taller(conn, pedido["taller_edicion_id"])
+        _clases_del_taller(conn, pedido["taller_edicion_id"], pedido["fecha_desde"], pedido["fecha_hasta"])
         if pedido.get("taller_edicion_id") else []
     )
     pedido["pedido_principal"] = (
@@ -251,15 +251,30 @@ def _turnos_embebidos(conn, pedido_id: int) -> list[dict]:
     return [row_to_dict(r) for r in rows]
 
 
-def _clases_del_taller(conn, edicion_id: int) -> list[dict]:
+def _clases_del_taller(conn, edicion_id: int, fecha_desde, fecha_hasta) -> list[dict]:
     """Clases reales (fecha + franja horaria) de la edición de taller que
     generó este pedido — la verdad temporal que `_regenerar_pedidos_taller`
     NO pone en `fecha_desde`/`fecha_hasta` (esas son el mes contable
     completo, ver `services/talleres/commands/economia.py`). El front las usa
     para mostrar "sáb 15 · 10:00-14:00" en vez de "N jornadas" (bug real
     #445). Fuente única `services.talleres.queries.clases.clases_de_edicion`
-    — mismo dato que ve el admin en Talleres → la edición."""
-    return clases_de_edicion(conn, edicion_id)
+    — mismo dato que ve el admin en Talleres → la edición.
+
+    Filtradas al rango `fecha_desde`/`fecha_hasta` DE ESTE PEDIDO (no todas
+    las de la edición): desde que el pedido mensual se genera solo al llegar
+    el mes (2026-08-13, un pedido por mes en vez de uno por toda la edición),
+    una edición de varios meses tiene VARIOS pedidos — sin este filtro, el
+    pedido de un solo mes mostraba las clases de TODA la edición (bug real
+    reportado por el dueño: el pedido de diciembre listaba las 16 clases de
+    sep-dic, no solo las 3 de diciembre). Con un único pedido cubriendo toda
+    la edición (el caso viejo, `#445`) el filtro no cambia nada — el rango ya
+    cubre todas las clases."""
+    clases = clases_de_edicion(conn, edicion_id)
+    if not fecha_desde or not fecha_hasta:
+        return clases
+    desde = to_datetime(fecha_desde).date().isoformat()
+    hasta = to_datetime(fecha_hasta).date().isoformat()
+    return [c for c in clases if desde <= c["fecha"] <= hasta]
 
 
 def _enriquecer_pedido_con_total(conn, pedido: dict) -> dict:
