@@ -10,7 +10,7 @@ from database import get_db, now_ar, row_to_dict
 from auth.guards import require_admin
 from pedidos_vinculados import SIN_PRINCIPAL_SQL
 from reservas.estados import ESTADOS_EN_CALENDARIO
-from tipos_pedido import TIPOS_SIN_RETIRO_SQL
+from tipos_pedido import TIPOS_DERIVADOS_SQL, TIPOS_SIN_RETIRO_SQL
 
 router = APIRouter()
 
@@ -23,7 +23,16 @@ def _turnos_embebidos_del_dia(conn, campo: str, valor: str):
     devuelven_hoy/devuelven_manana, pero con la fecha/hora PROPIA del turno —
     que puede no coincidir con el retiro/devolución de equipos del pedido
     contenedor (`a`, que sigue siendo `tipo='diaria'`) — y su monto propio
-    (no el del pedido completo, que puede incluir equipos ajenos al turno)."""
+    (no el del pedido completo, que puede incluir equipos ajenos al turno).
+
+    `a.tipo NOT IN TIPOS_DERIVADOS_SQL` (2026-08-13): un pedido de TALLER
+    también puede llevar turnos embebidos (uno por clase real, ver
+    `services/talleres/commands/economia.py`) — sin este filtro, sus clases
+    aparecían acá como si el equipo "saliera"/"volviera" ese día, mezclado con
+    salidas/devoluciones reales de rental (taller ya está excluido de este
+    dashboard vía `TIPOS_SIN_RETIRO_SQL` en las 3 queries de rental de arriba;
+    el join a `alquiler_turnos_estudio` es el único costado que se había
+    quedado sin ese mismo filtro)."""
     return conn.execute(f"""
         SELECT a.id, a.cliente_nombre, ate.fecha_desde, ate.fecha_hasta,
                COALESCE((SELECT SUM(subtotal) FROM alquiler_items
@@ -31,6 +40,7 @@ def _turnos_embebidos_del_dia(conn, campo: str, valor: str):
         FROM alquiler_turnos_estudio ate
         JOIN alquileres a ON a.id = ate.pedido_id
         WHERE a.estado IN ('confirmado','retirado') AND a.{SIN_PRINCIPAL_SQL}
+          AND a.tipo NOT IN {TIPOS_DERIVADOS_SQL}
           AND ate.{campo}::date = %s
         ORDER BY ate.fecha_desde
     """, (valor,)).fetchall()
@@ -167,6 +177,14 @@ def get_calendario(
         # `tipo='estudio'` sintético (mismo criterio que `eventos_estudio` en
         # `estadisticas.py`) para que el front lo coloree vía
         # `estadoClaseEstudio` como cualquier turno del Estudio.
+        #
+        # `a.tipo NOT IN {TIPOS_DERIVADOS_SQL}` (2026-08-13): desde que un
+        # pedido de TALLER también puede llevar turnos embebidos (uno por
+        # clase real), este join dejaría de resolver solo a contenedores
+        # `diaria` — mismo criterio que la query de arriba (`p.tipo NOT IN
+        # TIPOS_SIN_RETIRO_SQL`, que ya excluye taller del calendario general
+        # por completo): el taller vive en Talleres + su propia página de
+        # pedido, no se mezcla acá con los turnos reales del Estudio.
         rows_turnos = conn.execute(f"""
             SELECT a.id, a.numero_pedido, a.cliente_nombre, a.estado,
                    'estudio' AS tipo, ate.fecha_desde, ate.fecha_hasta,
@@ -178,6 +196,7 @@ def get_calendario(
             FROM alquiler_turnos_estudio ate
             JOIN alquileres a ON a.id = ate.pedido_id
             WHERE a.estado IN {ESTADOS_EN_CALENDARIO}
+              AND a.tipo NOT IN {TIPOS_DERIVADOS_SQL}
               AND ate.fecha_hasta >= %s AND ate.fecha_desde <= %s
             ORDER BY ate.fecha_desde
         """, (desde, hasta)).fetchall()

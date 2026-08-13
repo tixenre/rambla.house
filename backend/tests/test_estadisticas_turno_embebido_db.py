@@ -62,6 +62,7 @@ CLIENTE_STANDALONE_ID = 9_483_002
 EQUIPO_NORMAL_ID = 9_483_010
 PEDIDO_MIXTO_ID = 9_483_020        # tipo='diaria': equipo normal + turno embebido
 PEDIDO_STANDALONE_ID = 9_483_021   # tipo='estudio': turno real, otro cliente
+PEDIDO_TALLER_ID = 9_483_022       # tipo='taller': turno embebido por clase (2026-08-13)
 
 DUENO_TEST = "Rental Test 1308-F2.2"
 MES = "2031-05"
@@ -76,12 +77,16 @@ STANDALONE_DESDE, STANDALONE_HASTA = f"{MES}-15 10:00", f"{MES}-15 13:00"  # 3 h
 
 def _limpiar(conn):
     conn.execute(
-        "DELETE FROM alquiler_items WHERE pedido_id IN (%s, %s)",
-        (PEDIDO_MIXTO_ID, PEDIDO_STANDALONE_ID),
+        "DELETE FROM alquiler_items WHERE pedido_id IN (%s, %s, %s)",
+        (PEDIDO_MIXTO_ID, PEDIDO_STANDALONE_ID, PEDIDO_TALLER_ID),
     )
-    conn.execute("DELETE FROM alquiler_turnos_estudio WHERE pedido_id = %s", (PEDIDO_MIXTO_ID,))
     conn.execute(
-        "DELETE FROM alquileres WHERE id IN (%s, %s)", (PEDIDO_MIXTO_ID, PEDIDO_STANDALONE_ID)
+        "DELETE FROM alquiler_turnos_estudio WHERE pedido_id IN (%s, %s)",
+        (PEDIDO_MIXTO_ID, PEDIDO_TALLER_ID),
+    )
+    conn.execute(
+        "DELETE FROM alquileres WHERE id IN (%s, %s, %s)",
+        (PEDIDO_MIXTO_ID, PEDIDO_STANDALONE_ID, PEDIDO_TALLER_ID),
     )
     conn.execute("DELETE FROM equipos WHERE id = %s", (EQUIPO_NORMAL_ID,))
     conn.execute(
@@ -220,3 +225,68 @@ def test_turno_embebido_no_se_pierde_ni_se_duplica(conn):
     assert fila_estudio_mes["meses_slot_fijo"] == 0
     assert fila_estudio_mes["total_ars"] == TURNO_EMBEBIDO_MONTO + STANDALONE_MONTO
     assert float(fila_estudio_mes["horas_vendidas"]) == pytest.approx(5.0)
+
+
+TALLER_MONTO = 18_000
+TALLER_DESDE, TALLER_HASTA = f"{MES}-20 09:00", f"{MES}-20 12:00"  # 3hs, MISMO mes que el fixture
+
+
+def test_turno_embebido_de_un_taller_no_cuenta_como_estudio(conn):
+    """Bug real encontrado en la auditoría de consumidores del turno-embebido-
+    por-clase (2026-08-13): desde que `_crear_turnos_taller_del_mes`
+    (`services/talleres/commands/economia.py`) también puede crear filas en
+    `alquiler_turnos_estudio`, `_TURNO_EVENTOS_CTE` las contaba como si fueran
+    un turno REAL del Estudio (`a.estado = 'finalizado'` sin filtrar `a.tipo`)
+    — la franja mensual de un taller (precio de la economía del taller, no
+    `estudio.precio_hora`) inflaba `total_turnos`/`horas_vendidas`/
+    `total_ars` de la sección Estudio con plata que ya tiene su propio hogar
+    (afuera de TODAS las secciones de `/estadisticas`, como cualquier plata
+    de taller — `TIPOS_DERIVADOS_SQL`)."""
+    from routes.estadisticas import compute_estadisticas
+
+    antes = compute_estadisticas(conn)
+    estudio_turnos_antes = antes["estudio"]["totales"]["total_turnos"] or 0
+    estudio_ars_antes = antes["estudio"]["totales"]["total_ars"] or 0
+    estudio_horas_antes = float(antes["estudio"]["totales"]["horas_vendidas"] or 0)
+    rental_ars_antes = antes["totales"]["total_ars"] or 0
+
+    cid = conn.execute("SELECT equipo_id FROM estudio WHERE id=1").fetchone()["equipo_id"]
+    conn.execute(
+        "INSERT INTO alquileres (id, cliente_nombre, estado, tipo, "
+        "fecha_desde, fecha_hasta, monto_total) "
+        "VALUES (%s,'Taller test estadisticas','finalizado','taller',%s,%s,%s)",
+        (PEDIDO_TALLER_ID, f"{MES}-01", f"{MES}-30", TALLER_MONTO),
+    )
+    turno_id = conn.execute(
+        "INSERT INTO alquiler_turnos_estudio (pedido_id, fecha_desde, fecha_hasta) "
+        "VALUES (%s,%s,%s) RETURNING id",
+        (PEDIDO_TALLER_ID, TALLER_DESDE, TALLER_HASTA),
+    ).fetchone()["id"]
+    conn.execute(
+        "INSERT INTO alquiler_items "
+        "(pedido_id, equipo_id, cantidad, subtotal, cobro_modo, turno_estudio_id) "
+        "VALUES (%s,%s,1,%s,'fijo',%s)",
+        (PEDIDO_TALLER_ID, cid, TALLER_MONTO, turno_id),
+    )
+    conn.commit()
+
+    despues = compute_estadisticas(conn)
+
+    # Sección Estudio: ni un turno, ni plata, ni horas de más.
+    assert (despues["estudio"]["totales"]["total_turnos"] or 0) == estudio_turnos_antes
+    assert (despues["estudio"]["totales"]["total_ars"] or 0) == estudio_ars_antes
+    assert float(despues["estudio"]["totales"]["horas_vendidas"] or 0) == pytest.approx(
+        estudio_horas_antes
+    )
+    fila_mes_estudio = next(
+        (m for m in despues["estudio"]["por_mes"] if m["mes"] == MES), None
+    )
+    turnos_mes_antes = next(
+        (m["turnos"] for m in antes["estudio"]["por_mes"] if m["mes"] == MES), 0
+    )
+    if fila_mes_estudio is not None:
+        assert fila_mes_estudio["turnos"] == turnos_mes_antes
+
+    # Tampoco se cuela del lado rental (ya cubierto por TIPOS_DERIVADOS_SQL
+    # aguas arriba — control de que sigue así, no doble-cuenta por otra vía).
+    assert (despues["totales"]["total_ars"] or 0) == rental_ars_antes
