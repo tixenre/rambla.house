@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
 import { formatARS } from "@/lib/format";
+import { trackClickInscribirseTaller } from "@/lib/analytics";
 import type { Taller } from "@/lib/api";
 
 /**
@@ -57,6 +58,7 @@ export function TallerCTABar({ taller, label }: { taller: Taller; label: string 
         </div>
         <a
           href="#inscripcion"
+          onClick={() => trackClickInscribirseTaller(taller.id)}
           className="shrink-0 inline-flex min-h-11 items-center justify-center rounded-full bg-rosa text-ink px-5 py-2.5 text-sm font-bold hover:brightness-110 active:scale-[0.97] transition-all"
         >
           {label}

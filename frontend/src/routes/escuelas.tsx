@@ -24,6 +24,9 @@ export const Route = createFileRoute("/escuelas")({
       { property: "og:locale", content: "es_AR" },
       { name: "twitter:card", content: "summary_large_image" },
     ],
-    links: [{ rel: "canonical", href: `${SITE_URL}/escuelas` }],
+    // El canonical de /escuelas vive en escuelas.index.tsx, NO acá — un
+    // layout + su ruta hija (escuelas.$slug.tsx) mergean head(), y los
+    // `links` no dedupean por `rel` como sí lo hace `meta` por name/
+    // property: tenerlo acá duplicaba el canonical en la ficha de un taller.
   }),
 });

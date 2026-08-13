@@ -486,3 +486,74 @@ def test_eliminar_inscripcion_espera_lock_y_ve_estado_fresco(taller_base):
         f"esperaba 3 (el reclamo sumó, el borrado de la confirmada resta) — "
         f"quedó en {edicion['cupos_confirmados']}: cupos contados de más"
     )
+
+
+def test_eliminar_inscripcion_es_soft_delete(taller_base):
+    """Pedido del dueño (2026-08-13): admin_delete_inscripcion NO hace un
+    DELETE real — la fila sigue en la base (dataset de interesados), solo
+    sale de las listas/vistas normales."""
+    t = taller_base
+    ed = _crear_edicion_activa(t)
+    ins_id = _insertar_inscripcion(ed["id"], en_lista_espera=True, estado="en_espera")
+
+    t.admin_delete_inscripcion(TALLER_ID, ins_id, None)
+
+    from database import get_db
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT eliminado_at, eliminado_por, nombre, email FROM taller_inscripciones "
+            "WHERE id = %s",
+            (ins_id,),
+        ).fetchone()
+    assert row is not None, "la fila NO se borró de la base — solo se marca"
+    assert row["eliminado_at"] is not None
+    assert row["nombre"] and row["email"], "los datos de contacto se conservan"
+    # require_admin está mockeado a `lambda r: None` en este fixture — el
+    # fallback "unknown" es el comportamiento esperado, no un bug.
+    assert row["eliminado_por"] == "unknown"
+
+    listado = t.admin_list_inscripciones_edicion(ed["id"], None)
+    assert listado == [], "una inscripción soft-deleted no aparece en la lista admin"
+
+
+def test_eliminar_inscripcion_ya_eliminada_da_404(taller_base):
+    """Idempotencia: borrar dos veces la misma inscripción no re-actualiza
+    en silencio (evitaría, entre otras cosas, doble-decremento de cupos)."""
+    t = taller_base
+    ed = _crear_edicion_activa(t)
+    ins_id = _insertar_inscripcion(ed["id"], en_lista_espera=True, estado="en_espera")
+
+    t.admin_delete_inscripcion(TALLER_ID, ins_id, None)
+    with pytest.raises(t.HTTPException) as exc:
+        t.admin_delete_inscripcion(TALLER_ID, ins_id, None)
+    assert exc.value.status_code == 404
+
+
+def test_acciones_de_estado_404_en_inscripcion_eliminada(taller_base):
+    """confirmar/verificar-sena/ofrecer-cupo no deben poder operar sobre una
+    inscripción ya dada de baja — mismo criterio que "no existe" para el
+    admin, aunque la fila siga viva en la base."""
+    t = taller_base
+    ed = _crear_edicion_activa(t)
+
+    ins_espera = _insertar_inscripcion(ed["id"], en_lista_espera=True, estado="en_espera")
+    t.admin_delete_inscripcion(TALLER_ID, ins_espera, None)
+    with pytest.raises(t.HTTPException) as exc:
+        t.admin_confirmar_inscripcion(TALLER_ID, ins_espera, None)
+    assert exc.value.status_code == 404
+
+    ins_sena = _insertar_inscripcion(
+        ed["id"], en_lista_espera=False, estado="pendiente_sena", email="sena@example.com"
+    )
+    t.admin_delete_inscripcion(TALLER_ID, ins_sena, None)
+    with pytest.raises(t.HTTPException) as exc:
+        t.admin_verificar_sena(TALLER_ID, ins_sena, None)
+    assert exc.value.status_code == 404
+
+    ins_cupo = _insertar_inscripcion(
+        ed["id"], en_lista_espera=True, estado="en_espera", email="cupo@example.com"
+    )
+    t.admin_delete_inscripcion(TALLER_ID, ins_cupo, None)
+    with pytest.raises(t.HTTPException) as exc:
+        t.admin_ofrecer_cupo(TALLER_ID, ins_cupo, None)
+    assert exc.value.status_code == 404

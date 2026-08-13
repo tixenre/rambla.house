@@ -95,7 +95,8 @@ el otro paquete.
   (2026-08-13): `_modo` sigue decidiendo "cómo se reparte entre meses"; `_tipo` decide "de dónde sale
   el total ANTES de repartirlo" — 'fijo' = tipeado (`valor_estudio`/`valor_equipos`, de siempre);
   'porcentaje' = `_valor_efectivo` aplica `_pct` sobre `_revenue_inscriptos` (SUM de
-  `taller_inscripciones.modalidad_monto` no en lista de espera de ESA edición). `_regenerar_pedidos_taller`
+  `taller_inscripciones.modalidad_monto` no en lista de espera y no dada de baja —
+  `eliminado_at IS NULL`, ver soft-delete más abajo— de ESA edición). `_regenerar_pedidos_taller`
   resuelve el valor efectivo de cada eje ANTES de llamar a `_partes` — `_partes`/`_modo` no saben ni
   necesitan saber de dónde salió el total. El revenue se consulta **una sola vez** y se comparte entre
   Estudio/equipos (guard: `if _tipo=='porcentaje' de cualquiera de los dos`) — no dispara la query
@@ -105,6 +106,17 @@ el otro paquete.
   último `_pct` GUARDADO, no lo que se está tipeando. El supervisor marca: un `_partes`/`_modo`
   tocado para acomodar 'porcentaje' (no debería hacer falta), un preview de `valor_*_efectivo`
   recalculado en el front, o una query de revenue nueva fuera de `queries/economia.py::_revenue_inscriptos`.
+- **`taller_inscripciones` es soft-delete, no DELETE real** (2026-08-13, pedido del dueño: toda
+  persona que se inscribe sirve como dataset de interesados). `admin_delete_inscripcion`
+  (`routes/talleres.py`) hace `UPDATE ... SET eliminado_at = NOW(), eliminado_por = <email>` — la
+  fila queda en la tabla, solo sale de las vistas/listas/exports/conteos normales. **Todo SELECT/
+  COUNT sobre `taller_inscripciones` que decida qué es "un inscripto real" (listas admin, export
+  CSV, KPIs, `_revenue_inscriptos`, el dedup por mail de `crear_inscripcion`, los guards de
+  `admin_delete_taller`/`admin_notificar_cambios`, los lookups de `admin_confirmar_inscripcion`/
+  `admin_verificar_sena`/`admin_ofrecer_cupo`/`claim_oferta_cupo`/`get_oferta_cupo`) filtra
+  `eliminado_at IS NULL`** — un LEFT JOIN lo filtra en el ON, no en el WHERE (si no, pierde filas del
+  lado izquierdo sin inscriptos vivos). Sin este filtro en el dedup de `crear_inscripcion`, una baja
+  (accidental o no) bloquearía re-inscribir a esa persona para siempre.
 - **Inscripción/seña y los helpers de lectura/serialización quedan fuera a propósito** (Fase 1
   acotada) — no expandir este paquete para "completarlo" sin que haya una duplicación real que lo
   justifique, mismo criterio que dejó fuera "slots fijos" del split de estudio.
@@ -116,4 +128,6 @@ El supervisor marca: lógica de gate/economía/validación de clases reimplement
 paquete; un import de `routes.*` dentro de `services/talleres/`; un `queries/` importando de
 `commands/`; el gate re-inlineado en cualquier call-site nuevo; `_regenerar_pedidos_taller`
 resolviendo `numero_pedido`/mes actual/iterador de meses por import directo en vez de vía inyección o
-`services.fechas`; un commit dentro de un command (el route es dueño de la transacción).
+`services.fechas`; un commit dentro de un command (el route es dueño de la transacción); un `DELETE
+FROM taller_inscripciones` reintroducido, o una query nueva sobre esa tabla sin `eliminado_at IS
+NULL`.

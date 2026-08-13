@@ -133,3 +133,35 @@ def test_otro_email_no_se_bloquea(client):
     assert _post(client, "ana@example.com", "2236898641").status_code == 200
     otra = _post(client, "otra@example.com", "2235444704")
     assert otra.status_code == 200
+
+
+def test_reinscripcion_tras_soft_delete_no_es_409(client):
+    """Pedido del dueño (2026-08-13): un borrado de admin es soft-delete, no
+    DELETE real — pero eso NO puede bloquear volver a anotar a la misma
+    persona (ej. se la borró por error, o simplemente se dio de baja y
+    después quiere volver). El dedup filtra `eliminado_at IS NULL`."""
+    from database import get_db
+
+    assert _post(client, "ana@example.com", "2236898641").status_code == 200
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE taller_inscripciones SET eliminado_at = NOW(), eliminado_por = %s "
+            "WHERE edicion_id = %s AND LOWER(email) = 'ana@example.com'",
+            ("admin@example.com", EDICION_ID),
+        )
+        conn.commit()
+
+    reinscripcion = _post(client, "ana@example.com", "2236898641")
+    assert reinscripcion.status_code == 200, reinscripcion.text
+
+    # Las dos filas conviven: la vieja soft-deleted + la nueva activa.
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT eliminado_at FROM taller_inscripciones "
+            "WHERE edicion_id = %s AND LOWER(email) = 'ana@example.com' "
+            "ORDER BY id",
+            (EDICION_ID,),
+        ).fetchall()
+    assert len(rows) == 2, "la fila vieja sigue existiendo (soft-delete), más la nueva"
+    assert rows[0]["eliminado_at"] is not None, "la primera sigue marcada como eliminada"
+    assert rows[1]["eliminado_at"] is None, "la nueva quedó activa"
