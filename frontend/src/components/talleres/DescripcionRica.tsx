@@ -34,9 +34,7 @@ export function DescripcionBloques({
             {b.items.map((item, ii) => (
               <li key={ii} className="flex flex-col gap-1.5">
                 <div className="flex items-start gap-3">
-                  <span className="shrink-0 mt-0.5 w-5 h-5 rounded-full bg-rosa text-ink text-xs font-bold grid place-items-center">
-                    {ii + 1}
-                  </span>
+                  <span className="shrink-0 mt-0.5 w-5 h-5 rounded-full bg-rosa" />
                   <span className="font-semibold text-ink leading-relaxed">{item.texto}</span>
                 </div>
                 {item.subitems.length > 0 && (
