@@ -4,7 +4,7 @@
  * Es transversal a todos los eventos (por eso vive como su propia sección al pie
  * de /admin/comunicacion, no adentro de un evento).
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { RefreshCw, Send } from "lucide-react";
 
@@ -14,6 +14,8 @@ import { ErrorState } from "@/components/admin/ErrorState";
 import { TableSkeleton } from "@/components/admin/skeletons";
 import { Button } from "@/design-system/ui/button";
 import { Pill } from "@/design-system/ui/Pill";
+import { SearchInput } from "@/design-system/ui/search-input";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 
 import { adminApi, type EmailLogEntry } from "@/lib/admin/api";
 import { TEMPLATE_META } from "./templateMeta";
@@ -27,11 +29,26 @@ const PAGE = 25;
 
 export function EmailsLog() {
   const [status, setStatus] = useState("");
+  const [templateKey, setTemplateKey] = useState("");
+  const [search, setSearch] = useState("");
+  const debouncedSearch = useDebouncedValue(search.trim(), 250);
   const [offset, setOffset] = useState(0);
 
+  // Cualquier cambio de búsqueda vuelve a la primera página — separado del
+  // resto de los filtros (que resetean el offset en su propio onClick/onChange)
+  // porque este valor llega debounced, no en el evento del input.
+  useEffect(() => setOffset(0), [debouncedSearch]);
+
   const q = useQuery({
-    queryKey: ["admin", "emails-log", status, offset],
-    queryFn: () => adminApi.listEmailsLog({ status: status || undefined, limit: PAGE, offset }),
+    queryKey: ["admin", "emails-log", status, templateKey, debouncedSearch, offset],
+    queryFn: () =>
+      adminApi.listEmailsLog({
+        status: status || undefined,
+        template_key: templateKey || undefined,
+        q: debouncedSearch || undefined,
+        limit: PAGE,
+        offset,
+      }),
   });
 
   const data = q.data;
@@ -41,7 +58,7 @@ export function EmailsLog() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1.5">
+        <div className="flex flex-wrap items-center gap-1.5">
           {STATUS_FILTERS.map((f) => (
             <button
               key={f.value}
@@ -59,16 +76,40 @@ export function EmailsLog() {
               {f.label}
             </button>
           ))}
+          <select
+            value={templateKey}
+            onChange={(e) => {
+              setTemplateKey(e.target.value);
+              setOffset(0);
+            }}
+            className="h-8 rounded-full border hairline bg-surface-elevated px-2.5 text-xs text-muted-foreground"
+          >
+            <option value="">Todas las plantillas</option>
+            {Object.entries(TEMPLATE_META).map(([key, meta]) => (
+              <option key={key} value={key}>
+                {meta.label}
+              </option>
+            ))}
+          </select>
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => void q.refetch()}
-          disabled={q.isFetching}
-        >
-          <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${q.isFetching ? "animate-spin" : ""}`} />
-          Refrescar
-        </Button>
+        <div className="flex items-center gap-2">
+          <SearchInput
+            value={search}
+            onValueChange={setSearch}
+            clearable
+            placeholder="Buscar por destinatario…"
+            wrapperClassName="w-56"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void q.refetch()}
+            disabled={q.isFetching}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 mr-1.5 ${q.isFetching ? "animate-spin" : ""}`} />
+            Refrescar
+          </Button>
+        </div>
       </div>
 
       {q.isLoading && <TableSkeleton rows={6} cols={5} />}

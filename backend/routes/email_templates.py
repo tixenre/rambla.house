@@ -180,12 +180,14 @@ def list_emails_log(
     request: Request,
     status: Optional[str] = None,
     template_key: Optional[str] = None,
+    q: Optional[str] = None,
     limit: int = 50,
     offset: int = 0,
 ):
     """Visor read-only del log de envíos (`emails_log`): qué salió, a quién,
     cuáles fallaron y el error. Lo más valioso para diagnosticar entregabilidad.
-    Paginado (limit/offset) y con filtros opcionales por estado y plantilla."""
+    Paginado (limit/offset) y con filtros opcionales por estado, plantilla y
+    destinatario (`q`, substring case-insensitive sobre `to_addr`)."""
     require_admin(request)
     limit = max(1, min(int(limit), 200))
     offset = max(0, int(offset))
@@ -197,6 +199,9 @@ def list_emails_log(
     if template_key:
         where.append("template_key = %s")
         params.append(template_key)
+    if q:
+        where.append("to_addr ILIKE %s")
+        params.append(f"%{q}%")
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     with get_db() as conn:
         total = conn.execute(
