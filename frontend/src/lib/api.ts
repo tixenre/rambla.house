@@ -532,6 +532,11 @@ export type Taller = {
     monto_cuota: number;
     monto_cuota_str: string;
   }[];
+  // Cuentas de cobro (alias/cbu/banco) — lista, independiente de la
+  // modalidad de pago; el público ve todas y elige a cuál transferir. Sin
+  // fallback sintético (a diferencia de modalidades arriba): [] = ninguna
+  // cargada.
+  cuentas_pago: { id: number | null; alias: string; cbu: string; banco: string }[];
   // F4c: FAQ del concepto, trabajos pasados (solo YouTube, sin testimonios) y
   // cierre de inscripciones de ESTA edición (null = sin cierre).
   faqs: { pregunta: string; respuesta: string }[];

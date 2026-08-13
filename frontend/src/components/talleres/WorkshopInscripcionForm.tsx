@@ -38,54 +38,45 @@ const MAX_MB = 10;
 const ACCEPT_TYPES = "image/jpeg,image/png,image/webp,image/heic,application/pdf";
 const ACCEPT_LIST = ACCEPT_TYPES.split(",");
 
+type CuentaPago = { alias: string; cbu: string; banco: string };
+
 /**
- * Alias/CBU/Banco de la seña — solo muestra los fragmentos que vienen con
- * dato (sin esto, un campo vacío dejaba un separador colgando, ej. "CBU: ·",
- * confirmado en vivo). Único lugar que arma esta lista — reusado en el
- * bloque previo al envío y en la pantalla de éxito, que no pueden volver a
- * divergir. Cada variant preserva el estilo/labels que ya tenía su call site
- * (el de "form" no rotula "Banco:", el de "success" separa con <br/> en vez
- * de " · " — diferencias preexistentes, no una unificación nueva).
+ * Fragmentos (alias/cbu/banco) de UNA cuenta — solo los que vienen con dato
+ * (sin esto, un campo vacío dejaba un separador colgando, ej. "CBU: ·",
+ * confirmado en vivo). Cada variant preserva el estilo/labels que ya tenía
+ * su call site (el de "form" no rotula "Banco:", el de "success" separa con
+ * <br/> en vez de " · " — diferencias preexistentes, no una unificación
+ * nueva).
  */
-function DatosPago({
-  alias,
-  cbu,
-  banco,
-  variant,
-}: {
-  alias: string;
-  cbu: string;
-  banco: string;
-  variant: "form" | "success";
-}) {
+function UnaCuenta({ cuenta, variant }: { cuenta: CuentaPago; variant: "form" | "success" }) {
   const fragments: ReactNode[] = [];
-  if (alias) {
+  if (cuenta.alias) {
     fragments.push(
       <span key="alias">
         Alias:{" "}
         <span
           className={variant === "form" ? "font-mono font-medium text-ink" : "text-ink font-mono"}
         >
-          {alias}
+          {cuenta.alias}
         </span>
       </span>,
     );
   }
-  if (cbu) {
+  if (cuenta.cbu) {
     fragments.push(
       <span key="cbu">
         CBU:{" "}
         <span className={variant === "form" ? "font-mono text-ink" : "text-ink font-mono text-xs"}>
-          {cbu}
+          {cuenta.cbu}
         </span>
       </span>,
     );
   }
-  if (banco) {
+  if (cuenta.banco) {
     fragments.push(
       <span key="banco">
         {variant === "success" && "Banco: "}
-        {banco}
+        {cuenta.banco}
       </span>,
     );
   }
@@ -100,6 +91,26 @@ function DatosPago({
         </span>
       ))}
     </>
+  );
+}
+
+/**
+ * Cuentas de cobro — 0+ (lista independiente de la modalidad de pago; el
+ * cliente ve todas y elige a cuál transferir). Único lugar que arma esto —
+ * reusado en el bloque previo al envío y en la pantalla de éxito, que no
+ * pueden volver a divergir. Con 1 sola cuenta (el caso común hoy), el
+ * render es idéntico al de antes — la lista solo aparece con 2+.
+ */
+function DatosPago({ cuentas, variant }: { cuentas: CuentaPago[]; variant: "form" | "success" }) {
+  const conDatos = cuentas.filter((c) => c.alias || c.cbu || c.banco);
+  if (conDatos.length === 0) return null;
+  if (conDatos.length === 1) return <UnaCuenta cuenta={conDatos[0]} variant={variant} />;
+  return (
+    <span className="flex flex-col gap-2">
+      {conDatos.map((c, i) => (
+        <UnaCuenta key={i} cuenta={c} variant={variant} />
+      ))}
+    </span>
   );
 }
 
@@ -283,12 +294,7 @@ export function WorkshopInscripcionForm({ taller, onSuccess }: Props) {
               Datos para la seña ({formatARS(taller.precio_sena)})
             </p>
             <p className="text-muted-foreground leading-relaxed">
-              <DatosPago
-                alias={taller.pago_alias}
-                cbu={taller.pago_cbu}
-                banco={taller.pago_banco}
-                variant="success"
-              />
+              <DatosPago cuentas={taller.cuentas_pago} variant="success" />
             </p>
           </div>
         )}
@@ -474,12 +480,7 @@ export function WorkshopInscripcionForm({ taller, onSuccess }: Props) {
           )}
         </div>
         <p className="text-xs text-muted-foreground">
-          <DatosPago
-            alias={taller.pago_alias}
-            cbu={taller.pago_cbu}
-            banco={taller.pago_banco}
-            variant="form"
-          />
+          <DatosPago cuentas={taller.cuentas_pago} variant="form" />
         </p>
       </div>
 

@@ -54,10 +54,15 @@ from services import telefono as telefono_svc
 from services.talleres.queries.clases import (
     _row_get,
     _validar_clases,
+    _validar_cuentas_pago,
     _validar_modalidades,
     clases_de_edicion as _get_clases,
 )
-from services.talleres.commands.clases import _upsert_clases, _upsert_modalidades
+from services.talleres.commands.clases import (
+    _upsert_clases,
+    _upsert_cuentas_pago,
+    _upsert_modalidades,
+)
 from services.talleres.commands.ediciones import _gate_conflicto_estudio, crear_edicion
 from services.talleres.commands.economia import _regenerar_pedidos_taller
 
@@ -243,6 +248,26 @@ def _modalidades_publicas(modalidades: list[dict] | None, precio_total: int) -> 
     return [_modalidad_dict({"codigo": "total", "label": "Pago total", "nota": "", "monto_total": precio_total})]
 
 
+def _cuenta_pago_dict(row) -> dict:
+    """Una cuenta de cobro (row de DB o dict normalizado de
+    _validar_cuentas_pago) — sin plata derivada, passthrough directo."""
+    return {
+        "id": _row_get(row, "id"),
+        "alias": _row_get(row, "alias", ""),
+        "cbu": _row_get(row, "cbu", ""),
+        "banco": _row_get(row, "banco", ""),
+    }
+
+
+def _get_cuentas_pago(conn, edicion_id: int) -> list[dict]:
+    rows = conn.execute(
+        "SELECT id, alias, cbu, banco FROM edicion_cuentas_pago "
+        "WHERE edicion_id = %s ORDER BY orden, id",
+        (edicion_id,),
+    ).fetchall()
+    return [_cuenta_pago_dict(r) for r in rows]
+
+
 def _video_dict(row) -> dict | None:
     """Shape público del video hero: None si no hay URL o no se pudo extraer
     un video_id (URL mal pegada) — la landing no debe romper por esto."""
@@ -281,7 +306,7 @@ def _edicion_lite(row) -> dict:
 
 def _edicion_to_public_dict(
     row, clases=None, instructores=None, modalidades=None, trabajos=None, instituciones=None,
-    fotos=None,
+    fotos=None, cuentas_pago=None,
 ) -> dict:
     """Convierte edicion_row (JOIN talleres) al shape plano del API público."""
     return {
@@ -333,6 +358,10 @@ def _edicion_to_public_dict(
         # sintético — ver _modalidades_publicas).
         "video": _video_dict(row),
         "modalidades": _modalidades_publicas(modalidades, row["precio_total"]),
+        # Cuentas de cobro (alias/cbu/banco) — lista, independiente de la
+        # modalidad de pago (el público ve todas, elige a cuál transferir).
+        # Sin fallback sintético: [] = sin cuentas cargadas.
+        "cuentas_pago": cuentas_pago if cuentas_pago is not None else [],
         # F4c: FAQ del concepto + cierre de inscripciones de ESTA edición +
         # trabajos pasados del concepto (solo YouTube, sin testimonios —
         # antes solo se servían al admin; F5 los muestra públicamente).
@@ -347,7 +376,9 @@ def _edicion_to_public_dict(
     }
 
 
-def _edicion_to_admin_dict(edicion_row, clases=None, modalidades=None, fotos=None) -> dict:
+def _edicion_to_admin_dict(
+    edicion_row, clases=None, modalidades=None, fotos=None, cuentas_pago=None,
+) -> dict:
     """Convierte una fila de ediciones_taller al shape de admin (anidado en concepto)."""
     return {
         "id": edicion_row["id"],
@@ -373,6 +404,8 @@ def _edicion_to_admin_dict(edicion_row, clases=None, modalidades=None, fotos=Non
         # F4a: modalidades RAW (sin fallback sintético — el admin ve el
         # estado real: lista vacía = "no configuradas todavía").
         "modalidades": modalidades if modalidades is not None else [],
+        # Cuentas de cobro RAW — mismo criterio que modalidades arriba.
+        "cuentas_pago": cuentas_pago if cuentas_pago is not None else [],
         # F4c: NULL = sin cierre (default, siempre abierto).
         "fecha_cierre_inscripcion": (
             str(edicion_row["fecha_cierre_inscripcion"])
@@ -431,6 +464,7 @@ def list_talleres():
                 _get_modalidades(conn, r["id"]),
                 instituciones=_get_instituciones_taller(conn, r["taller_id"]),
                 fotos=_get_edicion_fotos(conn, r["id"]),
+                cuentas_pago=_get_cuentas_pago(conn, r["id"]),
             )
             for r in rows
         ]
@@ -455,6 +489,7 @@ def get_taller(slug: str, request: Request):
             _get_modalidades(conn, row["id"]), _get_trabajos_taller(conn, row["taller_id"]),
             instituciones=_get_instituciones_taller(conn, row["taller_id"]),
             fotos=_get_edicion_fotos(conn, row["id"]),
+            cuentas_pago=_get_cuentas_pago(conn, row["id"]),
         )
 
         # Próxima edición: misma concepto (taller_id), numero_edicion mayor
@@ -928,6 +963,16 @@ class ModalidadPagoBody(BaseModel):
     n_cuotas: int = Field(default=1, ge=1)
 
 
+class CuentaPagoBody(BaseModel):
+    # `id` presente = actualizar esa cuenta; ausente = nueva. `orden` es la
+    # posición en la lista recibida (no viaja como campo propio). Sin plata
+    # ni codigo — independiente de la modalidad de pago.
+    id: int | None = None
+    alias: str = ""
+    cbu: str = ""
+    banco: str = ""
+
+
 class ClaseBody(BaseModel):
     fecha: str  # YYYY-MM-DD
     hora_inicio_min: int = Field(..., ge=0, le=1440)  # minutos desde medianoche (510 = 8:30)
@@ -1071,6 +1116,11 @@ class EdicionUpdateBody(BaseModel):
     activo: bool | None = None
     clases: list[ClaseBody] | None = None
     modalidades: list[ModalidadPagoBody] | None = None
+    # Cuentas de cobro (alias/cbu/banco) — lista, independiente de
+    # `modalidades`. Reemplaza a pago_alias/pago_cbu/pago_banco de arriba
+    # como lo que el admin edita; esos 3 campos quedan sin tocar por
+    # compatibilidad pero ya no los escribe la UI (ver PreciosSection).
+    cuentas_pago: list[CuentaPagoBody] | None = None
     # F4c: cierre de inscripciones. '' → borra el cierre (siempre abierto).
     fecha_cierre_inscripcion: str | None = None
     # Corrige el número de edición (ej. al cargar un taller con historia previa
@@ -1111,6 +1161,7 @@ def admin_list_talleres(request: Request):
                 _edicion_to_admin_dict(
                     e, _get_clases(conn, e["id"]), _get_modalidades(conn, e["id"]),
                     fotos=_get_edicion_fotos(conn, e["id"]),
+                    cuentas_pago=_get_cuentas_pago(conn, e["id"]),
                 )
                 for e in edicion_rows
             ]
@@ -1243,7 +1294,7 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
             raise
 
     return _concepto_to_admin_dict(
-        t_row, [_edicion_to_admin_dict(e_row, clases_out, fotos=[])], instructores_out,
+        t_row, [_edicion_to_admin_dict(e_row, clases_out, fotos=[], cuentas_pago=[])], instructores_out,
         instituciones=instituciones_out,
     )
 
@@ -1320,7 +1371,7 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
             conn.rollback()
             raise
 
-    return _edicion_to_admin_dict(e_row, clases_out, fotos=[])
+    return _edicion_to_admin_dict(e_row, clases_out, fotos=[], cuentas_pago=[])
 
 
 @router.patch("/admin/talleres/{taller_id}")
@@ -1402,6 +1453,7 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
                 _edicion_to_admin_dict(
                     e, _get_clases(conn, e["id"]), _get_modalidades(conn, e["id"]),
                     fotos=_get_edicion_fotos(conn, e["id"]),
+                    cuentas_pago=_get_cuentas_pago(conn, e["id"]),
                 )
                 for e in edicion_rows
             ]
@@ -1485,7 +1537,16 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
     if body.modalidades is not None:
         new_modalidades = _validar_modalidades(body.modalidades)
 
-    if not sets and new_clases is None and new_modalidades is None:
+    new_cuentas_pago = None
+    if body.cuentas_pago is not None:
+        new_cuentas_pago = _validar_cuentas_pago(body.cuentas_pago)
+
+    if (
+        not sets
+        and new_clases is None
+        and new_modalidades is None
+        and new_cuentas_pago is None
+    ):
         raise HTTPException(400, "No hay campos para actualizar")
 
     with get_db() as conn:
@@ -1551,6 +1612,9 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
             if new_modalidades is not None:
                 _upsert_modalidades(conn, edicion_id, new_modalidades)
 
+            if new_cuentas_pago is not None:
+                _upsert_cuentas_pago(conn, edicion_id, new_cuentas_pago)
+
             if sets:
                 sets.append("updated_at = NOW()")
                 params.append(edicion_id)
@@ -1569,11 +1633,14 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
             # DENTRO del `with` — ver comentario gemelo en admin_create_taller.
             clases_out = _get_clases(conn, edicion_id)
             modalidades_out = _get_modalidades(conn, edicion_id)
+            cuentas_pago_out = _get_cuentas_pago(conn, edicion_id)
             fotos_out = _get_edicion_fotos(conn, edicion_id)
         except Exception:
             conn.rollback()
             raise
-    return _edicion_to_admin_dict(e_row, clases_out, modalidades_out, fotos=fotos_out)
+    return _edicion_to_admin_dict(
+        e_row, clases_out, modalidades_out, fotos=fotos_out, cuentas_pago=cuentas_pago_out,
+    )
 
 
 @router.delete("/admin/talleres/{taller_id}", status_code=200)

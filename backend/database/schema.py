@@ -2180,6 +2180,29 @@ def _init_db_schema(conn):
         "ON edicion_modalidades_pago(edicion_id, orden)"
     )
 
+    # Cuentas de cobro por edición — lista (0+), mismo patrón que
+    # edicion_modalidades_pago pero SIN atarse a una forma de pago en
+    # particular: el cliente ve todas las opciones y elige a cuál
+    # transferir (pedido explícito del dueño, taller de Ariel). Reemplaza a
+    # ediciones_taller.pago_alias/pago_cbu/pago_banco (esas 3 columnas
+    # quedan sin tocar por compatibilidad — ver migración cu3nt4sp4g0 para
+    # el traspaso de datos existentes — pero el admin ya no las edita).
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS edicion_cuentas_pago (
+            id          SERIAL PRIMARY KEY,
+            edicion_id  INTEGER NOT NULL REFERENCES ediciones_taller(id) ON DELETE CASCADE,
+            orden       INTEGER NOT NULL DEFAULT 0,
+            alias       TEXT NOT NULL DEFAULT '',
+            cbu         TEXT NOT NULL DEFAULT '',
+            banco       TEXT NOT NULL DEFAULT '',
+            created_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_edicion_cuentas_pago_edicion "
+        "ON edicion_cuentas_pago(edicion_id, orden)"
+    )
+
     # Escuela v2 F4c: cierre de inscripciones por fecha. NULL = sin cierre
     # (comportamiento actual, siempre abierto). Pasada la fecha, el público
     # ve "inscripciones cerradas" y el POST de inscripción rechaza con 400.

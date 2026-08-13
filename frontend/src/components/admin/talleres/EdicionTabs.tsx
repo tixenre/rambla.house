@@ -5,7 +5,12 @@ import { Plus, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { talleresAdminApi } from "@/lib/admin/api/talleres";
-import type { ClaseBody, EdicionAdmin, ModalidadPagoBody } from "@/lib/admin/api/types";
+import type {
+  ClaseBody,
+  CuentaPagoBody,
+  EdicionAdmin,
+  ModalidadPagoBody,
+} from "@/lib/admin/api/types";
 import { Button } from "@/design-system/ui/button";
 import { EstadoBadge } from "@/design-system/ui/EstadoBadge";
 import { IconButton } from "@/design-system/ui/icon-button";
@@ -163,6 +168,11 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
   const [planes, setPlanes] = useState<PlanForm[]>(
     (edicion.modalidades ?? []).map((m) => planToForm(m, edicion.precio_total)),
   );
+  // Cuentas de cobro: lista independiente de las formas de pago — el
+  // cliente ve todas juntas y elige a cuál transferir (pedido explícito del
+  // dueño). Sin plata derivada, así que reusa `CuentaPagoBody` directo, sin
+  // un "Form" intermedio como en modalidades.
+  const [cuentas, setCuentas] = useState<CuentaPagoBody[]>(edicion.cuentas_pago ?? []);
 
   useEffect(() => {
     setPrecioTotal(String(edicion.precio_total));
@@ -175,6 +185,7 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
     setValorEquipos(String(edicion.valor_equipos));
     setValorEquiposModo(edicion.valor_equipos_modo);
     setPlanes((edicion.modalidades ?? []).map((m) => planToForm(m, edicion.precio_total)));
+    setCuentas(edicion.cuentas_pago ?? []);
   }, [edicion.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const mut = useMutation({
@@ -196,6 +207,18 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
 
   function actualizarPlan(idx: number, patch: Partial<PlanForm>) {
     setPlanes((p) => p.map((plan, i) => (i === idx ? { ...plan, ...patch } : plan)));
+  }
+
+  function agregarCuenta() {
+    setCuentas((c) => [...c, { alias: "", cbu: "", banco: "" }]);
+  }
+
+  function quitarCuenta(idx: number) {
+    setCuentas((c) => c.filter((_, i) => i !== idx));
+  }
+
+  function actualizarCuenta(idx: number, patch: Partial<CuentaPagoBody>) {
+    setCuentas((c) => c.map((cuenta, i) => (i === idx ? { ...cuenta, ...patch } : cuenta)));
   }
 
   function handleSave() {
@@ -255,6 +278,17 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
       );
       return;
     }
+    const cuentasOut: CuentaPagoBody[] = [];
+    for (const c of cuentas) {
+      const alias = (c.alias ?? "").trim();
+      const cbu = (c.cbu ?? "").trim();
+      const banco = (c.banco ?? "").trim();
+      if (!alias && !cbu && !banco) {
+        toast.error("Cada cuenta de cobro necesita al menos alias, CBU o banco");
+        return;
+      }
+      cuentasOut.push({ id: c.id ?? null, alias, cbu, banco });
+    }
     mut.mutate({
       precio_total: total,
       precio_sena: sena,
@@ -266,6 +300,7 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
       valor_equipos: isNaN(valEquipos) ? 0 : valEquipos,
       valor_equipos_modo: valorEquiposModo,
       modalidades,
+      cuentas_pago: cuentasOut,
     });
   }
 
@@ -404,6 +439,69 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
         </div>
       </div>
 
+      <div className="border-t border-border/40 pt-5 flex flex-col gap-4">
+        <div>
+          <p className="text-sm font-medium text-ink">Cuentas de cobro</p>
+          <p className="text-xs text-muted-foreground">
+            Alias/CBU/banco para transferir — podés cargar más de una, el cliente ve todas y elige a
+            cuál transferir.
+          </p>
+        </div>
+        {cuentas.length === 0 && (
+          <p className="text-sm text-muted-foreground italic">
+            Sin cuentas cargadas — el cliente no va a ver dónde transferir.
+          </p>
+        )}
+        {cuentas.map((cuenta, idx) => (
+          <div
+            key={cuenta.id ?? `nueva-${idx}`}
+            className="grid sm:grid-cols-[1fr_1fr_1fr_auto] gap-2 items-end"
+          >
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Alias
+              </label>
+              <Input
+                value={cuenta.alias ?? ""}
+                onChange={(e) => actualizarCuenta(idx, { alias: e.target.value })}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                CBU
+              </label>
+              <Input
+                value={cuenta.cbu ?? ""}
+                onChange={(e) => actualizarCuenta(idx, { cbu: e.target.value })}
+              />
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                Banco
+              </label>
+              <Input
+                value={cuenta.banco ?? ""}
+                onChange={(e) => actualizarCuenta(idx, { banco: e.target.value })}
+              />
+            </div>
+            <IconButton
+              aria-label="Quitar cuenta"
+              size="sm"
+              onClick={() => quitarCuenta(idx)}
+              className="text-muted-foreground hover:text-destructive mb-0.5"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </IconButton>
+          </div>
+        ))}
+        <div>
+          <Button variant="outline" size="sm" onClick={agregarCuenta} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" />
+            Agregar cuenta
+          </Button>
+        </div>
+      </div>
+
       {/* Economía del taller: si usa el Estudio y/o equipos de alquiler, para
           que el pedido mensual auto-generado atribuya esa plata (Estudio →
           caja Estudio, equipos → Rental) — ver `_regenerar_pedidos_taller`. */}
@@ -488,18 +586,12 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
 export function PagosSection({ edicion }: { edicion: EdicionAdmin }) {
   const qc = useQueryClient();
   const [form, setForm] = useState({
-    pago_alias: edicion.pago_alias ?? "",
-    pago_cbu: edicion.pago_cbu ?? "",
-    pago_banco: edicion.pago_banco ?? "",
     direccion: edicion.direccion ?? "",
     fecha_cierre_inscripcion: edicion.fecha_cierre_inscripcion ?? "",
   });
 
   useEffect(() => {
     setForm({
-      pago_alias: edicion.pago_alias ?? "",
-      pago_cbu: edicion.pago_cbu ?? "",
-      pago_banco: edicion.pago_banco ?? "",
       direccion: edicion.direccion ?? "",
       fecha_cierre_inscripcion: edicion.fecha_cierre_inscripcion ?? "",
     });
@@ -514,25 +606,18 @@ export function PagosSection({ edicion }: { edicion: EdicionAdmin }) {
     onError: (e) => toast.error((e as Error).message),
   });
 
-  const tf = (label: string, key: keyof typeof form) => (
-    <div className="flex flex-col gap-1.5">
-      <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-        {label}
-      </label>
-      <Input
-        value={form[key]}
-        onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-      />
-    </div>
-  );
-
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid sm:grid-cols-2 gap-4">{tf("Dirección", "direccion")}</div>
-      <div className="grid sm:grid-cols-3 gap-4">
-        {tf("Alias de pago", "pago_alias")}
-        {tf("CBU", "pago_cbu")}
-        {tf("Banco", "pago_banco")}
+      <div className="grid sm:grid-cols-2 gap-4">
+        <div className="flex flex-col gap-1.5">
+          <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+            Dirección
+          </label>
+          <Input
+            value={form.direccion}
+            onChange={(e) => setForm((f) => ({ ...f, direccion: e.target.value }))}
+          />
+        </div>
       </div>
       <div className="border-t border-border/40 pt-4">
         <div className="grid sm:grid-cols-2 gap-4">
@@ -554,7 +639,7 @@ export function PagosSection({ edicion }: { edicion: EdicionAdmin }) {
       <div className="flex justify-end">
         <Button onClick={() => mut.mutate(form)} disabled={mut.isPending} className="gap-2">
           {mut.isPending ? <Spinner size="sm" /> : <Save className="h-4 w-4" />}
-          Guardar datos de pago
+          Guardar
         </Button>
       </div>
     </div>

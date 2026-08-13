@@ -1769,6 +1769,16 @@ export type ModalidadPagoBody = {
   monto_cuota_str?: string;
 };
 
+// Cuenta de cobro (alias/cbu/banco) de una edición — lista, independiente de
+// la modalidad de pago (el público ve todas juntas, elige a cuál
+// transferir). `id` presente al escribir = editar esa fila; ausente = nueva.
+export type CuentaPagoBody = {
+  id?: number | null;
+  alias?: string;
+  cbu?: string;
+  banco?: string;
+};
+
 export type EdicionAdmin = {
   id: number;
   taller_id: number;
@@ -1792,6 +1802,8 @@ export type EdicionAdmin = {
   clases: ClaseBody[];
   // F4a: RAW (sin fallback sintético — [] = "no configuradas todavía").
   modalidades: ModalidadPagoBody[];
+  // Cuentas de cobro RAW — mismo criterio que modalidades arriba.
+  cuentas_pago: CuentaPagoBody[];
   // F4c: NULL = sin cierre (siempre abierto).
   fecha_cierre_inscripcion: string | null;
   // Economía del taller (ver `_regenerar_pedidos_taller`, backend): si la

@@ -153,3 +153,29 @@ def _validar_modalidades(modalidades: list) -> list[dict]:
             "n_cuotas": n_cuotas,
         })
     return result
+
+
+def _validar_cuentas_pago(cuentas: list) -> list[dict]:
+    """Valida y normaliza una lista de cuentas de cobro (alias/cbu/banco) de
+    una edición — independiente de las modalidades de pago (el público ve
+    todas las cuentas juntas, elige a cuál transferir). Cada cuenta necesita
+    al menos un dato (alias, cbu o banco) — una fila totalmente vacía no
+    aporta nada y usualmente es un "+ Agregar" sin completar. Lanza 400 si
+    hay errores."""
+    result = []
+    for c in cuentas:
+        def _campo(nombre: str, default=""):
+            return _row_get(c, nombre, default) if isinstance(c, dict) else getattr(c, nombre, default)
+
+        alias = str(_campo("alias") or "").strip()
+        cbu = str(_campo("cbu") or "").strip()
+        banco = str(_campo("banco") or "").strip()
+        if not alias and not cbu and not banco:
+            raise HTTPException(400, "Cada cuenta de cobro necesita al menos alias, CBU o banco")
+        result.append({
+            "id": _campo("id", None),
+            "alias": alias,
+            "cbu": cbu,
+            "banco": banco,
+        })
+    return result
