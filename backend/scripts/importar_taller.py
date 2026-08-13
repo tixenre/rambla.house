@@ -199,7 +199,7 @@ def importar(client: httpx.Client, base: str, ficha: dict, ficha_dir: Path) -> d
             print(f"  perfil del instructor completado: {list(campos_ricos.keys())}")
 
     # Modalidades de pago — `EdicionCreateBody` no las acepta en la creación
-    # (mismo campo que `ModalidadesSection` en el admin, agregado aparte vía
+    # (mismo campo que `PreciosSection` en el admin, agregado aparte vía
     # PATCH). Con 2+ modalidades el público ve la LISTA (label+monto+nota);
     # con 1 sola, esa se vuelve "el" precio mostrado en vez de `precio_total`
     # (ver `PrecioCard.tsx`) — si la ficha quiere mostrar ambos, tiene que

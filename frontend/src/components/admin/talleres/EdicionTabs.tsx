@@ -153,6 +153,13 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
   const [usaEquipos, setUsaEquipos] = useState(edicion.usa_equipos);
   const [valorEquipos, setValorEquipos] = useState(String(edicion.valor_equipos));
   const [valorEquiposModo, setValorEquiposModo] = useState(edicion.valor_equipos_modo);
+  // Modalidades de pago viven en esta misma sección/guardado (antes eran una
+  // pestaña aparte con su propio botón — confusión real del dueño: tipeaba el
+  // monto por cuota en "Total" sin saber que había un segundo "Costo total"
+  // en otra caja). Ver `previewModalidad` para el preview en vivo por fila.
+  const [rows, setRows] = useState<ModalidadForm[]>(
+    (edicion.modalidades ?? []).map(toModalidadForm),
+  );
 
   useEffect(() => {
     setPrecioTotal(String(edicion.precio_total));
@@ -164,26 +171,32 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
     setUsaEquipos(edicion.usa_equipos);
     setValorEquipos(String(edicion.valor_equipos));
     setValorEquiposModo(edicion.valor_equipos_modo);
+    setRows((edicion.modalidades ?? []).map(toModalidadForm));
   }, [edicion.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const mut = useMutation({
-    mutationFn: (body: {
-      precio_total: number;
-      precio_sena: number;
-      cupos_total: number;
-      usa_estudio: boolean;
-      valor_estudio: number;
-      valor_estudio_modo: "mensual" | "total";
-      usa_equipos: boolean;
-      valor_equipos: number;
-      valor_equipos_modo: "mensual" | "total";
-    }) => talleresAdminApi.updateEdicion(edicion.id, body),
+    mutationFn: (body: object) => talleresAdminApi.updateEdicion(edicion.id, body),
     onSuccess: (updated) => {
-      toast.success("Precios actualizados");
+      toast.success("Precio y forma de pago actualizados");
       updateEdicionInCache(qc, updated);
     },
     onError: (e) => toast.error((e as Error).message),
   });
+
+  function agregarModalidad() {
+    setRows((r) => [
+      ...r,
+      { codigo: "", label: "", nota: "", monto_total: precioTotal || "", n_cuotas: "1" },
+    ]);
+  }
+
+  function quitarModalidad(idx: number) {
+    setRows((r) => r.filter((_, i) => i !== idx));
+  }
+
+  function actualizarModalidad(idx: number, patch: Partial<ModalidadForm>) {
+    setRows((r) => r.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
+  }
 
   function handleSave() {
     const total = parseInt(precioTotal, 10);
@@ -203,6 +216,38 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
       toast.error("Ingresá un valor válido para lo que usa el taller");
       return;
     }
+    const modalidades: ModalidadPagoBody[] = [];
+    for (const row of rows) {
+      const codigo = row.codigo.trim();
+      const label = row.label.trim();
+      const monto = parseInt(row.monto_total, 10);
+      const nCuotas = parseInt(row.n_cuotas, 10);
+      if (!codigo || !label) {
+        toast.error("Cada modalidad necesita código y label");
+        return;
+      }
+      if (isNaN(monto) || monto <= 0) {
+        toast.error(`La modalidad "${label}" necesita un monto válido`);
+        return;
+      }
+      if (isNaN(nCuotas) || nCuotas < 1) {
+        toast.error(`La modalidad "${label}" necesita al menos 1 cuota`);
+        return;
+      }
+      modalidades.push({
+        id: row.id,
+        codigo,
+        label,
+        nota: row.nota.trim(),
+        monto_total: monto,
+        n_cuotas: nCuotas,
+      });
+    }
+    const codigos = modalidades.map((m) => m.codigo);
+    if (new Set(codigos).size !== codigos.length) {
+      toast.error("Hay códigos de modalidad repetidos");
+      return;
+    }
     mut.mutate({
       precio_total: total,
       precio_sena: sena,
@@ -213,6 +258,7 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
       usa_equipos: usaEquipos,
       valor_equipos: isNaN(valEquipos) ? 0 : valEquipos,
       valor_equipos_modo: valorEquiposModo,
+      modalidades,
     });
   }
 
@@ -256,6 +302,98 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
             value={cuposTotal}
             onChange={(e) => setCuposTotal(e.target.value)}
           />
+        </div>
+      </div>
+
+      <div className="border-t border-border/40 pt-5 flex flex-col gap-4">
+        <div>
+          <p className="text-sm font-medium text-ink">Formas de pagar</p>
+          <p className="text-xs text-muted-foreground">
+            Un pago único, en cuotas, con descuento para ex alumnos, etc. Cada plan tiene su propio
+            costo — normalmente el mismo que el Precio total de arriba, salvo que quieras ofrecer un
+            descuento.
+          </p>
+        </div>
+        {rows.length === 0 && (
+          <p className="text-sm text-muted-foreground italic">
+            Sin planes configurados — el público paga el Precio total de arriba de una sola vez.
+          </p>
+        )}
+        {rows.map((row, idx) => (
+          <div key={row.id ?? `nueva-${idx}`} className="flex flex-col gap-1.5">
+            <div className="grid sm:grid-cols-[1fr_1fr_1fr_140px_90px_auto] gap-2 items-end">
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  Código
+                </label>
+                <Input
+                  value={row.codigo}
+                  onChange={(e) => actualizarModalidad(idx, { codigo: e.target.value })}
+                  placeholder="3-cuotas"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  Label
+                </label>
+                <Input
+                  value={row.label}
+                  onChange={(e) => actualizarModalidad(idx, { label: e.target.value })}
+                  placeholder="3 cuotas"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  Nota
+                </label>
+                <Input
+                  value={row.nota}
+                  onChange={(e) => actualizarModalidad(idx, { nota: e.target.value })}
+                  placeholder="10% off"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  Costo total del plan (ARS)
+                </label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={row.monto_total}
+                  onChange={(e) => actualizarModalidad(idx, { monto_total: e.target.value })}
+                  placeholder="ej: 320000 (el costo COMPLETO, no por cuota)"
+                />
+              </div>
+              <div className="flex flex-col gap-1.5">
+                <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+                  Cuotas
+                </label>
+                <Input
+                  type="number"
+                  min={1}
+                  value={row.n_cuotas}
+                  onChange={(e) => actualizarModalidad(idx, { n_cuotas: e.target.value })}
+                />
+              </div>
+              <IconButton
+                aria-label="Quitar modalidad"
+                size="sm"
+                onClick={() => quitarModalidad(idx)}
+                className="text-muted-foreground hover:text-destructive mb-0.5"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </IconButton>
+            </div>
+            {previewModalidad(row) && (
+              <p className="text-xs text-rosa-ink pl-0.5">{previewModalidad(row)}</p>
+            )}
+          </div>
+        ))}
+        <div>
+          <Button variant="outline" size="sm" onClick={agregarModalidad} className="gap-1.5">
+            <Plus className="h-3.5 w-3.5" />
+            Agregar modalidad
+          </Button>
         </div>
       </div>
 
@@ -333,7 +471,7 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
       <div className="flex justify-end">
         <Button onClick={handleSave} disabled={mut.isPending} className="gap-2">
           {mut.isPending ? <Spinner size="sm" /> : <Save className="h-4 w-4" />}
-          Guardar precios
+          Guardar
         </Button>
       </div>
     </div>
@@ -454,180 +592,6 @@ function previewModalidad(row: ModalidadForm): string | null {
   if (isNaN(cuotas) || cuotas <= 1) return `El público ve: ${fmtArs(monto)}, un solo pago`;
   const porCuota = Math.round(monto / cuotas);
   return `El público ve: ${cuotas} cuotas de ${fmtArs(porCuota)} (total ${fmtArs(monto)})`;
-}
-
-export function ModalidadesSection({ edicion }: { edicion: EdicionAdmin }) {
-  const qc = useQueryClient();
-  const [rows, setRows] = useState<ModalidadForm[]>(
-    (edicion.modalidades ?? []).map(toModalidadForm),
-  );
-
-  useEffect(() => {
-    setRows((edicion.modalidades ?? []).map(toModalidadForm));
-  }, [edicion.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const mut = useMutation({
-    mutationFn: (modalidades: ModalidadPagoBody[]) =>
-      talleresAdminApi.updateEdicion(edicion.id, { modalidades }),
-    onSuccess: (updated) => {
-      toast.success("Modalidades guardadas");
-      updateEdicionInCache(qc, updated);
-    },
-    onError: (e) => toast.error((e as Error).message),
-  });
-
-  function agregar() {
-    setRows((r) => [
-      ...r,
-      {
-        codigo: "",
-        label: "",
-        nota: "",
-        monto_total: String(edicion.precio_total || ""),
-        n_cuotas: "1",
-      },
-    ]);
-  }
-
-  function quitar(idx: number) {
-    setRows((r) => r.filter((_, i) => i !== idx));
-  }
-
-  function actualizar(idx: number, patch: Partial<ModalidadForm>) {
-    setRows((r) => r.map((row, i) => (i === idx ? { ...row, ...patch } : row)));
-  }
-
-  function handleSave() {
-    const parsed: ModalidadPagoBody[] = [];
-    for (const row of rows) {
-      const codigo = row.codigo.trim();
-      const label = row.label.trim();
-      const monto = parseInt(row.monto_total, 10);
-      const nCuotas = parseInt(row.n_cuotas, 10);
-      if (!codigo || !label) {
-        toast.error("Cada modalidad necesita código y label");
-        return;
-      }
-      if (isNaN(monto) || monto <= 0) {
-        toast.error(`La modalidad "${label}" necesita un monto válido`);
-        return;
-      }
-      if (isNaN(nCuotas) || nCuotas < 1) {
-        toast.error(`La modalidad "${label}" necesita al menos 1 cuota`);
-        return;
-      }
-      parsed.push({
-        id: row.id,
-        codigo,
-        label,
-        nota: row.nota.trim(),
-        monto_total: monto,
-        n_cuotas: nCuotas,
-      });
-    }
-    const codigos = parsed.map((m) => m.codigo);
-    if (new Set(codigos).size !== codigos.length) {
-      toast.error("Hay códigos de modalidad repetidos");
-      return;
-    }
-    mut.mutate(parsed);
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      <p className="text-xs text-muted-foreground -mt-1">
-        Formas de pagar este taller — un pago único, en cuotas, con descuento para ex alumnos, etc.
-        Cada plan tiene su propio costo (normalmente el mismo que el Precio total de arriba, salvo
-        que quieras ofrecer un descuento).
-      </p>
-      {rows.length === 0 && (
-        <p className="text-sm text-muted-foreground italic">
-          Sin modalidades configuradas — el público ve 1 sola opción ("Pago total", el precio de
-          arriba).
-        </p>
-      )}
-      {rows.map((row, idx) => (
-        <div key={row.id ?? `nueva-${idx}`} className="flex flex-col gap-1.5">
-          <div className="grid sm:grid-cols-[1fr_1fr_1fr_140px_90px_auto] gap-2 items-end">
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Código
-              </label>
-              <Input
-                value={row.codigo}
-                onChange={(e) => actualizar(idx, { codigo: e.target.value })}
-                placeholder="3-cuotas"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Label
-              </label>
-              <Input
-                value={row.label}
-                onChange={(e) => actualizar(idx, { label: e.target.value })}
-                placeholder="3 cuotas"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Nota
-              </label>
-              <Input
-                value={row.nota}
-                onChange={(e) => actualizar(idx, { nota: e.target.value })}
-                placeholder="10% off"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Costo total del plan (ARS)
-              </label>
-              <Input
-                type="number"
-                min={1}
-                value={row.monto_total}
-                onChange={(e) => actualizar(idx, { monto_total: e.target.value })}
-                placeholder="ej: 320000 (el costo COMPLETO, no por cuota)"
-              />
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Cuotas
-              </label>
-              <Input
-                type="number"
-                min={1}
-                value={row.n_cuotas}
-                onChange={(e) => actualizar(idx, { n_cuotas: e.target.value })}
-              />
-            </div>
-            <IconButton
-              aria-label="Quitar modalidad"
-              size="sm"
-              onClick={() => quitar(idx)}
-              className="text-muted-foreground hover:text-destructive mb-0.5"
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </IconButton>
-          </div>
-          {previewModalidad(row) && (
-            <p className="text-xs text-rosa-ink pl-0.5">{previewModalidad(row)}</p>
-          )}
-        </div>
-      ))}
-      <div className="flex justify-between pt-1">
-        <Button variant="outline" size="sm" onClick={agregar} className="gap-1.5">
-          <Plus className="h-3.5 w-3.5" />
-          Agregar modalidad
-        </Button>
-        <Button onClick={handleSave} disabled={mut.isPending} className="gap-2">
-          {mut.isPending ? <Spinner size="sm" /> : <Save className="h-4 w-4" />}
-          Guardar modalidades
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 // Puente Talleres → Pedidos (Fase 1, #1308): antes había que buscar a mano en

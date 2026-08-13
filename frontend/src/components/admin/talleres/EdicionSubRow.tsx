@@ -14,7 +14,6 @@ import { useScrollFadeMask } from "@/hooks/useScrollFadeMask";
 import { CuposPill } from "./CuposPill";
 import {
   ClasesSection,
-  ModalidadesSection,
   PagosSection,
   PedidosGeneradosSection,
   PreciosSection,
@@ -235,7 +234,7 @@ export function EdicionSubRow({
             {activeTab === "precios" && (
               <div className="flex flex-col gap-0">
                 <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3">
-                  Precios
+                  Precio y forma de pago
                 </p>
                 <PreciosSection edicion={edicion} />
                 <div className="border-t border-border/40 mt-6 pt-6">
@@ -243,12 +242,6 @@ export function EdicionSubRow({
                     Datos de pago
                   </p>
                   <PagosSection edicion={edicion} />
-                </div>
-                <div className="border-t border-border/40 mt-6 pt-6">
-                  <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3">
-                    Modalidades de pago
-                  </p>
-                  <ModalidadesSection edicion={edicion} />
                 </div>
                 <div className="border-t border-border/40 mt-6 pt-6">
                   <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground mb-3">
