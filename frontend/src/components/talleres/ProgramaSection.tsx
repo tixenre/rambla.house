@@ -1,6 +1,7 @@
 import type { Sesion } from "@/lib/api";
 import { parseTemario } from "@/lib/talleres/temario";
 import { ClaseCard } from "./ClaseCard";
+import { SeccionCard } from "./SeccionCard";
 
 const TITULO_GENERICO_RE = /^Clase \d+$/;
 
@@ -34,8 +35,7 @@ export function ProgramaSection({ clases }: { clases: Sesion[] }) {
   if (clases.every(esClaseGenerica)) return null;
 
   return (
-    <section>
-      <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa mb-4">Programa</p>
+    <SeccionCard eyebrow="Programa">
       <div className="flex flex-col gap-3">
         {clases.map((clase, i) => (
           <ClaseCard
@@ -46,6 +46,6 @@ export function ProgramaSection({ clases }: { clases: Sesion[] }) {
           />
         ))}
       </div>
-    </section>
+    </SeccionCard>
   );
 }

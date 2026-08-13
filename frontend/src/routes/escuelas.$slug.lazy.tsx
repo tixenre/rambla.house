@@ -9,6 +9,7 @@ import { IconButton } from "@/design-system/ui/icon-button";
 import { ModalBackdrop } from "@/design-system/ui/modal-backdrop";
 import { WorkshopInscripcionForm } from "@/components/talleres/WorkshopInscripcionForm";
 import { DescripcionRica } from "@/components/talleres/DescripcionRica";
+import { SeccionCard } from "@/components/talleres/SeccionCard";
 import { TallerHero } from "@/components/talleres/TallerHero";
 import { TallerGaleria, TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
 import { TallerCalendario } from "@/components/talleres/TallerCalendario";
@@ -248,32 +249,24 @@ function TallerLandingPage() {
                 {/* Orden: de qué se trata → a quién está orientado → cuándo es
                     (chequeo rápido antes de invertir tiempo en leer) → el
                     desarrollo completo del programa. */}
-                <section>
+                <SeccionCard eyebrow="De qué se trata">
                   <DescripcionRica
                     texto={taller.descripcion}
                     className="text-lg sm:text-xl text-muted-foreground"
                   />
-                </section>
+                </SeccionCard>
 
                 {taller.publico_objetivo && (
-                  <section className="rounded-xl bg-muted/30 border border-border/50 px-5 py-4">
-                    <p className="text-xs font-mono uppercase tracking-widest text-muted-foreground mb-2">
-                      Orientado a
-                    </p>
+                  <SeccionCard eyebrow="Orientado a">
                     <DescripcionRica
                       texto={taller.publico_objetivo}
                       className="text-base text-muted-foreground"
                     />
-                  </section>
+                  </SeccionCard>
                 )}
 
                 {formTaller.sesiones.length > 0 && (
-                  <section>
-                    <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa mb-4">
-                      Cuándo
-                    </p>
-                    <TallerCalendario sesiones={formTaller.sesiones} horario={formTaller.horario} />
-                  </section>
+                  <TallerCalendario sesiones={formTaller.sesiones} horario={formTaller.horario} />
                 )}
 
                 <ProgramaSection clases={clases} />

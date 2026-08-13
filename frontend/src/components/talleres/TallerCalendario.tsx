@@ -115,9 +115,12 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
   if (sorted.length === 0) {
     if (!horario) return null;
     return (
-      <div className="flex items-center gap-2 text-sm text-muted-foreground">
-        <Clock className="h-4 w-4 shrink-0 text-rosa" />
-        <span>{horario}</span>
+      <div className="flex flex-col gap-3">
+        <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa">Cuándo</p>
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Clock className="h-4 w-4 shrink-0 text-rosa" />
+          <span>{horario}</span>
+        </div>
       </div>
     );
   }
@@ -160,6 +163,11 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
 
   return (
     <div className="rounded-2xl bg-rosa/5 border border-rosa/20 overflow-hidden">
+      {/* Eyebrow ADENTRO de la card (no arriba, suelta contra el fondo) —
+          mismo criterio que "Orientado a"/"Sobre"/"Programa" (SeccionCard):
+          cada bloque de la página es autocontenido, con su título como parte
+          del mismo diseño en vez de una etiqueta flotando aparte. */}
+      <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa px-5 pt-5">Cuándo</p>
       <div className="flex justify-center py-2">
         <Calendar
           locale={es}
