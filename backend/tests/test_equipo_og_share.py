@@ -66,6 +66,22 @@ def test_ruta_equipo_acepta_slug_sin_422():
     assert resp.status_code != 422
 
 
+def test_inject_json_ld_marca_los_scripts_como_ssr():
+    """`data-ssr-jsonld` distingue el JSON-LD server-injectado del estático
+    (WebSite/LocalBusiness en index.html, sin equivalente client-side): sin el
+    marker, `main.tsx` no puede barrerlo antes de que la ruta cliente
+    (equipo/escuelas/categoria) vuelva a declarar el mismo schema — quedaban
+    duplicados post-hidratación (mismo bug de clase que title/OG)."""
+    out = main._inject_json_ld(
+        _SAMPLE_HTML,
+        {"@type": "Product", "name": "Cámara RED"},
+        {"@type": "BreadcrumbList"},
+    )
+    assert out.count('data-ssr-jsonld="1"') == 2
+    assert '"@type": "Product"' in out
+    assert '"@type": "BreadcrumbList"' in out
+
+
 def test_set_og_image_home_reemplaza_solo_la_imagen():
     """La home inyecta el og:image configurado (og_image_url) para crawlers,
     sin tocar el resto del <head>."""

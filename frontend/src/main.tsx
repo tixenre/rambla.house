@@ -136,6 +136,14 @@ declare module "@tanstack/react-router" {
 // cualquier lector que ejecute JS. Mismo criterio que canonical/description
 // (2026-08-13): una ruta sin su propia declaración se queda sin el tag, no
 // con uno potencialmente incorrecto.
+//
+// `script[data-ssr-jsonld]` — mismo problema, para el JSON-LD que el backend
+// inyecta server-side (equipo/escuelas/categoria — ver `_inject_json_ld` en
+// backend/main.py): la ruta cliente vuelve a declarar el mismo Product/
+// Course/CollectionPage vía head(), así que sin barrer el server-injectado
+// quedan dos scripts iguales post-hidratación. El atributo distingue estos
+// de los ESTÁTICOS (WebSite/LocalBusiness en index.html, sin equivalente
+// client-side) — esos NO se tocan.
 document.head
   .querySelectorAll(
     [
@@ -152,6 +160,7 @@ document.head
       'meta[name="twitter:description"]',
       'meta[name="twitter:image"]',
       'meta[name="theme-color"]',
+      "script[data-ssr-jsonld]",
     ].join(", "),
   )
   .forEach((el) => el.remove());

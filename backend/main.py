@@ -661,9 +661,16 @@ def _inject_json_ld(html_text: str, *schemas: dict) -> str:
     Los crawlers/agentes que no ejecutan JS (Googlebot light, LLM indexers)
     ven el structured data directamente en el HTML inicial — sin esperar JS.
     Cada schema se emite en un <script> separado para facilitar el debug.
+
+    `data-ssr-jsonld` marca estos scripts como server-injectados: la ruta
+    cliente (equipo/escuelas/categoria) declara el MISMO JSON-LD de nuevo vía
+    head() para cuando SÍ hay JS — sin el atributo, `main.tsx` no podría
+    diferenciarlos de los estáticos (WebSite/LocalBusiness en index.html, sin
+    equivalente client-side) al barrerlos antes de montar, y quedarían
+    duplicados post-hidratación (mismo bug de clase que title/OG, 2026-08-13).
     """
     tags = "".join(
-        f'<script type="application/ld+json">{json.dumps(s, ensure_ascii=False)}</script>'
+        f'<script type="application/ld+json" data-ssr-jsonld="1">{json.dumps(s, ensure_ascii=False)}</script>'
         for s in schemas
     )
     return html_text.replace("</head>", tags + "</head>", 1)
