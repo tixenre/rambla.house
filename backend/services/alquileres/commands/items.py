@@ -449,11 +449,24 @@ def _validar_reemplazo_items_taller(conn, pedido_id: int, items_nuevos: list["Pe
     Import diferido de `services.estudio` — mismo estilo que
     `transiciones.py::_revalidar_stock` (ese paquete no importa de `routes.*`,
     así que esta dirección de import es segura, sin ciclo).
+
+    `AND turno_estudio_id IS NULL` en `actuales` (2026-08-13): desde que el
+    Estudio de un taller genera un turno embebido POR CLASE real (en vez de
+    una línea plana), esas filas quedan fuera de este endpoint por completo —
+    `pedidoToItems` (front) las filtra de `items_nuevos` (nunca viajan de
+    vuelta) y `_apply_pedido_items` las excluye de su propio DELETE (misma
+    condición, ver más abajo). Sin este filtro acá, `actuales` las contaba
+    como "el centinela sigue estando" y, al no reaparecer NUNCA en
+    `items_nuevos` (no porque se hayan quitado, sino porque este endpoint no
+    las toca), el guard rechazaba con 409 CUALQUIER guardado de ítems de un
+    taller con clases cargadas — incluido agregar una matrícula, el único
+    caso que este guard existe para seguir permitiendo.
     """
     from services.estudio.queries.estudio import _get_estudio_row
 
     actuales = conn.execute(
-        "SELECT equipo_id, nombre_libre FROM alquiler_items WHERE pedido_id=%s",
+        "SELECT equipo_id, nombre_libre FROM alquiler_items "
+        "WHERE pedido_id=%s AND turno_estudio_id IS NULL",
         (pedido_id,),
     ).fetchall()
     estudio = _get_estudio_row(conn)
