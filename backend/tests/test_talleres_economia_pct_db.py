@@ -141,6 +141,28 @@ def test_revenue_inscriptos_suma_solo_no_en_lista_espera(taller_base):
         conn.close()
 
 
+def test_revenue_inscriptos_excluye_soft_deleted(taller_base):
+    """Pedido del dueño (2026-08-13): una inscripción dada de baja no debería
+    seguir inflando el % que le corresponde al Estudio/equipos — mismo
+    criterio que `en_lista_espera`."""
+    from database import get_db
+    from services.talleres.queries.economia import _revenue_inscriptos
+
+    t = taller_base
+    ed = _crear_edicion(t)
+    conn = get_db()
+    try:
+        _inscribir(conn, ed["id"], monto=100_000, email="viva@example.com")
+        _inscribir(conn, ed["id"], monto=999_999, email="baja@example.com")
+        conn.execute(
+            "UPDATE taller_inscripciones SET eliminado_at = NOW() WHERE email = 'baja@example.com'"
+        )
+        conn.commit()
+        assert _revenue_inscriptos(conn, ed["id"]) == 100_000
+    finally:
+        conn.close()
+
+
 def test_revenue_inscriptos_cero_sin_inscriptos(taller_base):
     from database import get_db
     from services.talleres.queries.economia import _revenue_inscriptos

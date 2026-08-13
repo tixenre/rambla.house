@@ -721,9 +721,12 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
             # clave es el email (ya normalizado a lowercase). Corre bajo el
             # FOR UPDATE de la edición → race-safe (dos envíos concurrentes del
             # mismo email quedan serializados, el segundo ve al primero).
+            # `eliminado_at IS NULL`: una inscripción soft-deleted no cuenta
+            # como "ya inscripto" — si no, un borrado (accidental o no) bloquea
+            # para siempre volver a anotar a esa persona.
             ya_inscripto = conn.execute(
                 "SELECT 1 FROM taller_inscripciones "
-                "WHERE edicion_id = %s AND LOWER(email) = %s LIMIT 1",
+                "WHERE edicion_id = %s AND LOWER(email) = %s AND eliminado_at IS NULL LIMIT 1",
                 (edicion_id, email),
             ).fetchone()
             if ya_inscripto:
@@ -900,7 +903,7 @@ def get_oferta_cupo(token: str, request: Request):
             FROM taller_inscripciones ti
             JOIN ediciones_taller e ON e.id = ti.edicion_id
             JOIN talleres t ON t.id = ti.taller_id
-            WHERE ti.id = %s
+            WHERE ti.id = %s AND ti.eliminado_at IS NULL
             """,
             (insid,),
         ).fetchone()
@@ -963,7 +966,7 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
         try:
             ins = conn.execute(
                 "SELECT id, taller_id, edicion_id, estado, nombre, email, telefono "
-                "FROM taller_inscripciones WHERE id = %s FOR UPDATE",
+                "FROM taller_inscripciones WHERE id = %s AND eliminado_at IS NULL FOR UPDATE",
                 (insid,),
             ).fetchone()
             if ins is None:
@@ -1827,6 +1830,7 @@ def admin_delete_taller(taller_id: int, request: Request):
                 SELECT COUNT(*) AS cnt FROM taller_inscripciones ti
                 JOIN ediciones_taller e ON e.id = ti.edicion_id
                 WHERE e.taller_id = %s AND ti.en_lista_espera = FALSE
+                  AND ti.eliminado_at IS NULL
                 """,
                 (taller_id,),
             ).fetchone()["cnt"]
@@ -2608,7 +2612,7 @@ def admin_list_inscripciones(taller_id: int, request: Request):
             SELECT ti.*, e.numero_edicion, e.slug AS edicion_slug
             FROM taller_inscripciones ti
             LEFT JOIN ediciones_taller e ON e.id = ti.edicion_id
-            WHERE ti.taller_id = %s
+            WHERE ti.taller_id = %s AND ti.eliminado_at IS NULL
             ORDER BY ti.en_lista_espera, ti.created_at
             """,
             (taller_id,),
@@ -2646,7 +2650,7 @@ def admin_list_inscripciones_edicion(edicion_id: int, request: Request):
             SELECT ti.*, e.numero_edicion, e.slug AS edicion_slug
             FROM taller_inscripciones ti
             LEFT JOIN ediciones_taller e ON e.id = ti.edicion_id
-            WHERE ti.edicion_id = %s
+            WHERE ti.edicion_id = %s AND ti.eliminado_at IS NULL
             ORDER BY ti.en_lista_espera, ti.created_at
             """,
             (edicion_id,),
@@ -2692,7 +2696,8 @@ def admin_edicion_kpis(edicion_id: int, request: Request):
                    COUNT(*) FILTER (WHERE ti.estado = 'en_espera') AS en_espera,
                    COUNT(*) FILTER (WHERE ti.estado = 'cupo_ofrecido') AS cupo_ofrecido
             FROM ediciones_taller e
-            LEFT JOIN taller_inscripciones ti ON ti.edicion_id = e.id
+            LEFT JOIN taller_inscripciones ti
+                   ON ti.edicion_id = e.id AND ti.eliminado_at IS NULL
             WHERE e.id = %s
             GROUP BY e.id
             """,
@@ -2760,7 +2765,7 @@ def admin_export_inscripciones_csv(taller_id: int, request: Request):
                    ti.modalidad_label, ti.tyc_aceptado_at
             FROM taller_inscripciones ti
             LEFT JOIN ediciones_taller e ON e.id = ti.edicion_id
-            WHERE ti.taller_id = %s
+            WHERE ti.taller_id = %s AND ti.eliminado_at IS NULL
             ORDER BY ti.en_lista_espera, ti.created_at
             """,
             (taller_id,),
@@ -2793,26 +2798,38 @@ def admin_export_inscripciones_csv(taller_id: int, request: Request):
 
 @router.delete("/admin/talleres/{taller_id}/inscripciones/{ins_id}", status_code=200)
 def admin_delete_inscripcion(taller_id: int, ins_id: int, request: Request):
-    """Elimina una inscripción. Si era confirmada, decrementa cupos en la edición.
+    """Da de baja una inscripción (soft-delete). Si era confirmada, decrementa
+    cupos en la edición.
+
+    Soft, no DELETE real (2026-08-13, pedido del dueño): toda persona que se
+    inscribe sirve como dataset de interesados — se saca de las vistas/listas/
+    conteos normales, pero la fila (nombre/mail/teléfono) no se pierde.
 
     `FOR UPDATE`: sin el lock, un reclamo de cupo concurrente
     (POST /talleres/sena/{token}, que también toma FOR UPDATE sobre esta
     misma fila) podía commitear `en_lista_espera=False` justo entre este
-    SELECT y el DELETE — el admin borraba la fila leyendo el `en_lista_espera`
-    viejo (True) y se saltaba el decremento, dejando `cupos_confirmados`
-    contando de más para siempre (hallazgo del supervisor, reproducido con
-    dos conexiones reales)."""
-    require_admin(request)
+    SELECT y la baja — el admin daba de baja la fila leyendo el
+    `en_lista_espera` viejo (True) y se saltaba el decremento, dejando
+    `cupos_confirmados` contando de más para siempre (hallazgo del
+    supervisor, reproducido con dos conexiones reales)."""
+    # `or {}`: algunos tests llaman a esta función directo (sin HTTP) con
+    # require_admin mockeado a `lambda r: None` — nunca antes hacía falta su
+    # valor de retorno en este archivo, así que ningún test lo cubría.
+    session = require_admin(request) or {}
     with get_db() as conn:
         try:
             ins = conn.execute(
                 "SELECT id, en_lista_espera, edicion_id FROM taller_inscripciones "
-                "WHERE id = %s AND taller_id = %s FOR UPDATE",
+                "WHERE id = %s AND taller_id = %s AND eliminado_at IS NULL FOR UPDATE",
                 (ins_id, taller_id),
             ).fetchone()
             if ins is None:
                 raise HTTPException(404, "Inscripción no encontrada")
-            conn.execute("DELETE FROM taller_inscripciones WHERE id = %s", (ins_id,))
+            conn.execute(
+                "UPDATE taller_inscripciones SET eliminado_at = NOW(), eliminado_por = %s "
+                "WHERE id = %s",
+                (session.get("email", "unknown"), ins_id),
+            )
             if not ins["en_lista_espera"] and ins["edicion_id"]:
                 conn.execute(
                     "UPDATE ediciones_taller "
@@ -2835,7 +2852,7 @@ def admin_confirmar_inscripcion(taller_id: int, ins_id: int, request: Request):
         try:
             ins = conn.execute(
                 "SELECT id, en_lista_espera, edicion_id FROM taller_inscripciones "
-                "WHERE id = %s AND taller_id = %s",
+                "WHERE id = %s AND taller_id = %s AND eliminado_at IS NULL",
                 (ins_id, taller_id),
             ).fetchone()
             if ins is None:
@@ -2880,7 +2897,7 @@ def admin_verificar_sena(taller_id: int, ins_id: int, request: Request):
         try:
             ins = conn.execute(
                 "SELECT id, estado, nombre, email, edicion_id FROM taller_inscripciones "
-                "WHERE id = %s AND taller_id = %s",
+                "WHERE id = %s AND taller_id = %s AND eliminado_at IS NULL",
                 (ins_id, taller_id),
             ).fetchone()
             if ins is None:
@@ -2925,7 +2942,7 @@ def admin_ofrecer_cupo(taller_id: int, ins_id: int, request: Request):
         try:
             ins = conn.execute(
                 "SELECT id, en_lista_espera, nombre, email, edicion_id FROM taller_inscripciones "
-                "WHERE id = %s AND taller_id = %s",
+                "WHERE id = %s AND taller_id = %s AND eliminado_at IS NULL",
                 (ins_id, taller_id),
             ).fetchone()
             if ins is None:
@@ -2973,7 +2990,7 @@ def admin_notificar_cambios(taller_id: int, body: NotificarCambiosBody, request:
             raise HTTPException(404, "Taller no encontrado")
         inscriptos = conn.execute(
             "SELECT nombre, email FROM taller_inscripciones "
-            "WHERE taller_id = %s AND en_lista_espera = FALSE",
+            "WHERE taller_id = %s AND en_lista_espera = FALSE AND eliminado_at IS NULL",
             (taller_id,),
         ).fetchall()
 

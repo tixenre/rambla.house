@@ -2337,6 +2337,17 @@ def _init_db_schema(conn):
     conn.execute(
         "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS cupo_ofrecido_at TIMESTAMPTZ"
     )
+    # Soft-delete (2026-08-13, pedido del dueño): toda persona que se inscribe
+    # sirve como dataset de interesados — un borrado (accidental o normal) NO
+    # puede perder esos datos para siempre. `eliminado_at IS NULL` = activo
+    # (default, sin tocar ningún caller existente); las listas/exports/conteos
+    # filtran explícitamente, nunca un DELETE real.
+    conn.execute(
+        "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS eliminado_at TIMESTAMPTZ"
+    )
+    conn.execute(
+        "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS eliminado_por TEXT"
+    )
 
     # ── Carritos activos (#280 Fase 1): persistencia server-side ──────────────
     # Cada heartbeat del frontend hace upsert por session_id (UUID v4 generado
