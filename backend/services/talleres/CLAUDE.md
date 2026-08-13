@@ -23,6 +23,7 @@ services/talleres/
                        # comparte namespace con _ADVISORY_NS_ESTUDIO)
   queries/            # LECTURA — nunca mutan
     clases.py            # _row_get, _validar_clases, _validar_modalidades (puras, sin conn)
+    economia.py           # _revenue_inscriptos (conn) + _valor_efectivo (pura) — 'porcentaje'
   commands/           # ESCRITURA
     clases.py            # _insert_clases, _upsert_clases, _upsert_modalidades
     ediciones.py           # _gate_conflicto_estudio (dedup del gate ×3) + crear_edicion
@@ -65,6 +66,20 @@ el otro paquete.
   (`admin_delete_edicion` no limpia pedidos futuros, confía en `ON DELETE SET NULL`). Asimetría
   preexistente y documentada, no resuelta acá — no extraer "por simetría" con estudio sin que
   aparezca un segundo consumidor genuino.
+- **`valor_estudio_tipo`/`valor_equipos_tipo` ('fijo'|'porcentaje') es un eje ortogonal a `_modo`**
+  (2026-08-13): `_modo` sigue decidiendo "cómo se reparte entre meses"; `_tipo` decide "de dónde sale
+  el total ANTES de repartirlo" — 'fijo' = tipeado (`valor_estudio`/`valor_equipos`, de siempre);
+  'porcentaje' = `_valor_efectivo` aplica `_pct` sobre `_revenue_inscriptos` (SUM de
+  `taller_inscripciones.modalidad_monto` no en lista de espera de ESA edición). `_regenerar_pedidos_taller`
+  resuelve el valor efectivo de cada eje ANTES de llamar a `_partes` — `_partes`/`_modo` no saben ni
+  necesitan saber de dónde salió el total. El revenue se consulta **una sola vez** y se comparte entre
+  Estudio/equipos (guard: `if _tipo=='porcentaje' de cualquiera de los dos`) — no dispara la query
+  cuando ambos son 'fijo' (el caso común). `routes/talleres.py::_edicion_to_admin_dict` expone el
+  mismo preview ya resuelto (`inscriptos_revenue`/`valor_*_efectivo`) para que el admin lo vea SIN que
+  el front recalcule nada (el front no calcula plata, MEMORIA 2026-06-29) — el preview refleja el
+  último `_pct` GUARDADO, no lo que se está tipeando. El supervisor marca: un `_partes`/`_modo`
+  tocado para acomodar 'porcentaje' (no debería hacer falta), un preview de `valor_*_efectivo`
+  recalculado en el front, o una query de revenue nueva fuera de `queries/economia.py::_revenue_inscriptos`.
 - **Inscripción/seña y los helpers de lectura/serialización quedan fuera a propósito** (Fase 1
   acotada) — no expandir este paquete para "completarlo" sin que haya una duplicación real que lo
   justifique, mismo criterio que dejó fuera "slots fijos" del split de estudio.

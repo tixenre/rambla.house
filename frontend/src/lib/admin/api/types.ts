@@ -1808,14 +1808,25 @@ export type EdicionAdmin = {
   fecha_cierre_inscripcion: string | null;
   // Economía del taller (ver `_regenerar_pedidos_taller`, backend): si la
   // edición usa el espacio del Estudio y/o equipos de alquiler, con un valor
-  // que el admin tipea a mano — 'mensual' (mismo valor cada mes) o 'total'
-  // (se reparte en partes iguales entre los meses de la edición).
+  // — 'mensual' (mismo valor cada mes) o 'total' (se reparte en partes
+  // iguales entre los meses). `_tipo` decide CÓMO se determina el valor:
+  // 'fijo' = `valor_estudio`/`valor_equipos` tal cual (el admin lo tipea);
+  // 'porcentaje' = `_pct` (0-100) sobre `inscriptos_revenue`. `_efectivo` y
+  // `inscriptos_revenue` los resuelve SIEMPRE el backend (nunca se
+  // recalculan acá) — son el preview de lo que se va a cobrar.
   usa_estudio: boolean;
   valor_estudio: number;
   valor_estudio_modo: "mensual" | "total";
+  valor_estudio_tipo: "fijo" | "porcentaje";
+  valor_estudio_pct: number;
   usa_equipos: boolean;
   valor_equipos: number;
   valor_equipos_modo: "mensual" | "total";
+  valor_equipos_tipo: "fijo" | "porcentaje";
+  valor_equipos_pct: number;
+  inscriptos_revenue: number;
+  valor_estudio_efectivo: number;
+  valor_equipos_efectivo: number;
   // Portada + galería de ESTA edición (mismo patrón que `EstudioFoto`, pero
   // scoped a la edición — cada edición tiene su propia tanda de fotos).
   fotos: EdicionFoto[];

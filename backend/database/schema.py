@@ -2022,6 +2022,45 @@ def _init_db_schema(conn):
         "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_equipos_modo_check "
         "CHECK (valor_equipos_modo IN ('mensual','total'))"
     )
+    # `_tipo` ('fijo'|'porcentaje') es un eje NUEVO y ortogonal a `_modo`
+    # (mensual/total sigue siendo "cómo se reparte entre los meses" — esto es
+    # "cómo se determina el valor"). 'fijo' = el admin tipea el monto directo
+    # (comportamiento de siempre, `valor_estudio`/`valor_equipos`). 'porcentaje'
+    # = el admin tipea un % (`valor_estudio_pct`/`valor_equipos_pct`, 0-100) y
+    # `_regenerar_pedidos_taller` deriva el monto de ESE % sobre el total que
+    # los inscriptos (no en lista de espera) de la edición van a pagar —
+    # `SUM(modalidad_monto)`, nunca un número tipeado a mano. Pedido explícito
+    # del dueño: "si se anotan 6 vamos al 50%".
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_estudio_tipo TEXT NOT NULL DEFAULT 'fijo'")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_estudio_pct INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_equipos_tipo TEXT NOT NULL DEFAULT 'fijo'")
+    conn.execute("ALTER TABLE ediciones_taller ADD COLUMN IF NOT EXISTS valor_equipos_pct INTEGER NOT NULL DEFAULT 0")
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_estudio_tipo_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_estudio_tipo_check "
+        "CHECK (valor_estudio_tipo IN ('fijo','porcentaje'))"
+    )
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_equipos_tipo_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_equipos_tipo_check "
+        "CHECK (valor_equipos_tipo IN ('fijo','porcentaje'))"
+    )
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_estudio_pct_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_estudio_pct_check "
+        "CHECK (valor_estudio_pct BETWEEN 0 AND 100)"
+    )
+    conn.execute("ALTER TABLE ediciones_taller DROP CONSTRAINT IF EXISTS ediciones_taller_valor_equipos_pct_check")
+    conn.execute(
+        "ALTER TABLE ediciones_taller ADD CONSTRAINT ediciones_taller_valor_equipos_pct_check "
+        "CHECK (valor_equipos_pct BETWEEN 0 AND 100)"
+    )
+    # Sirve la query de `_revenue_inscriptos` (WHERE edicion_id = ... AND
+    # en_lista_espera = FALSE) — antes solo había índice por `taller_id`.
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_inscripciones_edicion_lista "
+        "ON taller_inscripciones(edicion_id, en_lista_espera)"
+    )
     # Vincula cada pedido mensual generado con su edición, para regenerar
     # futuros sin tocar pasados/pagados (mismo patrón que `estudio_slot_id`).
     # NULL en todo pedido normal → cero impacto.

@@ -65,6 +65,7 @@ from services.talleres.commands.clases import (
 )
 from services.talleres.commands.ediciones import _gate_conflicto_estudio, crear_edicion
 from services.talleres.commands.economia import _regenerar_pedidos_taller
+from services.talleres.queries.economia import _revenue_inscriptos, _valor_efectivo
 
 logger = logging.getLogger(__name__)
 
@@ -378,6 +379,7 @@ def _edicion_to_public_dict(
 
 def _edicion_to_admin_dict(
     edicion_row, clases=None, modalidades=None, fotos=None, cuentas_pago=None,
+    inscriptos_revenue: int = 0,
 ) -> dict:
     """Convierte una fila de ediciones_taller al shape de admin (anidado en concepto)."""
     return {
@@ -414,9 +416,27 @@ def _edicion_to_admin_dict(
         "usa_estudio": bool(edicion_row["usa_estudio"]),
         "valor_estudio": edicion_row["valor_estudio"],
         "valor_estudio_modo": edicion_row["valor_estudio_modo"],
+        "valor_estudio_tipo": edicion_row["valor_estudio_tipo"],
+        "valor_estudio_pct": edicion_row["valor_estudio_pct"],
         "usa_equipos": bool(edicion_row["usa_equipos"]),
         "valor_equipos": edicion_row["valor_equipos"],
         "valor_equipos_modo": edicion_row["valor_equipos_modo"],
+        "valor_equipos_tipo": edicion_row["valor_equipos_tipo"],
+        "valor_equipos_pct": edicion_row["valor_equipos_pct"],
+        # Preview resuelto por el backend (nunca el front): cuánto pagan HOY
+        # los inscriptos no en lista de espera + el valor efectivo que
+        # `_regenerar_pedidos_taller` aplicaría con la config actual — en
+        # 'fijo' es un espejo de `valor_estudio`/`valor_equipos`, en
+        # 'porcentaje' es `revenue * pct / 100` ya calculado.
+        "inscriptos_revenue": inscriptos_revenue,
+        "valor_estudio_efectivo": _valor_efectivo(
+            edicion_row["valor_estudio_tipo"], edicion_row["valor_estudio"],
+            edicion_row["valor_estudio_pct"], inscriptos_revenue,
+        ),
+        "valor_equipos_efectivo": _valor_efectivo(
+            edicion_row["valor_equipos_tipo"], edicion_row["valor_equipos"],
+            edicion_row["valor_equipos_pct"], inscriptos_revenue,
+        ),
         "fotos": fotos if fotos is not None else [],
     }
 
@@ -1007,15 +1027,22 @@ class EdicionCreateBody(BaseModel):
     activo: bool = False
     numero_edicion: int = 1
     # Economía del taller (ver `_regenerar_pedidos_taller`): si la edición usa
-    # el espacio del Estudio y/o equipos de alquiler, con un valor que el
-    # admin tipea a mano — 'mensual' (mismo valor cada mes) o 'total' (se
-    # reparte en partes iguales entre los meses de la edición).
+    # el espacio del Estudio y/o equipos de alquiler, con un valor — 'mensual'
+    # (mismo valor cada mes) o 'total' (se reparte en partes iguales entre los
+    # meses de la edición). `_tipo` decide CÓMO se determina ese valor: 'fijo'
+    # = lo tipea el admin (`valor_estudio`/`valor_equipos`, comportamiento de
+    # siempre); 'porcentaje' = un % (`valor_estudio_pct`/`valor_equipos_pct`,
+    # 0-100) sobre lo que van a pagar los inscriptos no en lista de espera.
     usa_estudio: bool = False
     valor_estudio: int = 0
     valor_estudio_modo: str = "mensual"
+    valor_estudio_tipo: str = "fijo"
+    valor_estudio_pct: int = 0
     usa_equipos: bool = False
     valor_equipos: int = 0
     valor_equipos_modo: str = "mensual"
+    valor_equipos_tipo: str = "fijo"
+    valor_equipos_pct: int = 0
 
 
 class TallerConceptoCreateBody(BaseModel):
@@ -1131,9 +1158,13 @@ class EdicionUpdateBody(BaseModel):
     usa_estudio: bool | None = None
     valor_estudio: int | None = None
     valor_estudio_modo: str | None = None
+    valor_estudio_tipo: str | None = None
+    valor_estudio_pct: int | None = None
     usa_equipos: bool | None = None
     valor_equipos: int | None = None
     valor_equipos_modo: str | None = None
+    valor_equipos_tipo: str | None = None
+    valor_equipos_pct: int | None = None
 
 
 @router.get("/admin/talleres")
@@ -1162,6 +1193,7 @@ def admin_list_talleres(request: Request):
                     e, _get_clases(conn, e["id"]), _get_modalidades(conn, e["id"]),
                     fotos=_get_edicion_fotos(conn, e["id"]),
                     cuentas_pago=_get_cuentas_pago(conn, e["id"]),
+                    inscriptos_revenue=_revenue_inscriptos(conn, e["id"]),
                 )
                 for e in edicion_rows
             ]
@@ -1202,6 +1234,14 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
         raise HTTPException(400, "valor_estudio_modo debe ser 'mensual' o 'total'")
     if ed.valor_equipos_modo not in ("mensual", "total"):
         raise HTTPException(400, "valor_equipos_modo debe ser 'mensual' o 'total'")
+    if ed.valor_estudio_tipo not in ("fijo", "porcentaje"):
+        raise HTTPException(400, "valor_estudio_tipo debe ser 'fijo' o 'porcentaje'")
+    if not (0 <= ed.valor_estudio_pct <= 100):
+        raise HTTPException(400, "valor_estudio_pct debe estar entre 0 y 100")
+    if ed.valor_equipos_tipo not in ("fijo", "porcentaje"):
+        raise HTTPException(400, "valor_equipos_tipo debe ser 'fijo' o 'porcentaje'")
+    if not (0 <= ed.valor_equipos_pct <= 100):
+        raise HTTPException(400, "valor_equipos_pct debe estar entre 0 y 100")
 
     with get_db() as conn:
         try:
@@ -1273,8 +1313,10 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
                     "activo": ed.activo,
                     "usa_estudio": ed.usa_estudio, "valor_estudio": ed.valor_estudio,
                     "valor_estudio_modo": ed.valor_estudio_modo,
+                    "valor_estudio_tipo": ed.valor_estudio_tipo, "valor_estudio_pct": ed.valor_estudio_pct,
                     "usa_equipos": ed.usa_equipos, "valor_equipos": ed.valor_equipos,
                     "valor_equipos_modo": ed.valor_equipos_modo,
+                    "valor_equipos_tipo": ed.valor_equipos_tipo, "valor_equipos_pct": ed.valor_equipos_pct,
                 },
             )
             conn.commit()
@@ -1294,7 +1336,9 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
             raise
 
     return _concepto_to_admin_dict(
-        t_row, [_edicion_to_admin_dict(e_row, clases_out, fotos=[], cuentas_pago=[])], instructores_out,
+        t_row,
+        [_edicion_to_admin_dict(e_row, clases_out, fotos=[], cuentas_pago=[], inscriptos_revenue=0)],
+        instructores_out,
         instituciones=instituciones_out,
     )
 
@@ -1314,6 +1358,14 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
         raise HTTPException(400, "valor_estudio_modo debe ser 'mensual' o 'total'")
     if body.valor_equipos_modo not in ("mensual", "total"):
         raise HTTPException(400, "valor_equipos_modo debe ser 'mensual' o 'total'")
+    if body.valor_estudio_tipo not in ("fijo", "porcentaje"):
+        raise HTTPException(400, "valor_estudio_tipo debe ser 'fijo' o 'porcentaje'")
+    if not (0 <= body.valor_estudio_pct <= 100):
+        raise HTTPException(400, "valor_estudio_pct debe estar entre 0 y 100")
+    if body.valor_equipos_tipo not in ("fijo", "porcentaje"):
+        raise HTTPException(400, "valor_equipos_tipo debe ser 'fijo' o 'porcentaje'")
+    if not (0 <= body.valor_equipos_pct <= 100):
+        raise HTTPException(400, "valor_equipos_pct debe estar entre 0 y 100")
 
     with get_db() as conn:
         try:
@@ -1358,8 +1410,10 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
                     "activo": body.activo,
                     "usa_estudio": body.usa_estudio, "valor_estudio": body.valor_estudio,
                     "valor_estudio_modo": body.valor_estudio_modo,
+                    "valor_estudio_tipo": body.valor_estudio_tipo, "valor_estudio_pct": body.valor_estudio_pct,
                     "usa_equipos": body.usa_equipos, "valor_equipos": body.valor_equipos,
                     "valor_equipos_modo": body.valor_equipos_modo,
+                    "valor_equipos_tipo": body.valor_equipos_tipo, "valor_equipos_pct": body.valor_equipos_pct,
                 },
             )
             conn.commit()
@@ -1371,7 +1425,7 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
             conn.rollback()
             raise
 
-    return _edicion_to_admin_dict(e_row, clases_out, fotos=[], cuentas_pago=[])
+    return _edicion_to_admin_dict(e_row, clases_out, fotos=[], cuentas_pago=[], inscriptos_revenue=0)
 
 
 @router.patch("/admin/talleres/{taller_id}")
@@ -1454,6 +1508,7 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
                     e, _get_clases(conn, e["id"]), _get_modalidades(conn, e["id"]),
                     fotos=_get_edicion_fotos(conn, e["id"]),
                     cuentas_pago=_get_cuentas_pago(conn, e["id"]),
+                    inscriptos_revenue=_revenue_inscriptos(conn, e["id"]),
                 )
                 for e in edicion_rows
             ]
@@ -1520,6 +1575,14 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
         if body.valor_estudio_modo not in ("mensual", "total"):
             raise HTTPException(400, "valor_estudio_modo debe ser 'mensual' o 'total'")
         sets.append("valor_estudio_modo = %s"); params.append(body.valor_estudio_modo)
+    if body.valor_estudio_tipo is not None:
+        if body.valor_estudio_tipo not in ("fijo", "porcentaje"):
+            raise HTTPException(400, "valor_estudio_tipo debe ser 'fijo' o 'porcentaje'")
+        sets.append("valor_estudio_tipo = %s"); params.append(body.valor_estudio_tipo)
+    if body.valor_estudio_pct is not None:
+        if not (0 <= body.valor_estudio_pct <= 100):
+            raise HTTPException(400, "valor_estudio_pct debe estar entre 0 y 100")
+        sets.append("valor_estudio_pct = %s"); params.append(body.valor_estudio_pct)
     if body.usa_equipos is not None:
         sets.append("usa_equipos = %s"); params.append(body.usa_equipos)
     if body.valor_equipos is not None:
@@ -1528,6 +1591,14 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
         if body.valor_equipos_modo not in ("mensual", "total"):
             raise HTTPException(400, "valor_equipos_modo debe ser 'mensual' o 'total'")
         sets.append("valor_equipos_modo = %s"); params.append(body.valor_equipos_modo)
+    if body.valor_equipos_tipo is not None:
+        if body.valor_equipos_tipo not in ("fijo", "porcentaje"):
+            raise HTTPException(400, "valor_equipos_tipo debe ser 'fijo' o 'porcentaje'")
+        sets.append("valor_equipos_tipo = %s"); params.append(body.valor_equipos_tipo)
+    if body.valor_equipos_pct is not None:
+        if not (0 <= body.valor_equipos_pct <= 100):
+            raise HTTPException(400, "valor_equipos_pct debe estar entre 0 y 100")
+        sets.append("valor_equipos_pct = %s"); params.append(body.valor_equipos_pct)
 
     new_clases = None
     if body.clases is not None:
@@ -1635,11 +1706,13 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
             modalidades_out = _get_modalidades(conn, edicion_id)
             cuentas_pago_out = _get_cuentas_pago(conn, edicion_id)
             fotos_out = _get_edicion_fotos(conn, edicion_id)
+            inscriptos_revenue_out = _revenue_inscriptos(conn, edicion_id)
         except Exception:
             conn.rollback()
             raise
     return _edicion_to_admin_dict(
         e_row, clases_out, modalidades_out, fotos=fotos_out, cuentas_pago=cuentas_pago_out,
+        inscriptos_revenue=inscriptos_revenue_out,
     )
 
 

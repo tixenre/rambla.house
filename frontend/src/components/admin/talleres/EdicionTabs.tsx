@@ -155,9 +155,13 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
   const [usaEstudio, setUsaEstudio] = useState(edicion.usa_estudio);
   const [valorEstudio, setValorEstudio] = useState(String(edicion.valor_estudio));
   const [valorEstudioModo, setValorEstudioModo] = useState(edicion.valor_estudio_modo);
+  const [valorEstudioTipo, setValorEstudioTipo] = useState(edicion.valor_estudio_tipo);
+  const [valorEstudioPct, setValorEstudioPct] = useState(String(edicion.valor_estudio_pct));
   const [usaEquipos, setUsaEquipos] = useState(edicion.usa_equipos);
   const [valorEquipos, setValorEquipos] = useState(String(edicion.valor_equipos));
   const [valorEquiposModo, setValorEquiposModo] = useState(edicion.valor_equipos_modo);
+  const [valorEquiposTipo, setValorEquiposTipo] = useState(edicion.valor_equipos_tipo);
+  const [valorEquiposPct, setValorEquiposPct] = useState(String(edicion.valor_equipos_pct));
   // Formas de pagar: lista de planes (0+, el dueño puede ofrecer "pago único"
   // Y "en cuotas" a la vez para que el cliente elija) — pero NINGUNO tipea un
   // total: el monto de cada plan sale siempre del Precio total de arriba
@@ -181,9 +185,13 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
     setUsaEstudio(edicion.usa_estudio);
     setValorEstudio(String(edicion.valor_estudio));
     setValorEstudioModo(edicion.valor_estudio_modo);
+    setValorEstudioTipo(edicion.valor_estudio_tipo);
+    setValorEstudioPct(String(edicion.valor_estudio_pct));
     setUsaEquipos(edicion.usa_equipos);
     setValorEquipos(String(edicion.valor_equipos));
     setValorEquiposModo(edicion.valor_equipos_modo);
+    setValorEquiposTipo(edicion.valor_equipos_tipo);
+    setValorEquiposPct(String(edicion.valor_equipos_pct));
     setPlanes((edicion.modalidades ?? []).map((m) => planToForm(m, edicion.precio_total)));
     setCuentas(edicion.cuentas_pago ?? []);
   }, [edicion.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -193,6 +201,10 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
     onSuccess: (updated) => {
       toast.success("Precio y forma de pago actualizados");
       updateEdicionInCache(qc, updated);
+      // Guardar acá SIEMPRE re-corre `_regenerar_pedidos_taller` en el
+      // backend (cambie o no la Economía) — sin esto, "Pedidos generados"
+      // se queda mostrando el monto viejo hasta el próximo refetch.
+      qc.invalidateQueries({ queryKey: ["admin", "ediciones", edicion.id, "pedidos"] });
     },
     onError: (e) => toast.error((e as Error).message),
   });
@@ -227,6 +239,8 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
     const cupos = parseInt(cuposTotal, 10);
     const valEstudio = parseInt(valorEstudio, 10);
     const valEquipos = parseInt(valorEquipos, 10);
+    const pctEstudio = parseInt(valorEstudioPct, 10);
+    const pctEquipos = parseInt(valorEquiposPct, 10);
     if (isNaN(total) || isNaN(sena) || isNaN(cupos) || cupos < 1) {
       toast.error("Ingresá números válidos");
       return;
@@ -235,8 +249,28 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
       toast.error(`No podés bajar cupos a ${cupos}: hay ${edicion.cupos_confirmados} confirmados`);
       return;
     }
-    if ((usaEstudio && isNaN(valEstudio)) || (usaEquipos && isNaN(valEquipos))) {
+    if (usaEstudio && valorEstudioTipo === "fijo" && isNaN(valEstudio)) {
       toast.error("Ingresá un valor válido para lo que usa el taller");
+      return;
+    }
+    if (usaEquipos && valorEquiposTipo === "fijo" && isNaN(valEquipos)) {
+      toast.error("Ingresá un valor válido para lo que usa el taller");
+      return;
+    }
+    if (
+      usaEstudio &&
+      valorEstudioTipo === "porcentaje" &&
+      (isNaN(pctEstudio) || pctEstudio < 0 || pctEstudio > 100)
+    ) {
+      toast.error("El % del Estudio tiene que estar entre 0 y 100");
+      return;
+    }
+    if (
+      usaEquipos &&
+      valorEquiposTipo === "porcentaje" &&
+      (isNaN(pctEquipos) || pctEquipos < 0 || pctEquipos > 100)
+    ) {
+      toast.error("El % de equipos tiene que estar entre 0 y 100");
       return;
     }
     const modalidades: ModalidadPagoBody[] = [];
@@ -296,9 +330,13 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
       usa_estudio: usaEstudio,
       valor_estudio: isNaN(valEstudio) ? 0 : valEstudio,
       valor_estudio_modo: valorEstudioModo,
+      valor_estudio_tipo: valorEstudioTipo,
+      valor_estudio_pct: isNaN(pctEstudio) ? 0 : pctEstudio,
       usa_equipos: usaEquipos,
       valor_equipos: isNaN(valEquipos) ? 0 : valEquipos,
       valor_equipos_modo: valorEquiposModo,
+      valor_equipos_tipo: valorEquiposTipo,
+      valor_equipos_pct: isNaN(pctEquipos) ? 0 : pctEquipos,
       modalidades,
       cuentas_pago: cuentasOut,
     });
@@ -514,62 +552,42 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
           <Switch checked={usaEstudio} onCheckedChange={setUsaEstudio} />
         </div>
         {usaEstudio && (
-          <div className="flex items-end gap-3 pl-1">
-            <div className="flex flex-col gap-1.5 flex-1">
-              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Valor Estudio (ARS)
-              </label>
-              <Input
-                type="number"
-                min={0}
-                value={valorEstudio}
-                onChange={(e) => setValorEstudio(e.target.value)}
-              />
-            </div>
-            <Select
-              value={valorEstudioModo}
-              onValueChange={(v) => setValorEstudioModo(v as "mensual" | "total")}
-            >
-              <SelectTrigger className="w-[130px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="mensual">por mes</SelectItem>
-                <SelectItem value="total">total</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <EconomiaCampo
+            label="Valor Estudio"
+            tipo={valorEstudioTipo}
+            onTipoChange={setValorEstudioTipo}
+            valor={valorEstudio}
+            onValorChange={setValorEstudio}
+            pct={valorEstudioPct}
+            onPctChange={setValorEstudioPct}
+            modo={valorEstudioModo}
+            onModoChange={setValorEstudioModo}
+            revenue={edicion.inscriptos_revenue}
+            pctGuardado={edicion.valor_estudio_pct}
+            efectivo={edicion.valor_estudio_efectivo}
+            cuposConfirmados={edicion.cupos_confirmados}
+          />
         )}
         <div className="flex items-center justify-between gap-3 pt-2 border-t border-border/40">
           <label className="text-sm">Usa equipos de alquiler</label>
           <Switch checked={usaEquipos} onCheckedChange={setUsaEquipos} />
         </div>
         {usaEquipos && (
-          <div className="flex items-end gap-3 pl-1">
-            <div className="flex flex-col gap-1.5 flex-1">
-              <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-                Valor equipos (ARS)
-              </label>
-              <Input
-                type="number"
-                min={0}
-                value={valorEquipos}
-                onChange={(e) => setValorEquipos(e.target.value)}
-              />
-            </div>
-            <Select
-              value={valorEquiposModo}
-              onValueChange={(v) => setValorEquiposModo(v as "mensual" | "total")}
-            >
-              <SelectTrigger className="w-[130px]">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="mensual">por mes</SelectItem>
-                <SelectItem value="total">total</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <EconomiaCampo
+            label="Valor equipos"
+            tipo={valorEquiposTipo}
+            onTipoChange={setValorEquiposTipo}
+            valor={valorEquipos}
+            onValorChange={setValorEquipos}
+            pct={valorEquiposPct}
+            onPctChange={setValorEquiposPct}
+            modo={valorEquiposModo}
+            onModoChange={setValorEquiposModo}
+            revenue={edicion.inscriptos_revenue}
+            pctGuardado={edicion.valor_equipos_pct}
+            efectivo={edicion.valor_equipos_efectivo}
+            cuposConfirmados={edicion.cupos_confirmados}
+          />
         )}
       </div>
 
@@ -579,6 +597,96 @@ export function PreciosSection({ edicion }: { edicion: EdicionAdmin }) {
           Guardar
         </Button>
       </div>
+    </div>
+  );
+}
+
+// Un campo de "Economía del taller" (Estudio o equipos): 'fijo' = ARS tipeado
+// a mano (de siempre); 'porcentaje' = % sobre lo que pagan los inscriptos no
+// en lista de espera. El preview ("hoy esto da $X") viene SIEMPRE resuelto
+// por el backend (`efectivo`/`revenue`, props ya calculadas) — refleja el
+// último % GUARDADO, no lo que se está tipeando ahora mismo (el front no
+// calcula plata, ver MEMORIA 2026-06-29); se actualiza recién al guardar.
+function EconomiaCampo({
+  label,
+  tipo,
+  onTipoChange,
+  valor,
+  onValorChange,
+  pct,
+  onPctChange,
+  modo,
+  onModoChange,
+  revenue,
+  pctGuardado,
+  efectivo,
+  cuposConfirmados,
+}: {
+  label: string;
+  tipo: "fijo" | "porcentaje";
+  onTipoChange: (v: "fijo" | "porcentaje") => void;
+  valor: string;
+  onValorChange: (v: string) => void;
+  pct: string;
+  onPctChange: (v: string) => void;
+  modo: "mensual" | "total";
+  onModoChange: (v: "mensual" | "total") => void;
+  revenue: number;
+  pctGuardado: number;
+  efectivo: number;
+  cuposConfirmados: number;
+}) {
+  return (
+    <div className="flex flex-col gap-3 pl-1">
+      <Select value={tipo} onValueChange={(v) => onTipoChange(v as "fijo" | "porcentaje")}>
+        <SelectTrigger className="w-[210px]">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="fijo">Monto fijo</SelectItem>
+          <SelectItem value="porcentaje">% de los inscriptos</SelectItem>
+        </SelectContent>
+      </Select>
+      <div className="flex items-end gap-3">
+        <div className="flex flex-col gap-1.5 flex-1">
+          <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+            {tipo === "porcentaje" ? `${label} (%)` : `${label} (ARS)`}
+          </label>
+          {tipo === "porcentaje" ? (
+            <Input
+              type="number"
+              min={0}
+              max={100}
+              value={pct}
+              onChange={(e) => onPctChange(e.target.value)}
+            />
+          ) : (
+            <Input
+              type="number"
+              min={0}
+              value={valor}
+              onChange={(e) => onValorChange(e.target.value)}
+            />
+          )}
+        </div>
+        <Select value={modo} onValueChange={(v) => onModoChange(v as "mensual" | "total")}>
+          <SelectTrigger className="w-[130px]">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="mensual">por mes</SelectItem>
+            <SelectItem value="total">total</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {tipo === "porcentaje" && (
+        <p className="text-2xs text-muted-foreground">
+          {cuposConfirmados} inscripto{cuposConfirmados === 1 ? "" : "s"} anotados suman{" "}
+          {fmtArs(revenue)}. Con el {pctGuardado}% guardado, hoy esto da{" "}
+          <span className="text-ink font-semibold">{fmtArs(efectivo)}</span> — se recalcula al
+          guardar.
+        </p>
+      )}
     </div>
   );
 }

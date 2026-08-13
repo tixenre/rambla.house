@@ -12,6 +12,7 @@ from services.estudio.queries.estudio import _get_estudio_row
 from services.fechas import MESES_ES, iter_meses, mes_actual_ar
 
 from services.talleres.constants import _ADVISORY_NS_TALLER
+from services.talleres.queries.economia import _revenue_inscriptos, _valor_efectivo
 
 
 def _regenerar_pedidos_taller(conn, edicion: dict, taller_nombre: str, *, numero_pedido_fn) -> None:
@@ -68,8 +69,23 @@ def _regenerar_pedidos_taller(conn, edicion: dict, taller_nombre: str, *, numero
         base, resto = divmod(total, n_meses)
         return {clave: (base + resto if clave == ultimo else base) for clave in meses}
 
-    valores_estudio = _partes(edicion["valor_estudio"], edicion["valor_estudio_modo"]) if edicion["usa_estudio"] else {}
-    valores_equipos = _partes(edicion["valor_equipos"], edicion["valor_equipos_modo"]) if edicion["usa_equipos"] else {}
+    # `_tipo` ('fijo'|'porcentaje') resuelve el TOTAL antes de repartirlo entre
+    # meses — `_partes`/`_modo` no cambian: siguen repartiendo el mismo total,
+    # venga de un monto tipeado o de un % sobre lo que pagan los inscriptos.
+    revenue = (
+        _revenue_inscriptos(conn, edicion_id)
+        if edicion["valor_estudio_tipo"] == "porcentaje" or edicion["valor_equipos_tipo"] == "porcentaje"
+        else 0
+    )
+    valor_estudio_efectivo = _valor_efectivo(
+        edicion["valor_estudio_tipo"], edicion["valor_estudio"], edicion["valor_estudio_pct"], revenue
+    )
+    valor_equipos_efectivo = _valor_efectivo(
+        edicion["valor_equipos_tipo"], edicion["valor_equipos"], edicion["valor_equipos_pct"], revenue
+    )
+
+    valores_estudio = _partes(valor_estudio_efectivo, edicion["valor_estudio_modo"]) if edicion["usa_estudio"] else {}
+    valores_equipos = _partes(valor_equipos_efectivo, edicion["valor_equipos_modo"]) if edicion["usa_equipos"] else {}
     estudio = _get_estudio_row(conn) if edicion["usa_estudio"] else None
 
     for (y, m) in meses:

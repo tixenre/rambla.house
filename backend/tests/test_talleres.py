@@ -98,9 +98,13 @@ def _edicion_full(**ov):
         "usa_estudio": False,
         "valor_estudio": 0,
         "valor_estudio_modo": "mensual",
+        "valor_estudio_tipo": "fijo",
+        "valor_estudio_pct": 0,
         "usa_equipos": False,
         "valor_equipos": 0,
         "valor_equipos_modo": "mensual",
+        "valor_equipos_tipo": "fijo",
+        "valor_equipos_pct": 0,
     }
     e.update(ov)
     return e
@@ -110,13 +114,15 @@ class _TallerRegenConn(_ConnCM):
     """Fake conn para _regenerar_pedidos_taller: graba INSERT/DELETE de
     alquileres + los ítems de cada pedido nuevo."""
 
-    def __init__(self, existing=None, estudio=None):
+    def __init__(self, existing=None, estudio=None, revenue=0):
         # existing: [{id, fecha_desde, monto_pagado, n_items}]
         self.existing = existing or []
         self.inserted = []       # params posicionales de cada INSERT alquileres
         self.deleted = []        # ids borrados
         self.item_inserts = []   # [{columna: valor}] — uno por ítem insertado
         self.estudio = estudio if estudio is not None else _estudio_row()
+        self.revenue = revenue   # SUM(modalidad_monto) que devolvería _revenue_inscriptos
+        self.revenue_queries = 0  # cuántas veces se consultó — porcentaje comparte 1 sola
         self._num = 5000
 
     def execute(self, sql, params=()):
@@ -125,6 +131,9 @@ class _TallerRegenConn(_ConnCM):
             return _Cur([self.estudio])
         if "FROM ALQUILERES A WHERE A.TALLER_EDICION_ID" in su:
             return _Cur(self.existing)
+        if "SUM(MODALIDAD_MONTO)" in su:
+            self.revenue_queries += 1
+            return _Cur([{"total": self.revenue}])
         if "NEXTVAL" in su:
             self._num += 1
             return _Cur([{0: self._num}])
@@ -270,3 +279,121 @@ class TestRegenerarPedidosTaller:
         for it in equipos_items:
             assert it["subtotal"] == 5000
             assert it["nombre_libre"] == "Uso de equipos — Taller Y"
+
+
+class TestRegenerarPedidosTallerPorcentaje:
+    """`valor_estudio_tipo`/`valor_equipos_tipo` = 'porcentaje': el valor se
+    deriva de `_revenue_inscriptos` (SUM(modalidad_monto) de los no en lista
+    de espera) en vez de tipearse a mano. Pedido explícito del dueño: "si se
+    anotan 6 vamos al 50%"."""
+
+    def test_valor_estudio_porcentaje_deriva_del_revenue(self):
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
+        conn = _TallerRegenConn(existing=[], revenue=320_000)
+        edicion = _edicion_full(
+            usa_estudio=True, valor_estudio_tipo="porcentaje", valor_estudio_pct=50,
+            valor_estudio_modo="mensual",
+        )
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
+        assert len(conn.inserted) == 3
+        for p in conn.inserted:
+            assert p[3] == 160_000  # 50% de 320.000, mismo valor cada mes ("mensual")
+        for it in conn.item_inserts:
+            assert it["subtotal"] == 160_000
+
+    def test_valor_equipos_porcentaje_deriva_del_revenue(self):
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
+        conn = _TallerRegenConn(existing=[], revenue=100_000)
+        edicion = _edicion_full(
+            usa_equipos=True, valor_equipos_tipo="porcentaje", valor_equipos_pct=25,
+            valor_equipos_modo="mensual",
+        )
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
+        for it in conn.item_inserts:
+            assert it["subtotal"] == 25_000  # 25% de 100.000
+
+    def test_porcentaje_redondea_al_peso(self):
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
+        conn = _TallerRegenConn(existing=[], revenue=333_333)
+        edicion = _edicion_full(
+            usa_estudio=True, valor_estudio_tipo="porcentaje", valor_estudio_pct=33,
+            valor_estudio_modo="mensual",
+        )
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
+        # 333333 * 33 / 100 = 109999.89 -> redondea a 110000
+        assert conn.item_inserts[0]["subtotal"] == 110_000
+
+    def test_modo_total_reparte_el_valor_derivado_del_porcentaje(self):
+        # `_modo` (mensual/total) sigue repartiendo el TOTAL YA resuelto —
+        # 'porcentaje' no cambia cómo se reparte entre meses, solo de dónde
+        # sale el total antes de repartirlo.
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
+        conn = _TallerRegenConn(existing=[], revenue=300_000)
+        edicion = _edicion_full(
+            usa_estudio=True, valor_estudio_tipo="porcentaje", valor_estudio_pct=50,
+            valor_estudio_modo="total",
+        )
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
+        montos = sorted(p[3] for p in conn.inserted)
+        assert montos == [50000, 50000, 50000]  # 150.000 (50% de 300.000) repartido en 3 meses
+
+    def test_fijo_no_consulta_revenue(self):
+        # Guardrail de performance/costo: en 'fijo' (el caso común) no debe
+        # dispararse la query de inscriptos — solo 'porcentaje' la necesita.
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
+        conn = _TallerRegenConn(existing=[], revenue=999_999)
+        edicion = _edicion_full(usa_estudio=True, valor_estudio=30000, valor_estudio_modo="mensual")
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
+        assert conn.revenue_queries == 0
+        for p in conn.inserted:
+            assert p[3] == 30000  # el revenue (999999) NUNCA se aplicó
+
+    def test_estudio_y_equipos_porcentaje_comparten_una_sola_query(self):
+        # Ambos 'porcentaje' a la vez -> 1 sola consulta de revenue, no 2
+        # (mismo total se aplica a los dos cálculos).
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
+        conn = _TallerRegenConn(existing=[], revenue=200_000)
+        edicion = _edicion_full(
+            usa_estudio=True, valor_estudio_tipo="porcentaje", valor_estudio_pct=50,
+            valor_estudio_modo="mensual",
+            usa_equipos=True, valor_equipos_tipo="porcentaje", valor_equipos_pct=10,
+            valor_equipos_modo="mensual",
+        )
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
+        assert conn.revenue_queries == 1
+        estudio_items = [it for it in conn.item_inserts if it["subtotal"] == 100_000]
+        equipos_items = [it for it in conn.item_inserts if it["subtotal"] == 20_000]
+        assert len(estudio_items) == 3
+        assert len(equipos_items) == 3
+
+    def test_estudio_porcentaje_equipos_fijo_mezcla_ambos_modos(self):
+        # Un mismo taller puede combinar 'porcentaje' para el Estudio y
+        # 'fijo' para equipos (o viceversa) — son ejes independientes.
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
+        conn = _TallerRegenConn(existing=[], revenue=80_000)
+        edicion = _edicion_full(
+            usa_estudio=True, valor_estudio_tipo="porcentaje", valor_estudio_pct=50,
+            valor_estudio_modo="mensual",
+            usa_equipos=True, valor_equipos=5000, valor_equipos_modo="mensual",  # fijo, default
+        )
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
+        for p in conn.inserted:
+            assert p[3] == 45_000  # 40.000 (50% de 80.000) + 5.000 (fijo)
+        estudio_items = [it for it in conn.item_inserts if it["equipo_id"] == 99]
+        equipos_items = [it for it in conn.item_inserts if it["equipo_id"] is None]
+        for it in estudio_items:
+            assert it["subtotal"] == 40_000
+        for it in equipos_items:
+            assert it["subtotal"] == 5_000
+
+    def test_revenue_cero_no_rompe(self):
+        # Edición recién publicada, todavía sin inscriptos -> 0, no error.
+        from services.talleres.commands.economia import _regenerar_pedidos_taller
+        conn = _TallerRegenConn(existing=[], revenue=0)
+        edicion = _edicion_full(
+            usa_estudio=True, valor_estudio_tipo="porcentaje", valor_estudio_pct=50,
+            valor_estudio_modo="mensual",
+        )
+        _regenerar_pedidos_taller(conn, edicion, "Taller X", numero_pedido_fn=_numero_pedido_fn)
+        for it in conn.item_inserts:
+            assert it["subtotal"] == 0
