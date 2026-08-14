@@ -93,3 +93,34 @@ def telefono_contacto(conn, cliente_id: int) -> str | None:
         return row_to_dict(r).get("value")
     row = conn.execute("SELECT telefono FROM clientes WHERE id=%s", (cliente_id,)).fetchone()
     return row_to_dict(row).get("telefono") if row else None
+
+
+def contactos_verificados_batch(conn, cliente_ids: list[int]) -> dict[int, dict[str, str]]:
+    """Versión batch de la lectura que hacen `email_comunicacion`/`telefono_contacto`
+    sobre `verified_contacts`: el valor más reciente por (cliente_id, kind), en 1 query
+    con `IN (...)` en vez de hasta 2 queries POR CLIENTE — para listados que no pueden
+    pagar ese N+1 (ver `services.pedidos_enriquecimiento._enriquecer_pedidos_con_cliente`).
+
+    Sin el fallback a `clientes.email`/`telefono` acá a propósito: el caller ya batchea
+    esa lectura por su cuenta — resolverla acá forzaría un segundo SELECT redundante
+    contra `clientes`. Aplicar la MISMA prioridad que las versiones singulares (el
+    email prioriza la base, el teléfono prioriza el verificado) es responsabilidad
+    del caller — si esa prioridad cambia acá, actualizar los dos lugares.
+
+    Devuelve {cliente_id: {"email": str, "phone": str}} — claves ausentes = sin
+    contacto verificado de ese tipo. `{}` si `cliente_ids` está vacío."""
+    if not cliente_ids:
+        return {}
+    ph = ",".join(["%s"] * len(cliente_ids))
+    rows = conn.execute(
+        f"""SELECT DISTINCT ON (cliente_id, kind) cliente_id, kind, value
+            FROM verified_contacts
+            WHERE cliente_id IN ({ph})
+            ORDER BY cliente_id, kind, verified_at DESC NULLS LAST""",
+        cliente_ids,
+    ).fetchall()
+    out: dict[int, dict[str, str]] = {}
+    for r in rows:
+        d = row_to_dict(r)
+        out.setdefault(d["cliente_id"], {})[d["kind"]] = d["value"]
+    return out

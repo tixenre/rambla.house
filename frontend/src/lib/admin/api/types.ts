@@ -1185,6 +1185,12 @@ export type Cliente = {
   apellido: string;
   telefono: string | null;
   email: string | null;
+  // Contacto de comunicación resuelto server-side (identity/contacts.py): el
+  // teléfono verificado por Didit puede diferir del autodeclarado; el email
+  // prioriza el de Google. `telefono`/`email` de arriba siguen siendo los
+  // campos BASE editables del form — estos son solo para display.
+  telefono_contacto?: string | null;
+  email_comunicacion?: string | null;
   direccion: string | null;
   cuit: string | null;
   descuento: number | null;

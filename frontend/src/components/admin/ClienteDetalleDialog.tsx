@@ -242,7 +242,7 @@ export function ClienteDetalleDialog({ open, onOpenChange, cliente, onSaved }: P
             </div>
             {editing && (
               <div className="flex shrink-0 gap-1.5 pr-6">
-                <WhatsAppLinkButton phone={cliente!.telefono} />
+                <WhatsAppLinkButton phone={cliente!.telefono_contacto ?? cliente!.telefono} />
                 <Button
                   type="button"
                   variant="outline"
@@ -328,8 +328,14 @@ export function ClienteDetalleDialog({ open, onOpenChange, cliente, onSaved }: P
           <div className="grid grid-cols-2 gap-3">
             {verificado ? (
               <>
-                <ReadOnlyField label="Teléfono" value={cliente!.telefono} />
-                <ReadOnlyField label="Email" value={cliente!.email} />
+                <ReadOnlyField
+                  label="Teléfono"
+                  value={cliente!.telefono_contacto ?? cliente!.telefono}
+                />
+                <ReadOnlyField
+                  label="Email"
+                  value={cliente!.email_comunicacion ?? cliente!.email}
+                />
                 <ReadOnlyField
                   label="Dirección"
                   value={cliente!.direccion_legal}
