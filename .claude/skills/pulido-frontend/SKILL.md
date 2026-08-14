@@ -1,8 +1,8 @@
 ---
 name: pulido-frontend
 model: opus
-last-reviewed: 2026-07-26
-version: 1.1
+last-reviewed: 2026-08-14
+version: 1.2
 description: El go-to para AUDITAR y MEJORAR una pantalla/flujo del front que YA EXISTE y funciona, pero "está raro", no se ve bien, o se puede pulir. Flujo completo de calidad de experiencia — diagnosticar (rúbrica front-end, ejes P-U de PROTOCOLO) → rutear por riesgo → mejorar DS-first en 4 lentes (UX · UI/estética · modularización · performance) → verificar (preview_* tools + mobile gate + a11y + perf) → trackear página-por-página. Úsalo cuando el dueño diga "pulí la UX/UI", "esta pantalla está rara / no me cierra", "optimizá el flujo de X", "que se vea perfecto / más lindo", "mejorá la experiencia de X", "está lento el front", "modularizá esta pantalla", "auditá la UI de X con criterios de UX", o cuando detectes fricción/inconsistencia visual mientras trabajás. NO es para diseñar desde cero (eso es Claude Design), ni para salud del repo / código muerto / seguridad (skill `mantenimiento`). Este skill DIAGNOSTICA qué falla en la experiencia y lo PULE de a poco — el corazón NO es una lista de fixes, sino el MÉTODO: recorrer la pantalla en vivo con rúbrica → rutear por riesgo → reusar/extender la librería del DS (nunca one-offs) → verificar contra el render real (preview tools), mobile y accesibilidad → no romper el core de reservas. Método seguro + tests + supervisor en `mantenimiento`.
 ---
 
@@ -67,6 +67,11 @@ No se toca nada todavía. Se **ve** la pantalla viva y se mapea la deuda de expe
   390px), `preview_snapshot` para estructura, `preview_inspect` para valores de CSS/theming,
   `preview_eval` para medir contrastes reales vía canvas (oklch → sRGB por pixel sampling, no creerle
   al `getComputedStyle` que devuelve oklch en algunos browsers — ver MEMORIA *2026-06-22*).
+- **Sin `preview_*` disponible** (sesión CLI/remota, sin panel de preview) → el fallback es un script
+  Playwright puntual (`chromium.launch` + `staging-login` vía `context.request.post` para rutas
+  autenticadas + `page.screenshot` desktop/mobile), mismo patrón que `staging-login` +
+  `@playwright/test` ya establecido (MEMORIA *2026-06-20*) — mismo resultado, sin depender de tooling
+  que no todos los entornos tienen.
 - **Estados internos** (editor, modal, dark) → `preview_click` + `preview_fill` + `preview_eval` para
   evaluar JS de React.
 - **Ruta autenticada (admin/portal) o que use datos/assets reales** → los fixtures no alcanzan: los bugs
@@ -98,6 +103,14 @@ El cuidado es proporcional al radio de explosión. Clasificá cada hallazgo:
 Regla de ruteo (de la MEMORIA *2026-06-08 — Workflow de cambios*): trivial/normal → `dev` directo;
 grande / sensible / core de reservas / lo que ve el cliente → rama (`claude/<desc>`) + PR. **Nunca a
 `main` directo. No mergear con CI en rojo.**
+
+**Excepción dura: un número de plata recién EXPUESTO no es diferible.** La regla "un bug del motor se
+reporta, no se arregla acá" (ver Anti-objetivos) asume que el bug ya era visible antes del pulido. Si
+la pasada **hace VISIBLE un número que antes estaba oculto** (ej: unificar filas expone un subtotal
+que antes no se mostraba) y ese número resulta incorrecto, diferirlo shippea un dato de plata mal —
+peor que no mostrar nada. Ahí: arreglalo en la misma pasada (con test), o no mostrés el número
+todavía. Caso real: unificar "qué incluye" con "Equipos" expuso que el Estudio cotizaba precio de
+lista en vez de la tarifa negociada persistida — se arregló en la misma pasada.
 
 > **La máquina de estados de la UI se DERIVA, no se inventa.** El
 > "siguiente paso" / qué transición ofrecer sale de (a) lo que la pantalla ya hace y (b) las
@@ -142,6 +155,11 @@ Nada se da por bueno sin verlo:
   hubo un desfasaje real entre las coordenadas de `getBoundingClientRect()`/clicks y el recorte del
   screenshot — la medición por JS (`gridColumn` computado + `backgroundColor` reaccionando a un cambio de
   estado real) confirmó el fix al primer intento, sin necesitar el screenshot para verificar.
+  **Escopeá el selector a la sección bajo prueba** — un `document.querySelectorAll(...)` global puede
+  barrer filas de varias secciones distintas (cada una en su propio contenedor) y devolver un falso
+  negativo. Caso real: un selector global sobre `li` + la clase del subtotal mezcló 3 secciones de la
+  misma página y reportó "no alinean" cuando las filas que importaban sí alineaban — costó una vuelta
+  de diagnóstico. Medí dentro del contenedor (`section.querySelectorAll(...)`), no en `document`.
 - **Mobile gate (obligatorio, 375×667)** — el checklist de `PROTOCOLO`: sin scroll horizontal, tap
   targets ≥44px, inputs ≥16px, modales en `100dvh`, CTAs primarios en thumb-zone (mitad inferior),
   imágenes `lazy`. El smoke de CI (`mobile-smoke.yml`) corre solo, **no reemplaza** la validación visual.
