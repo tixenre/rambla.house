@@ -391,6 +391,26 @@ def _init_db_schema(conn):
         "ON passkey_credentials(LOWER(owner_email)) WHERE owner_type = 'admin'"
     )
 
+    # Códigos de respaldo del 2º factor admin (recovery cuando se pierde el
+    # dispositivo con la passkey — Google solo ya no alcanza una vez que la
+    # cuenta tiene una). `code_hash` = sha256 del código en texto plano (nunca
+    # se guarda el código en claro; alta entropía → hash rápido está bien,
+    # no son passwords elegidas por el usuario). Esquema en dos capas
+    # (MEMORIA 2026-06-03): espejo idempotente de la migración bkupcodes2fa.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS admin_backup_codes (
+            id           SERIAL PRIMARY KEY,
+            owner_email  TEXT NOT NULL,
+            code_hash    TEXT NOT NULL,
+            used_at      TIMESTAMP,
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_admin_backup_codes_email "
+        "ON admin_backup_codes(LOWER(owner_email))"
+    )
+
     # ── Sesiones server-side: allowlist para revocación (logout real + "cerrar mis
     # otras sesiones"). La cookie firmada lleva un `jti` opaco; esta tabla decide si
     # sigue viva. Espeja `passkey_credentials` (mismo discriminador owner_type +

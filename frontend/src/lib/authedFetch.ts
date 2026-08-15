@@ -8,10 +8,15 @@ const API_BASE = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 
 export class AuthedHttpError extends Error {
   status: number;
-  constructor(message: string, status: number) {
+  // `message` lleva el prefijo técnico "METHOD /path → status" (útil en consola/
+  // debug); `detail` es SOLO el texto que mandó el backend (o vacío) — lo que
+  // corresponde mostrarle a un usuario en vez del string de log completo.
+  detail: string;
+  constructor(message: string, status: number, detail: string = "") {
     super(message);
     this.name = "AuthedHttpError";
     this.status = status;
+    this.detail = detail;
   }
 }
 
@@ -72,7 +77,7 @@ export async function authedJson<T>(path: string, init: AuthedFetchInit = {}): P
         .slice(0, 200);
     }
     const prefix = `${method} ${path} → ${res.status}`;
-    throw new AuthedHttpError(message ? `${prefix}: ${message}` : prefix, res.status);
+    throw new AuthedHttpError(message ? `${prefix}: ${message}` : prefix, res.status, message);
   }
   // 204 No Content y respuestas sin body: devolver undefined cast a T para
   // no romper con `Unexpected end of JSON input`.
