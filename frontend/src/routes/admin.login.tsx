@@ -95,7 +95,18 @@ function AdminLoginPage() {
       await loginWithPasskey();
       window.location.href = "/admin";
     } catch (e) {
-      setError(passkeyLoginErrorMessage(e));
+      // `passkeyLoginErrorMessage` sugiere "entrá con Google y agregá una clave desde
+      // tu perfil" — correcto en la pantalla principal (Google sola alcanza para
+      // loguearse ahí), pero circular/imposible acá: en `pasoPasskey` ya entraste con
+      // Google y el backend a propósito NO minteó sesión (2º factor obligatorio, ver
+      // auth/google.py) — no hay "tu perfil" al que ir sin resolver primero este paso.
+      // Bug real: Pablo (otro admin) quedó sin salida en este dispositivo con el
+      // mensaje genérico, que lo mandaba a hacer algo que no podía hacer.
+      setError(
+        pasoPasskey
+          ? "No encontramos tu clave de acceso en este dispositivo (o cancelaste). Tu cuenta ya tiene una clave registrada en OTRO dispositivo — entrá desde ese, o pedile a otro admin que te ayude a resetearla."
+          : passkeyLoginErrorMessage(e),
+      );
       setPasskeyBusy(false);
     }
   }
