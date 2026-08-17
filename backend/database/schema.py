@@ -2200,6 +2200,17 @@ def _init_db_schema(conn):
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_url TEXT NOT NULL DEFAULT ''")
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_poster_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL")
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_poster_url TEXT NOT NULL DEFAULT ''")
+    # Taller hermano (pareja de marketing, pedido del dueño 2026-08-17): dos
+    # talleres lanzados juntos comparten un solo link — cada uno sigue siendo
+    # un concepto independiente con su propia página; el Hero de cualquiera
+    # de los dos muestra un mini-selector hacia el otro. El vínculo se
+    # resuelve SIMÉTRICO desde el lado que lo tenga seteado (ver
+    # `_resolver_hermano` en routes/talleres.py) — no hace falta setearlo en
+    # los 2 lados. `taller_hermano_titulo` es un copy corto opcional de esa
+    # campaña ("Dos talleres, un solo viaje"); '' → el header muestra solo
+    # los 2 nombres, sin bloque de texto de más.
+    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS taller_hermano_id INTEGER REFERENCES talleres(id) ON DELETE SET NULL")
+    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS taller_hermano_titulo TEXT NOT NULL DEFAULT ''")
 
     # Escuela v2 F4a: modalidades de pago por edición — `monto_total` (costo
     # total del plan) y `n_cuotas` cargados a mano por el admin; el monto POR

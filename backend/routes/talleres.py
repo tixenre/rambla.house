@@ -342,6 +342,56 @@ def _video_dict(row) -> dict | None:
     }
 
 
+def _resolver_hermano(conn, mi_taller_id: int) -> dict | None:
+    """Taller hermano (pareja de marketing, pedido del dueño 2026-08-17):
+    resuelve SIMÉTRICO — si YO apunto a otro (`taller_hermano_id`), o si
+    OTRO me apunta a mí, en cualquier caso devuelve el link al hermano. No
+    hace falta setear el vínculo en los 2 lados. El copy de campaña
+    (`taller_hermano_titulo`) vive en el lado que seteó el puntero, se
+    resuelve junto sea cual sea el lado desde el que se está mirando.
+    `ORDER BY id` en el lado inverso: si por error 2+ conceptos apuntan al
+    mismo hermano, el de menor id gana — determinístico, no una prioridad
+    real (caso raro, no vale una constraint para esto).
+
+    None si no hay hermano, o si el hermano no tiene ninguna edición activa
+    a la que linkear — el front no debe romper por un vínculo a medio
+    configurar."""
+    mio = conn.execute(
+        "SELECT taller_hermano_id, taller_hermano_titulo FROM talleres WHERE id = %s",
+        (mi_taller_id,),
+    ).fetchone()
+    if mio and mio["taller_hermano_id"]:
+        hermano_id, titulo = mio["taller_hermano_id"], mio["taller_hermano_titulo"]
+    else:
+        otro = conn.execute(
+            "SELECT id, taller_hermano_titulo FROM talleres "
+            "WHERE taller_hermano_id = %s ORDER BY id LIMIT 1",
+            (mi_taller_id,),
+        ).fetchone()
+        if not otro:
+            return None
+        hermano_id, titulo = otro["id"], otro["taller_hermano_titulo"]
+
+    hermano_taller = conn.execute(
+        "SELECT id, nombre FROM talleres WHERE id = %s", (hermano_id,)
+    ).fetchone()
+    if not hermano_taller:
+        return None
+    hermano_edicion = conn.execute(
+        "SELECT slug FROM ediciones_taller "
+        "WHERE taller_id = %s AND activo = TRUE ORDER BY numero_edicion DESC LIMIT 1",
+        (hermano_id,),
+    ).fetchone()
+    if not hermano_edicion:
+        return None
+    return {
+        "taller_id": hermano_id,
+        "nombre": hermano_taller["nombre"],
+        "slug": hermano_edicion["slug"],
+        "titulo": titulo or "",
+    }
+
+
 def _edicion_lite(row) -> dict:
     """Datos mínimos de una edición para mostrar en el contexto de otra."""
     return {
@@ -517,6 +567,8 @@ def _concepto_to_admin_dict(
         "mensaje_confirmacion": _row_get(taller_row, "mensaje_confirmacion", ""),
         "video_url": _row_get(taller_row, "video_url", ""),
         "video_poster_url": _row_get(taller_row, "video_poster_url", ""),
+        "taller_hermano_id": _row_get(taller_row, "taller_hermano_id", None),
+        "taller_hermano_titulo": _row_get(taller_row, "taller_hermano_titulo", ""),
         "instructores": instructores if instructores is not None else [],
         "instituciones": instituciones if instituciones is not None else [],
         "ediciones": ediciones if ediciones is not None else [],
@@ -590,6 +642,8 @@ def get_taller(slug: str, request: Request):
             (row["taller_id"], row["numero_edicion"]),
         ).fetchone()
         d["edicion_anterior"] = _edicion_lite(ant) if ant else None
+
+        d["taller_hermano"] = _resolver_hermano(conn, row["taller_id"])
     return d
 
 
@@ -1270,6 +1324,13 @@ class TallerConceptoUpdateBody(BaseModel):
     video_url: str | None = None
     # F4c: FAQ del concepto — [{pregunta, respuesta}]. Ninguna es obligatoria.
     faqs: list[FaqItemBody] | None = None
+    # Taller hermano (pareja de marketing) — único campo NULLABLE real del
+    # body: `None` es ambiguo entre "no lo mandaron" y "lo quiero borrar", a
+    # diferencia de los strings de arriba (que usan '' como su propio
+    # sentinel de borrado). Se resuelve con `exclude_unset`, no con "is not
+    # None" — ver admin_update_concepto.
+    taller_hermano_id: int | None = None
+    taller_hermano_titulo: str | None = None
 
 
 class EdicionUpdateBody(BaseModel):
@@ -1617,8 +1678,16 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
         sets.append("faqs = %s::jsonb"); params.append(_json.dumps(faqs_limpio, ensure_ascii=False))
 
     video_url_provisto = body.video_url is not None
+    if body.taller_hermano_titulo is not None:
+        sets.append("taller_hermano_titulo = %s"); params.append(body.taller_hermano_titulo.strip())
+    # `taller_hermano_id` es el único FK nullable del body: a diferencia de
+    # los strings (que usan '' como su propio sentinel de borrado), acá
+    # `None` es un valor real y válido ("sacale la pareja"). `is not None`
+    # lo confundiría con "no lo mandaron" — se resuelve mirando si la CLAVE
+    # vino en el JSON, no si el valor es None.
+    hermano_id_provisto = "taller_hermano_id" in body.model_fields_set
 
-    if not sets and not video_url_provisto:
+    if not sets and not video_url_provisto and not hermano_id_provisto:
         raise HTTPException(400, "No hay campos para actualizar")
 
     with get_db() as conn:
@@ -1626,6 +1695,18 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
             existing = conn.execute("SELECT id FROM talleres WHERE id = %s", (taller_id,)).fetchone()
             if existing is None:
                 raise HTTPException(404, "Taller no encontrado")
+
+            if hermano_id_provisto:
+                hermano_id = body.taller_hermano_id
+                if hermano_id is not None:
+                    if hermano_id == taller_id:
+                        raise HTTPException(400, "Un taller no puede ser su propio hermano")
+                    hermano_row = conn.execute(
+                        "SELECT id FROM talleres WHERE id = %s", (hermano_id,)
+                    ).fetchone()
+                    if hermano_row is None:
+                        raise HTTPException(400, "El taller hermano no existe")
+                sets.append("taller_hermano_id = %s"); params.append(hermano_id)
 
             if video_url_provisto:
                 nuevo_video = body.video_url.strip()

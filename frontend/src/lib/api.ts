@@ -484,6 +484,10 @@ export type Taller = {
   numero_edicion: number;
   proxima_edicion?: EdicionLite | null;
   edicion_anterior?: EdicionLite | null;
+  // Taller hermano (pareja de marketing) — otro concepto lanzado junto a
+  // este, resuelto simétrico por el backend. null si no tiene pareja, o si
+  // la tiene pero no hay edición activa a la que linkear.
+  taller_hermano?: { taller_id: number; nombre: string; slug: string; titulo: string } | null;
   activo: boolean;
   tipo_taller: string;
   notif_email: string;

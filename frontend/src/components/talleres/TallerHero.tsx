@@ -74,6 +74,37 @@ function EdicionesContexto({
   );
 }
 
+/**
+ * Taller hermano (pareja de marketing) — 2 pills de peso equivalente: el
+ * taller actual (no clickeable, remarca "estás viendo esto") + el hermano
+ * (link real a su propia página). Clickear ahí es navegación de SPA normal
+ * — el "cambio de contenido de abajo y del formulario" pasa solo, porque es
+ * la página real del otro taller, no un estado a mano.
+ */
+function HermanoContexto({ taller }: { taller: Taller }) {
+  if (!taller.taller_hermano) return null;
+  return (
+    <div className="mt-5">
+      {taller.taller_hermano.titulo && (
+        <p className="text-xs text-background/50 mb-2">{taller.taller_hermano.titulo}</p>
+      )}
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="inline-flex items-center rounded-full bg-rosa px-4 py-1.5 text-sm font-semibold text-ink">
+          {taller.nombre}
+        </span>
+        <span className="text-xs text-background/40">+</span>
+        <Link
+          to="/escuelas/$slug"
+          params={{ slug: taller.taller_hermano.slug }}
+          className="inline-flex items-center rounded-full border border-background/30 px-4 py-1.5 text-sm font-semibold text-background/80 transition hover:border-rosa hover:text-rosa"
+        >
+          {taller.taller_hermano.nombre}
+        </Link>
+      </div>
+    </div>
+  );
+}
+
 function MetaRow({
   fechasResumen,
   horarioResumen,
@@ -144,6 +175,7 @@ export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }
         >
           <div>
             <Titulo taller={taller} />
+            <HermanoContexto taller={taller} />
             <EdicionesContexto taller={taller} />
             <MetaRow
               fechasResumen={fechasResumen}
@@ -169,6 +201,7 @@ export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }
       <Grain opacity={10} />
       <div className="relative mx-auto py-16 sm:py-24" style={{ width: TALLER_CONTENT_WIDTH }}>
         <Titulo taller={taller} />
+        <HermanoContexto taller={taller} />
         <EdicionesContexto taller={taller} />
         <MetaRow
           fechasResumen={fechasResumen}
