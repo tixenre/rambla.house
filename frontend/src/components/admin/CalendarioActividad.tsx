@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 
 import { cn } from "@/lib/utils";
 import type { ActividadCalendarioData } from "@/lib/admin/api/types";
@@ -32,12 +32,12 @@ const MESES_LARGO = [
   "diciembre",
 ];
 
-// Fila = día del mes (1-31), columna = mes — así el 1° de cada mes (o, en
-// modo "todos", el 1° de TODOS los años combinado) queda siempre en la
-// misma fila. Solo se etiquetan algunas filas (como los días de semana del
-// diseño anterior) para no saturar el eje de 31 números.
+// Fila = mes, columna = día del mes (1-31) — así el 1°, el 15°, etc. de cada
+// mes quedan siempre en la misma columna. Grilla fluida (columnas `1fr`):
+// las celdas ocupan todo el ancho disponible de la card en vez de un tamaño
+// fijo chico — `minmax` evita que se aplasten en viewports angostos.
 const DIAS_DEL_MES = Array.from({ length: 31 }, (_, i) => i + 1);
-const DIAS_ETIQUETADOS = new Set([1, 5, 10, 15, 20, 25, 30]);
+const GRID_COLS = "auto repeat(31, minmax(20px, 1fr))";
 
 // tier 0-4 → los 5 tokens del heatmap (--color-heat-1..4 derivados de
 // --color-amber por color-mix, ver tokens/colors.css; tier 0 = --color-muted).
@@ -69,6 +69,18 @@ function claveCelda(modo: "anio" | "todos", anio: number | undefined, mes: numbe
 const DIAS_EN_MES_GENERICO = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
 function diasEnMes(modo: "anio" | "todos", anio: number, mes: number): number {
   return modo === "todos" ? DIAS_EN_MES_GENERICO[mes - 1] : new Date(anio, mes, 0).getDate();
+}
+
+// Un día FUTURO (respecto de hoy) tampoco "existe" todavía — mismo criterio
+// que un día que no existe en el mes: sin esto, diciembre de un año en
+// curso se veía igual de gris que un diciembre que YA pasó con cero
+// actividad (bug real, dueño 2026-08-17). Solo aplica en modo año — en
+// "todos" un día del año (ej. 15 de diciembre) ya ocurrió en años pasados
+// aunque el año actual todavía no llegue ahí, así que sí cuenta.
+function esFuturo(modo: "anio" | "todos", anio: number, mes: number, dia: number, hoy: Date) {
+  if (modo === "todos") return false;
+  const hoySinHora = new Date(hoy.getFullYear(), hoy.getMonth(), hoy.getDate());
+  return new Date(anio, mes - 1, dia).getTime() > hoySinHora.getTime();
 }
 
 function fmtDiaLargo(anio: number, mes: number, dia: number): string {
@@ -105,6 +117,7 @@ export function CalendarioActividad({
   const anios = data?.anios_disponibles ?? [];
   const anioActual = new Date().getFullYear();
   const anioParaClave = data?.anio ?? anioSeleccionado ?? anioActual;
+  const hoy = new Date();
 
   return (
     <div>
@@ -145,32 +158,30 @@ export function CalendarioActividad({
       </div>
 
       {loading ? (
-        <div className="h-[280px] animate-pulse rounded-lg bg-muted" />
+        <div className="h-[400px] animate-pulse rounded-lg bg-muted" />
       ) : (
         <div className="overflow-x-auto">
-          <div className="inline-flex flex-col gap-1">
-            <div className="flex gap-1">
-              <div className="w-8 shrink-0" />
-              {DIAS_DEL_MES.map((dia) => (
-                <div
-                  key={dia}
-                  className="h-4 w-[13px] shrink-0 text-center text-2xs leading-4 text-muted-foreground"
-                >
-                  {DIAS_ETIQUETADOS.has(dia) ? dia : ""}
-                </div>
-              ))}
-            </div>
+          <div className="grid gap-1" style={{ gridTemplateColumns: GRID_COLS }}>
+            <div />
+            {DIAS_DEL_MES.map((dia) => (
+              <div key={`h-${dia}`} className="text-center text-2xs text-muted-foreground">
+                {dia}
+              </div>
+            ))}
             {MESES_ABREV.map((mesLabel, mesIdx) => {
               const mes = mesIdx + 1;
               return (
-                <div key={mes} className="flex items-center gap-1">
-                  <div className="w-8 shrink-0 text-right text-2xs text-muted-foreground">
+                <Fragment key={mes}>
+                  <div className="flex items-center justify-end pr-1 text-2xs text-muted-foreground">
                     {mesLabel}
                   </div>
                   {DIAS_DEL_MES.map((dia) => {
-                    if (dia > diasEnMes(modo, anioParaClave, mes)) {
-                      // No existe (ej. 31 de abril) — celda vacía, ni gris.
-                      return <div key={dia} className="h-[13px] w-[13px] shrink-0" />;
+                    if (
+                      dia > diasEnMes(modo, anioParaClave, mes) ||
+                      esFuturo(modo, anioParaClave, mes, dia, hoy)
+                    ) {
+                      // No existe (ej. 31 de abril) o todavía no pasó — celda vacía, ni gris.
+                      return <div key={dia} className="aspect-square" />;
                     }
                     const clave = claveCelda(modo, anioParaClave, mes, dia);
                     const info = porDia.get(clave) ?? { pedidosActivos: 0, tier: 0 };
@@ -182,14 +193,11 @@ export function CalendarioActividad({
                       <div
                         key={dia}
                         title={titulo}
-                        className={cn(
-                          "h-[13px] w-[13px] shrink-0 rounded-[3px]",
-                          TIER_BG[info.tier],
-                        )}
+                        className={cn("aspect-square rounded-[3px]", TIER_BG[info.tier])}
                       />
                     );
                   })}
-                </div>
+                </Fragment>
               );
             })}
           </div>
