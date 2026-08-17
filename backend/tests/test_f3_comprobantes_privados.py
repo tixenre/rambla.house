@@ -7,7 +7,7 @@ Cobertura:
 - upload-comprobante de talleres usa store_raw_document y devuelve {url, key}
 - InscripcionBody acepta comprobante_key
 - INSERT en taller_inscripciones guarda comprobante_key
-- _comprobante_url_para_email usa presigned cuando hay key
+- _comprobante_url_fresca usa presigned cuando hay key
 - Endpoint /admin/media/document/presigned requiere admin
 - upload de contabilidad usa bucket privado
 """
@@ -128,28 +128,28 @@ def test_store_raw_document_key_incluye_kind_y_ref():
     assert key.endswith(".jpg")
 
 
-# ── _comprobante_url_para_email ────────────────────────────────────────────────
+# ── _comprobante_url_fresca ────────────────────────────────────────────────
 
-def test_comprobante_url_para_email_con_key_genera_presigned():
-    """_comprobante_url_para_email genera presigned URL cuando hay key."""
+def test_comprobante_url_fresca_con_key_genera_presigned():
+    """_comprobante_url_fresca genera presigned URL cuando hay key."""
     fake_url = "https://presigned.example/key?sig=abc"
     with patch("services.media.storage.presigned_url", return_value=fake_url):
-        from routes.talleres import _comprobante_url_para_email
-        result = _comprobante_url_para_email("docs/comprobante-taller/slug.pdf", None)
+        from routes.talleres import _comprobante_url_fresca
+        result = _comprobante_url_fresca("docs/comprobante-taller/slug.pdf", None)
     assert result == fake_url
 
 
-def test_comprobante_url_para_email_sin_key_usa_fallback():
-    """_comprobante_url_para_email devuelve fallback_url cuando no hay key."""
-    from routes.talleres import _comprobante_url_para_email
-    result = _comprobante_url_para_email(None, "https://cdn.legacy/foto.jpg")
+def test_comprobante_url_fresca_sin_key_usa_fallback():
+    """_comprobante_url_fresca devuelve fallback_url cuando no hay key."""
+    from routes.talleres import _comprobante_url_fresca
+    result = _comprobante_url_fresca(None, "https://cdn.legacy/foto.jpg")
     assert result == "https://cdn.legacy/foto.jpg"
 
 
-def test_comprobante_url_para_email_sin_nada_devuelve_vacio():
-    """_comprobante_url_para_email devuelve '' cuando no hay ni key ni fallback."""
-    from routes.talleres import _comprobante_url_para_email
-    result = _comprobante_url_para_email(None, None)
+def test_comprobante_url_fresca_sin_nada_devuelve_vacio():
+    """_comprobante_url_fresca devuelve '' cuando no hay ni key ni fallback."""
+    from routes.talleres import _comprobante_url_fresca
+    result = _comprobante_url_fresca(None, None)
     assert result == ""
 
 

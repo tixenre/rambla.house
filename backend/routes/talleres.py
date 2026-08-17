@@ -660,13 +660,20 @@ class InscripcionBorradorBody(BaseModel):
     telefono: str | None = None
 
 
-def _comprobante_url_para_email(key: str | None, fallback_url: str | None) -> str:
+def _comprobante_url_fresca(key: str | None, fallback_url: str | None) -> str:
+    """Re-firma la URL del comprobante AL MOMENTO de servirla — la que devuelve
+    `store_raw_document` al subir vence a las 24hs (`presign_expires`) y NO se
+    puede guardar tal cual para acceso futuro (bug real: la lista de
+    inscripciones del admin devolvía `comprobante_url` crudo de la base,
+    rompiendo con `ExpiredRequest` apenas pasaban 24hs desde la subida). La
+    key SÍ es estable — se re-firma desde ahí cada vez que hace falta mostrar
+    el comprobante (acá, en el mail de confirmación, o donde surja después)."""
     if key:
         try:
             from services.media.storage import presigned_url as _presigned
             return _presigned(key, expires_seconds=86400, private=True)
         except Exception as e:
-            logger.warning("_comprobante_url_para_email: no se pudo generar presigned: %s", e)
+            logger.warning("_comprobante_url_fresca: no se pudo generar presigned: %s", e)
     return fallback_url or ""
 
 
@@ -850,7 +857,7 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
         "email": email,
         "telefono": telefono,
         "experiencia": body.experiencia or "",
-        "comprobante_url": _comprobante_url_para_email(body.comprobante_key, body.comprobante_url),
+        "comprobante_url": _comprobante_url_fresca(body.comprobante_key, body.comprobante_url),
         "en_lista_espera": en_lista,
         "fecha": fecha_str,
     }
@@ -1092,7 +1099,7 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
         "email": ins["email"],
         "telefono": ins["telefono"] or "",
         "experiencia": "",
-        "comprobante_url": _comprobante_url_para_email(body.comprobante_key, body.comprobante_url),
+        "comprobante_url": _comprobante_url_fresca(body.comprobante_key, body.comprobante_url),
         "en_lista_espera": False,
         "fecha": now_ar().strftime("%-d de %B de %Y, %H:%M hs"),
     }
@@ -2676,7 +2683,7 @@ def admin_list_inscripciones(taller_id: int, request: Request):
             "email": r["email"],
             "telefono": r["telefono"],
             "experiencia": r["experiencia"],
-            "comprobante_url": r["comprobante_url"],
+            "comprobante_url": _comprobante_url_fresca(r["comprobante_key"], r["comprobante_url"]),
             "en_lista_espera": r["en_lista_espera"],
             "estado": r["estado"],
             "edicion_id": r["edicion_id"],
@@ -2714,7 +2721,7 @@ def admin_list_inscripciones_edicion(edicion_id: int, request: Request):
             "email": r["email"],
             "telefono": r["telefono"],
             "experiencia": r["experiencia"],
-            "comprobante_url": r["comprobante_url"],
+            "comprobante_url": _comprobante_url_fresca(r["comprobante_key"], r["comprobante_url"]),
             "en_lista_espera": r["en_lista_espera"],
             "estado": r["estado"],
             "edicion_id": r["edicion_id"],
