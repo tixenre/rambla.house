@@ -15,16 +15,10 @@ dispara un admin editando la Economía a mitad de mes, pero un job que corriera
 así TODOS LOS DÍAS le cambiaría el `id`/`numero_pedido` al pedido del mes cada
 vez que corre, aunque nada haya cambiado (rompe cualquier link/mail/referencia
 ya mandada). Este job evita eso con una pre-condición propia: solo llama al
-motor para una edición si (a) TODAVÍA NO existe un pedido con `fecha_desde`
-dentro del mes actual, O (b) existe algún pedido con `fecha_desde` DESPUÉS del
-mes actual — el caso (b) es lo que engancha la limpieza de pedidos futuros que
-hayan quedado de ANTES de este cambio (o de cualquier causa rara): el motor ya
-los borra solo (no están conservados — no son pasado/pagados/con ítems
-extra), esta pre-condición es lo único que faltaba para que el barrido los
-alcance sin necesitar que un admin edite la edición a mano. Una vez que solo
-queda el mes actual (ninguno futuro), (b) deja de disparar y el job no la
-vuelve a tocar — queda estable hasta el próximo mes, o hasta que un admin la
-edite a mano, que sigue recalculando como siempre."""
+motor para una edición si TODAVÍA NO existe ningún pedido con `fecha_desde`
+dentro del mes actual — una vez que nace, el job no la vuelve a tocar (queda
+estable hasta el próximo mes, o hasta que un admin la edite a mano, que sigue
+recalculando como siempre)."""
 from __future__ import annotations
 
 import logging
@@ -37,10 +31,8 @@ logger = logging.getLogger(__name__)
 
 
 def _ediciones_a_generar(conn, inicio_mes: _dt_date, fin_mes: _dt_date) -> list[dict]:
-    """Ediciones activas cuyo rango toca el mes actual, y a las que TODAVÍA les
-    falta algo por resolver este mes: no tienen el pedido del mes actual, o
-    tienen un pedido futuro que el motor tiene que limpiar — ver guard
-    anti-churn arriba (caso (a) y (b))."""
+    """Ediciones activas cuyo rango toca el mes actual y que TODAVÍA no tienen
+    un pedido con `fecha_desde` en ese mes — ver guard anti-churn arriba."""
     return conn.execute(
         """
         SELECT e.*, t.nombre AS taller_nombre
@@ -48,16 +40,10 @@ def _ediciones_a_generar(conn, inicio_mes: _dt_date, fin_mes: _dt_date) -> list[
         JOIN talleres t ON t.id = e.taller_id
         WHERE e.activo
           AND e.fecha_inicio <= %(fin_mes)s AND e.fecha_fin >= %(inicio_mes)s
-          AND (
-            NOT EXISTS (
-              SELECT 1 FROM alquileres a
-               WHERE a.taller_edicion_id = e.id
-                 AND a.fecha_desde >= %(inicio_mes)s AND a.fecha_desde <= %(fin_mes)s
-            )
-            OR EXISTS (
-              SELECT 1 FROM alquileres a
-               WHERE a.taller_edicion_id = e.id AND a.fecha_desde > %(fin_mes)s
-            )
+          AND NOT EXISTS (
+            SELECT 1 FROM alquileres a
+             WHERE a.taller_edicion_id = e.id
+               AND a.fecha_desde >= %(inicio_mes)s AND a.fecha_desde <= %(fin_mes)s
           )
         ORDER BY e.id
         """,
