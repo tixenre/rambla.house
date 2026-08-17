@@ -145,15 +145,16 @@ export function CalendarioActividad({
       </div>
 
       {loading ? (
-        <div className="h-[540px] animate-pulse rounded-lg bg-muted" />
+        <div className="h-[280px] animate-pulse rounded-lg bg-muted" />
       ) : (
         <div className="overflow-x-auto">
-          <div className="inline-flex gap-1">
-            <div className="flex flex-col gap-1 mr-1 pt-5">
+          <div className="inline-flex flex-col gap-1">
+            <div className="flex gap-1">
+              <div className="w-8 shrink-0" />
               {DIAS_DEL_MES.map((dia) => (
                 <div
                   key={dia}
-                  className="h-[13px] w-[18px] text-2xs leading-[13px] text-muted-foreground"
+                  className="h-4 w-[13px] shrink-0 text-center text-2xs leading-4 text-muted-foreground"
                 >
                   {DIAS_ETIQUETADOS.has(dia) ? dia : ""}
                 </div>
@@ -162,14 +163,14 @@ export function CalendarioActividad({
             {MESES_ABREV.map((mesLabel, mesIdx) => {
               const mes = mesIdx + 1;
               return (
-                <div key={mes} className="flex flex-col gap-1">
-                  <div className="h-4 text-2xs leading-4 text-muted-foreground whitespace-nowrap">
+                <div key={mes} className="flex items-center gap-1">
+                  <div className="w-8 shrink-0 text-right text-2xs text-muted-foreground">
                     {mesLabel}
                   </div>
                   {DIAS_DEL_MES.map((dia) => {
                     if (dia > diasEnMes(modo, anioParaClave, mes)) {
                       // No existe (ej. 31 de abril) — celda vacía, ni gris.
-                      return <div key={dia} className="h-[13px] w-[13px]" />;
+                      return <div key={dia} className="h-[13px] w-[13px] shrink-0" />;
                     }
                     const clave = claveCelda(modo, anioParaClave, mes, dia);
                     const info = porDia.get(clave) ?? { pedidosActivos: 0, tier: 0 };
@@ -181,7 +182,10 @@ export function CalendarioActividad({
                       <div
                         key={dia}
                         title={titulo}
-                        className={cn("h-[13px] w-[13px] rounded-[3px]", TIER_BG[info.tier])}
+                        className={cn(
+                          "h-[13px] w-[13px] shrink-0 rounded-[3px]",
+                          TIER_BG[info.tier],
+                        )}
                       />
                     );
                   })}
