@@ -1158,12 +1158,17 @@ export type EstadisticasData = {
  *  con los percentiles del propio año (`routes/estadisticas.py`) — el front
  *  solo mapea tier → color, no recalcula la escala. */
 export type ActividadCalendarioData = {
-  /** `null` en modo `todos` (el view apilado no tiene un único año). */
+  /** `null` en modo `todos` (la grilla agregada no tiene un único año). */
   anio: number | null;
   anios_disponibles: number[];
-  /** En modo `todos` abarca TODOS los años de `anios_disponibles` — el front
-   *  agrupa por año (prefijo de `dia`) para apilar una grilla por año. Los
-   *  tiers vienen bucketizados POR AÑO por separado, incluso acá. */
+  /** Modo año: `dia` es una fecha real `YYYY-MM-DD`, tier bucketizado
+   *  contra los percentiles de ESE año. Modo `todos`: `dia` es `MM-DD`
+   *  (SIN año — el 1° de enero de TODOS los años combinados en una sola
+   *  celda), `pedidos_activos` es la SUMA cross-year para ese día del año,
+   *  y el tier bucketiza esa distribución agregada de una sola vez (no
+   *  por año — acá no hay años que comparar, es un patrón de
+   *  estacionalidad). Ver `routes/estadisticas.py::compute_actividad_
+   *  calendario` — el front solo mapea tier → color, no recalcula nada. */
   dias: { dia: string; pedidos_activos: number; tier: 0 | 1 | 2 | 3 | 4 }[];
 };
 

@@ -548,14 +548,16 @@ def test_actividad_calendario_tiers_por_percentil_del_propio_anio(conn):
         conn.commit()
 
 
-# ── Modo `todos=True` (view "Todos los años" apilado): candado central — los
-# tiers se calculan POR AÑO incluso adentro de una sola respuesta, para que un
-# año chico (negocio recién arrancado) no quede aplastado por uno con más
-# volumen total. Años ficticios propios 1896/1897 (no chocan con `ANIO_CAL`
-# ni con los demás fixtures de este archivo).
+# ── Modo `todos=True` (patrón de estacionalidad agregado, no timeline
+# apilado — pedido explícito del dueño 2026-08-17, "el 1° de enero de TODOS
+# los años juntos"): candado central — `dia` pasa a `MM-DD` (sin año) y
+# `pedidos_activos` es la SUMA cross-year de ese día del año; el tier
+# bucketiza esa distribución agregada UNA sola vez (ya no per-año). Años
+# ficticios propios 1896/1897 (no chocan con `ANIO_CAL` ni con los demás
+# fixtures de este archivo).
 E_CAL_TODOS = 9_301_601
-ANIO_CHICO = 1896  # negocio chico: máximo 2 pedidos/día
-ANIO_GRANDE = 1897  # negocio grande: máximo 10 pedidos/día
+ANIO_UNO = 1896
+ANIO_DOS = 1897
 IDS_CAL_TODOS = list(range(9_301_611, 9_301_625))
 
 
@@ -565,14 +567,13 @@ def _limpiar_calendario_todos(conn):
     conn.execute("DELETE FROM equipos WHERE id = %s", (E_CAL_TODOS,))
 
 
-def test_actividad_calendario_todos_bucketiza_tiers_por_anio_no_global(conn):
-    """El view apilado (`todos=True`) tiene que preservar la misma garantía
-    que el modo single-year: un año chico no queda todo gris solo por
-    compararse contra uno con más volumen. Simula un año con máximo 2
-    pedidos/día (negocio chico) y otro con máximo 10 (negocio grande) — el
-    día "flojo" del año chico (1 pedido) tiene que quedar en un tier
-    razonable DENTRO de su propio año, no aplastado a 0/1 por comparación
-    con los 10 pedidos/día del año grande."""
+def test_actividad_calendario_todos_suma_cross_year_por_dia_del_anio(conn):
+    """El 1° y el 2° de mayo existen en AMBOS años fixture — la respuesta
+    tiene que combinarlos en UNA sola celda por día del año (`dia` = "MM-DD",
+    sin año), sumando `pedidos_activos` de los dos años. El 2 de mayo (2+10=12
+    pedidos sumados) tiene que quedar en un tier más alto que el 1° de mayo
+    (1+1=2 sumados) — bucketizado una sola vez contra el resto de los días
+    del año agregados, no por año."""
     from routes.estadisticas import compute_actividad_calendario
 
     _limpiar_calendario_todos(conn)
@@ -583,10 +584,10 @@ def test_actividad_calendario_todos_bucketiza_tiers_por_anio_no_global(conn):
             "VALUES (%s, %s, 20, 'Rental', 1000)",
             (E_CAL_TODOS, "Cámara test #calendario-todos"),
         )
-        dia_chico_bajo = f"{ANIO_CHICO}-05-01"  # 1 pedido
-        dia_chico_alto = f"{ANIO_CHICO}-05-02"  # 2 pedidos
-        dia_grande_bajo = f"{ANIO_GRANDE}-05-01"  # 1 pedido
-        dia_grande_alto = f"{ANIO_GRANDE}-05-02"  # 10 pedidos
+        dia_uno_01 = f"{ANIO_UNO}-05-01"  # 1 pedido
+        dia_uno_02 = f"{ANIO_UNO}-05-02"  # 2 pedidos
+        dia_dos_01 = f"{ANIO_DOS}-05-01"  # 1 pedido
+        dia_dos_02 = f"{ANIO_DOS}-05-02"  # 10 pedidos
 
         pid = iter(IDS_CAL_TODOS)
 
@@ -603,37 +604,34 @@ def test_actividad_calendario_todos_bucketiza_tiers_por_anio_no_global(conn):
                 (p, E_CAL_TODOS),
             )
 
-        _insertar_pedido(dia_chico_bajo)
+        _insertar_pedido(dia_uno_01)
         for _ in range(2):
-            _insertar_pedido(dia_chico_alto)
-        _insertar_pedido(dia_grande_bajo)
+            _insertar_pedido(dia_uno_02)
+        _insertar_pedido(dia_dos_01)
         for _ in range(10):
-            _insertar_pedido(dia_grande_alto)
+            _insertar_pedido(dia_dos_02)
         conn.commit()
 
         data = compute_actividad_calendario(conn, todos=True)
 
         assert data["anio"] is None
-        assert ANIO_CHICO in data["anios_disponibles"]
-        assert ANIO_GRANDE in data["anios_disponibles"]
+        assert ANIO_UNO in data["anios_disponibles"]
+        assert ANIO_DOS in data["anios_disponibles"]
 
         por_dia = {d["dia"]: d for d in data["dias"]}
-        assert por_dia[dia_chico_bajo]["pedidos_activos"] == 1
-        assert por_dia[dia_chico_alto]["pedidos_activos"] == 2
-        assert por_dia[dia_grande_bajo]["pedidos_activos"] == 1
-        assert por_dia[dia_grande_alto]["pedidos_activos"] == 10
+        # `dia` es "MM-DD" — ninguna fila lleva el año.
+        assert all(len(d) == 5 and d[2] == "-" for d in por_dia)
+        assert "05-01" in por_dia and "05-02" in por_dia
+        assert dia_uno_01 not in por_dia  # la fecha completa YA NO es la clave
 
-        # El candado: el día más flojo del año CHICO (1 pedido, la mitad de
-        # su propio máximo de 2) tiene que quedar en un tier intermedio —
-        # NO en el tier más bajo (0/1), que es lo que pasaría si se
-        # comparara contra el máximo GLOBAL de 10 en vez del de su año.
-        assert por_dia[dia_chico_bajo]["tier"] >= 2
-        # Y el día más flojo del año GRANDE (1 de 10) SÍ tiene que quedar
-        # bajo, relativo a su propio año.
-        assert por_dia[dia_grande_bajo]["tier"] < por_dia[dia_grande_alto]["tier"]
-        # Cada año tiene su propio pico en el tier más alto.
-        assert por_dia[dia_chico_alto]["tier"] == 4
-        assert por_dia[dia_grande_alto]["tier"] == 4
+        # Suma cross-year, no un valor por año.
+        assert por_dia["05-01"]["pedidos_activos"] == 2  # 1 (1896) + 1 (1897)
+        assert por_dia["05-02"]["pedidos_activos"] == 12  # 2 (1896) + 10 (1897)
+
+        # Bucketizado una sola vez contra el resto de los días agregados —
+        # 05-02 (12, el pico) queda estrictamente por encima de 05-01 (2).
+        assert por_dia["05-02"]["tier"] > por_dia["05-01"]["tier"]
+        assert por_dia["05-02"]["tier"] == 4
     finally:
         _limpiar_calendario_todos(conn)
         conn.commit()
