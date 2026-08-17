@@ -180,6 +180,7 @@ que se cobra (peor que antes, cuando esa fila no mostraba nada). Proponer: agreg
 que si un cambio de presentación EXPONE un número de plata que antes no se veía, el fix del número deja
 de ser diferible — o se arregla en la misma pasada (con test), o no se muestra el número. · Por qué: la
 regla actual, leída literal, empuja a shippear un dato incorrecto a la vista.
+✅ aplicada — cierre de gobernanza 2026-08-14 (excepción sumada a `pulido-frontend/SKILL.md` §2 RUTEAR)
 
 2026-07-29 · pulido-frontend · Gotcha de verificación: al medir alineación por JS (`getBoundingClientRect`,
 como ya recomienda el paso 4), **scopear el selector a la sección bajo prueba**. Un selector global
@@ -189,6 +190,7 @@ importaban sí alineaban: un falso negativo que costó una vuelta de diagnóstic
 "medí dentro del contenedor de la sección (`section.querySelectorAll(...)`), no en `document`". · Por qué:
 el paso 4 ya empuja a medir por JS en vez de screenshot, pero no advierte que el alcance del selector es
 justo donde se cuela el falso negativo.
+✅ aplicada — cierre de gobernanza 2026-08-14 (gotcha sumado a `pulido-frontend/SKILL.md` §4 VERIFICAR)
 
 2026-08-10 · pulido-frontend · El paso 1 (Diagnosticar) asume las tools `preview_*`
 (`preview_screenshot`/`preview_resize`/`preview_snapshot`/`preview_inspect`/`preview_eval`) como el único
@@ -202,3 +204,4 @@ panel de preview); en su ausencia, el camino es un script Playwright puntual (`c
 depender de tooling que no todos los entornos tienen. · Por qué: el skill se invoca desde cualquier
 sesión (interactiva, remota, CLI); asumir un tooling específico sin decir la alternativa hace que cada
 sesión sin `preview_*` tenga que redescubrir el mismo patrón de reemplazo.
+✅ aplicada — cierre de gobernanza 2026-08-14 (fallback sumado a `pulido-frontend/SKILL.md` §1 DIAGNOSTICAR)

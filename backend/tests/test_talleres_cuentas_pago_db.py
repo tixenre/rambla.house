@@ -77,7 +77,7 @@ def taller_base(monkeypatch):
         conn.close()
 
 
-def _crear_edicion(t, numero=1):
+def _crear_edicion(t, numero=1, *, pago_alias="", pago_cbu="", pago_banco=""):
     body = t.EdicionCreateBody(
         clases=[
             t.ClaseBody(fecha="2099-03-06", hora_inicio_min=510, hora_fin_min=750, titulo="Clase 1"),
@@ -85,17 +85,46 @@ def _crear_edicion(t, numero=1):
         numero_edicion=numero,
         precio_total=100_000,
         activo=False,
+        pago_alias=pago_alias, pago_cbu=pago_cbu, pago_banco=pago_banco,
     )
     d = t.admin_create_edicion(TALLER_ID, body, None)
     return d["ediciones"][0] if "ediciones" in d else d
 
 
 def test_edicion_nace_sin_cuentas(taller_base):
-    """Una edición recién creada no trae cuentas de cobro (mismo patrón que
-    modalidades: no se setean en la creación, solo por PATCH después)."""
+    """Una edición recién creada SIN los 3 campos viejos tampoco trae cuentas
+    de cobro (mismo patrón que modalidades: no se setean en la creación, solo
+    por PATCH después) — nada que traspasar."""
     t = taller_base
     ed = _crear_edicion(t)
     assert ed["cuentas_pago"] == []
+
+
+def test_edicion_con_pago_alias_viejo_sintetiza_cuentas_pago(taller_base):
+    """Hallazgo del supervisor (2026-08-13): `admin_create_taller`/
+    `admin_create_edicion`/`scripts/importar_taller.py` solo tipean
+    pago_alias/pago_cbu/pago_banco (sin un campo `cuentas_pago` propio en el
+    alta) — sin este traspaso, el público (`WorkshopInscripcionForm`, que
+    SOLO lee `cuentas_pago`) no mostraba ningún dato de pago hasta que
+    alguien editara la edición a mano. `crear_edicion` ahora siembra una fila
+    en `edicion_cuentas_pago` cuando el alta trae algo en los 3 campos
+    viejos, mismo criterio que la migración `cu3nt4sp4g0`."""
+    t = taller_base
+    ed = _crear_edicion(t, pago_alias="rambla.taller", pago_cbu="CBU0001", pago_banco="Galicia")
+    assert ed["cuentas_pago"] == [
+        {"id": ed["cuentas_pago"][0]["id"], "alias": "rambla.taller", "cbu": "CBU0001", "banco": "Galicia"}
+    ]
+
+
+def test_edicion_con_solo_un_campo_viejo_tambien_sintetiza(taller_base):
+    """No hace falta que los 3 campos vengan cargados — con uno solo alcanza
+    (mismo criterio que la migración: `pago_alias != '' OR pago_cbu != '' OR
+    pago_banco != ''`)."""
+    t = taller_base
+    ed = _crear_edicion(t, pago_banco="Solo el banco")
+    assert ed["cuentas_pago"] == [
+        {"id": ed["cuentas_pago"][0]["id"], "alias": "", "cbu": "", "banco": "Solo el banco"}
+    ]
 
 
 def test_cuentas_upsert_sincroniza(taller_base):

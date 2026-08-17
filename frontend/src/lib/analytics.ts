@@ -11,9 +11,11 @@
  * Cobertura: solo el catálogo público. El page-view tracking (en `main.tsx`)
  * saltea `/admin` (interno/noindex) y `/cliente` (área privada logueada). Los
  * eventos de negocio se disparan desde sus puntos canónicos:
- *   - `add_to_cart`      → `cart-store.ts` (useCart.add)
- *   - `solicitar_pedido` → `orders.ts` (createOrder, al confirmarse el POST)
- *   - `reservar_estudio` → `api.ts` (apiCrearReservaEstudio, idem)
+ *   - `add_to_cart`             → `cart-store.ts` (useCart.add)
+ *   - `solicitar_pedido`        → `orders.ts` (createOrder, al confirmarse el POST)
+ *   - `reservar_estudio`        → `api.ts` (apiCrearReservaEstudio, idem)
+ *   - `click_inscribirme_taller` → `TallerHero.tsx`/`TallerCTABar.tsx` (click del CTA)
+ *   - `taller_inscripcion`      → `WorkshopInscripcionForm.tsx` (POST inscripción OK)
  *
  * No tiene dependencias de React: es un módulo plano reusable desde stores,
  * libs de API y el router.
@@ -112,6 +114,20 @@ export function trackReservarEstudio(args: { horas: number; conPromo?: boolean }
   trackEvent("reservar_estudio", {
     horas: args.horas,
     con_promo: args.conPromo ?? false,
+  });
+}
+
+/** Click en el CTA "Quiero inscribirme" de un taller — antes de llegar al
+ * form o de enviarlo (funnel de intención, previo al heartbeat/inscripción). */
+export function trackClickInscribirseTaller(tallerId: number): void {
+  trackEvent("click_inscribirme_taller", { taller_id: tallerId });
+}
+
+/** Se envió una inscripción a un taller (POST a /api/talleres/{slug}/inscripcion OK). */
+export function trackTallerInscripcion(args: { tallerId: number; enListaEspera: boolean }): void {
+  trackEvent("taller_inscripcion", {
+    taller_id: args.tallerId,
+    en_lista_espera: args.enListaEspera,
   });
 }
 

@@ -68,6 +68,15 @@ export function EdicionSubRow({
     staleTime: 0,
   });
 
+  const { data: borradores } = useQuery({
+    queryKey: ["admin", "ediciones", edicion.id, "borradores"],
+    queryFn: () => talleresAdminApi.listBorradores(edicion.id),
+    enabled: expanded && activeTab === "inscripciones",
+    staleTime: 0,
+    // No confirmado por el dueño como algo a refrescar en vivo todavía — se
+    // ve fresco al abrir la pestaña, sin agregar un poll de fondo nuevo.
+  });
+
   const toggleActivoMut = useMutation({
     mutationFn: (activo: boolean) => talleresAdminApi.updateEdicion(edicion.id, { activo }),
     onSuccess: (updated) => {
@@ -264,6 +273,7 @@ export function EdicionSubRow({
                 concepto={concepto}
                 inscripciones={inscripciones}
                 loading={loadingIns}
+                borradores={borradores}
               />
             )}
           </div>

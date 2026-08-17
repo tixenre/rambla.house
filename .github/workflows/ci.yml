@@ -11,6 +11,11 @@ on:
       - "docs/**"
   push:
     branches: [main, dev]
+    # Gotcha confirmado en vivo (2026-08-13): un push SIN archivos cambiados
+    # (commit vacío, --allow-empty) también lo saltea — paths-ignore no tiene
+    # nada que comparar y lo trata como "nada fuera de la lista". No sirve
+    # para forzar un re-run tras un check suite cancelado; hace falta un
+    # cambio de contenido real en un archivo no ignorado.
     paths-ignore:
       - "**/*.md"
       - "docs/**"
@@ -345,6 +350,19 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export RESERVAS_DB_TEST=1
           python -m pytest tests/test_talleres_inscripcion_db.py -v --tb=short -m integration
+      - name: Borrador de inscripción a talleres contra Postgres real (funnel de interesados)
+        run: |
+          cd backend
+          # services.talleres_borrador (mirror de carritos_activos): heartbeat mientras
+          # alguien tipea el form sin enviarlo, el admin ve a quién no llegó a terminar,
+          # se cierra el funnel al confirmarse la inscripción real. Este job venía sin
+          # correr — quedaba mudo en cada PR pese a existir (auditoría del supervisor,
+          # previo al PR dev→main del 2026-08-13).
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_talleres_borrador_db.py -v --tb=short -m integration
       - name: Escuela v2 — clases ricas + borradores + T&C contra Postgres real (F2, #1278)
         run: |
           cd backend
@@ -763,6 +781,30 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export ALEMBIC_DB_TEST=1
           python -m pytest tests/test_rambla_a_rental_cuentas_merge_migration_db.py -v --tb=short -m integration
+      - name: Calendario/dashboard resuelven el cliente en vivo contra Postgres real (pedido #466)
+        run: |
+          cd backend
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_dashboard_calendario_contacto_en_vivo_db.py -v --tb=short -m integration
+      - name: Contacto verificado (verified_contacts) del pedido/cliente contra Postgres real
+        run: |
+          cd backend
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_pedido_contacto_verificado_db.py -v --tb=short -m integration
+      - name: Códigos de respaldo del 2º factor admin (consumo atómico) contra Postgres real
+        run: |
+          cd backend
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_backup_codes_db.py -v --tb=short -m integration
 
   e2e-admin:
     name: E2E admin (Playwright + backend real)

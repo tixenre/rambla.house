@@ -1,10 +1,11 @@
-import { Outlet, createRootRouteWithContext } from "@tanstack/react-router";
+import { HeadContent, Outlet, createRootRouteWithContext } from "@tanstack/react-router";
 import { QueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Toaster } from "@/design-system/ui/sonner";
 import { PublicLayout } from "@/components/rental/shell/PublicLayout";
 import { FaviconSync } from "@/components/rental/shell/FaviconSync";
 import { useCartHeartbeat } from "@/hooks/useCartHeartbeat";
+import { SITE_URL } from "@/lib/site";
 import { Component, type ReactNode } from "react";
 
 // Los nombres de archivo de los chunks llevan hash de build — tras un deploy,
@@ -78,14 +79,46 @@ function CartSync() {
   return null;
 }
 
+const SITE_TITLE = "Rambla — Rental, estudio y workshops audiovisuales";
+const SITE_DESC_OG =
+  "Alquiler de equipos audiovisuales, estudio de foto y video, y workshops de producción en Mar del Plata.";
+const SITE_DESC_TWITTER =
+  "Alquiler de equipos, estudio y workshops audiovisuales en Mar del Plata.";
+
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
+  // Default de sitio para title/OG/twitter/theme-color — mismo copy que el
+  // fallback estático de index.html (main.tsx lo barre antes de montar, ver
+  // su comentario). Una ruta/layout que declara su propia clave la pisa acá
+  // mismo (TanStack mergea head() por toda la jerarquía y dedupea por key —
+  // ya probado con el título de la ficha de un taller pisando al de la
+  // lista). `og:image`/`twitter:image`/`og:site_name` NO van acá a propósito:
+  // ninguna ruta cliente los declara, así que la imagen dinámica que el
+  // backend inyecta server-side (foto del equipo/taller) sigue siendo la
+  // única fuente — agregarlos acá los pisaría con la genérica.
+  head: () => ({
+    meta: [
+      { title: SITE_TITLE },
+      { property: "og:type", content: "website" },
+      { property: "og:url", content: `${SITE_URL}/` },
+      { property: "og:title", content: SITE_TITLE },
+      { property: "og:description", content: SITE_DESC_OG },
+      { property: "og:locale", content: "es_AR" },
+      { name: "twitter:card", content: "summary_large_image" },
+      { name: "twitter:title", content: SITE_TITLE },
+      { name: "twitter:description", content: SITE_DESC_TWITTER },
+      { name: "theme-color", content: "#fbbf24" },
+    ],
+  }),
   component: () => (
-    <RootErrorBoundary>
-      <FaviconSync />
-      <CartSync />
-      <Outlet />
-      <Toaster richColors position="top-right" />
-    </RootErrorBoundary>
+    <>
+      <HeadContent />
+      <RootErrorBoundary>
+        <FaviconSync />
+        <CartSync />
+        <Outlet />
+        <Toaster richColors position="top-right" />
+      </RootErrorBoundary>
+    </>
   ),
   notFoundComponent: NotFoundComponent,
 });

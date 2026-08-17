@@ -6,16 +6,18 @@ acá lo que necesita para resolver el valor efectivo, más lo que necesita
 
 
 def _revenue_inscriptos(conn, edicion_id: int) -> int:
-    """Suma `modalidad_monto` de los inscriptos NO en lista de espera de una
-    edición — lo que la gente ya anotada va a pagar en total. Fuente única
-    del "% del total de los inscriptos" (pedido explícito del dueño: "si se
-    anotan 6 vamos al 50%"), NUNCA un número tipeado a mano. Mismo filtro
-    `en_lista_espera = FALSE` que decide si `cupos_confirmados` cuenta a
-    alguien (routes/talleres.py::crear_inscripcion) — alguien en lista de
-    espera todavía no es un inscripto real."""
+    """Suma `modalidad_monto` de los inscriptos NO en lista de espera y NO
+    dados de baja de una edición — lo que la gente ya anotada va a pagar en
+    total. Fuente única del "% del total de los inscriptos" (pedido explícito
+    del dueño: "si se anotan 6 vamos al 50%"), NUNCA un número tipeado a
+    mano. Mismo filtro `en_lista_espera = FALSE` que decide si
+    `cupos_confirmados` cuenta a alguien (routes/talleres.py::crear_inscripcion)
+    — alguien en lista de espera todavía no es un inscripto real. `eliminado_at
+    IS NULL` (soft-delete, 2026-08-13): una baja no debería seguir inflando el
+    % que le corresponde al Estudio/equipos."""
     row = conn.execute(
         "SELECT COALESCE(SUM(modalidad_monto), 0) AS total FROM taller_inscripciones "
-        "WHERE edicion_id = %s AND en_lista_espera = FALSE",
+        "WHERE edicion_id = %s AND en_lista_espera = FALSE AND eliminado_at IS NULL",
         (edicion_id,),
     ).fetchone()
     return row["total"]

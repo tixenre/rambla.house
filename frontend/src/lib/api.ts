@@ -453,6 +453,12 @@ export type Sesion = {
   portada_url: string;
 };
 
+/** Una cuenta de cobro (alias/cbu/banco) de una edición de taller — mismo
+ *  shape que `services.talleres.queries.clases._cuenta_pago_dict` (backend).
+ *  `id` ausente en una entrada sintetizada desde los 3 campos viejos
+ *  (`_cuentas_pago_efectivas`, backend) — nunca se manda de vuelta al editar. */
+export type CuentaPago = { id?: number | null; alias: string; cbu: string; banco: string };
+
 export type Taller = {
   id: number;
   slug: string;
@@ -536,7 +542,7 @@ export type Taller = {
   // modalidad de pago; el público ve todas y elige a cuál transferir. Sin
   // fallback sintético (a diferencia de modalidades arriba): [] = ninguna
   // cargada.
-  cuentas_pago: { id: number | null; alias: string; cbu: string; banco: string }[];
+  cuentas_pago: CuentaPago[];
   // F4c: FAQ del concepto, trabajos pasados (solo YouTube, sin testimonios) y
   // cierre de inscripciones de ESTA edición (null = sin cierre).
   faqs: { pregunta: string; respuesta: string }[];
@@ -570,6 +576,9 @@ export type InscripcionBody = {
   modalidad_codigo?: string;
   /** F2: checkbox "Acepto los términos" — el form v2 (F5) lo manda siempre. */
   acepta_terminos?: boolean;
+  /** session_id del heartbeat de borrador (ver apiHeartbeatInscripcion) —
+   *  cierra ese funnel al confirmarse la inscripción real. */
+  session_id?: string;
 };
 
 export type InscripcionResult = {
@@ -603,6 +612,25 @@ export async function apiUploadComprobante(
   return res.json() as Promise<{ url: string; key: string }>;
 }
 
+/**
+ * Heartbeat de borrador (mirror de `syncCartHeartbeat`): lo que la persona
+ * lleva tipeado en WorkshopInscripcionForm, para que el admin vea a quién no
+ * llegó a enviar el formulario. Fire-and-forget — nunca bloquea ni rompe la
+ * UX del form si la red falla.
+ */
+export function apiHeartbeatInscripcion(
+  slug: string,
+  body: { session_id: string; nombre?: string; email?: string; telefono?: string },
+) {
+  fetch(`${API_BASE}/api/talleres/${slug}/inscripcion/heartbeat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).catch(() => {
+    // Silencioso — es telemetría, no una acción del usuario.
+  });
+}
+
 export function apiCrearInscripcion(slug: string, body: InscripcionBody) {
   return post<InscripcionResult>(`/api/talleres/${slug}/inscripcion`, body);
 }
@@ -617,9 +645,7 @@ export type OfertaCupo = {
   horario: string;
   direccion: string;
   precio_sena_str: string;
-  pago_alias: string;
-  pago_cbu: string;
-  pago_banco: string;
+  cuentas_pago: CuentaPago[];
 };
 
 class ApiStatusError extends Error {

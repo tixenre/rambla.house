@@ -75,6 +75,18 @@ _TURNO_NETO_CTE = """
 # Todo embebido entra como `tipo='estudio'` (turno real, con horas propias) —
 # nunca 'estudio_fijo': ese tipo es exclusivo de la fila recurrente standalone
 # (`_regenerar_pedidos_slot`), que no tiene contraparte embebida hoy.
+#
+# `AND a.tipo NOT IN {TIPOS_DERIVADOS_SQL}` en la rama embebida (2026-08-13):
+# desde que un pedido de TALLER también puede llevar turnos embebidos
+# (`services/talleres/commands/economia.py::_crear_turnos_taller_del_mes`, un
+# turno por clase real), este join a `alquileres` ya no resuelve solo a
+# contenedores `tipo='diaria'` como cuando se escribió. Sin el filtro, la
+# franja del Estudio de un taller (precio por sesión mensual/economía de
+# taller, no `estudio.precio_hora`) se contaba acá como turno real del
+# Estudio — inflando `total_turnos`/`horas_vendidas`/`total_ars` de esta
+# sección con plata que ya tiene su propio hogar (queda afuera de TODAS las
+# secciones de `/estadisticas`, como cualquier plata de taller, ver
+# `TIPOS_DERIVADOS_SQL` arriba).
 _TURNO_EVENTOS_CTE = f"""
     turno_money AS (
         SELECT turno_estudio_id AS tid, COALESCE(SUM(subtotal), 0) AS monto
@@ -93,7 +105,7 @@ _TURNO_EVENTOS_CTE = f"""
         FROM alquiler_turnos_estudio ate
         JOIN alquileres a ON a.id = ate.pedido_id
         LEFT JOIN turno_money tm ON tm.tid = ate.id
-        WHERE a.estado = 'finalizado'
+        WHERE a.estado = 'finalizado' AND a.tipo NOT IN {TIPOS_DERIVADOS_SQL}
     )
 """
 

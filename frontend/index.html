@@ -1,20 +1,44 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 
-    <!-- SEO básico — meta tags se sobrescriben por página vía TanStack Router. -->
+    <!-- SEO básico — el fallback que ve un crawler que NO ejecuta JS (o el
+         backend server-injecta un valor específico por regex sobre ESTOS
+         tags para /, /rental, /estudio, /escuelas/{slug} — ver
+         `_inject_og_meta` en backend/main.py). NO se puede sacar de acá:
+         además del fallback, son el target literal de ese regex.
+
+         Para un lector que SÍ ejecuta JS (browser, Googlebot render pass,
+         agentes de IA con JS): `HeadContent` (montado en __root.tsx) agrega
+         el head() de la ruta pero NO reemplaza lo que ya estaba en el HTML
+         al cargar — dos <title>/og:title/... a la vez, confuso para un
+         parser que no haga "el último gana" (bug real, 2026-08-13). Fix:
+         `main.tsx` los barre ANTES de montar React, y `__root.tsx` repone el
+         mismo copy vía head() (así una ruta sin el suyo propio no se queda
+         sin nada). `og:image`/`twitter:image`/`og:site_name` quedan afuera
+         de ese barrido — ninguna ruta cliente los declara, la imagen
+         dinámica que el backend inyecta (foto del equipo/taller) es la
+         única fuente y no debe pisarse con la genérica.
+
+         Canonical y description NO están acá — una ruta sin `head()` propio
+         simplemente no lleva canonical/description (mejor que uno
+         incorrecto — Google infiere solo si falta). -->
     <title>Rambla — Rental, estudio y workshops audiovisuales</title>
-    <meta name="description" content="Alquiler de equipos audiovisuales, estudio de foto y video, y workshops de producción en Mar del Plata." />
-    <meta name="keywords" content="alquiler equipos cine, rental cámaras Mar del Plata, alquiler lentes, iluminación producciones, estudio foto video" />
-    <link rel="canonical" href="https://rambla.house/" />
+    <meta
+      name="keywords"
+      content="alquiler equipos cine, rental cámaras Mar del Plata, alquiler lentes, iluminación producciones, estudio foto video"
+    />
 
     <!-- Open Graph (Facebook, WhatsApp, LinkedIn, Slack). -->
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://rambla.house/" />
     <meta property="og:title" content="Rambla — Rental, estudio y workshops audiovisuales" />
-    <meta property="og:description" content="Alquiler de equipos audiovisuales, estudio de foto y video, y workshops de producción en Mar del Plata." />
+    <meta
+      property="og:description"
+      content="Alquiler de equipos audiovisuales, estudio de foto y video, y workshops de producción en Mar del Plata."
+    />
     <meta property="og:image" content="https://rambla.house/og-image.png" />
     <meta property="og:locale" content="es_AR" />
     <meta property="og:site_name" content="Rambla" />
@@ -22,45 +46,64 @@
     <!-- Twitter Cards. -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="Rambla — Rental, estudio y workshops audiovisuales" />
-    <meta name="twitter:description" content="Alquiler de equipos, estudio y workshops audiovisuales en Mar del Plata." />
+    <meta
+      name="twitter:description"
+      content="Alquiler de equipos, estudio y workshops audiovisuales en Mar del Plata."
+    />
     <meta name="twitter:image" content="https://rambla.house/og-image.png" />
 
     <!-- Structured data: WebSite (identidad canónica del sitio para Google). -->
     <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "WebSite",
-      "name": "Rambla",
-      "url": "https://rambla.house/"
-    }
+      {
+        "@context": "https://schema.org",
+        "@type": "WebSite",
+        "name": "Rambla",
+        "url": "https://rambla.house/"
+      }
     </script>
 
     <!-- Structured data: Organization (Google Knowledge Panel). -->
     <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "LocalBusiness",
-      "name": "Rambla Rental",
-      "description": "Alquiler de equipos audiovisuales y estudio de foto/video en Mar del Plata.",
-      "url": "https://rambla.house/",
-      "telephone": "+5492235852510",
-      "email": "ramblarental@gmail.com",
-      "address": {
-        "@type": "PostalAddress",
-        "streetAddress": "Chaco 1392",
-        "addressLocality": "Mar del Plata",
-        "addressRegion": "Buenos Aires",
-        "postalCode": "7600",
-        "addressCountry": "AR"
-      },
-      "openingHoursSpecification": [
-        { "@type": "OpeningHoursSpecification", "dayOfWeek": ["Monday","Tuesday","Wednesday","Thursday","Friday"], "opens": "10:00", "closes": "19:00" },
-        { "@type": "OpeningHoursSpecification", "dayOfWeek": "Saturday", "opens": "10:00", "closes": "14:00" }
-      ],
-      "priceRange": "$$",
-      "image": "https://rambla.house/icon-512.png",
-      "sameAs": ["https://instagram.com/ramblarental"]
-    }
+      {
+        "@context": "https://schema.org",
+        "@type": "LocalBusiness",
+        "name": "Rambla Rental",
+        "description": "Alquiler de equipos audiovisuales y estudio de foto/video en Mar del Plata.",
+        "url": "https://rambla.house/",
+        "telephone": "+5492235852510",
+        "email": "ramblarental@gmail.com",
+        "address": {
+          "@type": "PostalAddress",
+          "streetAddress": "Chaco 1392",
+          "addressLocality": "Mar del Plata",
+          "addressRegion": "Buenos Aires",
+          "postalCode": "7600",
+          "addressCountry": "AR"
+        },
+        "geo": {
+          "@type": "GeoCoordinates",
+          "latitude": -37.9876646,
+          "longitude": -57.5627813
+        },
+        "areaServed": [{ "@type": "City", "name": "Mar del Plata" }, "Costa Atlántica bonaerense"],
+        "openingHoursSpecification": [
+          {
+            "@type": "OpeningHoursSpecification",
+            "dayOfWeek": ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"],
+            "opens": "10:00",
+            "closes": "19:00"
+          },
+          {
+            "@type": "OpeningHoursSpecification",
+            "dayOfWeek": "Saturday",
+            "opens": "10:00",
+            "closes": "14:00"
+          }
+        ],
+        "priceRange": "$$",
+        "image": "https://rambla.house/icon-512.png",
+        "sameAs": ["https://instagram.com/ramblarental"]
+      }
     </script>
 
     <!-- Favicon: PNG (todos los browsers modernos lo soportan) + Apple touch icon. -->
@@ -79,13 +122,55 @@
     <!-- Fuentes críticas: Champ Black (H1/display) + TT Commons 400 (body) + JetBrains Mono 400 (precios).
          Self-hosted woff2 subseteados (~16-18KB c/u), servidos desde /public/fonts/ (URL estable, sin
          hash de Vite → el browser deduplica preload + @font-face). `crossorigin` obligatorio para CORS. -->
-    <link rel="preload" href="/fonts/woff2/champ-black-900.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="/fonts/woff2/tt-commons-400.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="/fonts/woff2/tt-commons-500.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="/fonts/woff2/tt-commons-600.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="/fonts/woff2/tt-commons-700.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="/fonts/woff2/jetbrains-mono-400.woff2" as="font" type="font/woff2" crossorigin />
-    <link rel="preload" href="/fonts/woff2/jetbrains-mono-500.woff2" as="font" type="font/woff2" crossorigin />
+    <link
+      rel="preload"
+      href="/fonts/woff2/champ-black-900.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/fonts/woff2/tt-commons-400.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/fonts/woff2/tt-commons-500.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/fonts/woff2/tt-commons-600.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/fonts/woff2/tt-commons-700.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/fonts/woff2/jetbrains-mono-400.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <link
+      rel="preload"
+      href="/fonts/woff2/jetbrains-mono-500.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
   </head>
   <body>
     <div id="root"></div>

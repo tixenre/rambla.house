@@ -16,6 +16,7 @@ from database import get_db, now_ar, row_to_dict, to_datetime
 from rate_limit import limiter, ADMIN_WRITE_LIMIT, ADMIN_UPLOAD_LIMIT, CLIENTE_WRITE_LIMIT
 from clientes.queries.identidad import nombre_completo_cliente
 from reservas.estados import ESTADOS_EN_CALENDARIO  # display: ver su docstring
+from tipos_pedido import TIPOS_DERIVADOS_SQL
 from routes.alquileres import (
     _enriquecer_pedidos_con_cliente,
     _get_alquiler_detail,
@@ -1481,8 +1482,14 @@ def listar_reservas_estudio(
         ).fetchall()
         pedidos = [row_to_dict(r) for r in rows]
 
+        # `a.tipo NOT IN {TIPOS_DERIVADOS_SQL}` (2026-08-13): un pedido de
+        # TALLER también puede llevar turnos embebidos (uno por clase real,
+        # `services/talleres/commands/economia.py`) — sin este filtro, sus
+        # clases se mezclaban acá con los turnos reales del Estudio en esta
+        # agenda dedicada. El taller tiene su propia agenda (Talleres); esta
+        # lista es solo para `tipo='diaria'` con un turno del Estudio agregado.
         embebidos = conn.execute(
-            """
+            f"""
             SELECT a.id, a.numero_pedido, a.cliente_id, a.cliente_nombre,
                    ate.fecha_desde, ate.fecha_hasta,
                    (SELECT COALESCE(SUM(subtotal), 0) FROM alquiler_items
@@ -1491,7 +1498,8 @@ def listar_reservas_estudio(
                    ate.id AS turno_estudio_id
             FROM alquiler_turnos_estudio ate
             JOIN alquileres a ON a.id = ate.pedido_id
-            WHERE (%s::date IS NULL OR ate.fecha_hasta >= %s::date)
+            WHERE a.tipo NOT IN {TIPOS_DERIVADOS_SQL}
+              AND (%s::date IS NULL OR ate.fecha_hasta >= %s::date)
               AND (%s::date IS NULL OR ate.fecha_desde < %s::date + interval '1 day')
             ORDER BY ate.fecha_desde DESC
             """,
@@ -1560,6 +1568,14 @@ def agenda_estudio(request: Request, desde: str = Query(...), hasta: str = Query
         # pedido CONTENEDOR (no hay una página propia del turno); `embebido: True`
         # deja que el front lo distinga visualmente si quiere, sin que la agenda
         # necesite tratarlo distinto para calcular ocupación.
+        #
+        # `a.tipo NOT IN {TIPOS_DERIVADOS_SQL}` (2026-08-13): un pedido de
+        # TALLER también puede llevar turnos embebidos (uno por clase real) —
+        # sin este filtro, cada clase aparecía acá DOS VECES: una vez acá
+        # (`tipo: "turno", embebido: true`) y otra vez en el bloque "talleres"
+        # de abajo (que lee `clases_taller` directo, la fuente única real de
+        # las clases de un taller). El bloque "talleres" ya cubre taller —
+        # este solo es para el turno del Estudio agregado a un `diaria`.
         embebidos = conn.execute(
             f"""
             SELECT a.id, a.numero_pedido, a.cliente_nombre, a.estado,
@@ -1567,6 +1583,7 @@ def agenda_estudio(request: Request, desde: str = Query(...), hasta: str = Query
             FROM alquiler_turnos_estudio ate
             JOIN alquileres a ON a.id = ate.pedido_id
             WHERE a.estado IN {ESTADOS_EN_CALENDARIO}
+              AND a.tipo NOT IN {TIPOS_DERIVADOS_SQL}
               AND ate.fecha_desde < %s AND ate.fecha_hasta > %s
             ORDER BY ate.fecha_desde
             """,

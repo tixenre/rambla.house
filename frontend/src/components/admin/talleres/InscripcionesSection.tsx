@@ -12,9 +12,21 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
+import { formatDistanceToNow } from "date-fns";
+import { es } from "date-fns/locale";
+import { MessageCircle } from "lucide-react";
+
 import { talleresAdminApi } from "@/lib/admin/api/talleres";
-import type { EdicionAdmin, Inscripcion, TallerConcepto } from "@/lib/admin/api/types";
+import type {
+  Borrador,
+  BorradoresResp,
+  EdicionAdmin,
+  Inscripcion,
+  TallerConcepto,
+} from "@/lib/admin/api/types";
+import { whatsappLink } from "@/lib/whatsapp";
 import { Button } from "@/design-system/ui/button";
+import { Pill } from "@/design-system/ui/Pill";
 import { Textarea } from "@/design-system/ui/textarea";
 import {
   Dialog,
@@ -46,11 +58,15 @@ export function InscripcionesSection({
   concepto,
   inscripciones,
   loading,
+  borradores,
 }: {
   edicion: EdicionAdmin;
   concepto: TallerConcepto;
   inscripciones: Inscripcion[];
   loading: boolean;
+  /** Borradores sin enviar (heartbeat del form público) — `undefined` mientras
+   *  carga, nunca bloquea el resto de la sección. */
+  borradores?: BorradoresResp;
 }) {
   const qc = useQueryClient();
   const confirm = useConfirm();
@@ -141,7 +157,10 @@ export function InscripcionesSection({
 
   if (loading) return <ListSkeleton rows={4} />;
 
-  if (inscripciones.length === 0) {
+  // Vacío de verdad = ni inscripciones ni borradores — si hay gente que
+  // arrancó el form sin enviarlo, esa sección sola justifica no mostrar el
+  // empty state (es la señal que este feature existe para mostrar).
+  if (inscripciones.length === 0 && !borradores?.total) {
     return <EmptyState icon={<Users className="h-6 w-6" />} title="No hay inscripciones todavía" />;
   }
 
@@ -308,6 +327,25 @@ export function InscripcionesSection({
         </div>
       )}
 
+      {borradores && borradores.total > 0 && (
+        <div
+          className={`flex flex-col gap-3${
+            confirmadas.length > 0 || espera.length > 0
+              ? " border-t border-border/40 pt-5 mt-2"
+              : ""
+          }`}
+        >
+          <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+            Empezaron el formulario y no lo enviaron ({borradores.total})
+          </p>
+          <div className="flex flex-col gap-2">
+            {borradores.borradores.map((b) => (
+              <BorradorRow key={b.id} borrador={b} />
+            ))}
+          </div>
+        </div>
+      )}
+
       <Dialog open={notifOpen} onOpenChange={setNotifOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
@@ -346,5 +384,47 @@ export function InscripcionesSection({
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+/** Mensaje de WhatsApp pre-armado — mismo criterio que `CarritoCard`. */
+function buildWhatsappMessage(b: Borrador): string {
+  const nombre = b.nombre?.trim().split(/\s+/)[0];
+  const saludo = nombre ? `Hola ${nombre}` : "Hola";
+  return `${saludo}, te escribo de Rambla 👋 Vi que estabas por anotarte a uno de nuestros talleres. ¿Te ayudo a terminar la inscripción?`;
+}
+
+function BorradorRow({ borrador: b }: { borrador: Borrador }) {
+  const wasaLink = whatsappLink({ phone: b.telefono, message: buildWhatsappMessage(b) });
+  const ultimaActividad = formatDistanceToNow(new Date(b.updated_at), {
+    addSuffix: true,
+    locale: es,
+  });
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-lg border hairline bg-muted/10 px-3 py-2">
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium text-ink truncate">{b.nombre || "Sin nombre"}</p>
+        <p className="text-xs text-muted-foreground truncate">
+          {[b.email, b.telefono].filter(Boolean).join(" · ") || "Sin datos de contacto"}
+        </p>
+      </div>
+      {b.abandonado && (
+        <Pill tone="warning" className="shrink-0">
+          Abandonado
+        </Pill>
+      )}
+      <span className="shrink-0 text-xs text-muted-foreground">{ultimaActividad}</span>
+      {wasaLink && (
+        <a
+          href={wasaLink}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-verde-ink hover:bg-verde/10 transition"
+          title="Escribir por WhatsApp"
+        >
+          <MessageCircle className="h-4 w-4" />
+        </a>
+      )}
+    </div>
   );
 }

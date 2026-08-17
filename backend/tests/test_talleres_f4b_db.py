@@ -216,6 +216,38 @@ def test_claim_cupo_via_token_reclama_y_suma_cupo(taller_base):
     assert r_post2.status_code == 410, r_post2.text
 
 
+def test_get_oferta_cupo_incluye_cuentas_pago(taller_base):
+    """Hallazgo del supervisor (2026-08-13): la página pública "completá tu
+    seña" (`GET /talleres/sena/{token}`) seguía devolviendo los 3 campos
+    viejos (`pago_alias`/`pago_cbu`/`pago_banco`) en vez de `cuentas_pago` —
+    el front (`DatosPago`) solo lee `cuentas_pago`, así que un cambio de
+    cuenta desde "Precios y forma de pago" no se reflejaba acá."""
+    from fastapi.testclient import TestClient
+    import main
+    t = taller_base
+
+    ed = _crear_edicion_activa(t, cupos_total=5, cupos_confirmados=3)
+    t.admin_update_edicion(
+        ed["id"],
+        t.EdicionUpdateBody(cuentas_pago=[
+            t.CuentaPagoBody(alias="rambla.f4b", cbu="", banco="Galicia"),
+        ]),
+        None,
+    )
+    ins_id = _insertar_inscripcion(ed["id"], en_lista_espera=True, estado="en_espera")
+    t.admin_ofrecer_cupo(TALLER_ID, ins_id, None)
+    token = t._generar_token_cupo(ins_id)
+
+    client = TestClient(main.app)
+    r = client.get(f"/api/talleres/sena/{token}")
+    assert r.status_code == 200, r.text
+    data = r.json()
+    assert data["cuentas_pago"] == [
+        {"id": data["cuentas_pago"][0]["id"], "alias": "rambla.f4b", "cbu": "", "banco": "Galicia"}
+    ]
+    assert "pago_alias" not in data, "los 3 campos viejos ya no se exponen acá"
+
+
 def test_upload_comprobante_sena_no_necesita_slug(taller_base, monkeypatch):
     """F5: la página pública 'completá tu seña' solo tiene el token — el
     upload de comprobante tiene que resolver todo por ahí, sin slug."""
@@ -454,3 +486,74 @@ def test_eliminar_inscripcion_espera_lock_y_ve_estado_fresco(taller_base):
         f"esperaba 3 (el reclamo sumó, el borrado de la confirmada resta) — "
         f"quedó en {edicion['cupos_confirmados']}: cupos contados de más"
     )
+
+
+def test_eliminar_inscripcion_es_soft_delete(taller_base):
+    """Pedido del dueño (2026-08-13): admin_delete_inscripcion NO hace un
+    DELETE real — la fila sigue en la base (dataset de interesados), solo
+    sale de las listas/vistas normales."""
+    t = taller_base
+    ed = _crear_edicion_activa(t)
+    ins_id = _insertar_inscripcion(ed["id"], en_lista_espera=True, estado="en_espera")
+
+    t.admin_delete_inscripcion(TALLER_ID, ins_id, None)
+
+    from database import get_db
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT eliminado_at, eliminado_por, nombre, email FROM taller_inscripciones "
+            "WHERE id = %s",
+            (ins_id,),
+        ).fetchone()
+    assert row is not None, "la fila NO se borró de la base — solo se marca"
+    assert row["eliminado_at"] is not None
+    assert row["nombre"] and row["email"], "los datos de contacto se conservan"
+    # require_admin está mockeado a `lambda r: None` en este fixture — el
+    # fallback "unknown" es el comportamiento esperado, no un bug.
+    assert row["eliminado_por"] == "unknown"
+
+    listado = t.admin_list_inscripciones_edicion(ed["id"], None)
+    assert listado == [], "una inscripción soft-deleted no aparece en la lista admin"
+
+
+def test_eliminar_inscripcion_ya_eliminada_da_404(taller_base):
+    """Idempotencia: borrar dos veces la misma inscripción no re-actualiza
+    en silencio (evitaría, entre otras cosas, doble-decremento de cupos)."""
+    t = taller_base
+    ed = _crear_edicion_activa(t)
+    ins_id = _insertar_inscripcion(ed["id"], en_lista_espera=True, estado="en_espera")
+
+    t.admin_delete_inscripcion(TALLER_ID, ins_id, None)
+    with pytest.raises(t.HTTPException) as exc:
+        t.admin_delete_inscripcion(TALLER_ID, ins_id, None)
+    assert exc.value.status_code == 404
+
+
+def test_acciones_de_estado_404_en_inscripcion_eliminada(taller_base):
+    """confirmar/verificar-sena/ofrecer-cupo no deben poder operar sobre una
+    inscripción ya dada de baja — mismo criterio que "no existe" para el
+    admin, aunque la fila siga viva en la base."""
+    t = taller_base
+    ed = _crear_edicion_activa(t)
+
+    ins_espera = _insertar_inscripcion(ed["id"], en_lista_espera=True, estado="en_espera")
+    t.admin_delete_inscripcion(TALLER_ID, ins_espera, None)
+    with pytest.raises(t.HTTPException) as exc:
+        t.admin_confirmar_inscripcion(TALLER_ID, ins_espera, None)
+    assert exc.value.status_code == 404
+
+    ins_sena = _insertar_inscripcion(
+        ed["id"], en_lista_espera=False, estado="pendiente_sena", email="sena@example.com"
+    )
+    t.admin_delete_inscripcion(TALLER_ID, ins_sena, None)
+    with pytest.raises(t.HTTPException) as exc:
+        t.admin_verificar_sena(TALLER_ID, ins_sena, None)
+    assert exc.value.status_code == 404
+
+    ins_cupo = _insertar_inscripcion(
+        ed["id"], en_lista_espera=True, estado="en_espera", email="cupo@example.com"
+    )
+    t.admin_delete_inscripcion(TALLER_ID, ins_cupo, None)
+    with pytest.raises(t.HTTPException) as exc:
+        t.admin_ofrecer_cupo(TALLER_ID, ins_cupo, None)
+    assert exc.value.status_code == 404

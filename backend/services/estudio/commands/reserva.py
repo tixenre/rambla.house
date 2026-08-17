@@ -806,6 +806,21 @@ def editar_turno_embebido(
         raise HTTPException(404, "Turno no encontrado")
     pedido_id = turno["pedido_id"]
 
+    # Mismo espíritu que el gate de `agregar_turno_embebido` (`tipo != "diaria"`),
+    # del otro lado: un turno de TALLER (uno por clase real, 2026-08-13) no se
+    # edita acá — su fuente de verdad es `clases_taller`/la edición en
+    # Talleres, y este camino no sabe nada de esa sincronización (reprogramar
+    # horario/monto acá desalinearía la clase real sin que nada lo note).
+    contenedor_tipo = conn.execute(
+        "SELECT tipo FROM alquileres WHERE id = %s", (pedido_id,)
+    ).fetchone()["tipo"]
+    if contenedor_tipo == "taller":
+        raise HTTPException(
+            409,
+            "Este turno pertenece a un taller — se administra desde Talleres "
+            "(clases de la edición), no se edita acá.",
+        )
+
     estudio = _get_estudio_row(conn)
 
     fecha_desde = to_datetime(turno["fecha_desde"])
@@ -972,9 +987,15 @@ def eliminar_turno_embebido(conn, turno_id: int) -> None:
     pedido_id = turno["pedido_id"]
 
     pedido = conn.execute(
-        "SELECT monto_total, monto_pagado FROM alquileres WHERE id = %s FOR UPDATE",
+        "SELECT tipo, monto_total, monto_pagado FROM alquileres WHERE id = %s FOR UPDATE",
         (pedido_id,),
     ).fetchone()
+    if pedido["tipo"] == "taller":
+        raise HTTPException(
+            409,
+            "Este turno pertenece a un taller — se administra desde Talleres "
+            "(clases de la edición), no se borra acá.",
+        )
     turno_monto = conn.execute(
         "SELECT COALESCE(SUM(subtotal), 0) AS monto FROM alquiler_items WHERE turno_estudio_id = %s",
         (turno_id,),

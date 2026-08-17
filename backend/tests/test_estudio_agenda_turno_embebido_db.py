@@ -45,6 +45,9 @@ NUMERO_PEDIDO = 948210
 # el dueño vio vacío en pantalla. Ids propios para no chocar con el embebido.
 PEDIDO_STANDALONE = 9_482_011
 NUMERO_STANDALONE = 948211
+# Taller con turno embebido por clase (2026-08-13) — no debe mezclarse acá.
+PEDIDO_TALLER = 9_482_012
+NUMERO_TALLER = 948212
 
 
 @pytest.fixture
@@ -93,10 +96,10 @@ def setup(monkeypatch):
 
 
 def _limpiar(conn):
-    ids = (PEDIDO_ID, PEDIDO_STANDALONE)
-    conn.execute("DELETE FROM alquiler_items WHERE pedido_id IN (%s,%s)", ids)
-    conn.execute("DELETE FROM alquiler_turnos_estudio WHERE pedido_id IN (%s,%s)", ids)
-    conn.execute("DELETE FROM alquileres WHERE id IN (%s,%s)", ids)
+    ids = (PEDIDO_ID, PEDIDO_STANDALONE, PEDIDO_TALLER)
+    conn.execute("DELETE FROM alquiler_items WHERE pedido_id IN (%s,%s,%s)", ids)
+    conn.execute("DELETE FROM alquiler_turnos_estudio WHERE pedido_id IN (%s,%s,%s)", ids)
+    conn.execute("DELETE FROM alquileres WHERE id IN (%s,%s,%s)", ids)
     conn.execute("DELETE FROM clientes WHERE id = %s", (CLIENTE_ID,))
 
 
@@ -227,6 +230,63 @@ def test_un_turno_cancelado_o_borrador_no_ocupa_la_agenda(client_con_db, setup, 
     )
     assert r.status_code == 200
     assert all(b.get("id") != PEDIDO_ID for b in r.json()["bloques"])
+
+
+def test_turno_de_un_taller_no_aparece_en_ninguna_de_las_dos_agendas(client_con_db, setup):
+    """Bug real encontrado en la auditoría de consumidores del turno-embebido-
+    por-clase (2026-08-13): `_crear_turnos_taller_del_mes`
+    (`services/talleres/commands/economia.py`) también puede crear filas en
+    `alquiler_turnos_estudio` — sin filtrar `a.tipo`, esas clases se mezclaban
+    con los turnos reales del Estudio en `listar_reservas_estudio` (agenda
+    dedicada del back-office) y, en `agenda_estudio`, aparecían DOS VECES (acá
+    + en el bloque "talleres" que ya lee `clases_taller` directo)."""
+    from database import get_db
+
+    conn = get_db()
+    try:
+        conn.execute(
+            "INSERT INTO alquileres (id, cliente_nombre, estado, tipo, "
+            "fecha_desde, fecha_hasta, numero_pedido) "
+            "VALUES (%s,'Taller Agenda Embebida','confirmado','taller',"
+            "'2030-03-01','2030-03-31',%s)",
+            (PEDIDO_TALLER, NUMERO_TALLER),
+        )
+        cid = conn.execute("SELECT equipo_id FROM estudio WHERE id=1").fetchone()["equipo_id"]
+        turno_id = conn.execute(
+            "INSERT INTO alquiler_turnos_estudio (pedido_id, fecha_desde, fecha_hasta) "
+            "VALUES (%s,'2030-03-15 09:00','2030-03-15 12:00') RETURNING id",
+            (PEDIDO_TALLER,),
+        ).fetchone()["id"]
+        conn.execute(
+            "INSERT INTO alquiler_items "
+            "(pedido_id, equipo_id, cantidad, precio_jornada, subtotal, cobro_modo, turno_estudio_id) "
+            "VALUES (%s,%s,1,18000,18000,'fijo',%s)",
+            (PEDIDO_TALLER, cid, turno_id),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    r = client_con_db.get(
+        "/api/admin/estudio/reservas", params={"desde": "2030-03-01", "hasta": "2030-03-31"}
+    )
+    assert r.status_code == 200
+    reservas = r.json()["reservas"]
+    assert not any(x.get("turno_estudio_id") == turno_id for x in reservas), reservas
+    assert not any(x["id"] == PEDIDO_TALLER for x in reservas), reservas
+
+    r2 = client_con_db.get(
+        "/api/admin/estudio/agenda", params={"desde": "2030-03-01", "hasta": "2030-03-31"}
+    )
+    assert r2.status_code == 200
+    bloques = r2.json()["bloques"]
+    # Nada con `embebido: True` apuntando a este pedido — el "turno como
+    # ítem" queda fuera de acá; si el taller aparece, es SOLO vía el bloque
+    # `tipo: "taller"` que lee `clases_taller` (sin fixture acá, así que
+    # tampoco debería aparecer por ese lado).
+    assert not any(
+        b.get("id") == PEDIDO_TALLER and b.get("embebido") is True for b in bloques
+    ), bloques
 
 
 def test_sin_turno_embebido_no_aparece_nada_extra(client_con_db, setup):

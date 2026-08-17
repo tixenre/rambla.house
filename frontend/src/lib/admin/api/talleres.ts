@@ -1,5 +1,6 @@
 import { authedFetch, authedJson, authedPostJson } from "@/lib/authedFetch";
 import type {
+  BorradoresResp,
   ClaseBody,
   EdicionAdmin,
   EdicionFoto,
@@ -86,6 +87,9 @@ export const talleresAdminApi = {
 
   listInscripciones: (edicionId: number) =>
     authedJson<Inscripcion[]>(`/api/admin/ediciones/${edicionId}/inscripciones`),
+
+  listBorradores: (edicionId: number) =>
+    authedJson<BorradoresResp>(`/api/admin/ediciones/${edicionId}/borradores`),
 
   // F4c: mini-KPIs de una edición (señas + plata, ya resuelta por el backend).
   getEdicionKpis: (edicionId: number) =>

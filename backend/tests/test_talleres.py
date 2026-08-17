@@ -114,7 +114,7 @@ class _TallerRegenConn(_ConnCM):
     """Fake conn para _regenerar_pedidos_taller: graba INSERT/DELETE de
     alquileres + los ítems de cada pedido nuevo."""
 
-    def __init__(self, existing=None, estudio=None, revenue=0):
+    def __init__(self, existing=None, estudio=None, revenue=0, clases=None):
         # existing: [{id, fecha_desde, monto_pagado, n_items}]
         self.existing = existing or []
         self.inserted = []       # params posicionales de cada INSERT alquileres
@@ -123,6 +123,7 @@ class _TallerRegenConn(_ConnCM):
         self.estudio = estudio if estudio is not None else _estudio_row()
         self.revenue = revenue   # SUM(modalidad_monto) que devolvería _revenue_inscriptos
         self.revenue_queries = 0  # cuántas veces se consultó — porcentaje comparte 1 sola
+        self.clases = clases or []  # filas de clases_taller — ver el handler más abajo
         self._num = 5000
 
     def execute(self, sql, params=()):
@@ -131,6 +132,13 @@ class _TallerRegenConn(_ConnCM):
             return _Cur([self.estudio])
         if "FROM ALQUILERES A WHERE A.TALLER_EDICION_ID" in su:
             return _Cur(self.existing)
+        if "FROM CLASES_TALLER WHERE EDICION_ID" in su:
+            # Sin clases cargadas por default — el fake conn no puede simular
+            # _centinela_libre/FOR UPDATE (SQL real contra otras tablas), así
+            # que el camino "SÍ hay clases" (turno embebido por clase) se
+            # prueba contra Postgres real, no acá — ver
+            # test_talleres_economia_turnos_db.py.
+            return _Cur(self.clases)
         if "SUM(MODALIDAD_MONTO)" in su:
             self.revenue_queries += 1
             return _Cur([{"total": self.revenue}])

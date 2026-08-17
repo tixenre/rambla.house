@@ -79,19 +79,21 @@ export const brandingMethods = {
         body: JSON.stringify({ enabled }),
       },
     ),
-  /** Log de envíos (read-only, paginado). Filtros opcionales por estado/plantilla. */
+  /** Log de envíos (read-only, paginado). Filtros opcionales por estado/plantilla/destinatario. */
   listEmailsLog: (params?: {
     status?: string;
     template_key?: string;
+    q?: string;
     limit?: number;
     offset?: number;
   }) => {
-    const q = new URLSearchParams();
-    if (params?.status) q.set("status", params.status);
-    if (params?.template_key) q.set("template_key", params.template_key);
-    if (params?.limit != null) q.set("limit", String(params.limit));
-    if (params?.offset != null) q.set("offset", String(params.offset));
-    const qs = q.toString();
+    const query = new URLSearchParams();
+    if (params?.status) query.set("status", params.status);
+    if (params?.template_key) query.set("template_key", params.template_key);
+    if (params?.q) query.set("q", params.q);
+    if (params?.limit != null) query.set("limit", String(params.limit));
+    if (params?.offset != null) query.set("offset", String(params.offset));
+    const qs = query.toString();
     return authedJson<{
       items: EmailLogEntry[];
       total: number;

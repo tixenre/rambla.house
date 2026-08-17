@@ -49,8 +49,16 @@ export function PasskeyManager({ scope }: { scope: PasskeyScope }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground leading-relaxed">
-        Entrá sin contraseña con la huella, el rostro o el PIN de tu dispositivo. Tu cuenta de
-        Google sigue disponible como respaldo si perdés el dispositivo.
+        Entrá sin contraseña con la huella, el rostro o el PIN de tu dispositivo.{" "}
+        {scope === "cliente"
+          ? // Cliente: Google es co-primario, sin 2º factor obligatorio — perder el
+            // dispositivo es trivial (entrás con Google y registrás una passkey nueva).
+            "Tu cuenta de Google sigue disponible como respaldo si perdés el dispositivo."
+          : // Admin: una vez que hay una passkey, Google SOLO ya no alcanza (2º factor
+            // obligatorio, auth/google.py::auth_callback) — decía lo mismo que arriba y
+            // era falso acá, justo el bug que dejó a un admin sin poder entrar desde un
+            // dispositivo nuevo. Los códigos de respaldo (más abajo) son el recovery real.
+            "Guardá los códigos de respaldo (más abajo) — sin ellos, perder este dispositivo te deja sin poder entrar."}
       </p>
 
       {!supported ? (

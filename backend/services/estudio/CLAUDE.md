@@ -101,6 +101,16 @@ de `queries/`; `queries/` **nunca** de `commands/`.
 - **Un `estudio_fijo` (pedido de slot) no se edita acá** (`editar_reserva` lo rechaza con 409) — lo
   gobierna su slot (`routes/estudio.py::_regenerar_pedidos_slot`, fuera de este paquete a propósito:
   dominio "slots", no "disponibilidad/reserva por hora").
+- **`editar_turno_embebido`/`eliminar_turno_embebido` rechazan (409) un contenedor `tipo='taller'`**
+  (2026-08-13, mismo espíritu que el punto anterior): desde que el Estudio de un taller genera un
+  turno embebido POR CLASE real (`services/talleres/commands/economia.py::_crear_turnos_taller_del_mes`,
+  bypasea `agregar_turno_embebido` a propósito — ver su propio docstring), esas filas necesitan el
+  MISMO blindaje que un `estudio_fijo`: la fuente de verdad de la clase/franja es `clases_taller`/la
+  edición en Talleres, no este pedido — editar/borrar por acá desincroniza sin que nada lo note.
+  `agregar_turno_embebido` ya rechazaba `tipo != 'diaria'`; sus dos hermanas no lo hacían hasta este
+  fix (hallazgo del supervisor). Hoy el front tampoco expone el control para un pedido de taller
+  (`TurnosEstudioSection` está oculta para cualquier pedido derivado) — el gate es defensa en
+  profundidad para cualquier caller futuro (API directa, otra UI).
 - **El listado público "qué incluye" de la promo (`_promo_info`'s `componentes`) sale de la puerta
   única `services.contenido.contenido_de`** (2026-06-29), NUNCA de una query ad-hoc a
   `kit_componentes` — misma fuente que `attach_kit` usa para el catálogo, así el panel público de

@@ -10,7 +10,8 @@ from database import get_db, now_ar, row_to_dict
 from auth.guards import require_admin
 from pedidos_vinculados import SIN_PRINCIPAL_SQL
 from reservas.estados import ESTADOS_EN_CALENDARIO
-from tipos_pedido import TIPOS_SIN_RETIRO_SQL
+from services.pedidos_enriquecimiento import _enriquecer_pedidos_con_cliente
+from tipos_pedido import TIPOS_DERIVADOS_SQL, TIPOS_SIN_RETIRO_SQL
 
 router = APIRouter()
 
@@ -23,14 +24,24 @@ def _turnos_embebidos_del_dia(conn, campo: str, valor: str):
     devuelven_hoy/devuelven_manana, pero con la fecha/hora PROPIA del turno —
     que puede no coincidir con el retiro/devolución de equipos del pedido
     contenedor (`a`, que sigue siendo `tipo='diaria'`) — y su monto propio
-    (no el del pedido completo, que puede incluir equipos ajenos al turno)."""
+    (no el del pedido completo, que puede incluir equipos ajenos al turno).
+
+    `a.tipo NOT IN TIPOS_DERIVADOS_SQL` (2026-08-13): un pedido de TALLER
+    también puede llevar turnos embebidos (uno por clase real, ver
+    `services/talleres/commands/economia.py`) — sin este filtro, sus clases
+    aparecían acá como si el equipo "saliera"/"volviera" ese día, mezclado con
+    salidas/devoluciones reales de rental (taller ya está excluido de este
+    dashboard vía `TIPOS_SIN_RETIRO_SQL` en las 3 queries de rental de arriba;
+    el join a `alquiler_turnos_estudio` es el único costado que se había
+    quedado sin ese mismo filtro)."""
     return conn.execute(f"""
-        SELECT a.id, a.cliente_nombre, ate.fecha_desde, ate.fecha_hasta,
+        SELECT a.id, a.cliente_nombre, a.cliente_id, ate.fecha_desde, ate.fecha_hasta,
                COALESCE((SELECT SUM(subtotal) FROM alquiler_items
                          WHERE turno_estudio_id = ate.id), 0) AS monto_total
         FROM alquiler_turnos_estudio ate
         JOIN alquileres a ON a.id = ate.pedido_id
         WHERE a.estado IN ('confirmado','retirado') AND a.{SIN_PRINCIPAL_SQL}
+          AND a.tipo NOT IN {TIPOS_DERIVADOS_SQL}
           AND ate.{campo}::date = %s
         ORDER BY ate.fecha_desde
     """, (valor,)).fetchall()
@@ -67,7 +78,7 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
         # combinar (dos queries separadas, no UNION, por la subquery de monto
         # propio del turno).
         salen_hoy = [row_to_dict(r) for r in conn.execute(f"""
-            SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
+            SELECT p.id, p.cliente_nombre, p.cliente_id, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
             WHERE estado IN ('confirmado','retirado')
               AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
@@ -76,10 +87,11 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
             ORDER BY p.fecha_desde
         """, (hoy,)).fetchall()]
         salen_hoy.extend(row_to_dict(r) for r in _turnos_embebidos_del_dia(conn, "fecha_desde", hoy))
+        _enriquecer_pedidos_con_cliente(conn, salen_hoy)
         salen_hoy.sort(key=lambda r: r["fecha_desde"])
 
         devuelven_hoy = [row_to_dict(r) for r in conn.execute(f"""
-            SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
+            SELECT p.id, p.cliente_nombre, p.cliente_id, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
             WHERE estado IN ('confirmado','retirado') AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
               AND p.{SIN_PRINCIPAL_SQL}
@@ -87,10 +99,11 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
             ORDER BY p.fecha_hasta
         """, (hoy,)).fetchall()]
         devuelven_hoy.extend(row_to_dict(r) for r in _turnos_embebidos_del_dia(conn, "fecha_hasta", hoy))
+        _enriquecer_pedidos_con_cliente(conn, devuelven_hoy)
         devuelven_hoy.sort(key=lambda r: r["fecha_hasta"])
 
         devuelven_manana = [row_to_dict(r) for r in conn.execute(f"""
-            SELECT p.id, p.cliente_nombre, p.fecha_desde, p.fecha_hasta, p.monto_total
+            SELECT p.id, p.cliente_nombre, p.cliente_id, p.fecha_desde, p.fecha_hasta, p.monto_total
             FROM alquileres p
             WHERE estado IN ('confirmado','retirado') AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
               AND p.{SIN_PRINCIPAL_SQL}
@@ -100,6 +113,7 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
         devuelven_manana.extend(
             row_to_dict(r) for r in _turnos_embebidos_del_dia(conn, "fecha_hasta", manana)
         )
+        _enriquecer_pedidos_con_cliente(conn, devuelven_manana)
         devuelven_manana.sort(key=lambda r: r["fecha_hasta"])
 
         ingresos_mes = conn.execute("""
@@ -112,18 +126,20 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
 
         total_clientes = conn.execute("SELECT COUNT(*) FROM clientes").fetchone()[0]
 
-        equipos_afuera = conn.execute("""
+        equipos_afuera = [row_to_dict(r) for r in conn.execute("""
             SELECT e.nombre, mb.nombre AS marca, SUM(pi.cantidad) AS cantidad,
-                   p.cliente_nombre, p.fecha_hasta
+                   p.cliente_nombre, p.cliente_id, p.pedido_principal_id, p.fecha_hasta
             FROM alquiler_items pi
             JOIN equipos e ON e.id = pi.equipo_id
             LEFT JOIN marcas mb ON mb.id = e.brand_id
             JOIN alquileres p ON p.id = pi.pedido_id
             WHERE p.estado IN ('confirmado','retirado') AND p.fecha_hasta >= %s
               AND e.es_recurso_interno = FALSE
-            GROUP BY pi.equipo_id, p.id, e.nombre, mb.nombre, p.cliente_nombre, p.fecha_hasta
+            GROUP BY pi.equipo_id, p.id, e.nombre, mb.nombre, p.cliente_nombre,
+                     p.cliente_id, p.pedido_principal_id, p.fecha_hasta
             ORDER BY p.fecha_hasta
-        """, (hoy,)).fetchall()
+        """, (hoy,)).fetchall()]
+        _enriquecer_pedidos_con_cliente(conn, equipos_afuera)
 
         return {
             "pendientes":       pendientes,
@@ -133,7 +149,7 @@ def get_dashboard(_admin: dict = Depends(require_admin)):
             "salen_hoy":        salen_hoy,
             "devuelven_hoy":    devuelven_hoy,
             "devuelven_manana": devuelven_manana,
-            "equipos_afuera":   [row_to_dict(r) for r in equipos_afuera],
+            "equipos_afuera":   equipos_afuera,
         }
 
 
@@ -149,7 +165,8 @@ def get_calendario(
         # de SU fila de equipamiento — el turno tiene su propia fila abajo,
         # con su propia ventana horaria (puede no coincidir con estas fechas).
         rows = conn.execute(f"""
-            SELECT p.id, p.numero_pedido, p.cliente_nombre, p.estado, p.tipo,
+            SELECT p.id, p.numero_pedido, p.cliente_nombre, p.cliente_id,
+                   p.pedido_principal_id, p.estado, p.tipo,
                    p.fecha_desde, p.fecha_hasta, p.monto_total,
                    STRING_AGG(e.nombre, ' / ') AS equipos
             FROM alquileres p
@@ -158,7 +175,8 @@ def get_calendario(
             WHERE p.estado IN {ESTADOS_EN_CALENDARIO}
               AND p.tipo NOT IN {TIPOS_SIN_RETIRO_SQL}
               AND p.fecha_hasta >= %s AND p.fecha_desde <= %s
-            GROUP BY p.id, p.numero_pedido, p.cliente_nombre, p.estado, p.tipo,
+            GROUP BY p.id, p.numero_pedido, p.cliente_nombre, p.cliente_id,
+                     p.pedido_principal_id, p.estado, p.tipo,
                      p.fecha_desde, p.fecha_hasta, p.monto_total
             ORDER BY p.fecha_desde
         """, (desde, hasta)).fetchall()
@@ -167,8 +185,16 @@ def get_calendario(
         # `tipo='estudio'` sintético (mismo criterio que `eventos_estudio` en
         # `estadisticas.py`) para que el front lo coloree vía
         # `estadoClaseEstudio` como cualquier turno del Estudio.
+        #
+        # `a.tipo NOT IN {TIPOS_DERIVADOS_SQL}` (2026-08-13): desde que un
+        # pedido de TALLER también puede llevar turnos embebidos (uno por
+        # clase real), este join dejaría de resolver solo a contenedores
+        # `diaria` — mismo criterio que la query de arriba (`p.tipo NOT IN
+        # TIPOS_SIN_RETIRO_SQL`, que ya excluye taller del calendario general
+        # por completo): el taller vive en Talleres + su propia página de
+        # pedido, no se mezcla acá con los turnos reales del Estudio.
         rows_turnos = conn.execute(f"""
-            SELECT a.id, a.numero_pedido, a.cliente_nombre, a.estado,
+            SELECT a.id, a.numero_pedido, a.cliente_nombre, a.cliente_id, a.estado,
                    'estudio' AS tipo, ate.fecha_desde, ate.fecha_hasta,
                    COALESCE((SELECT SUM(subtotal) FROM alquiler_items
                              WHERE turno_estudio_id = ate.id), 0) AS monto_total,
@@ -178,11 +204,19 @@ def get_calendario(
             FROM alquiler_turnos_estudio ate
             JOIN alquileres a ON a.id = ate.pedido_id
             WHERE a.estado IN {ESTADOS_EN_CALENDARIO}
+              AND a.tipo NOT IN {TIPOS_DERIVADOS_SQL}
               AND ate.fecha_hasta >= %s AND ate.fecha_desde <= %s
             ORDER BY ate.fecha_desde
         """, (desde, hasta)).fetchall()
 
         eventos = [row_to_dict(r) for r in rows]
         eventos.extend(row_to_dict(r) for r in rows_turnos)
+        # Nombre/email/teléfono en vivo — mismo helper que GET /api/alquileres.
+        # `cliente_nombre` es una foto congelada al crear/vincular el pedido: un
+        # pedido vinculado ANTES de que el cliente tuviera nombre cargado se
+        # mostraba "Sin cliente" para siempre acá, aunque el cliente después se
+        # haya verificado y el detalle del pedido ya lo mostrara bien (bug real,
+        # ver pedido #466).
+        _enriquecer_pedidos_con_cliente(conn, eventos)
         eventos.sort(key=lambda r: r["fecha_desde"])
         return eventos

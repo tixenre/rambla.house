@@ -66,6 +66,11 @@ from services.talleres.commands.clases import (
 from services.talleres.commands.ediciones import _gate_conflicto_estudio, crear_edicion
 from services.talleres.commands.economia import _regenerar_pedidos_taller
 from services.talleres.queries.economia import _revenue_inscriptos, _valor_efectivo
+from services.talleres_borrador import (
+    heartbeat_upsert as _borrador_heartbeat_upsert,
+    listar_borradores_admin as _listar_borradores_admin,
+    marcar_confirmado as _borrador_marcar_confirmado,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -267,6 +272,58 @@ def _get_cuentas_pago(conn, edicion_id: int) -> list[dict]:
         (edicion_id,),
     ).fetchall()
     return [_cuenta_pago_dict(r) for r in rows]
+
+
+def _cuentas_pago_para_mail(cuentas: list[dict]) -> tuple[str, str]:
+    """Fragmentos (HTML + texto plano) de "Datos de pago" para el mail de
+    inscripción (`taller_inscripcion_cliente`) — inyectados con `{{
+    cuentas_pago_html|safe }}`/`{{ cuentas_pago_text }}`, mismo patrón que
+    `items_html`/`items_text` en `services/comunicacion/despacho.py` (evita
+    loopear en Jinja: sin `trim_blocks`, un `{% for %}` en el body de texto
+    plano deja saltos de línea sueltos que sí se ven en un mail).
+
+    Mismo criterio que `DatosPago`/`UnaCuenta` del frontend
+    (`frontend/src/components/talleres/WorkshopInscripcionForm.tsx`): salta
+    los campos vacíos (nunca un separador colgando) — con 1 sola cuenta (el
+    caso común) el render queda igual al de siempre; con 2+, un bloque por
+    cuenta. Values escapados a mano (mismo patrón que
+    `services/comunicacion/despacho.py`) — el HTML se inyecta con `|safe`,
+    así que no pasa por el autoescape de Jinja."""
+    from markupsafe import escape
+
+    con_datos = [c for c in cuentas if c.get("alias") or c.get("cbu") or c.get("banco")]
+    if not con_datos:
+        return "", ""
+
+    bloques_html, bloques_text = [], []
+    for c in con_datos:
+        campos = [
+            (label, valor)
+            for label, valor in (("Alias", c.get("alias")), ("CBU", c.get("cbu")), ("Banco", c.get("banco")))
+            if valor
+        ]
+        bloques_html.append(
+            "<br>".join(f"<strong>{label}:</strong> {escape(valor)}" for label, valor in campos)
+        )
+        bloques_text.append("\n".join(f"  {label}: {valor}" for label, valor in campos))
+
+    html = "".join(f'<p style="margin:0 0 4px;">{b}</p>' for b in bloques_html)
+    text = "\n\n".join(bloques_text)
+    return html, text
+
+
+def _cuentas_pago_efectivas(
+    cuentas: list[dict], *, pago_alias: str, pago_cbu: str, pago_banco: str
+) -> list[dict]:
+    """`cuentas` (de `_get_cuentas_pago`) si trae algo; si no, una sintetizada
+    desde los 3 campos viejos — defensa en profundidad para una edición que,
+    por lo que sea, no pasó por el traspaso de `crear_edicion`/la migración
+    `cu3nt4sp4g0`. No debería hacer falta en el camino normal."""
+    if cuentas:
+        return cuentas
+    if pago_alias or pago_cbu or pago_banco:
+        return [{"alias": pago_alias, "cbu": pago_cbu, "banco": pago_banco}]
+    return []
 
 
 def _video_dict(row) -> dict | None:
@@ -590,6 +647,17 @@ class InscripcionBody(BaseModel):
     # CABLEADO-APAGADO: el form v1 no manda el campo — default a la primera
     # modalidad configurada (o al fallback sintético "Pago total").
     modalidad_codigo: str | None = None
+    # session_id del heartbeat de borrador (services.talleres_borrador) — si
+    # viene, cierra ese funnel al confirmarse la inscripción real. Opcional:
+    # un front viejo sin el heartbeat wireado sigue funcionando igual.
+    session_id: str | None = None
+
+
+class InscripcionBorradorBody(BaseModel):
+    session_id: str
+    nombre: str | None = None
+    email: str | None = None
+    telefono: str | None = None
 
 
 def _comprobante_url_para_email(key: str | None, fallback_url: str | None) -> str:
@@ -625,6 +693,40 @@ def _ics_adjunto_taller(
         return None
 
 
+@router.post("/talleres/{slug}/inscripcion/heartbeat")
+@limiter.limit("60/minute")
+def inscripcion_heartbeat(slug: str, body: InscripcionBorradorBody, request: Request):
+    """Persiste lo que la persona lleva tipeado en WorkshopInscripcionForm
+    (services.talleres_borrador — mirror de POST /cart/heartbeat). Anónimo,
+    sin auth: mismo criterio que el resto de los endpoints públicos de
+    talleres. Silencioso ante slug/edición inválida (404 no aporta nada acá
+    — es telemetría, no una acción del usuario) en vez de romper el form."""
+    with get_db() as conn:
+        try:
+            edicion_row = _get_edicion_row(conn, slug)
+        except HTTPException:
+            return {"ok": True}
+        _borrador_heartbeat_upsert(
+            conn,
+            session_id=body.session_id,
+            edicion_id=edicion_row["id"],
+            nombre=body.nombre,
+            email=body.email,
+            telefono=body.telefono,
+        )
+        conn.commit()
+    return {"ok": True}
+
+
+@router.get("/admin/ediciones/{edicion_id}/borradores")
+def admin_listar_borradores(edicion_id: int, request: Request, horas: int = 72):
+    """Borradores de inscripción sin enviar de una edición — quién estuvo por
+    anotarse y no llegó, para que el admin pueda hacer seguimiento."""
+    require_admin(request)
+    with get_db() as conn:
+        return _listar_borradores_admin(conn, edicion_id, horas)
+
+
 @router.post("/talleres/{slug}/inscripcion")
 @limiter.limit("10/minute")
 def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
@@ -646,6 +748,10 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
             taller_id = edicion_row["taller_id"]
             # Clases reales (para el adjunto .ics del mail — ver más abajo).
             clases = _get_clases(conn, edicion_id)
+            # Cuentas de cobro (para el mail — ver ctx_cliente más abajo).
+            # Fetch DENTRO del `with`, mismo motivo que `clases`: se usa
+            # después de que el context manager cierra la conexión.
+            cuentas_pago_ctx = _get_cuentas_pago(conn, edicion_id)
 
             # F4c: cierre de inscripciones por fecha (NULL = siempre abierto).
             cierre = edicion_row["fecha_cierre_inscripcion"]
@@ -665,9 +771,12 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
             # clave es el email (ya normalizado a lowercase). Corre bajo el
             # FOR UPDATE de la edición → race-safe (dos envíos concurrentes del
             # mismo email quedan serializados, el segundo ve al primero).
+            # `eliminado_at IS NULL`: una inscripción soft-deleted no cuenta
+            # como "ya inscripto" — si no, un borrado (accidental o no) bloquea
+            # para siempre volver a anotar a esa persona.
             ya_inscripto = conn.execute(
                 "SELECT 1 FROM taller_inscripciones "
-                "WHERE edicion_id = %s AND LOWER(email) = %s LIMIT 1",
+                "WHERE edicion_id = %s AND LOWER(email) = %s AND eliminado_at IS NULL LIMIT 1",
                 (edicion_id, email),
             ).fetchone()
             if ya_inscripto:
@@ -724,6 +833,8 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
                     "WHERE id = %s",
                     (edicion_id,),
                 )
+            if body.session_id:
+                _borrador_marcar_confirmado(conn, body.session_id)
             conn.commit()
         except Exception:
             conn.rollback()
@@ -752,6 +863,17 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
             taller_nombre=edicion_row["nombre"], direccion=edicion_row["direccion"],
             slug=edicion_row["slug"], clases=clases,
         )
+    # `cuentas_pago_ctx` es la fuente real (0+ cuentas, lo que edita el admin
+    # desde "Precios y forma de pago"); `_cuentas_pago_efectivas` cae a los 3
+    # campos viejos SOLO si esa lista vino vacía (defensa en profundidad —
+    # no debería pasar tras el fix de `crear_edicion`).
+    cuentas_pago_html, cuentas_pago_text = _cuentas_pago_para_mail(
+        _cuentas_pago_efectivas(
+            cuentas_pago_ctx,
+            pago_alias=edicion_row["pago_alias"], pago_cbu=edicion_row["pago_cbu"],
+            pago_banco=edicion_row["pago_banco"],
+        )
+    )
     ctx_cliente = {
         "taller_nombre": edicion_row["nombre"],
         "nombre_pila": nombre_pila,
@@ -761,9 +883,8 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
         "horario": edicion_row["horario"],
         "direccion": edicion_row["direccion"],
         "precio_sena_str": _fmt_pesos(edicion_row["precio_sena"]),
-        "pago_alias": edicion_row["pago_alias"],
-        "pago_cbu": edicion_row["pago_cbu"],
-        "pago_banco": edicion_row["pago_banco"],
+        "cuentas_pago_html": cuentas_pago_html,
+        "cuentas_pago_text": cuentas_pago_text,
         "tipo_taller": edicion_row["tipo_taller"],
         "tiene_ics": bool(attachments),
     }
@@ -827,20 +948,28 @@ def get_oferta_cupo(token: str, request: Request):
     with get_db() as conn:
         row = conn.execute(
             """
-            SELECT ti.id, ti.nombre, ti.estado, e.fecha_inicio, e.fecha_fin, e.horario,
+            SELECT ti.id, ti.nombre, ti.estado, e.id AS edicion_id,
+                   e.fecha_inicio, e.fecha_fin, e.horario,
                    e.direccion, e.precio_sena, e.pago_alias, e.pago_cbu, e.pago_banco,
                    t.nombre AS taller_nombre
             FROM taller_inscripciones ti
             JOIN ediciones_taller e ON e.id = ti.edicion_id
             JOIN talleres t ON t.id = ti.taller_id
-            WHERE ti.id = %s
+            WHERE ti.id = %s AND ti.eliminado_at IS NULL
             """,
             (insid,),
         ).fetchone()
-    if row is None:
-        raise HTTPException(404, "Este link no es válido o venció.")
-    if row["estado"] != "cupo_ofrecido":
-        raise HTTPException(410, "Esta oferta ya no está disponible.")
+        if row is None:
+            raise HTTPException(404, "Este link no es válido o venció.")
+        if row["estado"] != "cupo_ofrecido":
+            raise HTTPException(410, "Esta oferta ya no está disponible.")
+        # Efectivas (fallback a los 3 campos viejos si la lista vino vacía —
+        # mismo criterio defensivo que el mail, ver _cuentas_pago_efectivas):
+        # el front (`DatosPago`) solo lee `cuentas_pago`, sin fallback propio.
+        cuentas_pago = _cuentas_pago_efectivas(
+            _get_cuentas_pago(conn, row["edicion_id"]),
+            pago_alias=row["pago_alias"], pago_cbu=row["pago_cbu"], pago_banco=row["pago_banco"],
+        )
     return {
         "taller_nombre": row["taller_nombre"],
         "nombre_pila": row["nombre"].split()[0],
@@ -849,9 +978,7 @@ def get_oferta_cupo(token: str, request: Request):
         "horario": row["horario"],
         "direccion": row["direccion"],
         "precio_sena_str": _fmt_pesos(row["precio_sena"]),
-        "pago_alias": row["pago_alias"],
-        "pago_cbu": row["pago_cbu"],
-        "pago_banco": row["pago_banco"],
+        "cuentas_pago": cuentas_pago,
     }
 
 
@@ -891,7 +1018,7 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
         try:
             ins = conn.execute(
                 "SELECT id, taller_id, edicion_id, estado, nombre, email, telefono "
-                "FROM taller_inscripciones WHERE id = %s FOR UPDATE",
+                "FROM taller_inscripciones WHERE id = %s AND eliminado_at IS NULL FOR UPDATE",
                 (insid,),
             ).fetchone()
             if ins is None:
@@ -926,6 +1053,8 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
             ).fetchone()
             # Clases reales (para el adjunto .ics del mail — ver más abajo).
             clases = _get_clases(conn, ins["edicion_id"])
+            # Cuentas de cobro (para el mail — mismo criterio que crear_inscripcion).
+            cuentas_pago_ctx = _get_cuentas_pago(conn, ins["edicion_id"])
         except Exception:
             conn.rollback()
             raise
@@ -934,6 +1063,13 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
     attachments = _ics_adjunto_taller(
         taller_nombre=edicion_row["taller_nombre"], direccion=edicion_row["direccion"],
         slug=edicion_row["slug"], clases=clases,
+    )
+    cuentas_pago_html, cuentas_pago_text = _cuentas_pago_para_mail(
+        _cuentas_pago_efectivas(
+            cuentas_pago_ctx,
+            pago_alias=edicion_row["pago_alias"], pago_cbu=edicion_row["pago_cbu"],
+            pago_banco=edicion_row["pago_banco"],
+        )
     )
     ctx_cliente = {
         "taller_nombre": edicion_row["taller_nombre"],
@@ -944,9 +1080,8 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
         "horario": edicion_row["horario"],
         "direccion": edicion_row["direccion"],
         "precio_sena_str": _fmt_pesos(edicion_row["precio_sena"]),
-        "pago_alias": edicion_row["pago_alias"],
-        "pago_cbu": edicion_row["pago_cbu"],
-        "pago_banco": edicion_row["pago_banco"],
+        "cuentas_pago_html": cuentas_pago_html,
+        "cuentas_pago_text": cuentas_pago_text,
         "tipo_taller": edicion_row["tipo_taller"],
         "tiene_ics": bool(attachments),
     }
@@ -1329,6 +1464,11 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
             # bloquea el próximo `ALTER TABLE`/lock de otra sesión (candado:
             # test_talleres_f2_db.py, se colgaba justo por esto).
             clases_out = _get_clases(conn, e_row["id"])
+            # `_get_cuentas_pago`, no `[]`: `crear_edicion` puede haber
+            # sembrado una fila desde pago_alias/cbu/banco (ver su docstring)
+            # — devolver `[]` a ciegas le mentiría al admin sobre lo que
+            # realmente quedó guardado.
+            cuentas_pago_out = _get_cuentas_pago(conn, e_row["id"])
             instructores_out = _get_instructores_taller(conn, taller_id)
             instituciones_out = _get_instituciones_taller(conn, taller_id)
         except Exception:
@@ -1337,7 +1477,9 @@ def admin_create_taller(body: TallerConceptoCreateBody, request: Request):
 
     return _concepto_to_admin_dict(
         t_row,
-        [_edicion_to_admin_dict(e_row, clases_out, fotos=[], cuentas_pago=[], inscriptos_revenue=0)],
+        [_edicion_to_admin_dict(
+            e_row, clases_out, fotos=[], cuentas_pago=cuentas_pago_out, inscriptos_revenue=0,
+        )],
         instructores_out,
         instituciones=instituciones_out,
     )
@@ -1421,11 +1563,17 @@ def admin_create_edicion(taller_id: int, body: EdicionCreateBody, request: Reque
             # lo necesita para subir portadas / upsert sin refetch). DENTRO del
             # `with` — ver comentario gemelo en admin_create_taller.
             clases_out = _get_clases(conn, e_row["id"])
+            # `_get_cuentas_pago`, no `[]` — ver comentario gemelo en
+            # admin_create_taller (`crear_edicion` puede haber sembrado una
+            # fila desde pago_alias/cbu/banco).
+            cuentas_pago_out = _get_cuentas_pago(conn, e_row["id"])
         except Exception:
             conn.rollback()
             raise
 
-    return _edicion_to_admin_dict(e_row, clases_out, fotos=[], cuentas_pago=[], inscriptos_revenue=0)
+    return _edicion_to_admin_dict(
+        e_row, clases_out, fotos=[], cuentas_pago=cuentas_pago_out, inscriptos_revenue=0,
+    )
 
 
 @router.patch("/admin/talleres/{taller_id}")
@@ -1734,6 +1882,7 @@ def admin_delete_taller(taller_id: int, request: Request):
                 SELECT COUNT(*) AS cnt FROM taller_inscripciones ti
                 JOIN ediciones_taller e ON e.id = ti.edicion_id
                 WHERE e.taller_id = %s AND ti.en_lista_espera = FALSE
+                  AND ti.eliminado_at IS NULL
                 """,
                 (taller_id,),
             ).fetchone()["cnt"]
@@ -2515,7 +2664,7 @@ def admin_list_inscripciones(taller_id: int, request: Request):
             SELECT ti.*, e.numero_edicion, e.slug AS edicion_slug
             FROM taller_inscripciones ti
             LEFT JOIN ediciones_taller e ON e.id = ti.edicion_id
-            WHERE ti.taller_id = %s
+            WHERE ti.taller_id = %s AND ti.eliminado_at IS NULL
             ORDER BY ti.en_lista_espera, ti.created_at
             """,
             (taller_id,),
@@ -2553,7 +2702,7 @@ def admin_list_inscripciones_edicion(edicion_id: int, request: Request):
             SELECT ti.*, e.numero_edicion, e.slug AS edicion_slug
             FROM taller_inscripciones ti
             LEFT JOIN ediciones_taller e ON e.id = ti.edicion_id
-            WHERE ti.edicion_id = %s
+            WHERE ti.edicion_id = %s AND ti.eliminado_at IS NULL
             ORDER BY ti.en_lista_espera, ti.created_at
             """,
             (edicion_id,),
@@ -2599,7 +2748,8 @@ def admin_edicion_kpis(edicion_id: int, request: Request):
                    COUNT(*) FILTER (WHERE ti.estado = 'en_espera') AS en_espera,
                    COUNT(*) FILTER (WHERE ti.estado = 'cupo_ofrecido') AS cupo_ofrecido
             FROM ediciones_taller e
-            LEFT JOIN taller_inscripciones ti ON ti.edicion_id = e.id
+            LEFT JOIN taller_inscripciones ti
+                   ON ti.edicion_id = e.id AND ti.eliminado_at IS NULL
             WHERE e.id = %s
             GROUP BY e.id
             """,
@@ -2667,7 +2817,7 @@ def admin_export_inscripciones_csv(taller_id: int, request: Request):
                    ti.modalidad_label, ti.tyc_aceptado_at
             FROM taller_inscripciones ti
             LEFT JOIN ediciones_taller e ON e.id = ti.edicion_id
-            WHERE ti.taller_id = %s
+            WHERE ti.taller_id = %s AND ti.eliminado_at IS NULL
             ORDER BY ti.en_lista_espera, ti.created_at
             """,
             (taller_id,),
@@ -2700,26 +2850,38 @@ def admin_export_inscripciones_csv(taller_id: int, request: Request):
 
 @router.delete("/admin/talleres/{taller_id}/inscripciones/{ins_id}", status_code=200)
 def admin_delete_inscripcion(taller_id: int, ins_id: int, request: Request):
-    """Elimina una inscripción. Si era confirmada, decrementa cupos en la edición.
+    """Da de baja una inscripción (soft-delete). Si era confirmada, decrementa
+    cupos en la edición.
+
+    Soft, no DELETE real (2026-08-13, pedido del dueño): toda persona que se
+    inscribe sirve como dataset de interesados — se saca de las vistas/listas/
+    conteos normales, pero la fila (nombre/mail/teléfono) no se pierde.
 
     `FOR UPDATE`: sin el lock, un reclamo de cupo concurrente
     (POST /talleres/sena/{token}, que también toma FOR UPDATE sobre esta
     misma fila) podía commitear `en_lista_espera=False` justo entre este
-    SELECT y el DELETE — el admin borraba la fila leyendo el `en_lista_espera`
-    viejo (True) y se saltaba el decremento, dejando `cupos_confirmados`
-    contando de más para siempre (hallazgo del supervisor, reproducido con
-    dos conexiones reales)."""
-    require_admin(request)
+    SELECT y la baja — el admin daba de baja la fila leyendo el
+    `en_lista_espera` viejo (True) y se saltaba el decremento, dejando
+    `cupos_confirmados` contando de más para siempre (hallazgo del
+    supervisor, reproducido con dos conexiones reales)."""
+    # `or {}`: algunos tests llaman a esta función directo (sin HTTP) con
+    # require_admin mockeado a `lambda r: None` — nunca antes hacía falta su
+    # valor de retorno en este archivo, así que ningún test lo cubría.
+    session = require_admin(request) or {}
     with get_db() as conn:
         try:
             ins = conn.execute(
                 "SELECT id, en_lista_espera, edicion_id FROM taller_inscripciones "
-                "WHERE id = %s AND taller_id = %s FOR UPDATE",
+                "WHERE id = %s AND taller_id = %s AND eliminado_at IS NULL FOR UPDATE",
                 (ins_id, taller_id),
             ).fetchone()
             if ins is None:
                 raise HTTPException(404, "Inscripción no encontrada")
-            conn.execute("DELETE FROM taller_inscripciones WHERE id = %s", (ins_id,))
+            conn.execute(
+                "UPDATE taller_inscripciones SET eliminado_at = NOW(), eliminado_por = %s "
+                "WHERE id = %s",
+                (session.get("email", "unknown"), ins_id),
+            )
             if not ins["en_lista_espera"] and ins["edicion_id"]:
                 conn.execute(
                     "UPDATE ediciones_taller "
@@ -2742,7 +2904,7 @@ def admin_confirmar_inscripcion(taller_id: int, ins_id: int, request: Request):
         try:
             ins = conn.execute(
                 "SELECT id, en_lista_espera, edicion_id FROM taller_inscripciones "
-                "WHERE id = %s AND taller_id = %s",
+                "WHERE id = %s AND taller_id = %s AND eliminado_at IS NULL",
                 (ins_id, taller_id),
             ).fetchone()
             if ins is None:
@@ -2787,7 +2949,7 @@ def admin_verificar_sena(taller_id: int, ins_id: int, request: Request):
         try:
             ins = conn.execute(
                 "SELECT id, estado, nombre, email, edicion_id FROM taller_inscripciones "
-                "WHERE id = %s AND taller_id = %s",
+                "WHERE id = %s AND taller_id = %s AND eliminado_at IS NULL",
                 (ins_id, taller_id),
             ).fetchone()
             if ins is None:
@@ -2832,7 +2994,7 @@ def admin_ofrecer_cupo(taller_id: int, ins_id: int, request: Request):
         try:
             ins = conn.execute(
                 "SELECT id, en_lista_espera, nombre, email, edicion_id FROM taller_inscripciones "
-                "WHERE id = %s AND taller_id = %s",
+                "WHERE id = %s AND taller_id = %s AND eliminado_at IS NULL",
                 (ins_id, taller_id),
             ).fetchone()
             if ins is None:
@@ -2880,7 +3042,7 @@ def admin_notificar_cambios(taller_id: int, body: NotificarCambiosBody, request:
             raise HTTPException(404, "Taller no encontrado")
         inscriptos = conn.execute(
             "SELECT nombre, email FROM taller_inscripciones "
-            "WHERE taller_id = %s AND en_lista_espera = FALSE",
+            "WHERE taller_id = %s AND en_lista_espera = FALSE AND eliminado_at IS NULL",
             (taller_id,),
         ).fetchall()
 

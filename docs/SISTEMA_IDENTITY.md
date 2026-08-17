@@ -111,6 +111,7 @@ refresca metadata vía `ON CONFLICT DO UPDATE`).
 | `guardar_contactos_didit(conn, cliente_id, contactos)` | Persiste lo que devolvió Didit (mail + teléfono). |
 | `email_comunicacion(conn, cliente_id)` | Mail de comunicación: **Google preferido** (`clientes.email`, verificado por OAuth + disponible desde el alta) → fallback al verificado por Didit (cuentas passkey-only). |
 | `telefono_contacto(conn, cliente_id)` | Teléfono: el verificado (E.164, de Didit) preferido → fallback al base `clientes.telefono`. |
+| `contactos_verificados_batch(conn, cliente_ids)` | Versión batch de los dos de arriba (2026-08-14): `{cliente_id: {"email":..,"phone":..}}` en 1 query `IN (...)` — para listados que no pueden pagar 2 queries por cliente (`services.pedidos_enriquecimiento`). Sin fallback a columnas base a propósito (responsabilidad del caller aplicar la misma prioridad que las versiones singulares). |
 
 El teléfono se guarda en **E.164** (de Didit) → listo para WhatsApp futuro (notificaciones, no auth).
 
@@ -123,7 +124,7 @@ datos ya normalizados de `services/didit/` (`DatosRenaper`, `ContactosVerificado
 
 | Función | Rol |
 |---|---|
-| `aprobar(*, cliente_id, session_id, datos, contactos=None, conn=None)` | Persiste una verificación **Approved**: `UPDATE clientes` con **COALESCE** de cada `*_renaper` (la única pluma; no pisa con NULL ni con input del usuario) + ancla CUIL (validado mod-11) + `dni_validado_at` + `guardar_contactos_didit` + evento. **Atómico** (`conn.transaction()`). |
+| `aprobar(*, cliente_id, session_id, datos, contactos=None, conn=None)` | Persiste una verificación **Approved**: `UPDATE clientes` con **COALESCE** de cada `*_renaper` (la única pluma; no pisa con NULL ni con input del usuario) + ancla CUIL (validado mod-11) + `dni_validado_at` + `guardar_contactos_didit` + evento. **Atómico** (`conn.transaction()`). **Guard (2026-08-14):** si `datos.tiene_datos` es `False` (Didit dijo "Approved" pero sin datos del documento — webhook liviano + el fallback a `retrieve_decision` también vino vacío), NO marca `dni_validado_at`/verificado — deja `dni_verificacion_estado='en_revision'` (para que `jobs/recheck_didit_pendientes.py` lo agarre, su query exige ese estado) y registra el evento `'approved_sin_datos'` (no `'approved'`, para no bloquear un reintento futuro con datos reales vía `_ya_registrado`). Devuelve `False`. |
 | `actualizar_estado(*, cliente_id, session_id, estado, motivo=None, conn=None)` | Estado intermedio (`rechazado`/`en_revision`) + evento. |
 | `registrar_consentimiento(cliente_id, *, conn=None)` | Marca `kyc_consent_at` (el cliente consintió el KYC + el guardado, Ley 25.326). Idempotente. |
 | `registrar_evento(conn, cliente_id, evento, detalle=, session_id=)` | Bitácora `kyc_events`. **SOLO texto** (`detalle` = presencia de campos, nunca valores). |
@@ -157,11 +158,15 @@ Dos motores de merge, por peso:
 **Quién sobrevive:** el **`target`**, con SU identidad intacta. Por eso se rehúsa perder un RENAPER verificado.
 
 **Cobertura de FKs (anti-drift):** TODA columna que referencia `clientes(id)` está clasificada —
-`TABLAS_REASIGNADAS` (datos que se mueven: pedidos, listas, contactos, llaves, bitácora) ∪ `TABLAS_DESCARTADAS`
+`TABLAS_REASIGNADAS` (datos que se mueven: pedidos, listas, contactos, llaves, bitácora, **perfiles
+fiscales y membresía de productoras**, 2026-07-05) ∪ `TABLAS_DESCARTADAS`
 (efímeras + sesiones que mueren con el `source`: la cookie lleva el id viejo → re-login). El test estático
 `test_identity_merge_cobertura` cruza esta clasificación contra `schema.py` y **falla si aparece una FK nueva
-sin clasificar**. Las tablas con `UNIQUE` por-cuenta (`verified_contacts`, `login_identities`) se reasignan
-**deduplicando** (la fila sobrante muere con el `source`).
+sin clasificar**. Las tablas con `UNIQUE` por-cuenta (`verified_contacts`, `login_identities`,
+**`cliente_perfiles_fiscales`, `productora_miembros`**) se reasignan **deduplicando** (por CUIT / por
+`productora_id`, promoviendo un nuevo default si hace falta — la fila sobrante muere con el `source`).
+`account_is_absorbable` suma el chequeo de perfiles fiscales/productoras a "sin datos que perder" — antes
+una cuenta liviana vinculada a una productora podía absorberse igual, perdiendo el vínculo en silencio.
 
 ---
 

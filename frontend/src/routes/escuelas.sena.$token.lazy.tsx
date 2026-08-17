@@ -5,6 +5,7 @@ import { CheckCircle2, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { PublicLayout } from "@/components/rental/shell/PublicLayout";
+import { DatosPago } from "@/components/talleres/DatosPago";
 import { Button } from "@/design-system/ui/button";
 import { IconButton } from "@/design-system/ui/icon-button";
 import { Spinner } from "@/design-system/ui/spinner";
@@ -91,11 +92,7 @@ function ComprobanteForm({ token, oferta }: { token: string; oferta: OfertaCupo 
           {oferta.precio_sena_str}
         </p>
         <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
-          Alias: <span className="text-ink font-mono">{oferta.pago_alias}</span>
-          <br />
-          CBU: <span className="text-ink font-mono text-xs">{oferta.pago_cbu}</span>
-          <br />
-          Banco: {oferta.pago_banco}
+          <DatosPago cuentas={oferta.cuentas_pago} variant="success" />
         </p>
       </div>
 

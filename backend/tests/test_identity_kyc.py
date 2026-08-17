@@ -181,6 +181,37 @@ def test_aprobar_sesion_historica_no_vigente_mueve_puntero(monkeypatch):
     assert upd[0][1][0] == "session-1"  # el puntero se mueve a la sesión aprobada
 
 
+def test_aprobar_sin_datos_no_marca_verificado_y_deja_en_revision(monkeypatch):
+    """Didit dijo 'Approved' pero no devolvió datos del documento (webhook
+    'liviano' + el fallback también vino vacío) — no se marca Verificado con
+    la ficha vacía: dni_validado_at NO se toca, el estado pasa a 'en_revision'
+    (para que jobs/recheck_didit_pendientes.py lo agarre) y el evento es
+    'approved_sin_datos', no 'approved'."""
+    rec = _Recorder("sess-1")
+    _patch(monkeypatch, rec)
+    datos = DatosRenaper()  # vacío — tiene_datos es False (sin DNI)
+    assert kyc.aprobar(cliente_id=1, session_id="sess-1", datos=datos) is False
+    assert not _sql(rec, "dni_validado_at")  # NO marca verificado
+    estado = _sql(rec, "dni_verificacion_estado")
+    assert estado and estado[0][1][0] == "en_revision"
+    eventos = _sql(rec, "INSERT INTO kyc_events")
+    assert eventos and eventos[0][1][1] == "approved_sin_datos"
+
+
+def test_aprobar_sin_datos_no_bloquea_un_reintento_posterior_con_datos(monkeypatch):
+    """Como el evento que queda registrado es 'approved_sin_datos' (no
+    'approved'), un reintento posterior para la MISMA session_id que sí traiga
+    datos reales tiene que aplicarse igual — la idempotencia de 'approved' no
+    lo bloquea (si hubiera quedado 'approved', esta aprobación real se habría
+    perdido en silencio para siempre)."""
+    rec = _Recorder("sess-1", eventos_previos={"approved_sin_datos"})
+    _patch(monkeypatch, rec)
+    datos_reales = DatosRenaper(dni="12345678", cuil="20123456786", nombre_completo="Juan Pérez")
+    assert kyc.aprobar(cliente_id=1, session_id="sess-1", datos=datos_reales) is True
+    params = _sql(rec, "dni_validado_at")[0][1]
+    assert "12345678" in params
+
+
 def test_aprobar_sesion_ajena_se_rechaza(monkeypatch):
     """Anti-forgery preservado: una sesión que NUNCA se creó para este cliente
     (ni es el puntero vigente ni tiene evento en su historial) se sigue

@@ -284,12 +284,9 @@ sesión recomienda.
 
 ### 2026-06-23 — design-system = gobernador del DS; importar-diseno archivado
 
-El skill **`design-system`** (`model: opus`) gobierna el Design System: audita sistémicamente (tokens, adopción,
-reimplementaciones, 11 principios, drift del doc), dashboard `/ds` (estado rápido sin auditoría completa), propone
-issues — `pulido-frontend` los aplica. Es **read-only**: nunca edita código. **`importar-diseno` archivado** — el
-diseño se refina directamente en Claude Code, no desde handoffs externos; su rol de implementar lo toma
-`pulido-frontend` cuando aplique. El cuadro completo: `design-system` gobierna · `pulido-frontend` ejecuta UI ·
-`mantenimiento` ejecuta código. Refina _Design system consolidado (2026-06-06)_.
+Mismo reparto que _Design system consolidado (2026-06-06)_ — sin regla nueva. Único agregado: el cuadro
+de 3 roles es `design-system` gobierna (audita + dashboard `/ds`) · `pulido-frontend` ejecuta UI ·
+`mantenimiento` ejecuta código.
 
 ### 2026-06-23 — 6 skills nuevos: calidad-codigo, auditoria-seguridad, performance, specs, catalogo, calidad-tests
 
@@ -642,7 +639,9 @@ editar una transferencia para que apunte a una cuenta de OTRA moneda sin error, 
 `_validar_cuentas_y_categoria`, reusado por ambas. (2) `alquiler_pagos` (la tabla que alimenta todo el motor)
 no tenía actor ni soft-delete — `eliminar_pago` hacía `DELETE` real, sin motivo; ahora tiene
 `created_by`/`anulado`/`anulado_por`/`anulado_at`/`anulado_motivo` (mismo patrón que `movimientos`),
-`DELETE→POST .../anular` con motivo obligatorio, y los 7 SELECT que suman `alquiler_pagos` (incluido el
+`DELETE→POST .../anular` (motivo **opcional** desde 2026-08-02 — corrección de criterio del dueño,
+confirmada tras nombrarle la regla anterior; ver `backend/contabilidad/CLAUDE.md`), y los 7 SELECT que
+suman `alquiler_pagos` (incluido el
 `SALDADO_CTE` de `reportes/liquidacion.py`, compartido por 3 consumidores) filtran `NOT anulado`. (3)
 `subir_comprobante` escribía SQL directo saltándose el motor (sin candado de mes cerrado, sin chequear
 `anulado`, sin actor) — exactamente el escenario que el propio `CLAUDE.md` del paquete advertía; ahora pasa por
@@ -691,24 +690,12 @@ movimiento nuevo inventado para el caso "el socio pagó un gasto de Rambla" en v
 
 ### 2026-07-02 — Auditoría cruzada de plata: `docs/SISTEMA_PLATA.md` + el fix de #405 (#1181) nunca se mergeó
 
-A pedido del dueño, tras la auditoría de `contabilidad/`, ante el miedo de "drift de plata" con muchos
-motores tocando dinero sin un mapa único. 6 auditorías paralelas sobre `services/precios`,
-`reportes/liquidacion`+`comisiones`+`cierres`+`reconciliacion`, `services/facturacion`, el camino de
-congelamiento de precio en pedidos, y un trace end-to-end + estado del semáforo de reconciliación.
-**Hallazgo crítico de proceso (en el momento de esta auditoría):** el PR #1181 (fix original del bug
-#405 — editor de pedidos admin cotizando con precio de catálogo en vez del precio de línea congelado)
-**no estaba mergeado** a `dev`/`main` — `respetar_precio_item` no existía en ningún branch real, solo
-en la rama del PR sin mergear. La sesión anterior lo había registrado como shippeado por error.
-**Corrección (2026-07-05):** el PR #1181 SÍ se mergeó a `dev` ese mismo día, horas después de esta
-auditoría (commit `9cc4924`) — `respetar_precio_item` está presente y activo en
-`backend/routes/alquileres/cotizacion.py` en `dev` hoy. **El bug #405 está resuelto, no activo.**
-Nuevo manual **`docs/SISTEMA_PLATA.md`** (fuente única de cada número de plata + el semáforo de
-reconciliación, cruzado entre motores) — no repite invariantes de cada `CLAUDE.md`/`SISTEMA_*.md` local,
-los referencia. Hallazgos priorizados (14 ítems + el PR sin mergear) documentados ahí, no acá — evita
-duplicar y que se desactualice. Reconciliación confirmada **100% manual**: ni `reportes/reconciliacion.py`
-ni `contabilidad/queries/reconciliacion.py::reconciliar` corren en `jobs/scheduler.py`; sin badge/alerta
-en el dashboard admin — es el gap de gobernanza más directo detrás del miedo original del dueño. El
-supervisor marca un motor de plata nuevo sin entrada en la tabla "fuente única" de `SISTEMA_PLATA.md`, o
+Auditoría de 6 motores de plata en paralelo (miedo original: drift sin mapa único). Cada hallazgo real
+terminó con su propia entrada dedicada, listadas por fecha más abajo (facturas NUMERIC, `filas_atribucion`,
+`finanzas_flujo`, reconciliación proactiva, `estadisticas.py`, entre otras) — sin regla propia viva acá.
+**El manual que generó se renombró**: `docs/SISTEMA_PLATA.md` → `docs/SISTEMA_FINANZAS_FLUJO.md` (el link
+viejo ya no existe). El bug #405 que motivó la auditoría **está resuelto** (PR #1181 mergeado 2026-07-05,
+`respetar_precio_item` activo). Queda como puntero histórico de dónde salió esa tanda de fixes.
 un PR de fix de plata reportado como shippeado sin confirmar merge real a `dev`/`main`.
 
 ### 2026-07-03 — `facturas.imp_neto/imp_iva/imp_total`: INTEGER → NUMERIC(12,2), dejan de truncar al centavo (#1209)
@@ -1026,13 +1013,9 @@ y `services/pedidos_enriquecimiento.py`; tracking #1240.
 
 ### 2026-07-05 — `arca_fe` cruza el gate de "primera emisión real": arranca SemVer en 0.1.0
 
-`arca_fe.__version__` estaba fijo en `"0.0.0"` a propósito hasta la primera emisión real en
-producción (política que solo vivía como comentario en el código, nunca registrada en la memoria).
-El dueño confirmó que esa emisión real ya pasó → arranca el versionado SemVer real en **`0.1.0`**
-(conservador, no `1.0.0` — la API puede seguir evolucionando mientras se suman features como WSFEXv1).
-De acá en adelante, todo cambio de `__all__` bumpea MINOR/MAJOR según corresponda; `1.0.0` queda
-reservado para cuando el contrato público se declare estable. `pyproject.toml` se sincroniza a mano
-(sin build tooling), verificado por `test_portabilidad.py`.
+`arca_fe` empieza a versionar en serio (`0.1.0`, no `1.0.0` — la API todavía evoluciona) recién tras la
+primera emisión real en producción. Nota histórica de versión, sin regla enforceable — superada por los
+bumps posteriores (0.2.0/0.3.0, ver entradas de 2026-07-08).
 
 ### 2026-07-05 — El front no calcula stock: el "X libres" del editor sale del motor (draft-aware, con signo)
 
@@ -1405,15 +1388,14 @@ para integration tests que necesitan infra que el job default no provee. Detalle
 
 ### 2026-07-24 — `_regenerar_pedidos_taller` = nuevo miembro de la familia motor-único (espejo de `_regenerar_pedidos_slot`)
 
-Talleres (edición → pedido mensual de resumen, `usa_estudio`/`valor_estudio`/`usa_equipos`/
-`valor_equipos` en `ediciones_taller`) reusa el MISMO patrón que `estudio_slots_fijos`: reactivo (corre
-síncrono al crear/editar la edición, dentro de `pg_advisory_xact_lock` con namespace propio
-`_ADVISORY_NS_TALLER=5390423`), conserva pasados/pagados y borra+recrea futuros impagos, atribuye 100%
-genérico vía `equipos.dueno` (el ítem del Estudio usa el centinela real, el de equipos usa
-`equipo_id=NULL` → 'Rambla' — CERO código de atribución nuevo). Fix propio que el slot no necesita:
-también conserva un mes con MÁS ítems que los auto-generados — protege la línea de matrícula que el
-admin tipeó a mano de un borrado silencioso en el próximo recálculo. Cómo →
-`backend/routes/talleres.py::_regenerar_pedidos_taller`. El supervisor marca una regeneración de pedidos
+Talleres (edición → pedido mensual de resumen) reusa el patrón **conserva-borra-recrea** de
+`estudio_slots_fijos` (dentro de `pg_advisory_xact_lock`, namespace `_ADVISORY_NS_TALLER=5390423`):
+conserva pasados/pagados y los meses con MÁS ítems que los auto-generados (protege una línea tipeada a
+mano de un borrado silencioso), borra+recrea el resto; atribuye 100% vía `equipos.dueno` — cero código
+de atribución nuevo. **Actualizado 2026-08-13:** dejó de ser reactivo (ya no genera todos los meses
+futuros de una al crear/editar la edición) — un **job diario** genera **solo el mes actual** al
+llegar, y de paso limpia pedidos futuros de más que hayan quedado colgados. Cómo →
+`backend/jobs/regenerar_pedidos_talleres.py`. El supervisor marca una regeneración de pedidos
 recurrentes nueva que no siga este mismo patrón (conserva-borra-recrea + atribución vía `equipos.dueno`).
 
 ### 2026-07-24 — La promo del Estudio es best-effort; solo los sueltos son stock duro

@@ -76,12 +76,16 @@ from routes.cliente_portal   import router as cliente_portal_router
 from routes.marcas           import router as marcas_router
 from routes.specs            import router as specs_router
 from routes.unidades         import router as unidades_router
-from routes.seo              import router as seo_router, _build_categoria_slug as _cat_slug
+from routes.seo              import (
+    router as seo_router,
+    _build_categoria_slug as _cat_slug,
+    _build_equipo_slug as _eq_slug,
+)
 from routes.calendar         import router as calendar_router
 from routes.inventario       import router as inventario_router
 from routes.email_templates  import router as email_templates_router
 from routes.dataio           import router as dataio_router
-from routes.estudio          import router as estudio_router
+from routes.estudio          import router as estudio_router, _parse_json_field
 from routes.didit            import router as didit_router
 from routes.facturacion      import router as facturacion_router
 from routes.whatsapp         import router as whatsapp_router
@@ -257,6 +261,15 @@ _STATIC_EXT_RE = re.compile(
 async def security_headers(request, call_next):
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
+    # Fuera de prod (dev/staging/preview/local), nunca indexable — sin esto,
+    # cualquier cosa que un crawler encuentre en dev-rambla.up.railway.app
+    # (compartido, linkeado, o simplemente rastreado) podía entrar al índice
+    # como contenido duplicado. Header, no depende de que el crawler respete
+    # robots.txt (Google puede igual listar una URL bloqueada por robots.txt
+    # si la encuentra linkeada — `X-Robots-Tag` es la señal que sí lo evita).
+    # `robots.txt` (routes/seo.py) es la segunda capa: bloquea el CRAWL mismo.
+    if not settings.is_production:
+        response.headers["X-Robots-Tag"] = "noindex, nofollow"
     # Cache-Control por path (no se toca /api/* ni respuestas que ya fijan el suyo —
     # sitemap/calendar/doc-preview usan setdefault, así que su valor gana). Arregla
     # el "Use efficient cache lifetimes" de Lighthouse: el backend servía todo sin TTL.
@@ -661,12 +674,39 @@ def _inject_json_ld(html_text: str, *schemas: dict) -> str:
     Los crawlers/agentes que no ejecutan JS (Googlebot light, LLM indexers)
     ven el structured data directamente en el HTML inicial — sin esperar JS.
     Cada schema se emite en un <script> separado para facilitar el debug.
+
+    `data-ssr-jsonld` marca estos scripts como server-injectados: la ruta
+    cliente (equipo/escuelas/categoria) declara el MISMO JSON-LD de nuevo vía
+    head() para cuando SÍ hay JS — sin el atributo, `main.tsx` no podría
+    diferenciarlos de los estáticos (WebSite/LocalBusiness en index.html, sin
+    equivalente client-side) al barrerlos antes de montar, y quedarían
+    duplicados post-hidratación (mismo bug de clase que title/OG, 2026-08-13).
     """
     tags = "".join(
-        f'<script type="application/ld+json">{json.dumps(s, ensure_ascii=False)}</script>'
+        f'<script type="application/ld+json" data-ssr-jsonld="1">{json.dumps(s, ensure_ascii=False)}</script>'
         for s in schemas
     )
     return html_text.replace("</head>", tags + "</head>", 1)
+
+
+def _faq_page_schema(qa_pairs: list[tuple[str, str]]) -> dict | None:
+    """Arma el JSON-LD `FAQPage` a partir de pares (pregunta, respuesta) ya
+    resueltos por el caller (cada fuente de FAQ tiene su propia forma —
+    grupos anidados en `app_settings.faq_json`, plano en `estudio.faq_json`/
+    `talleres.faqs` — normalizarla es responsabilidad de quien llama).
+    Filtra pares vacíos; `None` si no queda ninguno (nada que inyectar)."""
+    items = [
+        {
+            "@type": "Question",
+            "name": q.strip(),
+            "acceptedAnswer": {"@type": "Answer", "text": a.strip()},
+        }
+        for q, a in qa_pairs
+        if q and q.strip() and a and a.strip()
+    ]
+    if not items:
+        return None
+    return {"@context": "https://schema.org", "@type": "FAQPage", "mainEntity": items}
 
 
 def _get_initial_catalog(conn) -> dict:
@@ -727,6 +767,19 @@ def rental_page():
         return _serve_frontend("index.html")
 
 
+def _nombre_equipo_publico(d: dict) -> str:
+    """Nombre público a mostrar de un equipo: `nombre_publico` si está cargado,
+    si no `marca + nombre` (sin duplicar la marca cuando ya forma parte del
+    nombre base). Fuente única — usado por `equipo_page` y `categoria_page`
+    para que el nombre en JSON-LD/OG sea el mismo en ambas rutas."""
+    nombre = (d.get("nombre_publico") or "").strip()
+    if nombre:
+        return nombre
+    marca = (d.get("marca") or "").strip()
+    base = (d.get("nombre") or "").strip()
+    return f"{marca} {base}".strip() if marca and marca.lower() not in base.lower() else base
+
+
 @app.get("/equipo/{id_or_slug}", include_in_schema=False)
 def equipo_page(id_or_slug: str):
     """Sirve el SPA para la ficha del equipo.
@@ -779,11 +832,7 @@ def equipo_page(id_or_slug: str):
         if not row:
             return _serve_frontend("index.html")
         d = row_to_dict(row)
-        nombre = (d.get("nombre_publico") or "").strip()
-        if not nombre:
-            marca = (d.get("marca") or "").strip()
-            base = (d.get("nombre") or "").strip()
-            nombre = f"{marca} {base}".strip() if marca and marca.lower() not in base.lower() else base
+        nombre = _nombre_equipo_publico(d)
         title = f"{nombre} — Rambla Rental" if nombre else "Rambla Rental"
         desc = (d.get("descripcion") or "").strip()
         if len(desc) > 200:
@@ -855,6 +904,99 @@ def equipo_page(id_or_slug: str):
     except Exception:
         logger.warning("OG injection falló para /equipo/%s — sirvo index plano", id_or_slug, exc_info=True)
         return _serve_frontend("index.html")
+
+
+@app.get("/categoria/{slug}", include_in_schema=False)
+def categoria_page(slug: str):
+    """Sirve el SPA para la página de categoría (ej. /categoria/lentes).
+
+    Antes esta ruta dependía 100% de dos fetches client-side (/api/categorias
+    + /api/equipos) para título/OG/JSON-LD Y el listado visible — invisible
+    para cualquier bot que no ejecuta JS (la mayoría de los crawlers de IA) y
+    también para el pase de render de Google, al que `robots.txt` le bloquea
+    justamente `/api/`. Mismo patrón que `equipo_page`/`workshop_page`:
+    inyecta OG/Twitter + CollectionPage/BreadcrumbList server-side, sin
+    depender de JS. Ante cualquier error o slug inexistente cae al index.html
+    plano — el SPA (`categoria.$slug.tsx`) resuelve normal.
+    """
+    try:
+        index_file = FRONT_NEW / "index.html"
+        if not index_file.exists():
+            return _serve_frontend("index.html")
+        conn = get_db()
+        try:
+            categorias = conn.execute(
+                "SELECT id, nombre FROM categorias WHERE COALESCE(visible, true) = true"
+            ).fetchall()
+            categoria = next(
+                (c for c in categorias if _cat_slug(c["nombre"]) == slug), None
+            )
+            if not categoria:
+                return _serve_frontend("index.html")
+            equipos = conn.execute(
+                f"""
+                SELECT e.id, {MARCA_SUBQUERY}, e.nombre, e.nombre_publico
+                FROM equipos e
+                JOIN equipo_categorias ec ON ec.equipo_id = e.id
+                WHERE ec.categoria_id = %s
+                  AND e.visible_catalogo = 1 AND e.estado != 'fuera_servicio'
+                  AND e.es_recurso_interno = FALSE
+                  AND e.eliminado_at IS NULL
+                ORDER BY e.relevancia_manual ASC, e.popularidad_score DESC, e.nombre ASC
+                """,
+                (categoria["id"],),
+            ).fetchall()
+        finally:
+            conn.close()
+        nombre = categoria["nombre"]
+        url = f"{SITE_URL}/categoria/{slug}"
+        title = f"Alquiler de {nombre} — Rambla Rental"
+        desc = (
+            f"Alquilá {nombre.lower()} para tu próxima producción en Rambla Rental, Mar del Plata. "
+            f"Más de {len(equipos)} equipos disponibles, por jornada."
+        )
+        image = f"{SITE_URL}/icon-512.png"
+        html_text = _inject_og_meta(
+            index_file.read_text(encoding="utf-8"),
+            title=title, description=desc[:160], image=image, url=url,
+        )
+        breadcrumb_schema = {
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": [
+                {"@type": "ListItem", "position": 1, "name": "Inicio", "item": f"{SITE_URL}/"},
+                {"@type": "ListItem", "position": 2, "name": nombre, "item": url},
+            ],
+        }
+        item_list = []
+        for i, r in enumerate(equipos[:20]):
+            d = row_to_dict(r)
+            eq_nombre = _nombre_equipo_publico(d)
+            eq_slug = _eq_slug(d.get("marca"), d.get("nombre"), d["id"])
+            item_list.append({
+                "@type": "ListItem",
+                "position": i + 1,
+                "url": f"{SITE_URL}/equipo/{eq_slug}",
+                "name": eq_nombre,
+            })
+        collection_schema = {
+            "@context": "https://schema.org",
+            "@type": "CollectionPage",
+            "name": title,
+            "description": desc,
+            "url": url,
+            "mainEntity": {
+                "@type": "ItemList",
+                "numberOfItems": len(equipos),
+                "itemListElement": item_list,
+            },
+        }
+        html_text = _inject_json_ld(html_text, breadcrumb_schema, collection_schema)
+        return HTMLResponse(content=html_text)
+    except Exception:
+        logger.warning("categoria_page: inyección falló para /categoria/%s — sirvo index plano", slug, exc_info=True)
+        return _serve_frontend("index.html")
+
 
 @app.get("/c/{token}", include_in_schema=False)
 def compartido_page(token: str):
@@ -964,7 +1106,7 @@ def estudio_page():
         conn = get_db()
         try:
             cfg = conn.execute(
-                "SELECT nombre, tagline, descripcion FROM estudio WHERE id = 1"
+                "SELECT nombre, tagline, descripcion, faq_json FROM estudio WHERE id = 1"
             ).fetchone()
             # Foto principal del estudio — preferir variante OG (jpg); fallback a url
             foto_row = conn.execute(
@@ -995,6 +1137,14 @@ def estudio_page():
             index_file.read_text(encoding="utf-8"),
             title=title, description=desc, image=img, url=f"{SITE_URL}/estudio",
         )
+        # FAQPage — mismo `faq_json` que ya muestra la página (editable desde
+        # el admin); condicionado a que haya contenido real, no un schema vacío.
+        faq_items = _parse_json_field(cfg["faq_json"]) if cfg else None
+        faq_schema = _faq_page_schema(
+            [(it.get("q", ""), it.get("a", "")) for it in (faq_items or [])]
+        )
+        if faq_schema:
+            html_text = _inject_json_ld(html_text, faq_schema)
         return HTMLResponse(content=html_text)
     except Exception:
         logger.warning("OG injection falló para /estudio — sirvo index plano", exc_info=True)
@@ -1005,8 +1155,9 @@ def estudio_page():
 @app.get("/escuela/{slug}", include_in_schema=False)  # alias viejo (singular): el front lo redirige a /escuelas, acá sirve OG para scrapers
 @app.get("/workshops/{slug}", include_in_schema=False)  # alias más viejo: el front lo redirige a /escuelas, acá sirve OG para scrapers
 def workshop_page(slug: str, request: Request):
-    """Sirve el SPA del taller con OG tags dinámicos (foto del instructor).
-    Ante cualquier error sirve el index.html plano — nunca rompe la página.
+    """Sirve el SPA del taller con OG tags dinámicos (foto del instructor),
+    JSON-LD `Course` y el preload del hero (LCP). Ante cualquier error sirve
+    el index.html plano — nunca rompe la página.
 
     `slug` es el de la EDICIÓN (mismo que resuelve `GET /talleres/{slug}` vía
     `ediciones_taller.slug` — no `talleres.slug`, el del CONCEPTO, que solo
@@ -1059,6 +1210,15 @@ def workshop_page(slug: str, request: Request):
                 og_img = (mv["url"] if mv else "") or ""
             if not og_img and instructor_row:
                 og_img = instructor_row["foto_url"] or ""
+            # Hero preload — misma fuente y orden que TallerGaleria.tsx
+            # (es_principal DESC, orden ASC, id ASC): la portada de la
+            # galería es el LCP de la página del taller, igual que
+            # estudio_fotos lo es para la home/rental.
+            hero_row = conn.execute(
+                "SELECT url, url_sm, url_avif, url_sm_avif FROM edicion_fotos "
+                "WHERE edicion_id = %s ORDER BY es_principal DESC, orden ASC, id ASC LIMIT 1",
+                (taller["id"],),
+            ).fetchone()
         finally:
             conn.close()
         nombre = (taller["nombre"] or "").strip()
@@ -1082,44 +1242,114 @@ def workshop_page(slug: str, request: Request):
             index_file.read_text(encoding="utf-8"),
             title=title, description=desc_raw, image=og_img, url=taller_url,
         )
-        # JSON-LD Event schema — visible para crawlers/agentes sin JS.
-        event_schema: dict = {
-            "@context": "https://schema.org",
-            "@type": "Event",
-            "name": nombre,
-            "description": desc_raw,
-            "url": taller_url,
-            "image": og_img,
+        hero_url = (hero_row["url"].strip() if hero_row and hero_row["url"] else "")
+        hero_sm = (hero_row["url_sm"].strip() if hero_row and hero_row["url_sm"] else "")
+        hero_avif = (hero_row["url_avif"].strip() if hero_row and hero_row["url_avif"] else "")
+        hero_sm_avif = (hero_row["url_sm_avif"].strip() if hero_row and hero_row["url_sm_avif"] else "")
+        if hero_url.startswith("http"):
+            html_text = _inject_hero_preload(
+                html_text, hero_url, hero_sm or None,
+                hero_avif or None, hero_sm_avif or None,
+            )
+        # JSON-LD Course schema — visible para crawlers/agentes sin JS. `Course`
+        # (no `Event`) porque es el tipo que Google trata distinto cuando alguien
+        # busca "cursos"/"talleres" (rich result propio); `CourseInstance` sigue
+        # llevando fecha/lugar/instructor (es subtipo de Event, no se pierde nada).
+        direccion = (taller["direccion"] or "").strip() or "Chaco 1392"
+        course_instance: dict = {
+            "@type": "CourseInstance",
+            "courseMode": "Onsite",
             "location": {
                 "@type": "Place",
                 "name": "Rambla",
                 "address": {
                     "@type": "PostalAddress",
+                    "streetAddress": direccion,
                     "addressLocality": "Mar del Plata",
                     "addressRegion": "Buenos Aires",
                     "addressCountry": "AR",
                 },
             },
-            "organizer": {"@type": "Organization", "name": "Rambla", "url": SITE_URL},
         }
         if instructor:
-            event_schema["performer"] = {"@type": "Person", "name": instructor}
+            course_instance["instructor"] = {"@type": "Person", "name": instructor}
         if taller["fecha_inicio"]:
-            event_schema["startDate"] = str(taller["fecha_inicio"])[:10]
+            course_instance["startDate"] = str(taller["fecha_inicio"])[:10]
         if taller["fecha_fin"]:
-            event_schema["endDate"] = str(taller["fecha_fin"])[:10]
+            course_instance["endDate"] = str(taller["fecha_fin"])[:10]
+        course_schema: dict = {
+            "@context": "https://schema.org",
+            "@type": "Course",
+            "name": nombre,
+            "description": desc_raw,
+            "url": taller_url,
+            "image": og_img,
+            "provider": {"@type": "Organization", "name": "Rambla", "sameAs": SITE_URL},
+            "hasCourseInstance": course_instance,
+        }
         if taller["precio_total"] is not None:
-            event_schema["offers"] = {
+            course_schema["offers"] = {
                 "@type": "Offer",
                 "price": taller["precio_total"],
                 "priceCurrency": "ARS",
                 "availability": "https://schema.org/InStock",
                 "url": taller_url,
+                "category": "Free" if taller["precio_total"] == 0 else "Paid",
             }
-        html_text = _inject_json_ld(html_text, event_schema)
+        schemas = [course_schema]
+        # FAQPage — condicionado a que el taller tenga FAQs cargadas (hoy
+        # ninguno las tiene todavía, ver FaqSection del admin): empieza a
+        # inyectarse solo apenas se cargue contenido, sin tocar código de nuevo.
+        faq_schema = _faq_page_schema(
+            [(f.get("pregunta", ""), f.get("respuesta", "")) for f in (taller["faqs"] or [])]
+        )
+        if faq_schema:
+            schemas.append(faq_schema)
+        html_text = _inject_json_ld(html_text, *schemas)
         return HTMLResponse(content=html_text)
     except Exception:
         logger.warning("OG injection falló para el taller %s — sirvo index plano", slug, exc_info=True)
+        return _serve_frontend("index.html")
+
+
+@app.get("/preguntas-frecuentes", include_in_schema=False)
+def preguntas_frecuentes_page():
+    """Sirve el SPA de preguntas frecuentes, inyectando FAQPage JSON-LD
+    server-side cuando el setting `faq_json` (app_settings, editable desde
+    /admin/settings → Preguntas frecuentes) está configurado — mismo
+    contenido que ya ve un lector con JS (`useFaqGroups`, `data/faq.ts`).
+
+    Si el setting no está seteado, no inyecta nada acá: el fallback
+    hardcodeado (`FAQ_GROUPS` en `data/faq.ts`) solo existe del lado
+    cliente — duplicarlo acá crearía una segunda copia del mismo texto que
+    puede divergir con el tiempo (dos verdades). Ante cualquier error sirve
+    el index.html plano — nunca rompe la página.
+    """
+    try:
+        index_file = FRONT_NEW / "index.html"
+        if not index_file.exists():
+            return _serve_frontend("index.html")
+        conn = get_db()
+        try:
+            row = conn.execute(
+                "SELECT value FROM app_settings WHERE key = %s", ("faq_json",)
+            ).fetchone()
+        finally:
+            conn.close()
+        groups = _parse_json_field(row["value"]) if row else None
+        faq_schema = _faq_page_schema(
+            [
+                (it.get("q", ""), it.get("a", ""))
+                for g in (groups or [])
+                for it in g.get("items", [])
+            ]
+        )
+        if not faq_schema:
+            return _serve_frontend("index.html")
+        html_text = _inject_json_ld(index_file.read_text(encoding="utf-8"), faq_schema)
+        return HTMLResponse(content=html_text)
+    except Exception:
+        logger.warning("preguntas_frecuentes_page: inyección falló — sirvo index plano", exc_info=True)
         return _serve_frontend("index.html")
 
 

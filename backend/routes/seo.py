@@ -21,7 +21,7 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-from config import SITE_URL  # URL pública del sitio (fuente única)
+from config import SITE_URL, settings  # URL pública + is_production (fuente única)
 from xml.sax.saxutils import escape
 
 from fastapi import APIRouter, Response
@@ -29,6 +29,41 @@ from fastapi import APIRouter, Response
 from database import get_db, MARCA_SUBQUERY
 
 router = APIRouter()
+
+# Fuera de prod (dev/staging/preview/local) no queremos NADA indexado — Disallow: /
+# global, sin Sitemap (no tiene sentido anunciar uno que no debe rastrearse). El
+# `X-Robots-Tag: noindex` del middleware (main.py) es la capa que de verdad lo
+# saca del índice; esto es la segunda capa, evita gastar crawl budget del bot.
+_ROBOTS_NON_PROD = "User-agent: *\nDisallow: /\n"
+
+
+@router.get("/robots.txt", include_in_schema=False)
+def robots_txt():
+    """robots.txt dinámico — antes un archivo estático en frontend/public/ (mismo
+    contenido en TODO ambiente, incluido dev/staging). Ahora por-ambiente: solo
+    prod anuncia el catálogo indexable + el sitemap; el resto bloquea todo."""
+    if not settings.is_production:
+        return Response(content=_ROBOTS_NON_PROD, media_type="text/plain")
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Allow: /equipo/\n"
+        "Allow: /categoria/\n"
+        "Allow: /estudio\n"
+        "Allow: /escuelas/\n"
+        "Allow: /preguntas-frecuentes\n"
+        "\n"
+        "# Bloquear back-office y portal cliente (info privada).\n"
+        "Disallow: /admin\n"
+        "Disallow: /admin/\n"
+        "Disallow: /cliente\n"
+        "Disallow: /cliente/\n"
+        "Disallow: /api/\n"
+        "\n"
+        "# Sitemap dinámico generado por el backend.\n"
+        f"Sitemap: {SITE_URL}/sitemap.xml\n"
+    )
+    return Response(content=body, media_type="text/plain")
 
 
 def _build_equipo_slug(marca: str | None, nombre: str | None, equipo_id: int) -> str:

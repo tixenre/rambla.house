@@ -14,6 +14,8 @@ Submódulos:
 - `google`     → rutas OAuth de Google (admin + cliente) + el `router` compartido.
 - `staging`    → dev-login / staging-login (registran sobre el router de google).
 - `passkey`    → motor WebAuthn + rutas.
+- `backup_codes` → recovery del 2º factor admin (códigos de un solo uso, cuando
+  se pierde el dispositivo con la passkey) — registra sobre el router de google.
 - `queries.sessions` / `commands.sessions` / `sessions_routes` → allowlist de
   sesiones + revocación (logout real, "cerrar mis otras sesiones"). La cookie
   firmada lleva un `jti`; la tabla decide si sigue viva.
@@ -35,6 +37,7 @@ import auth.ratelimit  # noqa: F401
 import auth.guards  # noqa: F401
 import auth.google  # noqa: F401
 import auth.staging  # noqa: F401
+import auth.backup_codes  # noqa: F401
 import auth.passkey.routes  # noqa: F401
 import auth.sessions_routes  # noqa: F401
 import auth.linking  # noqa: F401

@@ -391,6 +391,26 @@ def _init_db_schema(conn):
         "ON passkey_credentials(LOWER(owner_email)) WHERE owner_type = 'admin'"
     )
 
+    # Códigos de respaldo del 2º factor admin (recovery cuando se pierde el
+    # dispositivo con la passkey — Google solo ya no alcanza una vez que la
+    # cuenta tiene una). `code_hash` = sha256 del código en texto plano (nunca
+    # se guarda el código en claro; alta entropía → hash rápido está bien,
+    # no son passwords elegidas por el usuario). Esquema en dos capas
+    # (MEMORIA 2026-06-03): espejo idempotente de la migración bkupcodes2fa.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS admin_backup_codes (
+            id           SERIAL PRIMARY KEY,
+            owner_email  TEXT NOT NULL,
+            code_hash    TEXT NOT NULL,
+            used_at      TIMESTAMP,
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_admin_backup_codes_email "
+        "ON admin_backup_codes(LOWER(owner_email))"
+    )
+
     # ── Sesiones server-side: allowlist para revocación (logout real + "cerrar mis
     # otras sesiones"). La cookie firmada lleva un `jti` opaco; esta tabla decide si
     # sigue viva. Espeja `passkey_credentials` (mismo discriminador owner_type +
@@ -2336,6 +2356,44 @@ def _init_db_schema(conn):
     # no responde, sin tener que "devolver" nada.
     conn.execute(
         "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS cupo_ofrecido_at TIMESTAMPTZ"
+    )
+    # Soft-delete (2026-08-13, pedido del dueño): toda persona que se inscribe
+    # sirve como dataset de interesados — un borrado (accidental o normal) NO
+    # puede perder esos datos para siempre. `eliminado_at IS NULL` = activo
+    # (default, sin tocar ningún caller existente); las listas/exports/conteos
+    # filtran explícitamente, nunca un DELETE real.
+    conn.execute(
+        "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS eliminado_at TIMESTAMPTZ"
+    )
+    conn.execute(
+        "ALTER TABLE taller_inscripciones ADD COLUMN IF NOT EXISTS eliminado_por TEXT"
+    )
+
+    # Borradores de inscripción a un taller (2026-08-13, pedido del dueño):
+    # mirror de `carritos_activos` para el funnel de talleres — heartbeat
+    # mientras alguien tipea en WorkshopInscripcionForm, así el admin ve (y
+    # puede contactar) a quien no llegó a enviar el formulario, no solo un
+    # número agregado de GA4. `eliminado_at`/`eliminado_por` NO aplica acá:
+    # no hay acción de borrado manual sobre esta tabla — mismo criterio que
+    # `carritos_activos` (que tampoco tiene soft-delete ni job de purga), se
+    # acota por ventana de tiempo en la query (`horas`), no se elimina.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS taller_inscripciones_borrador (
+            id              SERIAL PRIMARY KEY,
+            session_id      TEXT NOT NULL UNIQUE,
+            edicion_id      INTEGER NOT NULL REFERENCES ediciones_taller(id) ON DELETE CASCADE,
+            nombre          TEXT,
+            email           TEXT,
+            telefono        TEXT,
+            confirmado      BOOLEAN NOT NULL DEFAULT FALSE,
+            abandonado_en   TIMESTAMPTZ,
+            created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            updated_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_taller_insc_borrador_edicion "
+        "ON taller_inscripciones_borrador(edicion_id)"
     )
 
     # ── Carritos activos (#280 Fase 1): persistencia server-side ──────────────

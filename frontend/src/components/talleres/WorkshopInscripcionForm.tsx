@@ -1,4 +1,4 @@
-import { useRef, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Upload, CheckCircle2, AlertCircle, X } from "lucide-react";
 import { Spinner } from "@/design-system/ui/spinner";
 import { toast } from "sonner";
@@ -17,8 +17,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/design-system/ui/dialog";
-import { apiUploadComprobante, apiCrearInscripcion, type Taller } from "@/lib/api";
+import {
+  apiUploadComprobante,
+  apiCrearInscripcion,
+  apiHeartbeatInscripcion,
+  type Taller,
+} from "@/lib/api";
 import { formatARS } from "@/lib/format";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { trackTallerInscripcion } from "@/lib/analytics";
+import { DatosPago } from "./DatosPago";
 import { ModalidadSelector } from "./ModalidadSelector";
 
 type Props = {
@@ -37,82 +45,6 @@ type SubmitState = "idle" | "submitting" | "success_normal" | "success_espera" |
 const MAX_MB = 10;
 const ACCEPT_TYPES = "image/jpeg,image/png,image/webp,image/heic,application/pdf";
 const ACCEPT_LIST = ACCEPT_TYPES.split(",");
-
-type CuentaPago = { alias: string; cbu: string; banco: string };
-
-/**
- * Fragmentos (alias/cbu/banco) de UNA cuenta — solo los que vienen con dato
- * (sin esto, un campo vacío dejaba un separador colgando, ej. "CBU: ·",
- * confirmado en vivo). Cada variant preserva el estilo/labels que ya tenía
- * su call site (el de "form" no rotula "Banco:", el de "success" separa con
- * <br/> en vez de " · " — diferencias preexistentes, no una unificación
- * nueva).
- */
-function UnaCuenta({ cuenta, variant }: { cuenta: CuentaPago; variant: "form" | "success" }) {
-  const fragments: ReactNode[] = [];
-  if (cuenta.alias) {
-    fragments.push(
-      <span key="alias">
-        Alias:{" "}
-        <span
-          className={variant === "form" ? "font-mono font-medium text-ink" : "text-ink font-mono"}
-        >
-          {cuenta.alias}
-        </span>
-      </span>,
-    );
-  }
-  if (cuenta.cbu) {
-    fragments.push(
-      <span key="cbu">
-        CBU:{" "}
-        <span className={variant === "form" ? "font-mono text-ink" : "text-ink font-mono text-xs"}>
-          {cuenta.cbu}
-        </span>
-      </span>,
-    );
-  }
-  if (cuenta.banco) {
-    fragments.push(
-      <span key="banco">
-        {variant === "success" && "Banco: "}
-        {cuenta.banco}
-      </span>,
-    );
-  }
-  if (fragments.length === 0) return null;
-
-  return (
-    <>
-      {fragments.map((f, i) => (
-        <span key={i}>
-          {i > 0 && (variant === "form" ? " · " : <br />)}
-          {f}
-        </span>
-      ))}
-    </>
-  );
-}
-
-/**
- * Cuentas de cobro — 0+ (lista independiente de la modalidad de pago; el
- * cliente ve todas y elige a cuál transferir). Único lugar que arma esto —
- * reusado en el bloque previo al envío y en la pantalla de éxito, que no
- * pueden volver a divergir. Con 1 sola cuenta (el caso común hoy), el
- * render es idéntico al de antes — la lista solo aparece con 2+.
- */
-function DatosPago({ cuentas, variant }: { cuentas: CuentaPago[]; variant: "form" | "success" }) {
-  const conDatos = cuentas.filter((c) => c.alias || c.cbu || c.banco);
-  if (conDatos.length === 0) return null;
-  if (conDatos.length === 1) return <UnaCuenta cuenta={conDatos[0]} variant={variant} />;
-  return (
-    <span className="flex flex-col gap-2">
-      {conDatos.map((c, i) => (
-        <UnaCuenta key={i} cuenta={c} variant={variant} />
-      ))}
-    </span>
-  );
-}
 
 function TerminosDialog({
   open,
@@ -154,6 +86,32 @@ export function WorkshopInscripcionForm({ taller, onSuccess }: Props) {
   const [submitState, setSubmitState] = useState<SubmitState>("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  // Un id propio de ESTA carga del form (no del cliente/dispositivo) — mismo
+  // rol que el session_id del carrito, pero acá alcanza con que sobreviva
+  // mientras la persona está completando el formulario.
+  const sessionIdRef = useRef<string>(crypto.randomUUID());
+
+  // Heartbeat de borrador (mirror de useCartHeartbeat): mientras haya algo
+  // tipeado en contacto, se manda al backend debounced — si la persona no
+  // llega a enviar, el admin la ve igual en "Inscripciones". Se apaga en
+  // cuanto el envío tiene éxito (pasa a success_*), para no seguir mandando
+  // heartbeats de un form que ya cumplió su función. Los valores viajan por
+  // ref (no como dependencia del effect) para que el efecto dispare por el
+  // valor YA debounced, no en cada tecla.
+  const camposRef = useRef({ nombre, email, telefono, slug: taller.slug });
+  camposRef.current = { nombre, email, telefono, slug: taller.slug };
+  const debouncedHeartbeatKey = useDebouncedValue(`${nombre}|${email}|${telefono}`, 2000);
+  useEffect(() => {
+    if (submitState !== "idle") return;
+    const c = camposRef.current;
+    if (!c.nombre.trim() && !c.email.trim() && !c.telefono.trim()) return;
+    apiHeartbeatInscripcion(c.slug, {
+      session_id: sessionIdRef.current,
+      nombre: c.nombre.trim() || undefined,
+      email: c.email.trim() || undefined,
+      telefono: c.telefono.trim() || undefined,
+    });
+  }, [debouncedHeartbeatKey, submitState]);
 
   const cuposDisponibles = Math.max(0, taller.cupos_total - taller.cupos_confirmados);
   const enListaActual = cuposDisponibles === 0;
@@ -250,7 +208,9 @@ export function WorkshopInscripcionForm({ taller, onSuccess }: Props) {
         comprobante_key: upload.status === "done" ? upload.key : undefined,
         modalidad_codigo: modalidadCodigo || undefined,
         acepta_terminos: aceptaTerminos,
+        session_id: sessionIdRef.current,
       });
+      trackTallerInscripcion({ tallerId: taller.id, enListaEspera: result.en_lista_espera });
       setSubmitState(result.en_lista_espera ? "success_espera" : "success_normal");
       onSuccess?.(result.en_lista_espera);
     } catch (err) {

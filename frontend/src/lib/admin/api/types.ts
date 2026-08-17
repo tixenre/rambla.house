@@ -1185,6 +1185,12 @@ export type Cliente = {
   apellido: string;
   telefono: string | null;
   email: string | null;
+  // Contacto de comunicación resuelto server-side (identity/contacts.py): el
+  // teléfono verificado por Didit puede diferir del autodeclarado; el email
+  // prioriza el de Google. `telefono`/`email` de arriba siguen siendo los
+  // campos BASE editables del form — estos son solo para display.
+  telefono_contacto?: string | null;
+  email_comunicacion?: string | null;
   direccion: string | null;
   cuit: string | null;
   descuento: number | null;
@@ -1429,6 +1435,14 @@ export type Pedido = {
    *  temporal que `fecha_desde`/`fecha_hasta` no representan (esas son el mes
    *  contable completo). Vacío para cualquier otro tipo. Bug real #445. */
   clases_taller?: ClaseTallerPedido[];
+  /** Solo presente en el detalle de un pedido de taller cuya edición dura más
+   *  de 1 mes: en qué mes de la serie está este pedido (`indice`, 1-based)
+   *  sobre el total de meses de la edición (`total`) — ej. {indice:2,total:4}
+   *  = "2/4". Desde que el pedido mensual se genera solo al llegar el mes
+   *  (2026-08-13, un pedido a la vez en vez de los N juntos), esta pieza
+   *  reemplaza la foto de conjunto que daba ver los N pedidos a la vez.
+   *  `null`/ausente = no aplica (edición de 1 solo mes, o no es taller). */
+  progreso_taller?: { indice: number; total: number } | null;
   /** Presente solo en la respuesta de crear/editar un turno del Estudio: si
    *  la promo (combo) se reservó con algún componente sin stock — best-effort,
    *  nunca bloquea la reserva, pero el admin/cliente debe saberlo. `null`/
@@ -1961,6 +1975,27 @@ export type Inscripcion = {
   modalidad_codigo: string | null;
   modalidad_label: string | null;
   modalidad_monto: number | null;
+};
+
+// Borrador de inscripción sin enviar (heartbeat de WorkshopInscripcionForm,
+// 2026-08-13) — mirror de `Carrito` para el funnel de talleres.
+export type Borrador = {
+  id: number;
+  session_id: string;
+  nombre: string | null;
+  email: string | null;
+  telefono: string | null;
+  /** Sin actividad por más de 24h (estampado en backend). */
+  abandonado: boolean;
+  created_at: string;
+  updated_at: string;
+};
+
+export type BorradoresResp = {
+  borradores: Borrador[];
+  total: number;
+  con_contacto: number;
+  abandonados: number;
 };
 
 // F4b: interesado (lead sin cupo en su momento). notificado_at = ya se le avisó
