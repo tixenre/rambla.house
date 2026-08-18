@@ -113,7 +113,8 @@ def aprobar(*, cliente_id, session_id, datos, contactos=None, conn=None) -> bool
     Mueve `didit_session_id` a `session_id` si un reintento posterior había corrido
     el puntero (ver `_sesion_conocida_del_cliente`) — la aprobación de Didit gana.
     Devuelve False si el `session_id` nunca se creó para este cliente (vendor_data
-    forjado / carrera)."""
+    forjado / carrera), o si Didit aprobó sin devolver datos del documento (ver
+    `datos.tiene_datos` abajo — no se marca Verificado con la ficha vacía)."""
     own = conn is None
     conn = conn or get_db()
     try:
@@ -124,6 +125,37 @@ def aprobar(*, cliente_id, session_id, datos, contactos=None, conn=None) -> bool
             logger.info("identity: cliente_id=%s session_id=%s ya aprobado — idempotente, no-op",
                         cliente_id, session_id)
             return True
+
+        if not datos.tiene_datos:
+            # Didit dijo "Approved" pero no devolvió datos del documento (webhook
+            # 'liviano' + el fallback a `retrieve_decision` también vino vacío) —
+            # no confundir "Didit aprobó la sesión" con "tenemos identidad para
+            # mostrar". NO marcamos Verificado con la ficha vacía: dejamos al
+            # cliente en 'en_revision' para que lo agarre el rechequeo automático
+            # (mismo motor único, `services.didit.recheck_cliente` — el barrido
+            # `jobs/recheck_didit_pendientes.py` SOLO revisa clientes en
+            # 'no_verificado'/'en_revision', así que 'en_revision' es necesario,
+            # no cosmético). Registramos un evento DISTINTO a 'approved' — si
+            # fuera 'approved', `_ya_registrado` bloquearía un reintento futuro
+            # para esta MISMA sesión que sí traiga los datos completos.
+            detalle = _presencia(datos)
+            with conn.transaction():
+                conn.execute(
+                    """UPDATE clientes SET
+                           dni_verificacion_estado=%s,
+                           dni_verificacion_motivo=%s,
+                           updated_at=%s
+                       WHERE id=%s""",
+                    ("en_revision", "Aprobado por Didit sin datos de documento", now_ar(), cliente_id),
+                )
+                if contactos is not None:
+                    guardar_contactos_didit(conn, cliente_id, contactos)
+                registrar_evento(conn, cliente_id, "approved_sin_datos", detalle, session_id)
+            logger.error(
+                "identity: cliente_id=%s Didit aprobó session_id=%s SIN datos de documento (%s) "
+                "— queda en_revision para el rechequeo automático", cliente_id, session_id, detalle,
+            )
+            return False
 
         cuil = normalizar_cuil(datos.cuil)
         if cuil and not cuil_valido(cuil):

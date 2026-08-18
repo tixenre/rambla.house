@@ -1,0 +1,46 @@
+name: "Install Playwright browsers (con reintento)"
+description: >
+  Instala los browsers de Playwright con --with-deps, con timeout + reintento
+  por intento. El mirror azure.archive.ubuntu.com que preconfiguran los
+  runners de GitHub a veces queda colgado (no falla rápido) en vez de caer
+  al mirror canónico — confirmado en vivo 2026-08-18: se comió el
+  timeout-minutes del job entero en 2 corridas seguidas sin llegar siquiera
+  a descargar los browsers. El timeout por intento corta ese cuelgue
+  temprano y reintenta, en vez de perder el job completo.
+
+inputs:
+  working-directory:
+    description: Directorio desde el que correr npx (donde vive package.json)
+    required: false
+    default: frontend
+  browser:
+    description: Browser a instalar (mismo argumento de `playwright install`)
+    required: false
+    default: chromium
+
+runs:
+  using: composite
+  steps:
+    - name: Install Playwright browsers (timeout + reintento)
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        for i in 1 2 3; do
+          if timeout 180 npx playwright install ${{ inputs.browser }} --with-deps; then
+            exit 0
+          fi
+          echo "Intento $i falló o se colgó (timeout 180s) — limpiando antes de reintentar..."
+          # `timeout` solo mata el hijo directo (npx) — el apt-get que ese
+          # script lanza por dentro (`sudo apt-get ...`) queda huérfano
+          # corriendo en segundo plano CON EL LOCK TOMADO. Confirmado en
+          # vivo 2026-08-18: sin esta limpieza, los intentos 2 y 3 fallaban
+          # en ~1s cada uno con "Could not get lock /var/lib/apt/lists/lock
+          # — held by process N (apt-get)", sin ninguna chance real de
+          # reintentar. Matar cualquier resto + soltar los locks antes del
+          # siguiente intento.
+          sudo pkill -9 -f 'apt-get|dpkg' 2>/dev/null || true
+          sudo rm -f /var/lib/apt/lists/lock /var/cache/apt/archives/lock \
+                     /var/lib/dpkg/lock-frontend /var/lib/dpkg/lock 2>/dev/null || true
+        done
+        echo "Los 3 intentos fallaron."
+        exit 1

@@ -557,3 +557,58 @@ def test_acciones_de_estado_404_en_inscripcion_eliminada(taller_base):
     with pytest.raises(t.HTTPException) as exc:
         t.admin_ofrecer_cupo(TALLER_ID, ins_cupo, None)
     assert exc.value.status_code == 404
+
+
+def test_lista_inscripciones_re_firma_el_comprobante(taller_base):
+    """Bug real (dueño, 2026-08-17: "estos comprobantes no andan"): la lista
+    de inscripciones devolvía `comprobante_url` crudo de la base — la URL
+    prefirmada al momento de SUBIR el archivo, que vence a las 24hs
+    (`store_raw_document`, `presign_expires` default) — cualquier
+    comprobante de más de un día rompía con `ExpiredRequest` al abrirlo
+    desde el admin. La lista ahora re-firma desde `comprobante_key`
+    (estable) en cada respuesta, mismo patrón ya usado para el mail de
+    confirmación (`_comprobante_url_fresca`, ex-`_comprobante_url_para_email`)."""
+    from database import get_db
+    from unittest.mock import patch
+
+    t = taller_base
+    ed = _crear_edicion_activa(t)
+    ins_id = _insertar_inscripcion(ed["id"], en_lista_espera=False, estado="pendiente_sena")
+
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE taller_inscripciones SET comprobante_key = %s, comprobante_url = %s "
+            "WHERE id = %s",
+            ("docs/comprobante-taller/slug.pdf", "https://vieja.expirada.example/x?sig=old", ins_id),
+        )
+        conn.commit()
+
+    fresh_url = "https://fresca.example/x?sig=new"
+    with patch("services.media.storage.presigned_url", return_value=fresh_url):
+        listado_edicion = t.admin_list_inscripciones_edicion(ed["id"], None)
+        listado_taller = t.admin_list_inscripciones(TALLER_ID, None)
+
+    assert listado_edicion[0]["comprobante_url"] == fresh_url
+    assert listado_taller[0]["comprobante_url"] == fresh_url
+
+
+def test_lista_inscripciones_sin_key_cae_al_fallback(taller_base):
+    """Una fila sin `comprobante_key` (dato viejo, de antes de esa columna)
+    no se puede re-firmar — sigue devolviendo lo que había guardado en vez
+    de romper. No es el caso feliz, pero no empeora lo que ya había."""
+    from database import get_db
+
+    t = taller_base
+    ed = _crear_edicion_activa(t)
+    ins_id = _insertar_inscripcion(ed["id"], en_lista_espera=False, estado="pendiente_sena")
+
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE taller_inscripciones SET comprobante_key = NULL, comprobante_url = %s "
+            "WHERE id = %s",
+            ("https://legacy.example/foto.jpg", ins_id),
+        )
+        conn.commit()
+
+    listado = t.admin_list_inscripciones_edicion(ed["id"], None)
+    assert listado[0]["comprobante_url"] == "https://legacy.example/foto.jpg"

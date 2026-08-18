@@ -781,11 +781,38 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export ALEMBIC_DB_TEST=1
           python -m pytest tests/test_rambla_a_rental_cuentas_merge_migration_db.py -v --tb=short -m integration
+      - name: Calendario/dashboard resuelven el cliente en vivo contra Postgres real (pedido #466)
+        run: |
+          cd backend
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_dashboard_calendario_contacto_en_vivo_db.py -v --tb=short -m integration
+      - name: Contacto verificado (verified_contacts) del pedido/cliente contra Postgres real
+        run: |
+          cd backend
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_pedido_contacto_verificado_db.py -v --tb=short -m integration
+      - name: Códigos de respaldo del 2º factor admin (consumo atómico) contra Postgres real
+        run: |
+          cd backend
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_backup_codes_db.py -v --tb=short -m integration
 
   e2e-admin:
     name: E2E admin (Playwright + backend real)
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 20 (no 15): deja margen real al timeout+reintento de "Install Playwright
+    # browsers" (hasta 3×180s si el mirror del runner se cuelga) sin comerse
+    # el resto del job — ver .github/actions/install-playwright-browsers.
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:16
@@ -872,8 +899,7 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
 
       - name: Install Playwright browsers
-        working-directory: frontend
-        run: npx playwright install chromium --with-deps
+        uses: ./.github/actions/install-playwright-browsers
 
       # El webServer de playwright.config.ts levanta el frontend solo (npm run
       # dev) — acá solo faltaba el backend, que ya está arriba desde el paso

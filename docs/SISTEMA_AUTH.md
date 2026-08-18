@@ -108,8 +108,15 @@ Todos terminan en `_make_session_response` (la misma cookie).
 
 ### Google OAuth — `auth/google.py`
 El **anchor de identidad** (y la recuperación: perdés el dispositivo → entrás por Google).
-- **Admin:** `GET /auth/google` → Google → `GET /auth/callback`. Valida email ∈ `ADMIN_EMAILS` (o
-  `ALLOWED_EMAILS`) → sesión admin. `state` **firmado** (verificable sin cookie → sobrevive ITP/ad-blockers).
+- **Admin — 2º factor obligatorio (2026-07-05):** `GET /auth/google` → Google → `GET /auth/callback`.
+  Valida email ∈ `ADMIN_EMAILS` (o `ALLOWED_EMAILS`) → si ese email **ya tiene una passkey enrolada**,
+  Google **no mintea sesión** — redirige a confirmarla (reusa el login discoverable de passkey, cero
+  verificación nueva). Sin passkey todavía, Google sigue alcanzando solo (bootstrapping): el frontend
+  fuerza el enrolamiento **on-the-fly** (`EnrolarPasskeyGate` en `AdminLayout` bloquea el resto del
+  back-office hasta registrar una — un toque, mismo `registerPasskey` que usa Settings; se salta sin
+  soporte WebAuthn o en dev-bypass). Mitiga que un compromiso de Google (phishing/recovery abuse) se
+  traduzca directo en acceso al back-office. `state` **firmado** (verificable sin cookie → sobrevive
+  ITP/ad-blockers).
 - **Cliente:** `GET /cliente/auth/google` (acepta `?next=` interno) → `GET /cliente/auth/callback`. Cliente
   conocido → sesión cliente (con redirect a `next` o al portal); cliente nuevo → **token de registro** (30 min)
   → `/cliente/registro`.

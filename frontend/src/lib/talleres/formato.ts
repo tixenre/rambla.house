@@ -17,7 +17,7 @@ export function ordinalEdicion(n: number): string {
   return map[n] ?? `${n}ta`;
 }
 
-type SesionFecha = {
+export type SesionFecha = {
   fecha: string;
   hora_inicio_min: number;
   hora_fin_min: number;

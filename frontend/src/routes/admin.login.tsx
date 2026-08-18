@@ -1,9 +1,17 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { authedFetch } from "@/lib/authedFetch";
+import { authedFetch, AuthedHttpError } from "@/lib/authedFetch";
 import { BackOfficeAuthCard } from "@/components/admin/BackOfficeAuthCard";
 import { GoogleIcon } from "@/design-system/ui/GoogleIcon";
-import { loginWithPasskey, passkeyLoginErrorMessage, passkeySupported } from "@/lib/passkey";
+import { Input } from "@/design-system/ui/input";
+import {
+  loginWithPasskey,
+  passkeyErrorMessage,
+  passkeyLoginErrorMessage,
+  passkeySupported,
+  registerPasskey,
+} from "@/lib/passkey";
+import { loginConCodigoRespaldo } from "@/lib/backupCodes";
 import { KeyRound } from "lucide-react";
 
 export const Route = createFileRoute("/admin/login")({
@@ -45,6 +53,16 @@ function AdminLoginPage() {
   // enrolada → no hay sesión todavía, hace falta confirmar con ella (backend no
   // minteó nada en /auth/callback, ver auth/google.py).
   const [pasoPasskey, setPasoPasskey] = useState(false);
+  // Recovery: perdió el dispositivo con la passkey → código de respaldo en vez
+  // de la ceremonia WebAuthn (auth/backup_codes.py).
+  const [showBackupForm, setShowBackupForm] = useState(false);
+  const [backupCode, setBackupCode] = useState("");
+  const [backupBusy, setBackupBusy] = useState(false);
+  // Tras un login exitoso con código de respaldo hay sesión pero SIGUE sin
+  // passkey funcional en este dispositivo — sin este paso, el próximo login
+  // volvería a pegar contra el mismo muro (y a consumir otro código de a uno).
+  const [recovered, setRecovered] = useState(false);
+  const [enrollBusy, setEnrollBusy] = useState(false);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -95,9 +113,79 @@ function AdminLoginPage() {
       await loginWithPasskey();
       window.location.href = "/admin";
     } catch (e) {
-      setError(passkeyLoginErrorMessage(e));
+      // `passkeyLoginErrorMessage` sugiere "entrá con Google y agregá una clave desde
+      // tu perfil" — correcto en la pantalla principal (Google sola alcanza para
+      // loguearse ahí), pero circular/imposible acá: en `pasoPasskey` ya entraste con
+      // Google y el backend a propósito NO minteó sesión (2º factor obligatorio, ver
+      // auth/google.py) — no hay "tu perfil" al que ir sin resolver primero este paso.
+      // Bug real: Pablo (otro admin) quedó sin salida en este dispositivo con el
+      // mensaje genérico, que lo mandaba a hacer algo que no podía hacer.
+      setError(
+        pasoPasskey
+          ? "No encontramos tu clave de acceso en este dispositivo (o cancelaste). Tu cuenta ya tiene una clave registrada en OTRO dispositivo — entrá desde ese, o usá un código de respaldo abajo."
+          : passkeyLoginErrorMessage(e),
+      );
       setPasskeyBusy(false);
     }
+  }
+
+  async function handleBackupCodeLogin() {
+    if (backupBusy || !backupCode.trim()) return;
+    setError(null);
+    setBackupBusy(true);
+    try {
+      await loginConCodigoRespaldo(backupCode.trim());
+      setRecovered(true); // sesión ya minteada — falta registrar una passkey nueva ACÁ
+    } catch (e) {
+      // `.detail` (no `.message`): un admin no técnico como Pablo no debería ver
+      // "POST /auth/backup-code/login → 401: ..." — solo el texto que mandó el
+      // backend (AuthedHttpError.detail, ver authedFetch.ts).
+      setError(
+        e instanceof AuthedHttpError && e.detail
+          ? e.detail
+          : e instanceof Error
+            ? e.message
+            : "No se pudo verificar el código.",
+      );
+    } finally {
+      setBackupBusy(false);
+    }
+  }
+
+  async function handleEnrollAfterRecovery() {
+    setEnrollBusy(true);
+    try {
+      await registerPasskey("admin");
+      window.location.href = "/admin";
+    } catch (e) {
+      setError(passkeyErrorMessage(e));
+      setEnrollBusy(false);
+    }
+  }
+
+  if (recovered) {
+    return (
+      <BackOfficeAuthCard
+        title="Recuperaste el acceso"
+        description="Registrá una clave de acceso nueva en este dispositivo — sin esto, la próxima vez vas a volver a quedar sin poder entrar."
+        error={error}
+      >
+        <button
+          onClick={handleEnrollAfterRecovery}
+          disabled={enrollBusy}
+          className="w-full flex items-center justify-center gap-3 rounded-md border hairline bg-background py-2.5 text-sm font-medium text-ink transition hover:bg-surface active:scale-[0.98] disabled:opacity-60"
+        >
+          <KeyRound className="h-4 w-4" />
+          {enrollBusy ? "Registrando…" : "Registrar clave de acceso"}
+        </button>
+        <button
+          onClick={() => (window.location.href = "/admin")}
+          className="w-full text-center text-xs text-muted-foreground hover:text-ink transition mt-2"
+        >
+          Ahora no, llevame al admin
+        </button>
+      </BackOfficeAuthCard>
+    );
   }
 
   if (pasoPasskey) {
@@ -105,8 +193,8 @@ function AdminLoginPage() {
     // — en un navegador sin WebAuthn, mostraba el botón igual y el error al
     // clickearlo era el genérico de "no encontramos tu clave" (falso acá: el
     // problema es el navegador, no que falte registrarla). Una vez que la
-    // cuenta tiene 2º factor, Google solo ya no alcanza — no hay vuelta atrás
-    // desde ESTE dispositivo, así que al menos el mensaje tiene que ser honesto.
+    // cuenta tiene 2º factor, Google solo ya no alcanza — pero ahora SÍ hay
+    // vuelta atrás desde este dispositivo: un código de respaldo (abajo).
     return (
       <BackOfficeAuthCard
         title="Confirmá tu identidad"
@@ -125,8 +213,39 @@ function AdminLoginPage() {
         ) : (
           <div className="rounded-md border border-amber/30 bg-amber/10 px-3 py-2 text-xs text-ink">
             Este navegador no soporta claves de acceso. Entrá desde el dispositivo donde la
-            registraste (celular, u otra compu con Face ID/Touch ID/Windows Hello).
+            registraste (celular, u otra compu con Face ID/Touch ID/Windows Hello) — o usá un código
+            de respaldo abajo.
           </div>
+        )}
+
+        {/* Recovery: perdió el dispositivo con la passkey. Independiente de `supported` —
+            es un código de texto, no una ceremonia WebAuthn, así que sirve incluso en un
+            navegador sin soporte. */}
+        {showBackupForm ? (
+          <div className="space-y-2 border-t hairline pt-3 mt-1">
+            <Input
+              autoFocus
+              value={backupCode}
+              onChange={(e) => setBackupCode(e.target.value)}
+              placeholder="XXXXX-XXXXX"
+              className="text-center font-mono uppercase"
+              onKeyDown={(e) => e.key === "Enter" && handleBackupCodeLogin()}
+            />
+            <button
+              onClick={handleBackupCodeLogin}
+              disabled={backupBusy || !backupCode.trim()}
+              className="w-full flex items-center justify-center gap-3 rounded-md border hairline bg-background py-2.5 text-sm font-medium text-ink transition hover:bg-surface active:scale-[0.98] disabled:opacity-60"
+            >
+              {backupBusy ? "Verificando…" : "Confirmar código"}
+            </button>
+          </div>
+        ) : (
+          <button
+            onClick={() => setShowBackupForm(true)}
+            className="w-full text-center text-xs text-muted-foreground hover:text-ink transition"
+          >
+            ¿Perdiste el dispositivo? Usar un código de respaldo
+          </button>
         )}
       </BackOfficeAuthCard>
     );

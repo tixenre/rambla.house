@@ -533,21 +533,24 @@ def compute_actividad_calendario(conn, anio: int | None = None, todos: bool = Fa
     depósito. Mismo universo `estado='finalizado'` que el resto de
     Estadísticas (negocio devengado y cerrado, MEMORIA 2026-07-04).
 
-    Los tiers de color (0-4) se calculan con los percentiles 25/50/75 de los
-    DÍAS CON ACTIVIDAD de CADA AÑO POR SEPARADO — no un umbral fijo ni
-    compartido entre años (ni siquiera en modo `todos`, ver abajo). Así un
-    pedido gigante puntual no aplasta la variación del resto del año, y un
-    año más chico (negocio recién arrancado) no queda todo gris solo por
-    compararse contra un año con más volumen total. Esta es la
-    "normalización" que importa acá — la lista de años NO se colapsa en un
-    patrón promedio (eso perdería el historial real).
+    `anio` (single-year, comportamiento sin cambios): un `dia` por CALENDAR
+    DAY real (`YYYY-MM-DD`), tier bucketizado con los percentiles 25/50/75
+    de los días con actividad de ESE año — un pedido gigante puntual no
+    aplasta la variación del resto del año.
 
-    `todos=True` ignora `anio` y devuelve TODO el historial en una sola
-    respuesta (`dias` abarca todos los años en `anios_disponibles`), para el
-    view apilado "Todos los años" — sigue bucketizando cada año por separado
-    (agrupa las filas por año ANTES de calcular percentiles) para no repetir
-    la distorsión que el diseño per-año ya evita.
-    """
+    `todos=True` (pedido explícito del dueño, 2026-08-17 — "el 1° de enero de
+    TODOS los años juntos", no un timeline apilado): ya NO devuelve un `dia`
+    por calendar-day real agrupado por año — agrupa por (mes, día-del-mes) y
+    SUMA `pedidos_activos` cross-year, para responder "¿qué día del año
+    concentra actividad, sumado en toda la historia?" en vez de "¿cuándo en
+    la cronología real hubo actividad?". `dia` pasa a ser `MM-DD` (sin año —
+    representa el mismo día de TODOS los años combinados). El tier se
+    bucketiza UNA sola vez contra esa distribución agregada de ~366 valores
+    (ya no per-año — a propósito: acá no hay "años" que comparar entre sí,
+    hay UN patrón de estacionalidad). Reversión deliberada del diseño previo
+    (per-año incluso en `todos`, ver `test_actividad_calendario_todos_
+    bucketiza_tiers_por_anio_no_global` en el historial de este archivo) —
+    es un caso de uso distinto, no un bug de aquel."""
     anios_rows = conn.execute(f"""
         SELECT DISTINCT EXTRACT(YEAR FROM fecha_desde)::int AS anio
         FROM alquileres
@@ -588,24 +591,35 @@ def compute_actividad_calendario(conn, anio: int | None = None, todos: bool = Fa
         ORDER BY dia::date
     """, (desde, hasta, hasta, desde)).fetchall()
 
-    # Agrupa por año ANTES de bucketizar — en modo single-year es un solo
-    # grupo (comportamiento sin cambios); en modo `todos` son N grupos, cada
-    # uno con sus propios percentiles.
-    filas_por_anio: dict[int, list] = {}
-    for r in rows:
-        filas_por_anio.setdefault(r["dia"].year, []).append(r)
-
-    dias = []
-    for filas in filas_por_anio.values():
-        valores = [f["pedidos_activos"] for f in filas]
-        p25, p50, p75 = _tiers_percentiles(valores)
-        for f in filas:
-            dias.append({
-                "dia": f["dia"].isoformat(),
-                "pedidos_activos": f["pedidos_activos"],
-                "tier": _tier(f["pedidos_activos"], p25, p50, p75),
-            })
-    dias.sort(key=lambda d: d["dia"])
+    if todos:
+        # Agrega (mes, día-del-mes) sumando cross-year — YA NO agrupa por año
+        # (ver docstring: "todos" es un patrón de estacionalidad, no un
+        # timeline apilado). `dict` preserva orden de inserción, pero se
+        # ordena explícito por (mes, día) igual, no por orden de aparición.
+        por_mes_dia: dict[tuple[int, int], int] = {}
+        for r in rows:
+            key = (r["dia"].month, r["dia"].day)
+            por_mes_dia[key] = por_mes_dia.get(key, 0) + r["pedidos_activos"]
+        p25, p50, p75 = _tiers_percentiles(list(por_mes_dia.values()))
+        dias = [
+            {
+                "dia": f"{mes:02d}-{dia:02d}",
+                "pedidos_activos": total,
+                "tier": _tier(total, p25, p50, p75),
+            }
+            for (mes, dia), total in sorted(por_mes_dia.items())
+        ]
+    else:
+        # Single-year: un solo grupo, comportamiento sin cambios.
+        p25, p50, p75 = _tiers_percentiles([r["pedidos_activos"] for r in rows])
+        dias = [
+            {
+                "dia": r["dia"].isoformat(),
+                "pedidos_activos": r["pedidos_activos"],
+                "tier": _tier(r["pedidos_activos"], p25, p50, p75),
+            }
+            for r in rows
+        ]
 
     return {
         "anio": anio_actual,

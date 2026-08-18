@@ -10,11 +10,20 @@ Todos usan FakeConn — sin Postgres, sin fixtures de DB.
 """
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import pytest
 
 pytestmark = pytest.mark.unit
+
+
+def _en(dias: int) -> date:
+    """Fecha relativa a HOY, no hardcodeada — evita que un test quede stale
+    semanas después de escribirlo (bug real: `date(2026, 8, 15)` quedó en el
+    pasado y `verificar_sesiones_disponibles` la empezó a saltear —ver
+    docstring de esa función—, rompiendo `test_verificar_sesiones_primera_
+    conflicto_lanza_409` sin que nadie tocara el código)."""
+    return date.today() + timedelta(days=dias)
 
 
 # ── Helpers de FakeConn ───────────────────────────────────────────────────────
@@ -260,8 +269,8 @@ def test_verificar_sesiones_libres():
     """Todas las sesiones libres → no lanza excepción."""
     from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
     sesiones = [
-        {"fecha": date(2026, 8, 15), "hora_inicio_min": 540, "hora_fin_min": 780},
-        {"fecha": date(2026, 8, 22), "hora_inicio_min": 540, "hora_fin_min": 780},
+        {"fecha": _en(7), "hora_inicio_min": 540, "hora_fin_min": 780},
+        {"fecha": _en(14), "hora_inicio_min": 540, "hora_fin_min": 780},
     ]
     # Cada sesión: slot vacío + taller vacío + centinela libre (3 queries × 2 = 6)
     conn = FakeConn([[], [], FakeRow(cnt=0)] * 2)
@@ -273,9 +282,10 @@ def test_verificar_sesiones_primera_conflicto_lanza_409():
     """Primera sesión conflicto → HTTPException 409 inmediato."""
     from fastapi import HTTPException
     from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
+    primera = _en(7)
     sesiones = [
-        {"fecha": date(2026, 8, 15), "hora_inicio_min": 540, "hora_fin_min": 780},
-        {"fecha": date(2026, 8, 22), "hora_inicio_min": 540, "hora_fin_min": 780},
+        {"fecha": primera, "hora_inicio_min": 540, "hora_fin_min": 780},
+        {"fecha": _en(14), "hora_inicio_min": 540, "hora_fin_min": 780},
     ]
     # Primera sesión: slot bloquea
     conn = FakeConn([
@@ -285,7 +295,7 @@ def test_verificar_sesiones_primera_conflicto_lanza_409():
     with pytest.raises(HTTPException) as exc:
         verificar_sesiones_disponibles(conn, estudio, sesiones)
     assert exc.value.status_code == 409
-    assert "15/08/2026" in str(exc.value.detail)
+    assert primera.strftime("%d/%m/%Y") in str(exc.value.detail)
 
 
 def test_verificar_sesiones_salta_pasadas():
@@ -304,11 +314,11 @@ def test_verificar_sesiones_segunda_conflicto():
     """Si la primera sesión está libre pero la segunda bloquea, lanza 409 para la segunda."""
     from fastapi import HTTPException
     from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
-    hoy = datetime.now().date()
-    desde_futuro = date(2026, 9, 1)
+    desde_futuro = _en(7)
+    segunda = _en(14)
     sesiones = [
         {"fecha": desde_futuro, "hora_inicio_min": 540, "hora_fin_min": 780},
-        {"fecha": date(2026, 9, 8), "hora_inicio_min": 540, "hora_fin_min": 780},
+        {"fecha": segunda, "hora_inicio_min": 540, "hora_fin_min": 780},
     ]
     # Primera sesión: libre (slot vacío, taller vacío, centinela libre)
     # Segunda sesión: taller bloquea
@@ -321,7 +331,7 @@ def test_verificar_sesiones_segunda_conflicto():
     with pytest.raises(HTTPException) as exc:
         verificar_sesiones_disponibles(conn, estudio, sesiones)
     assert exc.value.status_code == 409
-    assert "08/09/2026" in str(exc.value.detail)
+    assert segunda.strftime("%d/%m/%Y") in str(exc.value.detail)
 
 
 # ── Overlap cruzado ───────────────────────────────────────────────────────────
@@ -331,7 +341,7 @@ def test_taller_vs_slot_bloquea():
     """Un taller no puede ocupar un horario donde ya hay un slot fijo."""
     from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
     # Slot fijo lunes 10-18
-    sesiones = [{"fecha": date(2026, 9, 7), "hora_inicio_min": 600, "hora_fin_min": 1080}]
+    sesiones = [{"fecha": _en(7), "hora_inicio_min": 600, "hora_fin_min": 1080}]
     conn = FakeConn([
         [FakeRow(id=2, cliente="Slot Fijo", hora_desde=9, hora_hasta=19)],
     ])
@@ -344,7 +354,7 @@ def test_taller_vs_slot_bloquea():
 def test_taller_vs_reserva_web_bloquea():
     """Un taller no puede ocupar un horario donde ya hay una reserva web (centinela)."""
     from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
-    sesiones = [{"fecha": date(2026, 9, 7), "hora_inicio_min": 600, "hora_fin_min": 840}]
+    sesiones = [{"fecha": _en(7), "hora_inicio_min": 600, "hora_fin_min": 840}]
     conn = FakeConn([[], [], FakeRow(cnt=1)])  # slot vacío, taller vacío, centinela ocupado
     estudio = _estudio()
     with pytest.raises(Exception) as exc:
@@ -355,7 +365,7 @@ def test_taller_vs_reserva_web_bloquea():
 def test_taller_vs_taller_bloquea():
     """Dos talleres que solapan en la misma fecha son detectados."""
     from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
-    sesiones = [{"fecha": date(2026, 9, 7), "hora_inicio_min": 600, "hora_fin_min": 840}]
+    sesiones = [{"fecha": _en(7), "hora_inicio_min": 600, "hora_fin_min": 840}]
     # El taller existente (excluído con exclude_taller_id) no bloquea, pero hay otro
     conn = FakeConn([
         [],  # slot vacío
@@ -451,7 +461,7 @@ def test_verificar_sesiones_409_formatea_hhmm():
     """El mensaje del 409 muestra los horarios como HH:MM (8:30, no '510')."""
     from fastapi import HTTPException
     from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
-    sesiones = [{"fecha": date(2026, 9, 5), "hora_inicio_min": 510, "hora_fin_min": 750}]
+    sesiones = [{"fecha": _en(7), "hora_inicio_min": 510, "hora_fin_min": 750}]
     conn = FakeConn([
         [FakeRow(id=1, cliente="Fijo", hora_desde=8, hora_hasta=14)],  # slot bloquea
     ])
@@ -468,7 +478,7 @@ def test_verificar_sesiones_media_hora_contra_slot_borde():
     conversión ×60 de _sesiones_de_slot y los minutos de la clase comparan
     en la MISMA unidad (candado de la doble unidad transitoria)."""
     from services.estudio.queries.disponibilidad import verificar_sesiones_disponibles
-    sesiones = [{"fecha": date(2026, 9, 7), "hora_inicio_min": 750, "hora_fin_min": 990}]
+    sesiones = [{"fecha": _en(7), "hora_inicio_min": 750, "hora_fin_min": 990}]
     # slot 9–12 hs (en su tabla, horas): 540–720 min → NO solapa con 750–990
     conn = FakeConn([
         [FakeRow(id=1, cliente="Fijo", hora_desde=9, hora_hasta=12)],  # no solapa

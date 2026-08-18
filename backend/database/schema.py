@@ -391,6 +391,26 @@ def _init_db_schema(conn):
         "ON passkey_credentials(LOWER(owner_email)) WHERE owner_type = 'admin'"
     )
 
+    # Códigos de respaldo del 2º factor admin (recovery cuando se pierde el
+    # dispositivo con la passkey — Google solo ya no alcanza una vez que la
+    # cuenta tiene una). `code_hash` = sha256 del código en texto plano (nunca
+    # se guarda el código en claro; alta entropía → hash rápido está bien,
+    # no son passwords elegidas por el usuario). Esquema en dos capas
+    # (MEMORIA 2026-06-03): espejo idempotente de la migración bkupcodes2fa.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS admin_backup_codes (
+            id           SERIAL PRIMARY KEY,
+            owner_email  TEXT NOT NULL,
+            code_hash    TEXT NOT NULL,
+            used_at      TIMESTAMP,
+            created_at   TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_admin_backup_codes_email "
+        "ON admin_backup_codes(LOWER(owner_email))"
+    )
+
     # ── Sesiones server-side: allowlist para revocación (logout real + "cerrar mis
     # otras sesiones"). La cookie firmada lleva un `jti` opaco; esta tabla decide si
     # sigue viva. Espeja `passkey_credentials` (mismo discriminador owner_type +
@@ -2180,6 +2200,17 @@ def _init_db_schema(conn):
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_url TEXT NOT NULL DEFAULT ''")
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_poster_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL")
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_poster_url TEXT NOT NULL DEFAULT ''")
+    # Taller hermano (pareja de marketing, pedido del dueño 2026-08-17): dos
+    # talleres lanzados juntos comparten un solo link — cada uno sigue siendo
+    # un concepto independiente con su propia página; el Hero de cualquiera
+    # de los dos muestra un mini-selector hacia el otro. El vínculo se
+    # resuelve SIMÉTRICO desde el lado que lo tenga seteado (ver
+    # `_resolver_hermano` en routes/talleres.py) — no hace falta setearlo en
+    # los 2 lados. `taller_hermano_titulo` es un copy corto opcional de esa
+    # campaña ("Dos talleres, un solo viaje"); '' → el header muestra solo
+    # los 2 nombres, sin bloque de texto de más.
+    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS taller_hermano_id INTEGER REFERENCES talleres(id) ON DELETE SET NULL")
+    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS taller_hermano_titulo TEXT NOT NULL DEFAULT ''")
 
     # Escuela v2 F4a: modalidades de pago por edición — `monto_total` (costo
     # total del plan) y `n_cuotas` cargados a mano por el admin; el monto POR

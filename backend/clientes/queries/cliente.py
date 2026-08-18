@@ -7,6 +7,7 @@ from database import row_to_dict
 from busqueda import construir
 
 from clientes.queries.identidad import nombre_legal, direccion_legal
+from identity.contacts import email_comunicacion, telefono_contacto
 
 # Campos buscables del cliente. El combinado nombre+apellido permite que
 # "santiago perez" matchee/rankee aunque nombre y apellido sean campos distintos.
@@ -68,7 +69,16 @@ def obtener(conn, cliente_id: int) -> dict | None:
     row = conn.execute("SELECT * FROM clientes WHERE id=%s", (cliente_id,)).fetchone()
     if not row:
         return None
-    return _enriquecer(row_to_dict(row))
+    d = _enriquecer(row_to_dict(row))
+    # Vista resuelta para DISPLAY (mismo criterio que GET /api/cliente/me,
+    # identity/contacts.py): el email/teléfono BASE de arriba siguen intactos
+    # para el form de edición de la ficha — esto es aditivo, no un reemplazo.
+    # El teléfono verificado por Didit puede diferir del autodeclarado (sin
+    # esto, la ficha admin mostraba "sin contacto" para un cliente que el
+    # sistema SÍ sabe contactar, mismo bug que en la card del pedido).
+    d["email_comunicacion"] = email_comunicacion(conn, cliente_id)
+    d["telefono_contacto"] = telefono_contacto(conn, cliente_id)
+    return d
 
 
 def _enriquecer_grupo_duplicado(conn, cuil: str, ids: list[int]) -> dict:

@@ -342,6 +342,96 @@ def _video_dict(row) -> dict | None:
     }
 
 
+def _taller_publico_lite(conn, taller_id: int) -> dict | None:
+    """Datos de la edición activa más reciente de un CONCEPTO para mostrar
+    una mitad completa del banner de pareja (`MitadPareja` en el front,
+    pedido del dueño 2026-08-18: la info de fecha/horario/cupos va DENTRO
+    del recuadro de cada taller, no en una fila genérica aparte) + armar el
+    link a `/escuelas/$slug`. Trae `sesiones` (mismo shape que
+    `_edicion_to_public_dict`) para que el front pueda calcular
+    `resumenFechas`/`resumenHorario` con el MISMO criterio que usa para el
+    taller actual — así las 2 mitades formatean igual, no una rica y la
+    otra genérica. El subtítulo es lo que deja diferenciar "nivel inicial"/
+    "nivel avanzado" sin inventar un campo nuevo. None si el concepto no
+    existe o no tiene ninguna edición activa (nada a dónde linkear)."""
+    t = conn.execute(
+        "SELECT id, nombre, subtitulo FROM talleres WHERE id = %s", (taller_id,)
+    ).fetchone()
+    if not t:
+        return None
+    ed = conn.execute(
+        "SELECT id, slug, fecha_inicio, fecha_fin, horario, direccion, "
+        "cupos_total, cupos_confirmados FROM ediciones_taller "
+        "WHERE taller_id = %s AND activo = TRUE ORDER BY numero_edicion DESC LIMIT 1",
+        (taller_id,),
+    ).fetchone()
+    if not ed:
+        return None
+    return {
+        "taller_id": t["id"],
+        "nombre": t["nombre"],
+        "subtitulo": t["subtitulo"],
+        "slug": ed["slug"],
+        "fecha_inicio": str(ed["fecha_inicio"]),
+        "fecha_fin": str(ed["fecha_fin"]),
+        "horario": ed["horario"],
+        "direccion": ed["direccion"],
+        # cupos_total (no cupos_disponibles) — mismo campo que MetaRow ya
+        # muestra para el taller actual (formTaller.cupos_total); las 2
+        # mitades del banner tienen que decir lo mismo con el mismo criterio.
+        "cupos_total": ed["cupos_total"],
+        "sesiones": _get_clases(conn, ed["id"]),
+    }
+
+
+def _resolver_hermano(conn, mi_taller_id: int) -> dict | None:
+    """Taller hermano (pareja de marketing): resuelve SIMÉTRICO — si YO
+    apunto a otro (`taller_hermano_id`), o si OTRO me apunta a mí, en
+    cualquier caso devuelve el par. No hace falta setear el vínculo en los
+    2 lados. El copy de campaña (`taller_hermano_titulo`) vive en el lado
+    que seteó el puntero, se resuelve junto sea cual sea el lado desde el
+    que se está mirando.
+
+    Devuelve el par YA ORDENADO — `principal` (el lado que tiene el
+    puntero seteado) siempre primero, `secundario` (el resuelto) siempre
+    segundo, **el mismo orden sea cual sea la página desde la que se
+    mira** (pedido del dueño 2026-08-18: "se me cambia de lugar los
+    botones" — la versión anterior ordenaba "yo primero", que invertía el
+    orden según qué taller estuvieras viendo; con eso el banner no se
+    sentía como una sola pieza compartida). El front decide cuál de los
+    dos es un link (el que NO coincide con el taller actual) — acá solo
+    se fija el orden, no la interactividad.
+
+    `ORDER BY id` en el lado inverso: si por error 2+ conceptos apuntan al
+    mismo hermano, el de menor id gana — determinístico, no una prioridad
+    real (caso raro, no vale una constraint para esto).
+
+    None si no hay hermano, o si algún lado del par no tiene ninguna
+    edición activa a la que linkear — el front no debe romper por un
+    vínculo a medio configurar."""
+    mio = conn.execute(
+        "SELECT taller_hermano_id, taller_hermano_titulo FROM talleres WHERE id = %s",
+        (mi_taller_id,),
+    ).fetchone()
+    if mio and mio["taller_hermano_id"]:
+        dueño_id, otro_id, titulo = mi_taller_id, mio["taller_hermano_id"], mio["taller_hermano_titulo"]
+    else:
+        otro = conn.execute(
+            "SELECT id, taller_hermano_titulo FROM talleres "
+            "WHERE taller_hermano_id = %s ORDER BY id LIMIT 1",
+            (mi_taller_id,),
+        ).fetchone()
+        if not otro:
+            return None
+        dueño_id, otro_id, titulo = otro["id"], mi_taller_id, otro["taller_hermano_titulo"]
+
+    principal = _taller_publico_lite(conn, dueño_id)
+    secundario = _taller_publico_lite(conn, otro_id)
+    if not principal or not secundario:
+        return None
+    return {"titulo": titulo or "", "principal": principal, "secundario": secundario}
+
+
 def _edicion_lite(row) -> dict:
     """Datos mínimos de una edición para mostrar en el contexto de otra."""
     return {
@@ -517,6 +607,8 @@ def _concepto_to_admin_dict(
         "mensaje_confirmacion": _row_get(taller_row, "mensaje_confirmacion", ""),
         "video_url": _row_get(taller_row, "video_url", ""),
         "video_poster_url": _row_get(taller_row, "video_poster_url", ""),
+        "taller_hermano_id": _row_get(taller_row, "taller_hermano_id", None),
+        "taller_hermano_titulo": _row_get(taller_row, "taller_hermano_titulo", ""),
         "instructores": instructores if instructores is not None else [],
         "instituciones": instituciones if instituciones is not None else [],
         "ediciones": ediciones if ediciones is not None else [],
@@ -590,6 +682,8 @@ def get_taller(slug: str, request: Request):
             (row["taller_id"], row["numero_edicion"]),
         ).fetchone()
         d["edicion_anterior"] = _edicion_lite(ant) if ant else None
+
+        d["taller_hermano"] = _resolver_hermano(conn, row["taller_id"])
     return d
 
 
@@ -660,13 +754,20 @@ class InscripcionBorradorBody(BaseModel):
     telefono: str | None = None
 
 
-def _comprobante_url_para_email(key: str | None, fallback_url: str | None) -> str:
+def _comprobante_url_fresca(key: str | None, fallback_url: str | None) -> str:
+    """Re-firma la URL del comprobante AL MOMENTO de servirla — la que devuelve
+    `store_raw_document` al subir vence a las 24hs (`presign_expires`) y NO se
+    puede guardar tal cual para acceso futuro (bug real: la lista de
+    inscripciones del admin devolvía `comprobante_url` crudo de la base,
+    rompiendo con `ExpiredRequest` apenas pasaban 24hs desde la subida). La
+    key SÍ es estable — se re-firma desde ahí cada vez que hace falta mostrar
+    el comprobante (acá, en el mail de confirmación, o donde surja después)."""
     if key:
         try:
             from services.media.storage import presigned_url as _presigned
             return _presigned(key, expires_seconds=86400, private=True)
         except Exception as e:
-            logger.warning("_comprobante_url_para_email: no se pudo generar presigned: %s", e)
+            logger.warning("_comprobante_url_fresca: no se pudo generar presigned: %s", e)
     return fallback_url or ""
 
 
@@ -850,7 +951,7 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
         "email": email,
         "telefono": telefono,
         "experiencia": body.experiencia or "",
-        "comprobante_url": _comprobante_url_para_email(body.comprobante_key, body.comprobante_url),
+        "comprobante_url": _comprobante_url_fresca(body.comprobante_key, body.comprobante_url),
         "en_lista_espera": en_lista,
         "fecha": fecha_str,
     }
@@ -1092,7 +1193,7 @@ def claim_oferta_cupo(token: str, body: ClaimCupoBody, request: Request):
         "email": ins["email"],
         "telefono": ins["telefono"] or "",
         "experiencia": "",
-        "comprobante_url": _comprobante_url_para_email(body.comprobante_key, body.comprobante_url),
+        "comprobante_url": _comprobante_url_fresca(body.comprobante_key, body.comprobante_url),
         "en_lista_espera": False,
         "fecha": now_ar().strftime("%-d de %B de %Y, %H:%M hs"),
     }
@@ -1263,6 +1364,13 @@ class TallerConceptoUpdateBody(BaseModel):
     video_url: str | None = None
     # F4c: FAQ del concepto — [{pregunta, respuesta}]. Ninguna es obligatoria.
     faqs: list[FaqItemBody] | None = None
+    # Taller hermano (pareja de marketing) — único campo NULLABLE real del
+    # body: `None` es ambiguo entre "no lo mandaron" y "lo quiero borrar", a
+    # diferencia de los strings de arriba (que usan '' como su propio
+    # sentinel de borrado). Se resuelve con `exclude_unset`, no con "is not
+    # None" — ver admin_update_concepto.
+    taller_hermano_id: int | None = None
+    taller_hermano_titulo: str | None = None
 
 
 class EdicionUpdateBody(BaseModel):
@@ -1610,8 +1718,16 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
         sets.append("faqs = %s::jsonb"); params.append(_json.dumps(faqs_limpio, ensure_ascii=False))
 
     video_url_provisto = body.video_url is not None
+    if body.taller_hermano_titulo is not None:
+        sets.append("taller_hermano_titulo = %s"); params.append(body.taller_hermano_titulo.strip())
+    # `taller_hermano_id` es el único FK nullable del body: a diferencia de
+    # los strings (que usan '' como su propio sentinel de borrado), acá
+    # `None` es un valor real y válido ("sacale la pareja"). `is not None`
+    # lo confundiría con "no lo mandaron" — se resuelve mirando si la CLAVE
+    # vino en el JSON, no si el valor es None.
+    hermano_id_provisto = "taller_hermano_id" in body.model_fields_set
 
-    if not sets and not video_url_provisto:
+    if not sets and not video_url_provisto and not hermano_id_provisto:
         raise HTTPException(400, "No hay campos para actualizar")
 
     with get_db() as conn:
@@ -1619,6 +1735,18 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
             existing = conn.execute("SELECT id FROM talleres WHERE id = %s", (taller_id,)).fetchone()
             if existing is None:
                 raise HTTPException(404, "Taller no encontrado")
+
+            if hermano_id_provisto:
+                hermano_id = body.taller_hermano_id
+                if hermano_id is not None:
+                    if hermano_id == taller_id:
+                        raise HTTPException(400, "Un taller no puede ser su propio hermano")
+                    hermano_row = conn.execute(
+                        "SELECT id FROM talleres WHERE id = %s", (hermano_id,)
+                    ).fetchone()
+                    if hermano_row is None:
+                        raise HTTPException(400, "El taller hermano no existe")
+                sets.append("taller_hermano_id = %s"); params.append(hermano_id)
 
             if video_url_provisto:
                 nuevo_video = body.video_url.strip()
@@ -2676,7 +2804,7 @@ def admin_list_inscripciones(taller_id: int, request: Request):
             "email": r["email"],
             "telefono": r["telefono"],
             "experiencia": r["experiencia"],
-            "comprobante_url": r["comprobante_url"],
+            "comprobante_url": _comprobante_url_fresca(r["comprobante_key"], r["comprobante_url"]),
             "en_lista_espera": r["en_lista_espera"],
             "estado": r["estado"],
             "edicion_id": r["edicion_id"],
@@ -2714,7 +2842,7 @@ def admin_list_inscripciones_edicion(edicion_id: int, request: Request):
             "email": r["email"],
             "telefono": r["telefono"],
             "experiencia": r["experiencia"],
-            "comprobante_url": r["comprobante_url"],
+            "comprobante_url": _comprobante_url_fresca(r["comprobante_key"], r["comprobante_url"]),
             "en_lista_espera": r["en_lista_espera"],
             "estado": r["estado"],
             "edicion_id": r["edicion_id"],

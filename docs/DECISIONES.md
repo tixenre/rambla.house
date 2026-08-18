@@ -3497,6 +3497,13 @@ solo_whatsapp, admin siempre, una sola tarea en background); manuales `SISTEMA_C
   "una sola forma de cada cosa" (fuente única de "reservar mensual recurrente → pedido"). La atribución
   vía `equipos.dueno` ya era genérica — extenderla a un tercer consumidor (Talleres, después de rental y
   Estudio) confirma que el diseño escala sin tocar el motor de liquidación.
+- **Actualizado 2026-08-13 (commits `67c97c4`/`b11dd07`/`d4e83b4`).** El mecanismo dejó de ser reactivo:
+  ya no genera todos los meses futuros de una sola vez al crear/editar la edición — un **job diario**
+  (`backend/jobs/regenerar_pedidos_talleres.py`) genera **solo el mes actual** al llegar, y de paso
+  limpia pedidos futuros de más que hayan quedado colgados de la lógica vieja (incluidas ediciones que
+  todavía no habían arrancado, fix de seguimiento). El patrón conserva-borra-recrea y la atribución vía
+  `equipos.dueno` no cambiaron — solo el disparador (síncrono en el request → job diario) y el alcance
+  (todos los meses futuros → solo el actual).
 
 ### 2026-07-24 — La promo del Estudio es best-effort; solo los sueltos son stock duro
 

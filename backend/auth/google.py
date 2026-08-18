@@ -231,7 +231,11 @@ def auth_callback(request: Request):
     # apenas entra (mismo primitivo `registerPasskey`, sin código nuevo de ese lado).
     from auth.passkey import queries as passkey_queries
     if passkey_queries.list_for_owner("admin", owner_email=email):
+        # Import local (no al tope del archivo): `auth.backup_codes` importa `router` DESDE
+        # este módulo, así que un import a nivel de módulo acá crearía un ciclo.
+        from auth.backup_codes import set_pending_2fa_cookie
         res = RedirectResponse(f"{FRONTEND_BASE}/admin/login?paso=passkey", status_code=303)
+        set_pending_2fa_cookie(res, email)
         res.delete_cookie("oauth_state")
         return res
 

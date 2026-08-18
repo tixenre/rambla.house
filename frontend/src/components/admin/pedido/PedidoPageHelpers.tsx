@@ -630,12 +630,17 @@ const CONDICION_IVA_CORTA: Record<string, string> = {
 export function FacturaPreviewDialog({ f }: { f: FacturacionArca }) {
   return (
     <AlertDialog open={f.showPreview} onOpenChange={f.setShowPreview}>
-      <AlertDialogContent className="flex h-[94dvh] w-full max-w-[95vw] flex-col overflow-hidden p-0 md:h-[94vh] md:w-fit md:flex-row">
+      <AlertDialogContent className="flex h-[94dvh] w-full max-w-[95vw] flex-col overflow-y-auto p-0 md:h-[94vh] md:w-fit md:flex-row md:overflow-hidden">
         {/* Columna izquierda: info + chequeos + acciones. Columna derecha: la factura a pantalla
             completa de alto, dimensionada a la proporción REAL del layout elegido (LAYOUT_ASPECT)
             — así no queda el sobrante gris que el propio HTML de arca_fe deja alrededor cuando
-            el viewport no matchea el aspecto (ese HTML centra y escala manteniendo proporción). */}
-        <div className="flex w-full shrink-0 flex-col overflow-y-auto border-b hairline md:w-[360px] md:border-b-0 md:border-r">
+            el viewport no matchea el aspecto (ese HTML centra y escala manteniendo proporción).
+            En mobile las 2 columnas se apilan (flex-col) y el stack ENTERO scrollea (el contenedor
+            de afuera, no esta columna) — antes esta columna tenía su propio overflow-y-auto Y el de
+            afuera era overflow-hidden, así que si el texto + el preview apilados superaban 94dvh el
+            preview quedaba recortado e inalcanzable (sin scroll posible). En desktop cada columna
+            sigue con su propio scroll interno, como antes. */}
+        <div className="flex w-full shrink-0 flex-col border-b hairline md:w-[360px] md:overflow-y-auto md:border-b-0 md:border-r">
           <AlertDialogHeader className="px-5 py-4 text-left">
             <AlertDialogTitle>Confirmar factura</AlertDialogTitle>
             <AlertDialogDescription>

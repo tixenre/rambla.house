@@ -20,7 +20,10 @@ concurrency:
 jobs:
   mobile-smoke:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # 20 (no 15): deja margen real al timeout+reintento de "Install Playwright
+    # browsers" (hasta 3×180s si el mirror del runner se cuelga) sin comerse
+    # el resto del job — ver .github/actions/install-playwright-browsers.
+    timeout-minutes: 20
     # El frontend vive en frontend/ (simétrico a backend/) → los npm corren ahí.
     defaults:
       run:
@@ -48,7 +51,7 @@ jobs:
           key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
 
       - name: Install Playwright browsers
-        run: npx playwright install chromium --with-deps
+        uses: ./.github/actions/install-playwright-browsers
 
       - name: Run mobile smoke tests
         run: npx playwright test

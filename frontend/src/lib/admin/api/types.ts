@@ -1158,12 +1158,17 @@ export type EstadisticasData = {
  *  con los percentiles del propio año (`routes/estadisticas.py`) — el front
  *  solo mapea tier → color, no recalcula la escala. */
 export type ActividadCalendarioData = {
-  /** `null` en modo `todos` (el view apilado no tiene un único año). */
+  /** `null` en modo `todos` (la grilla agregada no tiene un único año). */
   anio: number | null;
   anios_disponibles: number[];
-  /** En modo `todos` abarca TODOS los años de `anios_disponibles` — el front
-   *  agrupa por año (prefijo de `dia`) para apilar una grilla por año. Los
-   *  tiers vienen bucketizados POR AÑO por separado, incluso acá. */
+  /** Modo año: `dia` es una fecha real `YYYY-MM-DD`, tier bucketizado
+   *  contra los percentiles de ESE año. Modo `todos`: `dia` es `MM-DD`
+   *  (SIN año — el 1° de enero de TODOS los años combinados en una sola
+   *  celda), `pedidos_activos` es la SUMA cross-year para ese día del año,
+   *  y el tier bucketiza esa distribución agregada de una sola vez (no
+   *  por año — acá no hay años que comparar, es un patrón de
+   *  estacionalidad). Ver `routes/estadisticas.py::compute_actividad_
+   *  calendario` — el front solo mapea tier → color, no recalcula nada. */
   dias: { dia: string; pedidos_activos: number; tier: 0 | 1 | 2 | 3 | 4 }[];
 };
 
@@ -1185,6 +1190,12 @@ export type Cliente = {
   apellido: string;
   telefono: string | null;
   email: string | null;
+  // Contacto de comunicación resuelto server-side (identity/contacts.py): el
+  // teléfono verificado por Didit puede diferir del autodeclarado; el email
+  // prioriza el de Google. `telefono`/`email` de arriba siguen siendo los
+  // campos BASE editables del form — estos son solo para display.
+  telefono_contacto?: string | null;
+  email_comunicacion?: string | null;
   direccion: string | null;
   cuit: string | null;
   descuento: number | null;
@@ -1914,6 +1925,12 @@ export type TallerConcepto = {
   // F4a: video hero (YouTube). '' → sin video.
   video_url: string;
   video_poster_url: string;
+  // Taller hermano (pareja de marketing, 2026-08-17): otro concepto que se
+  // lanza junto a este — su Hero muestra un mini-selector hacia el elegido
+  // acá. Simétrico: si OTRO taller te elige a vos, tu página lo muestra
+  // igual aunque este campo quede en null (ver _resolver_hermano backend).
+  taller_hermano_id: number | null;
+  taller_hermano_titulo: string;
   // F3: instructores como entidad (además de instructor_* legacy arriba).
   instructores: Instructor[];
   // Instituciones co-presentadoras (ej. "Rambla" + "Filmar").
