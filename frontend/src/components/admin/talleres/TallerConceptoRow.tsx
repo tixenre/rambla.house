@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { FileJson, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { talleresAdminApi } from "@/lib/admin/api/talleres";
@@ -9,6 +9,7 @@ import { Button } from "@/design-system/ui/button";
 import { Spinner } from "@/design-system/ui/spinner";
 import { useConfirm } from "@/components/admin/useConfirm";
 import { useScrollFadeMask } from "@/hooks/useScrollFadeMask";
+import { ActualizarPorJsonDialog } from "./ActualizarPorJsonDialog";
 import { ContenidoSection } from "./ConceptoTabs";
 import { EdicionSubRow } from "./EdicionSubRow";
 import { FaqSection } from "./FaqSection";
@@ -32,6 +33,7 @@ export function TallerConceptoRow({
 }) {
   const qc = useQueryClient();
   const confirm = useConfirm();
+  const [jsonUpdateOpen, setJsonUpdateOpen] = useState(false);
   const [activeTab, setActiveTab] = useState<
     "ediciones" | "taller" | "instructores" | "instituciones" | "interesados" | "trabajos" | "faq"
   >("ediciones");
@@ -172,6 +174,16 @@ export function TallerConceptoRow({
             <button
               onClick={(e) => {
                 e.stopPropagation();
+                setJsonUpdateOpen(true);
+              }}
+              className="px-3 py-2 text-xs text-muted-foreground/60 hover:text-ink transition shrink-0"
+              title="Actualizar por JSON"
+            >
+              <FileJson className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
                 handleDeleteConcepto();
               }}
               disabled={deleteMut.isPending}
@@ -220,6 +232,12 @@ export function TallerConceptoRow({
           </div>
         </div>
       )}
+
+      <ActualizarPorJsonDialog
+        concepto={jsonUpdateOpen ? concepto : null}
+        open={jsonUpdateOpen}
+        onClose={() => setJsonUpdateOpen(false)}
+      />
     </div>
   );
 }
