@@ -342,26 +342,55 @@ def _video_dict(row) -> dict | None:
     }
 
 
+def _taller_publico_lite(conn, taller_id: int) -> dict | None:
+    """Nombre + slug de la edición activa más reciente de un CONCEPTO — la
+    pieza mínima para armar un link a `/escuelas/$slug`. None si el
+    concepto no existe o no tiene ninguna edición activa (nada a dónde
+    linkear)."""
+    t = conn.execute("SELECT id, nombre FROM talleres WHERE id = %s", (taller_id,)).fetchone()
+    if not t:
+        return None
+    ed = conn.execute(
+        "SELECT slug FROM ediciones_taller "
+        "WHERE taller_id = %s AND activo = TRUE ORDER BY numero_edicion DESC LIMIT 1",
+        (taller_id,),
+    ).fetchone()
+    if not ed:
+        return None
+    return {"taller_id": t["id"], "nombre": t["nombre"], "slug": ed["slug"]}
+
+
 def _resolver_hermano(conn, mi_taller_id: int) -> dict | None:
-    """Taller hermano (pareja de marketing, pedido del dueño 2026-08-17):
-    resuelve SIMÉTRICO — si YO apunto a otro (`taller_hermano_id`), o si
-    OTRO me apunta a mí, en cualquier caso devuelve el link al hermano. No
-    hace falta setear el vínculo en los 2 lados. El copy de campaña
-    (`taller_hermano_titulo`) vive en el lado que seteó el puntero, se
-    resuelve junto sea cual sea el lado desde el que se está mirando.
+    """Taller hermano (pareja de marketing): resuelve SIMÉTRICO — si YO
+    apunto a otro (`taller_hermano_id`), o si OTRO me apunta a mí, en
+    cualquier caso devuelve el par. No hace falta setear el vínculo en los
+    2 lados. El copy de campaña (`taller_hermano_titulo`) vive en el lado
+    que seteó el puntero, se resuelve junto sea cual sea el lado desde el
+    que se está mirando.
+
+    Devuelve el par YA ORDENADO — `principal` (el lado que tiene el
+    puntero seteado) siempre primero, `secundario` (el resuelto) siempre
+    segundo, **el mismo orden sea cual sea la página desde la que se
+    mira** (pedido del dueño 2026-08-18: "se me cambia de lugar los
+    botones" — la versión anterior ordenaba "yo primero", que invertía el
+    orden según qué taller estuvieras viendo; con eso el banner no se
+    sentía como una sola pieza compartida). El front decide cuál de los
+    dos es un link (el que NO coincide con el taller actual) — acá solo
+    se fija el orden, no la interactividad.
+
     `ORDER BY id` en el lado inverso: si por error 2+ conceptos apuntan al
     mismo hermano, el de menor id gana — determinístico, no una prioridad
     real (caso raro, no vale una constraint para esto).
 
-    None si no hay hermano, o si el hermano no tiene ninguna edición activa
-    a la que linkear — el front no debe romper por un vínculo a medio
-    configurar."""
+    None si no hay hermano, o si algún lado del par no tiene ninguna
+    edición activa a la que linkear — el front no debe romper por un
+    vínculo a medio configurar."""
     mio = conn.execute(
         "SELECT taller_hermano_id, taller_hermano_titulo FROM talleres WHERE id = %s",
         (mi_taller_id,),
     ).fetchone()
     if mio and mio["taller_hermano_id"]:
-        hermano_id, titulo = mio["taller_hermano_id"], mio["taller_hermano_titulo"]
+        dueño_id, otro_id, titulo = mi_taller_id, mio["taller_hermano_id"], mio["taller_hermano_titulo"]
     else:
         otro = conn.execute(
             "SELECT id, taller_hermano_titulo FROM talleres "
@@ -370,26 +399,13 @@ def _resolver_hermano(conn, mi_taller_id: int) -> dict | None:
         ).fetchone()
         if not otro:
             return None
-        hermano_id, titulo = otro["id"], otro["taller_hermano_titulo"]
+        dueño_id, otro_id, titulo = otro["id"], mi_taller_id, otro["taller_hermano_titulo"]
 
-    hermano_taller = conn.execute(
-        "SELECT id, nombre FROM talleres WHERE id = %s", (hermano_id,)
-    ).fetchone()
-    if not hermano_taller:
+    principal = _taller_publico_lite(conn, dueño_id)
+    secundario = _taller_publico_lite(conn, otro_id)
+    if not principal or not secundario:
         return None
-    hermano_edicion = conn.execute(
-        "SELECT slug FROM ediciones_taller "
-        "WHERE taller_id = %s AND activo = TRUE ORDER BY numero_edicion DESC LIMIT 1",
-        (hermano_id,),
-    ).fetchone()
-    if not hermano_edicion:
-        return None
-    return {
-        "taller_id": hermano_id,
-        "nombre": hermano_taller["nombre"],
-        "slug": hermano_edicion["slug"],
-        "titulo": titulo or "",
-    }
+    return {"titulo": titulo or "", "principal": principal, "secundario": secundario}
 
 
 def _edicion_lite(row) -> dict:

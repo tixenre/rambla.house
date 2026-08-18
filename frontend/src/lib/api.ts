@@ -461,6 +461,11 @@ export type CuentaPago = { id?: number | null; alias: string; cbu: string; banco
 
 export type Taller = {
   id: number;
+  // El CONCEPTO (`talleres.id`) — distinto de `id` (la EDICIÓN). Necesario
+  // para comparar contra `taller_hermano.principal/secundario.taller_id`
+  // (ambos referencian concepto, no edición) y saber cuál de los 2 lados
+  // del par es "el que estoy viendo ahora".
+  taller_id: number;
   slug: string;
   nombre: string;
   subtitulo: string;
@@ -484,10 +489,16 @@ export type Taller = {
   numero_edicion: number;
   proxima_edicion?: EdicionLite | null;
   edicion_anterior?: EdicionLite | null;
-  // Taller hermano (pareja de marketing) — otro concepto lanzado junto a
-  // este, resuelto simétrico por el backend. null si no tiene pareja, o si
-  // la tiene pero no hay edición activa a la que linkear.
-  taller_hermano?: { taller_id: number; nombre: string; slug: string; titulo: string } | null;
+  // Taller hermano (pareja de marketing) — el par YA ORDENADO por el
+  // backend (`principal` = el lado con el puntero seteado, siempre
+  // primero) para que el banner se vea IGUAL sea cual sea la página desde
+  // la que se mira. null si no tiene pareja, o si algún lado no tiene
+  // edición activa a la que linkear.
+  taller_hermano?: {
+    titulo: string;
+    principal: { taller_id: number; nombre: string; slug: string };
+    secundario: { taller_id: number; nombre: string; slug: string };
+  } | null;
   activo: boolean;
   tipo_taller: string;
   notif_email: string;

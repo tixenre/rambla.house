@@ -74,32 +74,51 @@ function EdicionesContexto({
   );
 }
 
+/** Uno de los 2 nombres del banner hermano — texto plano si es el taller
+ * actual (nada que linkear a sí mismo), link real si es el otro. Misma
+ * tipografía en los 2 casos: la única diferencia es la interactividad, no
+ * el peso visual — es lo que hace que el banner se vea IGUAL en las 2
+ * páginas (pedido del dueño 2026-08-18, ver HermanoContexto). */
+function NombreHermano({
+  t,
+  taller,
+}: {
+  t: { taller_id: number; nombre: string; slug: string };
+  taller: Taller;
+}) {
+  if (t.taller_id === taller.taller_id) return <span>{t.nombre}</span>;
+  return (
+    <Link
+      to="/escuelas/$slug"
+      params={{ slug: t.slug }}
+      className="underline-offset-4 transition-colors hover:text-rosa hover:underline"
+    >
+      {t.nombre}
+    </Link>
+  );
+}
+
 /**
- * Taller hermano (pareja de marketing) — 2 pills de peso equivalente: el
- * taller actual (no clickeable, remarca "estás viendo esto") + el hermano
- * (link real a su propia página). Clickear ahí es navegación de SPA normal
- * — el "cambio de contenido de abajo y del formulario" pasa solo, porque es
- * la página real del otro taller, no un estado a mano.
+ * Taller hermano (pareja de marketing) — UN banner compartido, no 2 pills
+ * "vos acá + el otro": mismo orden y mismo peso visual en las 2 páginas
+ * del par (`principal`/`secundario` ya vienen ordenados por el backend,
+ * `_resolver_hermano`) — antes el taller actual salía resaltado y primero,
+ * lo que hacía que el banner "cambiara de lugar" según qué taller
+ * estuvieras viendo (pedido del dueño 2026-08-18). Clickear el nombre que
+ * no es el actual es navegación de SPA normal — el "cambio de contenido de
+ * abajo y del formulario" pasa solo, porque es la página real del otro
+ * taller, no un estado a mano.
  */
 function HermanoContexto({ taller }: { taller: Taller }) {
-  if (!taller.taller_hermano) return null;
+  const hermano = taller.taller_hermano;
+  if (!hermano) return null;
   return (
-    <div className="mt-5">
-      {taller.taller_hermano.titulo && (
-        <p className="text-xs text-background/50 mb-2">{taller.taller_hermano.titulo}</p>
-      )}
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex items-center rounded-full bg-rosa px-4 py-1.5 text-sm font-semibold text-ink">
-          {taller.nombre}
-        </span>
-        <span className="text-xs text-background/40">+</span>
-        <Link
-          to="/escuelas/$slug"
-          params={{ slug: taller.taller_hermano.slug }}
-          className="inline-flex items-center rounded-full border border-background/30 px-4 py-1.5 text-sm font-semibold text-background/80 transition hover:border-rosa hover:text-rosa"
-        >
-          {taller.taller_hermano.nombre}
-        </Link>
+    <div className="mt-5 inline-flex flex-col gap-1.5 rounded-xl border border-background/15 px-4 py-2.5">
+      {hermano.titulo && <p className="text-xs text-background/50">{hermano.titulo}</p>}
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm font-semibold text-background/90">
+        <NombreHermano t={hermano.principal} taller={taller} />
+        <span className="text-background/30">×</span>
+        <NombreHermano t={hermano.secundario} taller={taller} />
       </div>
     </div>
   );
