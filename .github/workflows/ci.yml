@@ -363,6 +363,18 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export RESERVAS_DB_TEST=1
           python -m pytest tests/test_talleres_borrador_db.py -v --tb=short -m integration
+      - name: Taller hermano — orden principal/secundario estable contra Postgres real
+        run: |
+          cd backend
+          # Candado del bug (2026-08-19, "no quiero que se den vuelta"): con el
+          # puntero taller_hermano_id seteado en AMBOS lados (la UI del admin no lo
+          # impide), el orden se invertía según cuál de los dos talleres estuvieras
+          # visitando. Solo se prueba de verdad contra una base real.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_taller_hermano_orden_db.py -v --tb=short -m integration
       - name: Escuela v2 — clases ricas + borradores + T&C contra Postgres real (F2, #1278)
         run: |
           cd backend
