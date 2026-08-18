@@ -496,8 +496,8 @@ export type Taller = {
   // edición activa a la que linkear.
   taller_hermano?: {
     titulo: string;
-    principal: { taller_id: number; nombre: string; slug: string };
-    secundario: { taller_id: number; nombre: string; slug: string };
+    principal: { taller_id: number; nombre: string; subtitulo: string; slug: string };
+    secundario: { taller_id: number; nombre: string; subtitulo: string; slug: string };
   } | null;
   activo: boolean;
   tipo_taller: string;

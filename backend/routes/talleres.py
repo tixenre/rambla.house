@@ -343,11 +343,16 @@ def _video_dict(row) -> dict | None:
 
 
 def _taller_publico_lite(conn, taller_id: int) -> dict | None:
-    """Nombre + slug de la edición activa más reciente de un CONCEPTO — la
-    pieza mínima para armar un link a `/escuelas/$slug`. None si el
+    """Nombre + subtítulo + slug de la edición activa más reciente de un
+    CONCEPTO — la pieza mínima para mostrar una mitad del banner de pareja
+    (`TituloPareja` en el front) y armar el link a `/escuelas/$slug`. El
+    subtítulo es lo que deja diferenciar "nivel inicial"/"nivel avanzado"
+    sin inventar un campo nuevo (usa el que ya existe). None si el
     concepto no existe o no tiene ninguna edición activa (nada a dónde
     linkear)."""
-    t = conn.execute("SELECT id, nombre FROM talleres WHERE id = %s", (taller_id,)).fetchone()
+    t = conn.execute(
+        "SELECT id, nombre, subtitulo FROM talleres WHERE id = %s", (taller_id,)
+    ).fetchone()
     if not t:
         return None
     ed = conn.execute(
@@ -357,7 +362,7 @@ def _taller_publico_lite(conn, taller_id: int) -> dict | None:
     ).fetchone()
     if not ed:
         return None
-    return {"taller_id": t["id"], "nombre": t["nombre"], "slug": ed["slug"]}
+    return {"taller_id": t["id"], "nombre": t["nombre"], "subtitulo": t["subtitulo"], "slug": ed["slug"]}
 
 
 def _resolver_hermano(conn, mi_taller_id: int) -> dict | None:

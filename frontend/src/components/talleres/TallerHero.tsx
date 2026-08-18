@@ -74,53 +74,86 @@ function EdicionesContexto({
   );
 }
 
-/** Uno de los 2 nombres del banner hermano — texto plano si es el taller
- * actual (nada que linkear a sí mismo), link real si es el otro. Misma
- * tipografía en los 2 casos: la única diferencia es la interactividad, no
- * el peso visual — es lo que hace que el banner se vea IGUAL en las 2
- * páginas (pedido del dueño 2026-08-18, ver HermanoContexto). */
-function NombreHermano({
+/** Una mitad de la pantalla partida del banner de pareja — nombre +
+ * subtítulo de un taller del par (el subtítulo es lo que deja diferenciar
+ * "nivel inicial"/"nivel avanzado" sin inventar un campo nuevo). Texto
+ * plano si es el taller actual (nada que linkear a sí mismo), link real si
+ * es el otro — misma tipografía en los 2 casos, la única diferencia es la
+ * interactividad, no el peso visual (pedido del dueño 2026-08-18: que las
+ * 2 mitades se vean iguales, sin una "resaltada"). */
+function MitadPareja({
   t,
   taller,
 }: {
-  t: { taller_id: number; nombre: string; slug: string };
+  t: { taller_id: number; nombre: string; subtitulo: string; slug: string };
   taller: Taller;
 }) {
-  if (t.taller_id === taller.taller_id) return <span>{t.nombre}</span>;
+  const contenido = (
+    <>
+      <p
+        className="font-display font-bold lowercase leading-tight tracking-[-0.01em] text-background"
+        style={{ fontSize: "clamp(1.1rem, 2.4vw, 1.5rem)" }}
+      >
+        {t.nombre}
+      </p>
+      {t.subtitulo && <p className="mt-1 text-xs text-background/50">{t.subtitulo}</p>}
+    </>
+  );
+  if (t.taller_id === taller.taller_id) return <div>{contenido}</div>;
   return (
     <Link
       to="/escuelas/$slug"
       params={{ slug: t.slug }}
-      className="underline-offset-4 transition-colors hover:text-rosa hover:underline"
+      className="block transition-opacity hover:opacity-70"
     >
-      {t.nombre}
+      {contenido}
     </Link>
   );
 }
 
 /**
- * Taller hermano (pareja de marketing) — UN banner compartido, no 2 pills
- * "vos acá + el otro": mismo orden y mismo peso visual en las 2 páginas
- * del par (`principal`/`secundario` ya vienen ordenados por el backend,
- * `_resolver_hermano`) — antes el taller actual salía resaltado y primero,
- * lo que hacía que el banner "cambiara de lugar" según qué taller
- * estuvieras viendo (pedido del dueño 2026-08-18). Clickear el nombre que
- * no es el actual es navegación de SPA normal — el "cambio de contenido de
- * abajo y del formulario" pasa solo, porque es la página real del otro
- * taller, no un estado a mano.
+ * Título de un taller que es parte de una PAREJA de marketing (dos
+ * talleres lanzados juntos, ej. nivel inicial + avanzado de la misma
+ * institución) — invierte la jerarquía de siempre (pedido del dueño
+ * 2026-08-18, "esto daría vuelta la lógica"): el título grande ya NO es
+ * el nombre de ESTE taller, es el de LOS DOS juntos. Debajo, una pantalla
+ * partida en 2 mitades de igual peso (`MitadPareja`) deja elegir cuál
+ * seguir viendo. Todo lo de más abajo (fecha/hora/cupos/CTA, y el resto
+ * de la página/form) sigue siendo del taller ACTUAL sin cambios — acá
+ * solo se comparte el título.
  */
-function HermanoContexto({ taller }: { taller: Taller }) {
+function TituloPareja({ taller }: { taller: Taller }) {
   const hermano = taller.taller_hermano;
   if (!hermano) return null;
   return (
-    <div className="mt-5 inline-flex flex-col gap-1.5 rounded-xl border border-background/15 px-4 py-2.5">
-      {hermano.titulo && <p className="text-xs text-background/50">{hermano.titulo}</p>}
-      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-sm font-semibold text-background/90">
-        <NombreHermano t={hermano.principal} taller={taller} />
-        <span className="text-background/30">×</span>
-        <NombreHermano t={hermano.secundario} taller={taller} />
+    <>
+      <p className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa mb-4">Talleres</p>
+      <h1
+        className="font-display font-black lowercase leading-[0.95] tracking-[-0.02em] text-background"
+        style={{ fontSize: "clamp(1.75rem, 6vw, 4rem)" }}
+      >
+        {hermano.principal.nombre} <span className="text-rosa">×</span> {hermano.secundario.nombre}
+      </h1>
+      {hermano.titulo && (
+        <p
+          className="font-display font-bold lowercase leading-tight tracking-[-0.01em] mt-3"
+          style={{
+            fontSize: "clamp(1.1rem, 2.6vw, 1.5rem)",
+            color: "color-mix(in oklch, var(--color-rosa) 80%, white)",
+          }}
+        >
+          {hermano.titulo}
+        </p>
+      )}
+      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 rounded-xl border border-background/15 overflow-hidden">
+        <div className="p-4 sm:border-r sm:border-background/15">
+          <MitadPareja t={hermano.principal} taller={taller} />
+        </div>
+        <div className="p-4 border-t sm:border-t-0 border-background/15">
+          <MitadPareja t={hermano.secundario} taller={taller} />
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -193,8 +226,7 @@ export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }
           style={{ width: TALLER_CONTENT_WIDTH }}
         >
           <div>
-            <Titulo taller={taller} />
-            <HermanoContexto taller={taller} />
+            {taller.taller_hermano ? <TituloPareja taller={taller} /> : <Titulo taller={taller} />}
             <EdicionesContexto taller={taller} />
             <MetaRow
               fechasResumen={fechasResumen}
@@ -219,8 +251,7 @@ export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }
     <section className="relative bg-ink overflow-hidden">
       <Grain opacity={10} />
       <div className="relative mx-auto py-16 sm:py-24" style={{ width: TALLER_CONTENT_WIDTH }}>
-        <Titulo taller={taller} />
-        <HermanoContexto taller={taller} />
+        {taller.taller_hermano ? <TituloPareja taller={taller} /> : <Titulo taller={taller} />}
         <EdicionesContexto taller={taller} />
         <MetaRow
           fechasResumen={fechasResumen}
