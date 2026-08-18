@@ -80,8 +80,14 @@ class TestPendingCookie:
         assert bc._read_pending_2fa(token) == "admin@test.com"
 
     def test_tampered_devuelve_none(self):
+        # Altera el PRIMER carácter (parte del payload), no el último: el
+        # último cae en el grupo final de la firma en base64, que puede tener
+        # bits "no significativos" (padding) — alterarlo ahí decodifica al
+        # mismo byte ~7.6% de las veces (medido empíricamente), dando un
+        # falso "sigue siendo válido" sin que la verificación de firma esté
+        # rota. Tocar el payload invalida la firma siempre (0/2000 medido).
         token = bc.sign_pending_2fa("admin@test.com")
-        assert bc._read_pending_2fa(token[:-1] + ("a" if token[-1] != "a" else "b")) is None
+        assert bc._read_pending_2fa(("a" if token[0] != "a" else "b") + token[1:]) is None
 
     def test_vacio_devuelve_none(self):
         assert bc._read_pending_2fa("") is None
