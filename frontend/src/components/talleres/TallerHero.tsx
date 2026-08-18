@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Calendar, Clock, MapPin, Users } from "lucide-react";
+import { ArrowRight, Calendar, Clock, MapPin, Users } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { Grain } from "@/components/common/Grain";
 import { YouTubeEmbed } from "@/components/common/YouTubeEmbed";
@@ -81,36 +81,20 @@ function EdicionesContexto({
 }
 
 /** Una mitad de la pantalla partida del banner de pareja — nombre +
- * subtítulo + fecha/horario/lugar/cupos de un taller del par (pedido del
- * dueño 2026-08-18: esa info "puede estar dentro del recuadro del
- * taller" en vez de en una fila genérica aparte). El resumen de fecha/
- * horario se calcula con las MISMAS `resumenFechas`/`resumenHorario` que
- * usa el taller actual (a partir de `sesiones`, que este lado trae
- * completo) — así las 2 mitades formatean igual, no una rica y la otra
- * genérica. Fondo propio (`bg-background/10`, el mismo tono que ya usan
- * las flechas del carrusel de `TallerGaleria` sobre el hero oscuro —
- * `bg-background/[0.03]` resultó imperceptible en pantalla) — más fuerte
- * en hover del lado clickeable — para que cada mitad "se note" contra el
- * negro del hero (pedido del dueño) — misma tipografía/peso en los 2
- * lados, la única
- * diferencia real sigue siendo la interactividad, no un resaltado
- * artificial. El lado ACTUAL suma, adentro de su propia mitad, el
- * contexto de edición (agotada/próxima) y el CTA de inscripción — ambos
- * son del taller actual, así que van CON su info, no flotando aparte
- * abajo de todo el banner ("parece un botón colgado ahí", pedido del
- * dueño). Texto plano si es el taller actual (nada que linkear a sí
- * mismo), link real si es el otro. */
-function MitadPareja({
-  t,
-  taller,
-  cta,
-  primero,
-}: {
-  t: HermanoLado;
-  taller: Taller;
-  cta: ReactNode;
-  primero: boolean;
-}) {
+ * subtítulo + fecha/horario/lugar/cupos de un taller del par. El resumen
+ * de fecha/horario usa las MISMAS `resumenFechas`/`resumenHorario` que
+ * el taller actual (a partir de `sesiones`, que este lado trae completo)
+ * — las 2 mitades formatean igual, no una rica y la otra genérica.
+ * Sin fondo/recuadro (pedido del dueño 2026-08-18, segunda vuelta: "el
+ * recuadro gris no me gusta, no es ni el fondo ni se distingue bien" —
+ * el tinte plano fallaba en los 2 extremos) — la jerarquía la da la
+ * TIPOGRAFÍA: el lado ACTUAL es grande/pleno y suma el contexto de
+ * edición + el CTA adentro; el otro lado queda apagado (`/45`, `/30`)
+ * con un link "Ver este taller" que se ilumina en hover — mismo pedido:
+ * "cuando seleccionás uno, que se vuelva más importante". Texto plano si
+ * es el taller actual (nada que linkear a sí mismo), link real si es el
+ * otro. */
+function MitadPareja({ t, taller, cta }: { t: HermanoLado; taller: Taller; cta: ReactNode }) {
   const optsLong: Intl.DateTimeFormatOptions = { weekday: "long", day: "numeric", month: "long" };
   const fechaInicioStr = new Date(t.fecha_inicio + "T12:00:00").toLocaleDateString(
     "es-AR",
@@ -124,36 +108,50 @@ function MitadPareja({
   const contenido = (
     <>
       <p
-        className="font-display font-bold lowercase leading-tight tracking-[-0.01em] text-background"
-        style={{ fontSize: "clamp(1.1rem, 2.4vw, 1.5rem)" }}
+        className={cn(
+          "font-display lowercase leading-tight tracking-[-0.02em] transition-colors",
+          esActual
+            ? "font-black text-background"
+            : "font-bold text-background/45 group-hover:text-background/75",
+        )}
+        style={{
+          fontSize: esActual ? "clamp(1.5rem, 3.2vw, 2.125rem)" : "clamp(1.15rem, 2.4vw, 1.5rem)",
+        }}
       >
         {t.nombre}
       </p>
-      {t.subtitulo && <p className="mt-1 text-xs text-background/50">{t.subtitulo}</p>}
+      {t.subtitulo && (
+        <p
+          className={cn(
+            "mt-1.5 text-xs transition-colors",
+            esActual ? "text-background/55" : "text-background/30 group-hover:text-background/45",
+          )}
+        >
+          {t.subtitulo}
+        </p>
+      )}
       <MetaRow
         fechasResumen={fechasResumen}
         horarioResumen={horarioResumen}
         direccion={t.direccion}
         cuposTotal={t.cupos_total}
         compact
+        dim={!esActual}
       />
       {esActual && <EdicionesContexto taller={taller} compact />}
-      {esActual && <div className="mt-4">{cta}</div>}
+      {esActual && <div className="mt-5">{cta}</div>}
+      {!esActual && (
+        <span className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-rosa/70 transition-colors group-hover:text-rosa">
+          Ver este taller
+          <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+        </span>
+      )}
     </>
   );
 
-  const clases = cn(
-    "block p-4 bg-background/10",
-    primero ? "sm:border-r sm:border-background/15" : "border-t sm:border-t-0 border-background/15",
-  );
-
-  if (esActual) return <div className={clases}>{contenido}</div>;
+  if (esActual) return <div>{contenido}</div>;
   return (
-    <Link
-      to="/escuelas/$slug"
-      params={{ slug: t.slug }}
-      className={cn(clases, "transition-colors hover:bg-background/20")}
-    >
+    <Link to="/escuelas/$slug" params={{ slug: t.slug }} className="group block">
       {contenido}
     </Link>
   );
@@ -162,19 +160,18 @@ function MitadPareja({
 /**
  * Título de un taller que es parte de una PAREJA de marketing (dos
  * talleres lanzados juntos, ej. nivel inicial + avanzado de la misma
- * institución) — invierte la jerarquía de siempre (pedido del dueño
- * 2026-08-18, "esto daría vuelta la lógica"): el título grande ya NO es
- * el nombre de ESTE taller, es el de la CAMPAÑA (`taller_hermano_titulo`,
- * lo que el dueño tipeó en el admin) — no una unión automática de los 2
- * nombres ("eso sea el título, no la unión de los dos títulos", pedido
- * del dueño). Fallback a esa unión SOLO si no cargó ningún título de
- * campaña (para no dejar el hero sin H1). Debajo, una pantalla partida en
- * 2 mitades de igual peso (`MitadPareja`) deja elegir cuál seguir viendo
- * — cada una con su propia fecha/hora/cupos, y la del taller ACTUAL
- * además con su contexto de edición + el CTA de inscripción adentro (el
- * `cta` se pasa desde `TallerHero`, mismo elemento con `id="hero-cta"`
- * que ya observa `TallerCTABar`). El resto de la página (contenido, form)
- * sigue siendo del taller actual sin cambios.
+ * institución) — invierte la jerarquía de siempre: el título grande ya
+ * NO es el nombre de ESTE taller, es el de la CAMPAÑA
+ * (`taller_hermano_titulo`, lo que el dueño tipeó en el admin) — no una
+ * unión automática de los 2 nombres. Fallback a esa unión SOLO si no
+ * cargó ningún título de campaña (para no dejar el hero sin H1). Debajo,
+ * 2 columnas (`MitadPareja`) con peso INTENCIONALMENTE asimétrico: la
+ * del taller actual domina (tamaño + color + CTA adentro), la otra queda
+ * secundaria con un link de salida — no una franja de igual peso (pedido
+ * del dueño 2026-08-18: "cuando seleccionás uno, que se vuelva más
+ * importante"). El `cta` se pasa desde `TallerHero`, mismo elemento con
+ * `id="hero-cta"` que ya observa `TallerCTABar`. El resto de la página
+ * (contenido, form) sigue siendo del taller actual sin cambios.
  */
 function TituloPareja({ taller, cta }: { taller: Taller; cta: ReactNode }) {
   const hermano = taller.taller_hermano;
@@ -190,9 +187,9 @@ function TituloPareja({ taller, cta }: { taller: Taller; cta: ReactNode }) {
       >
         {tituloGrande}
       </h1>
-      <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 rounded-xl border border-background/15 overflow-hidden">
-        <MitadPareja t={hermano.principal} taller={taller} cta={cta} primero />
-        <MitadPareja t={hermano.secundario} taller={taller} cta={cta} primero={false} />
+      <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-8">
+        <MitadPareja t={hermano.principal} taller={taller} cta={cta} />
+        <MitadPareja t={hermano.secundario} taller={taller} cta={cta} />
       </div>
     </>
   );
@@ -204,23 +201,29 @@ function MetaRow({
   direccion,
   cuposTotal,
   compact,
+  dim,
 }: {
   fechasResumen: string;
   horarioResumen: string;
   direccion: string;
   cuposTotal: number;
-  /** Dentro de una mitad del banner de pareja (`MitadPareja`): más chico
-   * y en columna — el ancho de cada mitad no alcanza para la fila
-   * horizontal de siempre. */
+  /** Dentro de una mitad del banner de pareja (`MitadPareja`): más chico,
+   * en una sola fila que envuelve si hace falta — no una columna forzada
+   * (pedido del dueño 2026-08-18: "la info me gustaba más en una sola
+   * línea"). */
   compact?: boolean;
+  /** El lado que NO es el taller actual va más apagado — la jerarquía
+   * (tamaño + color) es la señal de cuál está seleccionado, no un fondo. */
+  dim?: boolean;
 }) {
   return (
     <div
-      className={
+      className={cn(
+        "flex flex-wrap items-center",
         compact
-          ? "mt-3 flex flex-col gap-1 text-xs text-background/50"
-          : "mt-8 flex flex-wrap gap-x-6 gap-y-3 text-sm text-background/60"
-      }
+          ? cn("mt-3 gap-x-4 gap-y-1.5 text-xs", dim ? "text-background/35" : "text-background/55")
+          : "mt-8 gap-x-6 gap-y-3 text-sm text-background/60",
+      )}
     >
       <span className="flex items-center gap-2">
         <Calendar className={compact ? "h-3.5 w-3.5 shrink-0" : "h-4 w-4 shrink-0"} />
