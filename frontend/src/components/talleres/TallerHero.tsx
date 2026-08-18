@@ -3,9 +3,9 @@ import { Link } from "@tanstack/react-router";
 import { Grain } from "@/components/common/Grain";
 import { YouTubeEmbed } from "@/components/common/YouTubeEmbed";
 import { TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
-import { ordinalEdicion } from "@/lib/talleres/formato";
+import { ordinalEdicion, resumenFechas, resumenHorario } from "@/lib/talleres/formato";
 import { trackClickInscribirseTaller } from "@/lib/analytics";
-import type { Taller } from "@/lib/api";
+import type { HermanoLado, Taller } from "@/lib/api";
 
 function Titulo({ taller }: { taller: Taller }) {
   return (
@@ -75,19 +75,26 @@ function EdicionesContexto({
 }
 
 /** Una mitad de la pantalla partida del banner de pareja — nombre +
- * subtítulo de un taller del par (el subtítulo es lo que deja diferenciar
- * "nivel inicial"/"nivel avanzado" sin inventar un campo nuevo). Texto
- * plano si es el taller actual (nada que linkear a sí mismo), link real si
- * es el otro — misma tipografía en los 2 casos, la única diferencia es la
- * interactividad, no el peso visual (pedido del dueño 2026-08-18: que las
- * 2 mitades se vean iguales, sin una "resaltada"). */
-function MitadPareja({
-  t,
-  taller,
-}: {
-  t: { taller_id: number; nombre: string; subtitulo: string; slug: string };
-  taller: Taller;
-}) {
+ * subtítulo + fecha/horario/lugar/cupos de un taller del par (pedido del
+ * dueño 2026-08-18: esa info "puede estar dentro del recuadro del
+ * taller" en vez de en una fila genérica aparte). El resumen de fecha/
+ * horario se calcula con las MISMAS `resumenFechas`/`resumenHorario` que
+ * usa el taller actual (a partir de `sesiones`, que este lado trae
+ * completo) — así las 2 mitades formatean igual, no una rica y la otra
+ * genérica. Texto plano si es el taller actual (nada que linkear a sí
+ * mismo), link real si es el otro — misma tipografía en los 2 casos, la
+ * única diferencia es la interactividad, no el peso visual (pedido del
+ * dueño: que las 2 mitades se vean iguales, sin una "resaltada"). */
+function MitadPareja({ t, taller }: { t: HermanoLado; taller: Taller }) {
+  const optsLong: Intl.DateTimeFormatOptions = { weekday: "long", day: "numeric", month: "long" };
+  const fechaInicioStr = new Date(t.fecha_inicio + "T12:00:00").toLocaleDateString(
+    "es-AR",
+    optsLong,
+  );
+  const fechaFinStr = new Date(t.fecha_fin + "T12:00:00").toLocaleDateString("es-AR", optsLong);
+  const fechasResumen = resumenFechas(t.sesiones, fechaInicioStr, fechaFinStr);
+  const horarioResumen = resumenHorario(t.sesiones, t.horario);
+
   const contenido = (
     <>
       <p
@@ -97,6 +104,13 @@ function MitadPareja({
         {t.nombre}
       </p>
       {t.subtitulo && <p className="mt-1 text-xs text-background/50">{t.subtitulo}</p>}
+      <MetaRow
+        fechasResumen={fechasResumen}
+        horarioResumen={horarioResumen}
+        direccion={t.direccion}
+        cuposTotal={t.cupos_total}
+        compact
+      />
     </>
   );
   if (t.taller_id === taller.taller_id) return <div>{contenido}</div>;
@@ -116,15 +130,20 @@ function MitadPareja({
  * talleres lanzados juntos, ej. nivel inicial + avanzado de la misma
  * institución) — invierte la jerarquía de siempre (pedido del dueño
  * 2026-08-18, "esto daría vuelta la lógica"): el título grande ya NO es
- * el nombre de ESTE taller, es el de LOS DOS juntos. Debajo, una pantalla
- * partida en 2 mitades de igual peso (`MitadPareja`) deja elegir cuál
- * seguir viendo. Todo lo de más abajo (fecha/hora/cupos/CTA, y el resto
- * de la página/form) sigue siendo del taller ACTUAL sin cambios — acá
- * solo se comparte el título.
+ * el nombre de ESTE taller, es el de la CAMPAÑA (`taller_hermano_titulo`,
+ * lo que el dueño tipeó en el admin) — no una unión automática de los 2
+ * nombres ("eso sea el título, no la unión de los dos títulos", pedido
+ * del dueño). Fallback a esa unión SOLO si no cargó ningún título de
+ * campaña (para no dejar el hero sin H1). Debajo, una pantalla partida en
+ * 2 mitades de igual peso (`MitadPareja`, con su propia fecha/hora/cupos)
+ * deja elegir cuál seguir viendo. El resto de la página (contenido, form)
+ * sigue siendo del taller ACTUAL sin cambios.
  */
 function TituloPareja({ taller }: { taller: Taller }) {
   const hermano = taller.taller_hermano;
   if (!hermano) return null;
+  const tituloGrande =
+    hermano.titulo || `${hermano.principal.nombre} × ${hermano.secundario.nombre}`;
   return (
     <>
       <p className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa mb-4">Talleres</p>
@@ -132,19 +151,8 @@ function TituloPareja({ taller }: { taller: Taller }) {
         className="font-display font-black lowercase leading-[0.95] tracking-[-0.02em] text-background"
         style={{ fontSize: "clamp(1.75rem, 6vw, 4rem)" }}
       >
-        {hermano.principal.nombre} <span className="text-rosa">×</span> {hermano.secundario.nombre}
+        {tituloGrande}
       </h1>
-      {hermano.titulo && (
-        <p
-          className="font-display font-bold lowercase leading-tight tracking-[-0.01em] mt-3"
-          style={{
-            fontSize: "clamp(1.1rem, 2.6vw, 1.5rem)",
-            color: "color-mix(in oklch, var(--color-rosa) 80%, white)",
-          }}
-        >
-          {hermano.titulo}
-        </p>
-      )}
       <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 rounded-xl border border-background/15 overflow-hidden">
         <div className="p-4 sm:border-r sm:border-background/15">
           <MitadPareja t={hermano.principal} taller={taller} />
@@ -162,28 +170,39 @@ function MetaRow({
   horarioResumen,
   direccion,
   cuposTotal,
+  compact,
 }: {
   fechasResumen: string;
   horarioResumen: string;
   direccion: string;
   cuposTotal: number;
+  /** Dentro de una mitad del banner de pareja (`MitadPareja`): más chico
+   * y en columna — el ancho de cada mitad no alcanza para la fila
+   * horizontal de siempre. */
+  compact?: boolean;
 }) {
   return (
-    <div className="mt-8 flex flex-wrap gap-x-6 gap-y-3 text-sm text-background/60">
+    <div
+      className={
+        compact
+          ? "mt-3 flex flex-col gap-1 text-xs text-background/50"
+          : "mt-8 flex flex-wrap gap-x-6 gap-y-3 text-sm text-background/60"
+      }
+    >
       <span className="flex items-center gap-2">
-        <Calendar className="h-4 w-4 shrink-0" />
+        <Calendar className={compact ? "h-3.5 w-3.5 shrink-0" : "h-4 w-4 shrink-0"} />
         {fechasResumen}
       </span>
       <span className="flex items-center gap-2">
-        <Clock className="h-4 w-4 shrink-0" />
+        <Clock className={compact ? "h-3.5 w-3.5 shrink-0" : "h-4 w-4 shrink-0"} />
         {horarioResumen}
       </span>
       <span className="flex items-center gap-2">
-        <MapPin className="h-4 w-4 shrink-0" />
+        <MapPin className={compact ? "h-3.5 w-3.5 shrink-0" : "h-4 w-4 shrink-0"} />
         {direccion}
       </span>
       <span className="flex items-center gap-2">
-        <Users className="h-4 w-4 shrink-0" />
+        <Users className={compact ? "h-3.5 w-3.5 shrink-0" : "h-4 w-4 shrink-0"} />
         {cuposTotal} cupos
       </span>
     </div>
@@ -228,12 +247,14 @@ export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }
           <div>
             {taller.taller_hermano ? <TituloPareja taller={taller} /> : <Titulo taller={taller} />}
             <EdicionesContexto taller={taller} />
-            <MetaRow
-              fechasResumen={fechasResumen}
-              horarioResumen={horarioResumen}
-              direccion={formTaller.direccion}
-              cuposTotal={formTaller.cupos_total}
-            />
+            {!taller.taller_hermano && (
+              <MetaRow
+                fechasResumen={fechasResumen}
+                horarioResumen={horarioResumen}
+                direccion={formTaller.direccion}
+                cuposTotal={formTaller.cupos_total}
+              />
+            )}
             <div className="mt-8">{cta}</div>
           </div>
           <YouTubeEmbed
@@ -253,12 +274,14 @@ export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }
       <div className="relative mx-auto py-16 sm:py-24" style={{ width: TALLER_CONTENT_WIDTH }}>
         {taller.taller_hermano ? <TituloPareja taller={taller} /> : <Titulo taller={taller} />}
         <EdicionesContexto taller={taller} />
-        <MetaRow
-          fechasResumen={fechasResumen}
-          horarioResumen={horarioResumen}
-          direccion={formTaller.direccion}
-          cuposTotal={formTaller.cupos_total}
-        />
+        {!taller.taller_hermano && (
+          <MetaRow
+            fechasResumen={fechasResumen}
+            horarioResumen={horarioResumen}
+            direccion={formTaller.direccion}
+            cuposTotal={formTaller.cupos_total}
+          />
+        )}
         <div className="mt-8">{cta}</div>
       </div>
     </section>

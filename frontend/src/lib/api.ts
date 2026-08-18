@@ -8,6 +8,7 @@
 
 import { authedPostJson } from "@/lib/authedFetch";
 import { trackReservarEstudio } from "@/lib/analytics";
+import type { SesionFecha } from "@/lib/talleres/formato";
 
 const API_BASE = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "");
 
@@ -459,6 +460,24 @@ export type Sesion = {
  *  (`_cuentas_pago_efectivas`, backend) — nunca se manda de vuelta al editar. */
 export type CuentaPago = { id?: number | null; alias: string; cbu: string; banco: string };
 
+// Un lado del banner de pareja (taller hermano) — trae lo mínimo del
+// concepto (nombre/subtítulo) MÁS los datos de la edición activa que
+// `MitadPareja` necesita para armar su propio resumen de fecha/horario
+// (mismo criterio — `resumenFechas`/`resumenHorario` — que usa el taller
+// actual, para que las 2 mitades del banner formateen igual).
+export type HermanoLado = {
+  taller_id: number;
+  nombre: string;
+  subtitulo: string;
+  slug: string;
+  fecha_inicio: string;
+  fecha_fin: string;
+  horario: string;
+  direccion: string;
+  cupos_total: number;
+  sesiones: SesionFecha[];
+};
+
 export type Taller = {
   id: number;
   // El CONCEPTO (`talleres.id`) — distinto de `id` (la EDICIÓN). Necesario
@@ -494,11 +513,7 @@ export type Taller = {
   // primero) para que el banner se vea IGUAL sea cual sea la página desde
   // la que se mira. null si no tiene pareja, o si algún lado no tiene
   // edición activa a la que linkear.
-  taller_hermano?: {
-    titulo: string;
-    principal: { taller_id: number; nombre: string; subtitulo: string; slug: string };
-    secundario: { taller_id: number; nombre: string; subtitulo: string; slug: string };
-  } | null;
+  taller_hermano?: { titulo: string; principal: HermanoLado; secundario: HermanoLado } | null;
   activo: boolean;
   tipo_taller: string;
   notif_email: string;

@@ -343,26 +343,45 @@ def _video_dict(row) -> dict | None:
 
 
 def _taller_publico_lite(conn, taller_id: int) -> dict | None:
-    """Nombre + subtítulo + slug de la edición activa más reciente de un
-    CONCEPTO — la pieza mínima para mostrar una mitad del banner de pareja
-    (`TituloPareja` en el front) y armar el link a `/escuelas/$slug`. El
-    subtítulo es lo que deja diferenciar "nivel inicial"/"nivel avanzado"
-    sin inventar un campo nuevo (usa el que ya existe). None si el
-    concepto no existe o no tiene ninguna edición activa (nada a dónde
-    linkear)."""
+    """Datos de la edición activa más reciente de un CONCEPTO para mostrar
+    una mitad completa del banner de pareja (`MitadPareja` en el front,
+    pedido del dueño 2026-08-18: la info de fecha/horario/cupos va DENTRO
+    del recuadro de cada taller, no en una fila genérica aparte) + armar el
+    link a `/escuelas/$slug`. Trae `sesiones` (mismo shape que
+    `_edicion_to_public_dict`) para que el front pueda calcular
+    `resumenFechas`/`resumenHorario` con el MISMO criterio que usa para el
+    taller actual — así las 2 mitades formatean igual, no una rica y la
+    otra genérica. El subtítulo es lo que deja diferenciar "nivel inicial"/
+    "nivel avanzado" sin inventar un campo nuevo. None si el concepto no
+    existe o no tiene ninguna edición activa (nada a dónde linkear)."""
     t = conn.execute(
         "SELECT id, nombre, subtitulo FROM talleres WHERE id = %s", (taller_id,)
     ).fetchone()
     if not t:
         return None
     ed = conn.execute(
-        "SELECT slug FROM ediciones_taller "
+        "SELECT id, slug, fecha_inicio, fecha_fin, horario, direccion, "
+        "cupos_total, cupos_confirmados FROM ediciones_taller "
         "WHERE taller_id = %s AND activo = TRUE ORDER BY numero_edicion DESC LIMIT 1",
         (taller_id,),
     ).fetchone()
     if not ed:
         return None
-    return {"taller_id": t["id"], "nombre": t["nombre"], "subtitulo": t["subtitulo"], "slug": ed["slug"]}
+    return {
+        "taller_id": t["id"],
+        "nombre": t["nombre"],
+        "subtitulo": t["subtitulo"],
+        "slug": ed["slug"],
+        "fecha_inicio": str(ed["fecha_inicio"]),
+        "fecha_fin": str(ed["fecha_fin"]),
+        "horario": ed["horario"],
+        "direccion": ed["direccion"],
+        # cupos_total (no cupos_disponibles) — mismo campo que MetaRow ya
+        # muestra para el taller actual (formTaller.cupos_total); las 2
+        # mitades del banner tienen que decir lo mismo con el mismo criterio.
+        "cupos_total": ed["cupos_total"],
+        "sesiones": _get_clases(conn, ed["id"]),
+    }
 
 
 def _resolver_hermano(conn, mi_taller_id: int) -> dict | None:
