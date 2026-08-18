@@ -1,0 +1,35 @@
+name: "Install Playwright browsers (con reintento)"
+description: >
+  Instala los browsers de Playwright con --with-deps, con timeout + reintento
+  por intento. El mirror azure.archive.ubuntu.com que preconfiguran los
+  runners de GitHub a veces queda colgado (no falla rápido) en vez de caer
+  al mirror canónico — confirmado en vivo 2026-08-18: se comió el
+  timeout-minutes del job entero en 2 corridas seguidas sin llegar siquiera
+  a descargar los browsers. El timeout por intento corta ese cuelgue
+  temprano y reintenta, en vez de perder el job completo.
+
+inputs:
+  working-directory:
+    description: Directorio desde el que correr npx (donde vive package.json)
+    required: false
+    default: frontend
+  browser:
+    description: Browser a instalar (mismo argumento de `playwright install`)
+    required: false
+    default: chromium
+
+runs:
+  using: composite
+  steps:
+    - name: Install Playwright browsers (timeout + reintento)
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        for i in 1 2 3; do
+          if timeout 180 npx playwright install ${{ inputs.browser }} --with-deps; then
+            exit 0
+          fi
+          echo "Intento $i falló o se colgó (timeout 180s) — reintentando..."
+        done
+        echo "Los 3 intentos fallaron."
+        exit 1
