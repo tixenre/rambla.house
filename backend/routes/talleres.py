@@ -705,8 +705,14 @@ def get_institucion(slug: str):
     """Hub público de una institución co-presentadora (ej. "Filmar"): su
     perfil + todas sus ediciones activas — un solo link para compartir varios
     niveles/ediciones de la misma institución en vez de uno por taller.
-    Mismo shape de taller que /talleres (sin proxima_edicion/edicion_anterior/
-    taller_hermano — igual que list_talleres, campos opcionales en el front)."""
+    Mismo shape de taller que /talleres (sin proxima_edicion/edicion_anterior —
+    igual que list_talleres, campos opcionales en el front). SÍ incluye
+    `taller_hermano`: cuando 2 talleres de esta institución son pareja de
+    marketing entre sí, el front (`TallerHubBlock`/`dedupHermanos`) lo usa para
+    mostrar el hero compartido una sola vez en vez de 2 heroes completos
+    apilados (pedido del dueño 2026-08-19, "hero compartido + solo el taller
+    activo abajo") — sin este campo, `dedupHermanos` no tiene con qué
+    detectar el par."""
     with get_db() as conn:
         ins_row = conn.execute(
             "SELECT * FROM instituciones WHERE slug = %s", (slug,)
@@ -720,16 +726,17 @@ def get_institucion(slug: str):
             "ORDER BY ti.orden, e.id",
             (ins_row["id"],),
         ).fetchall()
-        talleres = [
-            _edicion_to_public_dict(
+        talleres = []
+        for r in rows:
+            d = _edicion_to_public_dict(
                 r, _get_clases(conn, r["id"]), _get_instructores_taller(conn, r["taller_id"]),
                 _get_modalidades(conn, r["id"]),
                 instituciones=_get_instituciones_taller(conn, r["taller_id"]),
                 fotos=_get_edicion_fotos(conn, r["id"]),
                 cuentas_pago=_get_cuentas_pago(conn, r["id"]),
             )
-            for r in rows
-        ]
+            d["taller_hermano"] = _resolver_hermano(conn, r["taller_id"])
+            talleres.append(d)
         return {"institucion": _institucion_dict(ins_row), "talleres": talleres}
 
 
