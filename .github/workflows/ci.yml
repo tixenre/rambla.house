@@ -15,7 +15,10 @@ on:
     # (commit vacío, --allow-empty) también lo saltea — paths-ignore no tiene
     # nada que comparar y lo trata como "nada fuera de la lista". No sirve
     # para forzar un re-run tras un check suite cancelado; hace falta un
-    # cambio de contenido real en un archivo no ignorado.
+    # cambio de contenido real en un archivo no ignorado. Mismo límite aplica
+    # para forzar un redeploy de Railway tras un incidente de su lado (2026-08-19):
+    # un commit vacío no dispara nada acá — hace falta el mismo cambio de
+    # contenido real, o el botón "Redeploy" de Railway sobre el commit ya verde.
     paths-ignore:
       - "**/*.md"
       - "docs/**"
