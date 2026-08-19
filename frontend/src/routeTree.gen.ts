@@ -45,6 +45,7 @@ import { Route as AdminLoginRouteImport } from './routes/admin.login'
 import { Route as AdminEstudioRouteImport } from './routes/admin/estudio'
 import { Route as AdminEquiposRouteImport } from './routes/admin/equipos'
 import { Route as EscuelasSenaTokenRouteImport } from './routes/escuelas.sena.$token'
+import { Route as EscuelasInstitucionesSlugRouteImport } from './routes/escuelas.instituciones.$slug'
 import { Route as EscuelaSenaTokenRouteImport } from './routes/escuela.sena.$token'
 
 const AdminIndexLazyRouteImport = createFileRoute('/admin/')()
@@ -583,6 +584,14 @@ const EscuelasSenaTokenRoute = EscuelasSenaTokenRouteImport.update({
 } as any).lazy(() =>
   import('./routes/escuelas.sena.$token.lazy').then((d) => d.Route),
 )
+const EscuelasInstitucionesSlugRoute =
+  EscuelasInstitucionesSlugRouteImport.update({
+    id: '/instituciones/$slug',
+    path: '/instituciones/$slug',
+    getParentRoute: () => EscuelasRoute,
+  } as any).lazy(() =>
+    import('./routes/escuelas.instituciones.$slug.lazy').then((d) => d.Route),
+  )
 const EscuelaSenaTokenRoute = EscuelaSenaTokenRouteImport.update({
   id: '/sena/$token',
   path: '/sena/$token',
@@ -649,6 +658,7 @@ export interface FileRoutesByFullPath {
   '/workshops/': typeof WorkshopsIndexRoute
   '/admin/': typeof AdminIndexLazyRoute
   '/escuela/sena/$token': typeof EscuelaSenaTokenRoute
+  '/escuelas/instituciones/$slug': typeof EscuelasInstitucionesSlugRoute
   '/escuelas/sena/$token': typeof EscuelasSenaTokenRoute
   '/admin/contabilidad/cuentas': typeof AdminContabilidadCuentasLazyRoute
   '/admin/contabilidad/estudio': typeof AdminContabilidadEstudioLazyRoute
@@ -719,6 +729,7 @@ export interface FileRoutesByTo {
   '/workshops': typeof WorkshopsIndexRoute
   '/admin': typeof AdminIndexLazyRoute
   '/escuela/sena/$token': typeof EscuelaSenaTokenRoute
+  '/escuelas/instituciones/$slug': typeof EscuelasInstitucionesSlugRoute
   '/escuelas/sena/$token': typeof EscuelasSenaTokenRoute
   '/admin/contabilidad/cuentas': typeof AdminContabilidadCuentasLazyRoute
   '/admin/contabilidad/estudio': typeof AdminContabilidadEstudioLazyRoute
@@ -798,6 +809,7 @@ export interface FileRoutesById {
   '/workshops/': typeof WorkshopsIndexRoute
   '/admin/': typeof AdminIndexLazyRoute
   '/escuela/sena/$token': typeof EscuelaSenaTokenRoute
+  '/escuelas/instituciones/$slug': typeof EscuelasInstitucionesSlugRoute
   '/escuelas/sena/$token': typeof EscuelasSenaTokenRoute
   '/admin/contabilidad/cuentas': typeof AdminContabilidadCuentasLazyRoute
   '/admin/contabilidad/estudio': typeof AdminContabilidadEstudioLazyRoute
@@ -878,6 +890,7 @@ export interface FileRouteTypes {
     | '/workshops/'
     | '/admin/'
     | '/escuela/sena/$token'
+    | '/escuelas/instituciones/$slug'
     | '/escuelas/sena/$token'
     | '/admin/contabilidad/cuentas'
     | '/admin/contabilidad/estudio'
@@ -948,6 +961,7 @@ export interface FileRouteTypes {
     | '/workshops'
     | '/admin'
     | '/escuela/sena/$token'
+    | '/escuelas/instituciones/$slug'
     | '/escuelas/sena/$token'
     | '/admin/contabilidad/cuentas'
     | '/admin/contabilidad/estudio'
@@ -1026,6 +1040,7 @@ export interface FileRouteTypes {
     | '/workshops/'
     | '/admin/'
     | '/escuela/sena/$token'
+    | '/escuelas/instituciones/$slug'
     | '/escuelas/sena/$token'
     | '/admin/contabilidad/cuentas'
     | '/admin/contabilidad/estudio'
@@ -1592,6 +1607,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EscuelasSenaTokenRouteImport
       parentRoute: typeof EscuelasRoute
     }
+    '/escuelas/instituciones/$slug': {
+      id: '/escuelas/instituciones/$slug'
+      path: '/instituciones/$slug'
+      fullPath: '/escuelas/instituciones/$slug'
+      preLoaderRoute: typeof EscuelasInstitucionesSlugRouteImport
+      parentRoute: typeof EscuelasRoute
+    }
     '/escuela/sena/$token': {
       id: '/escuela/sena/$token'
       path: '/sena/$token'
@@ -1778,12 +1800,14 @@ const EscuelaRouteWithChildren =
 interface EscuelasRouteChildren {
   EscuelasSlugRoute: typeof EscuelasSlugRoute
   EscuelasIndexRoute: typeof EscuelasIndexRoute
+  EscuelasInstitucionesSlugRoute: typeof EscuelasInstitucionesSlugRoute
   EscuelasSenaTokenRoute: typeof EscuelasSenaTokenRoute
 }
 
 const EscuelasRouteChildren: EscuelasRouteChildren = {
   EscuelasSlugRoute: EscuelasSlugRoute,
   EscuelasIndexRoute: EscuelasIndexRoute,
+  EscuelasInstitucionesSlugRoute: EscuelasInstitucionesSlugRoute,
   EscuelasSenaTokenRoute: EscuelasSenaTokenRoute,
 }
 

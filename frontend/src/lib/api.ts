@@ -478,6 +478,20 @@ export type HermanoLado = {
   sesiones: SesionFecha[];
 };
 
+// Institución co-presentadora de uno o más talleres (ej. "Rambla" + "Filmar").
+// Entidad propia con su propia URL pública (hub /escuelas/instituciones/$slug
+// que agrupa todos sus talleres) — ver apiGetInstitucion más abajo.
+export type Institucion = {
+  id: number;
+  slug: string;
+  nombre: string;
+  descripcion: string;
+  instagram: string;
+  web: string;
+  logo_url: string;
+  logo_media_id: number | null;
+};
+
 export type Taller = {
   id: number;
   // El CONCEPTO (`talleres.id`) — distinto de `id` (la EDICIÓN). Necesario
@@ -539,15 +553,7 @@ export type Taller = {
     proyectos: string;
   }[];
   // Instituciones co-presentadoras (ej. "Rambla" + "Filmar").
-  instituciones: {
-    id: number;
-    nombre: string;
-    descripcion: string;
-    instagram: string;
-    web: string;
-    logo_url: string;
-    logo_media_id: number | null;
-  }[];
+  instituciones: Institucion[];
   sesiones: Sesion[];
   // F4a: video hero (YouTube) — null si no hay video configurado o la URL no
   // se pudo interpretar. El embed es siempre youtube-nocookie.com.
@@ -623,6 +629,12 @@ export function apiGetTalleres() {
 
 export function apiGetTaller(slug: string) {
   return get<Taller>(`/api/talleres/${slug}`);
+}
+
+// Hub público de una institución co-presentadora (ej. "Filmar"): su perfil +
+// todos sus talleres con edición activa, para /escuelas/instituciones/$slug.
+export function apiGetInstitucion(slug: string) {
+  return get<{ institucion: Institucion; talleres: Taller[] }>(`/api/instituciones/${slug}`);
 }
 
 export async function apiUploadComprobante(
