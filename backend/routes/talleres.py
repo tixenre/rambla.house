@@ -173,6 +173,7 @@ def _get_instructores_taller(conn, taller_id: int) -> list[dict]:
 def _institucion_dict(row) -> dict:
     return {
         "id": row["id"],
+        "slug": row["slug"],
         "nombre": row["nombre"],
         "descripcion": row["descripcion"],
         "instagram": row["instagram"],
@@ -697,6 +698,39 @@ def get_taller(slug: str, request: Request):
 
         d["taller_hermano"] = _resolver_hermano(conn, row["taller_id"])
     return d
+
+
+@router.get("/instituciones/{slug}")
+def get_institucion(slug: str):
+    """Hub público de una institución co-presentadora (ej. "Filmar"): su
+    perfil + todas sus ediciones activas — un solo link para compartir varios
+    niveles/ediciones de la misma institución en vez de uno por taller.
+    Mismo shape de taller que /talleres (sin proxima_edicion/edicion_anterior/
+    taller_hermano — igual que list_talleres, campos opcionales en el front)."""
+    with get_db() as conn:
+        ins_row = conn.execute(
+            "SELECT * FROM instituciones WHERE slug = %s", (slug,)
+        ).fetchone()
+        if ins_row is None:
+            raise HTTPException(404, "Institución no encontrada")
+        rows = conn.execute(
+            f"{_EDICION_JOIN_SELECT} "
+            "JOIN taller_instituciones ti ON ti.taller_id = e.taller_id "
+            "WHERE ti.institucion_id = %s AND e.activo = TRUE "
+            "ORDER BY ti.orden, e.id",
+            (ins_row["id"],),
+        ).fetchall()
+        talleres = [
+            _edicion_to_public_dict(
+                r, _get_clases(conn, r["id"]), _get_instructores_taller(conn, r["taller_id"]),
+                _get_modalidades(conn, r["id"]),
+                instituciones=_get_instituciones_taller(conn, r["taller_id"]),
+                fotos=_get_edicion_fotos(conn, r["id"]),
+                cuentas_pago=_get_cuentas_pago(conn, r["id"]),
+            )
+            for r in rows
+        ]
+        return {"institucion": _institucion_dict(ins_row), "talleres": talleres}
 
 
 async def _procesar_upload_comprobante(request: Request, ref: str) -> dict:
@@ -2262,11 +2296,18 @@ def admin_create_institucion(body: InstitucionBody, request: Request):
     if not body.nombre.strip():
         raise HTTPException(400, "El nombre es obligatorio")
     with get_db() as conn:
+        # Slug estable generado una sola vez, al crear (mismo criterio que
+        # talleres: no se regenera solo porque el nombre se edita después —
+        # evitaría romper un link ya compartido del hub /escuelas/instituciones).
+        ocupados = {
+            r["slug"] for r in conn.execute("SELECT slug FROM instituciones").fetchall()
+        }
+        slug = slug_unico(slugify(body.nombre.strip()) or "institucion", ocupados)
         cur = conn.execute(
-            "INSERT INTO instituciones (nombre, descripcion, instagram, web) "
-            "VALUES (%s, %s, %s, %s) RETURNING id",
+            "INSERT INTO instituciones (nombre, descripcion, instagram, web, slug) "
+            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
             (body.nombre.strip(), body.descripcion.strip(),
-             body.instagram.strip(), body.web.strip()),
+             body.instagram.strip(), body.web.strip(), slug),
         )
         institucion_id = cur.fetchone()["id"]
         conn.commit()

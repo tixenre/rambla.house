@@ -2192,6 +2192,44 @@ def _init_db_schema(conn):
         "ON taller_instituciones(institucion_id)"
     )
 
+    # instituciones.slug (migración institucslug): URL pública del hub de
+    # talleres de una institución (/escuelas/instituciones/$slug). Tabla
+    # chica (pocas instituciones) — a diferencia de equipos.slug, se
+    # backfillea e impone NOT NULL + UNIQUE de una, sin fase transicional.
+    conn.execute("ALTER TABLE instituciones ADD COLUMN IF NOT EXISTS slug TEXT")
+    from dataio.slug import slugify, slug_unico
+
+    _pendientes_ins = conn.execute(
+        "SELECT id, nombre FROM instituciones WHERE slug IS NULL"
+    ).fetchall()
+    if _pendientes_ins:
+        _ocupados_ins = {
+            r["slug"]
+            for r in conn.execute(
+                "SELECT slug FROM instituciones WHERE slug IS NOT NULL"
+            ).fetchall()
+        }
+        for r in _pendientes_ins:
+            base = slugify(r["nombre"]) or f"institucion-{r['id']}"
+            slug = slug_unico(base, _ocupados_ins)
+            _ocupados_ins.add(slug)
+            conn.execute(
+                "UPDATE instituciones SET slug = %s WHERE id = %s", (slug, r["id"])
+            )
+    conn.execute("ALTER TABLE instituciones ALTER COLUMN slug SET NOT NULL")
+    conn.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'instituciones_slug_key'
+                  AND conrelid = 'instituciones'::regclass
+            ) THEN
+                ALTER TABLE instituciones ADD CONSTRAINT instituciones_slug_key UNIQUE (slug);
+            END IF;
+        END $$;
+    """)
+
     # Escuela v2 F4a: video hero (YouTube) del concepto. Mismo extractor que
     # estudio_trabajos (services.media.youtube.extract_video_id), pero acá SÍ
     # se descarga y guarda el poster en R2 (store_youtube_poster) — es
