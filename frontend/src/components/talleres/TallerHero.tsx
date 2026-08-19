@@ -250,6 +250,18 @@ type Props = {
   formTaller: { direccion: string; cupos_total: number };
   fechasResumen: string;
   horarioResumen: string;
+  /** Sufijo para los ids del CTA/ancla — default "" (`id="hero-cta"`,
+   * `href="#inscripcion"`, el comportamiento de siempre, page-único). El hub
+   * de institución (varios talleres completos en una sola página) pasa el
+   * slug del taller para que cada hero apunte a SU propio formulario en vez
+   * de que las N anclas "#inscripcion" colisionen en la primera. */
+  anchorSuffix?: string;
+  /** Oculta el banner de "pareja" (taller_hermano) aunque el taller lo
+   * tenga — default true (comportamiento de siempre). El hub de
+   * institución lo pasa en false: ya muestra ambos talleres completos uno
+   * debajo del otro, un mini-banner de pareja adentro de cada uno sería
+   * redundante (la propia página ES la unión). */
+  showHermano?: boolean;
 };
 
 /**
@@ -260,17 +272,27 @@ type Props = {
  * campo de foto de portada separado; si se pide, es un campo nuevo a sumar
  * junto a video_url, no algo a inventar acá.
  */
-export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }: Props) {
+export function TallerHero({
+  taller,
+  formTaller,
+  fechasResumen,
+  horarioResumen,
+  anchorSuffix,
+  showHermano = true,
+}: Props) {
+  const anchorId = anchorSuffix ? `inscripcion-${anchorSuffix}` : "inscripcion";
+  const heroCtaId = anchorSuffix ? `hero-cta-${anchorSuffix}` : "hero-cta";
   const cta = (
     <a
-      id="hero-cta"
-      href="#inscripcion"
+      id={heroCtaId}
+      href={`#${anchorId}`}
       onClick={() => trackClickInscribirseTaller(taller.id)}
       className="inline-flex items-center gap-2 rounded-full bg-rosa text-ink px-7 py-3.5 text-base font-bold hover:brightness-110 active:scale-[0.97] transition-all"
     >
       Quiero inscribirme
     </a>
   );
+  const mostrarHermano = showHermano && taller.taller_hermano;
 
   if (taller.video) {
     return (
@@ -281,7 +303,7 @@ export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }
           style={{ width: TALLER_CONTENT_WIDTH }}
         >
           <div>
-            {taller.taller_hermano ? (
+            {mostrarHermano ? (
               <TituloPareja taller={taller} cta={cta} />
             ) : (
               <>
@@ -312,7 +334,7 @@ export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }
     <section className="relative bg-ink overflow-hidden">
       <Grain opacity={10} />
       <div className="relative mx-auto py-16 sm:py-24" style={{ width: TALLER_CONTENT_WIDTH }}>
-        {taller.taller_hermano ? (
+        {mostrarHermano ? (
           <TituloPareja taller={taller} cta={cta} />
         ) : (
           <>

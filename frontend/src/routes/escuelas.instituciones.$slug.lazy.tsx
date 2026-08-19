@@ -1,69 +1,17 @@
 import { useQuery } from "@tanstack/react-query";
-import { createLazyFileRoute, Link } from "@tanstack/react-router";
-import { Calendar, Instagram, Users } from "lucide-react";
+import { createLazyFileRoute } from "@tanstack/react-router";
+import { Calendar, Instagram } from "lucide-react";
 
 import { PublicLayout } from "@/components/rental/shell/PublicLayout";
 import { EmptyState } from "@/design-system/composites/EmptyState";
 import { LogoMark } from "@/components/rental/shell/LogoMark";
-import { SeccionCard } from "@/components/talleres/SeccionCard";
-import { WorkshopInscripcionForm } from "@/components/talleres/WorkshopInscripcionForm";
-import { apiGetInstitucion, type Taller } from "@/lib/api";
-import { formatARS } from "@/lib/format";
+import { TallerHubBlock } from "@/components/talleres/TallerHubBlock";
+import { apiGetInstitucion } from "@/lib/api";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
 
 export const Route = createLazyFileRoute("/escuelas/instituciones/$slug")({
   component: InstitucionPage,
 });
-
-function fechaRango(t: Taller): string {
-  const inicio = new Date(t.fecha_inicio + "T12:00:00");
-  const fin = new Date(t.fecha_fin + "T12:00:00");
-  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "long" };
-  return inicio.getTime() === fin.getTime()
-    ? inicio.toLocaleDateString("es-AR", opts)
-    : `${inicio.toLocaleDateString("es-AR", opts)} – ${fin.toLocaleDateString("es-AR", opts)}`;
-}
-
-function TallerBlock({ taller }: { taller: Taller }) {
-  const soldOut = taller.cupos_disponibles === 0;
-  const cuposLabel = soldOut
-    ? "Lista de espera"
-    : `${taller.cupos_disponibles} lugar${taller.cupos_disponibles === 1 ? "" : "es"} disponible${taller.cupos_disponibles === 1 ? "" : "s"}`;
-
-  return (
-    <SeccionCard eyebrow="Taller" className="flex flex-col gap-6">
-      <div>
-        <Link
-          to="/escuelas/$slug"
-          params={{ slug: taller.slug }}
-          className="font-display font-black lowercase leading-[0.95] tracking-[-0.015em] text-ink hover:text-rosa transition-colors"
-          style={{ fontSize: "clamp(1.3rem, 2.4vw, 1.75rem)" }}
-        >
-          {taller.nombre}
-        </Link>
-        {taller.subtitulo && (
-          <p className="text-muted-foreground mt-1 text-sm">{taller.subtitulo}</p>
-        )}
-        <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-sm text-muted-foreground mt-3">
-          <span className="flex items-center gap-1.5 font-semibold text-ink">
-            <Calendar className="h-4 w-4 shrink-0" />
-            {fechaRango(taller)}
-            <span className="text-muted-foreground font-normal">· {taller.horario}</span>
-          </span>
-          <span className="flex items-center gap-1.5">
-            <Users className="h-3.5 w-3.5 shrink-0" />
-            {cuposLabel}
-          </span>
-          <span className="font-semibold text-ink">{formatARS(taller.precio_total)}</span>
-        </div>
-      </div>
-
-      <div id={`inscripcion-${taller.slug}`}>
-        <WorkshopInscripcionForm taller={taller} />
-      </div>
-    </SeccionCard>
-  );
-}
 
 function InstitucionPage() {
   const { slug } = Route.useParams();
@@ -91,7 +39,9 @@ function InstitucionPage() {
 
           {data && (
             <>
-              {/* Header de la institución */}
+              {/* Header de la institución — angosto y centrado, a diferencia
+                  de los bloques de taller que van edge-to-edge más abajo
+                  (cada uno arranca con su propio hero de página completa). */}
               <div className="flex items-center gap-4">
                 {data.institucion.logo_url ? (
                   <img
@@ -134,7 +84,7 @@ function InstitucionPage() {
                 </a>
               )}
 
-              {data.talleres.length === 0 ? (
+              {data.talleres.length === 0 && (
                 <EmptyState
                   icon={<Calendar className="h-6 w-6" />}
                   title="No hay talleres activos por el momento"
@@ -149,16 +99,21 @@ function InstitucionPage() {
                     @{contact.instagram}
                   </a>
                 </EmptyState>
-              ) : (
-                <div className="flex flex-col gap-6">
-                  {data.talleres.map((t) => (
-                    <TallerBlock key={t.id} taller={t} />
-                  ))}
-                </div>
               )}
             </>
           )}
         </div>
+
+        {/* Bloques de taller completos — FUERA del max-w de arriba: cada uno
+            necesita que su hero (bg-ink, edge-to-edge) respire igual que en
+            su propia página individual, no encogido dentro de una card. */}
+        {data && data.talleres.length > 0 && (
+          <div className="flex flex-col gap-20 mt-8">
+            {data.talleres.map((t) => (
+              <TallerHubBlock key={t.id} taller={t} />
+            ))}
+          </div>
+        )}
       </div>
     </PublicLayout>
   );
