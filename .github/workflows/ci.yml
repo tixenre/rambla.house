@@ -15,7 +15,10 @@ on:
     # (commit vacío, --allow-empty) también lo saltea — paths-ignore no tiene
     # nada que comparar y lo trata como "nada fuera de la lista". No sirve
     # para forzar un re-run tras un check suite cancelado; hace falta un
-    # cambio de contenido real en un archivo no ignorado.
+    # cambio de contenido real en un archivo no ignorado. Mismo límite aplica
+    # para forzar un redeploy de Railway tras un incidente de su lado (2026-08-19):
+    # un commit vacío no dispara nada acá — hace falta el mismo cambio de
+    # contenido real, o el botón "Redeploy" de Railway sobre el commit ya verde.
     paths-ignore:
       - "**/*.md"
       - "docs/**"
@@ -363,6 +366,18 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export RESERVAS_DB_TEST=1
           python -m pytest tests/test_talleres_borrador_db.py -v --tb=short -m integration
+      - name: Taller hermano — orden principal/secundario estable contra Postgres real
+        run: |
+          cd backend
+          # Candado del bug (2026-08-19, "no quiero que se den vuelta"): con el
+          # puntero taller_hermano_id seteado en AMBOS lados (la UI del admin no lo
+          # impide), el orden se invertía según cuál de los dos talleres estuvieras
+          # visitando. Solo se prueba de verdad contra una base real.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_taller_hermano_orden_db.py -v --tb=short -m integration
       - name: Escuela v2 — clases ricas + borradores + T&C contra Postgres real (F2, #1278)
         run: |
           cd backend

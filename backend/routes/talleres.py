@@ -388,48 +388,60 @@ def _resolver_hermano(conn, mi_taller_id: int) -> dict | None:
     """Taller hermano (pareja de marketing): resuelve SIMÉTRICO — si YO
     apunto a otro (`taller_hermano_id`), o si OTRO me apunta a mí, en
     cualquier caso devuelve el par. No hace falta setear el vínculo en los
-    2 lados. El copy de campaña (`taller_hermano_titulo`) vive en el lado
-    que seteó el puntero, se resuelve junto sea cual sea el lado desde el
-    que se está mirando.
+    2 lados.
 
-    Devuelve el par YA ORDENADO — `principal` (el lado que tiene el
-    puntero seteado) siempre primero, `secundario` (el resuelto) siempre
-    segundo, **el mismo orden sea cual sea la página desde la que se
-    mira** (pedido del dueño 2026-08-18: "se me cambia de lugar los
-    botones" — la versión anterior ordenaba "yo primero", que invertía el
-    orden según qué taller estuvieras viendo; con eso el banner no se
-    sentía como una sola pieza compartida). El front decide cuál de los
-    dos es un link (el que NO coincide con el taller actual) — acá solo
-    se fija el orden, no la interactividad.
+    Devuelve el par YA ORDENADO por **id** — el de menor id siempre
+    `principal`, el de mayor siempre `secundario`, sin importar desde qué
+    página se mira NI de qué lado(s) esté seteado `taller_hermano_id`.
+    Bug real confirmado en vivo (2026-08-19, "no quiero que se den vuelta"):
+    la versión anterior ordenaba "dueño_id = mi_taller_id si MI fila tiene
+    el puntero seteado" — funciona si el vínculo se configuró desde UN
+    solo concepto, pero la UI del admin no impide configurarlo desde LOS
+    DOS (cada tab de "Taller hermano" es independiente); con el puntero
+    seteado en ambos lados, cada página se "adueña" del rol principal al
+    mirarla y el orden se invierte según cuál estés viendo — exactamente
+    el síntoma reportado. Ordenar por id (un dato fijo, no por "quién
+    tiene el puntero") es estable sea uno, el otro, o los dos lados los que
+    tengan `taller_hermano_id` seteado. El front decide cuál de los dos es
+    un link (el que NO coincide con el taller actual) — acá solo se fija
+    el orden, no la interactividad.
 
-    `ORDER BY id` en el lado inverso: si por error 2+ conceptos apuntan al
-    mismo hermano, el de menor id gana — determinístico, no una prioridad
-    real (caso raro, no vale una constraint para esto).
+    El título de campaña (`taller_hermano_titulo`) se resuelve con el mismo
+    criterio: se lee de CUALQUIER lado que lo tenga (prioriza el de menor
+    id, por las dudas se haya tipeado distinto en cada tab) — nunca "el
+    de la página que estás mirando", mismo motivo que el orden.
 
     None si no hay hermano, o si algún lado del par no tiene ninguna
     edición activa a la que linkear — el front no debe romper por un
     vínculo a medio configurar."""
     mio = conn.execute(
-        "SELECT taller_hermano_id, taller_hermano_titulo FROM talleres WHERE id = %s",
+        "SELECT taller_hermano_id FROM talleres WHERE id = %s",
         (mi_taller_id,),
     ).fetchone()
     if mio and mio["taller_hermano_id"]:
-        dueño_id, otro_id, titulo = mi_taller_id, mio["taller_hermano_id"], mio["taller_hermano_titulo"]
+        otro_id = mio["taller_hermano_id"]
     else:
         otro = conn.execute(
-            "SELECT id, taller_hermano_titulo FROM talleres "
-            "WHERE taller_hermano_id = %s ORDER BY id LIMIT 1",
+            "SELECT id FROM talleres WHERE taller_hermano_id = %s ORDER BY id LIMIT 1",
             (mi_taller_id,),
         ).fetchone()
         if not otro:
             return None
-        dueño_id, otro_id, titulo = otro["id"], mi_taller_id, otro["taller_hermano_titulo"]
+        otro_id = otro["id"]
 
-    principal = _taller_publico_lite(conn, dueño_id)
-    secundario = _taller_publico_lite(conn, otro_id)
+    id_menor, id_mayor = sorted((mi_taller_id, otro_id))
+    titulos = conn.execute(
+        "SELECT id, taller_hermano_titulo FROM talleres WHERE id IN (%s, %s)",
+        (id_menor, id_mayor),
+    ).fetchall()
+    por_id = {r["id"]: r["taller_hermano_titulo"] for r in titulos}
+    titulo = por_id.get(id_menor) or por_id.get(id_mayor) or ""
+
+    principal = _taller_publico_lite(conn, id_menor)
+    secundario = _taller_publico_lite(conn, id_mayor)
     if not principal or not secundario:
         return None
-    return {"titulo": titulo or "", "principal": principal, "secundario": secundario}
+    return {"titulo": titulo, "principal": principal, "secundario": secundario}
 
 
 def _edicion_lite(row) -> dict:
