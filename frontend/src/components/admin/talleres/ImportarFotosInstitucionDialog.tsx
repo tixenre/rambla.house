@@ -52,6 +52,12 @@ export function ImportarFotosInstitucionDialog({
     enabled: activaId > 0,
   });
   const fotos = fotosQ.data?.fotos ?? [];
+  // Solo las de ESTA pestaña (institución activa) que no estén ya
+  // importadas — "seleccionar todas" opera sobre lo que se ve, no sobre
+  // pestañas que el admin ni siquiera abrió.
+  const seleccionables = fotos.filter((f) => !yaImportadas.has(f.url));
+  const todasSeleccionadas =
+    seleccionables.length > 0 && seleccionables.every((f) => seleccion.has(f.id));
 
   const importMut = useMutation({
     mutationFn: () => talleresAdminApi.importarFotosDeInstitucion(edicionId, Array.from(seleccion)),
@@ -68,6 +74,16 @@ export function ImportarFotosInstitucionDialog({
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleTodas() {
+    setSeleccion((prev) => {
+      const next = new Set(prev);
+      const ids = seleccionables.map((f) => f.id);
+      if (todasSeleccionadas) ids.forEach((id) => next.delete(id));
+      else ids.forEach((id) => next.add(id));
       return next;
     });
   }
@@ -112,52 +128,64 @@ export function ImportarFotosInstitucionDialog({
           )}
 
           {fotos.length > 0 && (
-            <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
-              {fotos.map((foto) => {
-                const yaEsta = yaImportadas.has(foto.url);
-                const selected = seleccion.has(foto.id);
-                return (
-                  <button
-                    key={foto.id}
-                    type="button"
-                    onClick={() => !yaEsta && toggle(foto.id)}
-                    disabled={yaEsta}
-                    title={yaEsta ? "Ya está en la galería de esta edición" : undefined}
-                    className={cn(
-                      "group relative aspect-square overflow-hidden rounded-xl border transition",
-                      yaEsta && "cursor-not-allowed opacity-40",
-                      !yaEsta && selected && "border-amber ring-2 ring-amber",
-                      !yaEsta && !selected && "hairline hover:border-ink/30",
-                    )}
-                  >
-                    <img
-                      src={foto.url}
-                      alt=""
-                      className="h-full w-full object-cover"
-                      loading="lazy"
-                    />
-                    {yaEsta ? (
-                      <div className="absolute inset-x-0 bottom-0 bg-ink/70 px-1.5 py-1 text-center text-2xs font-medium text-background">
-                        Ya está
-                      </div>
-                    ) : (
-                      <div
-                        className={cn(
-                          "absolute inset-0 flex items-center justify-center bg-ink/40 transition-opacity",
-                          selected ? "opacity-100" : "opacity-0 group-hover:opacity-100",
-                        )}
-                      >
-                        {selected && (
-                          <div className="flex h-7 w-7 items-center justify-center rounded-full bg-amber text-ink">
-                            <Check className="h-4 w-4" />
-                          </div>
-                        )}
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+            <>
+              <div className="flex items-center justify-between pb-2">
+                <p className="text-xs text-muted-foreground">
+                  {fotos.length} foto{fotos.length === 1 ? "" : "s"}
+                </p>
+                {seleccionables.length > 0 && (
+                  <Button type="button" variant="ghost" size="sm" onClick={toggleTodas}>
+                    {todasSeleccionadas ? "Deseleccionar todas" : "Seleccionar todas"}
+                  </Button>
+                )}
+              </div>
+              <div className="grid grid-cols-3 gap-3 sm:grid-cols-4">
+                {fotos.map((foto) => {
+                  const yaEsta = yaImportadas.has(foto.url);
+                  const selected = seleccion.has(foto.id);
+                  return (
+                    <button
+                      key={foto.id}
+                      type="button"
+                      onClick={() => !yaEsta && toggle(foto.id)}
+                      disabled={yaEsta}
+                      title={yaEsta ? "Ya está en la galería de esta edición" : undefined}
+                      className={cn(
+                        "group relative aspect-square overflow-hidden rounded-xl border transition",
+                        yaEsta && "cursor-not-allowed opacity-40",
+                        !yaEsta && selected && "border-amber ring-2 ring-amber",
+                        !yaEsta && !selected && "hairline hover:border-ink/30",
+                      )}
+                    >
+                      <img
+                        src={foto.url}
+                        alt=""
+                        className="h-full w-full object-cover"
+                        loading="lazy"
+                      />
+                      {yaEsta ? (
+                        <div className="absolute inset-x-0 bottom-0 bg-ink/70 px-1.5 py-1 text-center text-2xs font-medium text-background">
+                          Ya está
+                        </div>
+                      ) : (
+                        <div
+                          className={cn(
+                            "absolute inset-0 flex items-center justify-center bg-ink/40 transition-opacity",
+                            selected ? "opacity-100" : "opacity-0 group-hover:opacity-100",
+                          )}
+                        >
+                          {selected && (
+                            <div className="flex h-7 w-7 items-center justify-center rounded-full bg-amber text-ink">
+                              <Check className="h-4 w-4" />
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </>
           )}
         </div>
 
