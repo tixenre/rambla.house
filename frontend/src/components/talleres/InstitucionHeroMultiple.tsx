@@ -6,7 +6,7 @@ import { EdicionesContexto } from "@/components/talleres/TallerHero";
 import { resumenFechas, resumenHorario } from "@/lib/talleres/formato";
 import { trackClickInscribirseTaller } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
-import type { Institucion, Taller } from "@/lib/api";
+import type { Taller } from "@/lib/api";
 
 /** Una card del selector — nombre + subtítulo + fecha/horario/lugar/cupos
  * de un taller de la institución. Sin fondo/recuadro (mismo criterio que
@@ -112,34 +112,31 @@ function TallerCard({
 /**
  * Hero compartido del hub de institución cuando hay 2+ talleres — reemplaza
  * el banner de "taller hermano" (que solo servía para pares) con un
- * selector N-way: el nombre grande de la campaña sale de unir los nombres
- * de TODOS los talleres, la grilla lista uno por card, y "Ver este taller"
- * cambia cuál está activo sin navegar (`InstitucionPage` guarda el
- * `taller_id` activo). Pedido del dueño 2026-08-19: "esa página compartida
- * lo haría cuando seleccionás la institución… si tiene 2 o más, mostrá la
- * página múltiple". Con exactamente 1 taller, este componente no se usa —
+ * selector N-way: la grilla lista uno por card y "Ver este taller" cambia
+ * cuál está activo sin navegar (`InstitucionPage` guarda el `taller_id`
+ * activo). Pedido del dueño 2026-08-19: "esa página compartida lo haría
+ * cuando seleccionás la institución… si tiene 2 o más, mostrá la página
+ * múltiple". Con exactamente 1 taller, este componente no se usa —
  * `TallerHubBlock` muestra su propio `TallerHero` normal (`InstitucionPage`
  * decide por cantidad).
  *
- * El logo (si la institución cargó uno) va arriba del eyebrow, como
- * `<img>` liso — funciona igual para raster y SVG (el navegador renderiza
- * SVG nativo vía `src`, sin necesitar `InlineSvg`) y a propósito NO fuerza
- * `currentColor`: es el logo REAL de un tercero (a diferencia del wordmark
- * propio de Rambla o el muro de marcas de equipos en `BrandCard`, donde SÍ
- * se homogeniza a un color), tiene que verse con sus colores originales.
+ * Sin logo NI título grande acá — el logo de la institución (si cargó uno)
+ * ya se muestra arriba, en el header angosto de `InstitucionPage`, y ESE es
+ * el título visual de la página (pedido del dueño 2026-08-19: "el logo pasa
+ * a ser el título" — repetirlo acá abajo, y encima unir los nombres de cada
+ * taller con "×", era ruido/duplicado, no una segunda jerarquía útil). El
+ * `<h1>` real (accesibilidad/SEO) lo pone `InstitucionPage` como `sr-only`
+ * en ese mismo header cuando hay 2+ talleres — acá no hace falta otro.
  */
 export function InstitucionHeroMultiple({
-  institucion,
   talleres,
   activoId,
   onSeleccionar,
 }: {
-  institucion: Institucion;
   talleres: Taller[];
   activoId: number;
   onSeleccionar: (tallerId: number) => void;
 }) {
-  const tituloGrande = talleres.map((t) => t.nombre).join(" × ");
   const activo = talleres.find((t) => t.taller_id === activoId) ?? talleres[0];
   const cta = (
     <a
@@ -156,20 +153,7 @@ export function InstitucionHeroMultiple({
     <section className="relative bg-ink overflow-hidden">
       <Grain opacity={10} />
       <div className="relative mx-auto py-16 sm:py-24" style={{ width: TALLER_CONTENT_WIDTH }}>
-        {institucion.logo_url && (
-          <img
-            src={institucion.logo_url}
-            alt={institucion.nombre}
-            className="h-14 w-14 rounded-2xl object-contain bg-background/10 mb-5"
-          />
-        )}
-        <p className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa mb-4">Talleres</p>
-        <h1
-          className="font-display font-black lowercase leading-[0.95] tracking-[-0.02em] text-background"
-          style={{ fontSize: "clamp(1.75rem, 6vw, 4rem)" }}
-        >
-          {tituloGrande}
-        </h1>
+        <p className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa">Talleres</p>
         <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-8">
           {talleres.map((t) => (
             <TallerCard

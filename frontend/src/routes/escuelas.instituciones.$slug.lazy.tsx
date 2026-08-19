@@ -55,19 +55,23 @@ function InstitucionPage() {
               {/* Header de la institución — angosto y centrado, a diferencia
                   del hero de abajo (bg-ink, edge-to-edge). Con logo: SOLO el
                   logo, centrado, sin fondo ni texto al lado — el logo YA es
-                  un wordmark (ej. "FILMAR"), repetir el nombre en texto al
-                  lado lo dice 2 veces (pedido del dueño 2026-08-19, con
-                  captura real). El h1 visible de la página pasa a ponerlo el
-                  hero de abajo (InstitucionHeroMultiple o TallerHero, según
-                  cantidad de talleres); acá va un h1 sr-only SOLO si no hay
-                  ningún taller activo (no hay hero abajo en ese caso — sin
-                  esto la página quedaría sin ningún h1). Sin logo
-                  (fallback): se mantiene el tratamiento de siempre (ícono +
-                  "Talleres con" + h1 visible) — no hay wordmark que haga de
-                  identidad visual. */}
+                  un wordmark (ej. "FILMAR") y a partir de acá ES el título
+                  visual de la página (pedido del dueño 2026-08-19, con
+                  captura real: primero "que el logo no tenga fondo, que esté
+                  centrado como título, y el texto no esté"; después "sacá
+                  también el título grande de abajo — ahora el logo pasa a
+                  ser el título" — así que `InstitucionHeroMultiple` dejó de
+                  poner su propio `<h1>`/logo, ver ese componente). El h1
+                  REAL de la página (accesibilidad/SEO, no visual) va acá
+                  mismo como `sr-only` salvo cuando hay exactamente 1 taller
+                  activo — ahí `TallerHubBlock` renderiza `TallerHero`, que
+                  ya trae su propio h1 visible con el nombre del taller. Sin
+                  logo (fallback): se mantiene el tratamiento de siempre
+                  (ícono + "Talleres con" + h1 visible) — no hay wordmark que
+                  haga de identidad visual. */}
               {data.institucion.logo_url ? (
                 <div className="flex flex-col items-center text-center">
-                  {talleres.length === 0 && <h1 className="sr-only">{data.institucion.nombre}</h1>}
+                  {talleres.length !== 1 && <h1 className="sr-only">{data.institucion.nombre}</h1>}
                   <img
                     src={data.institucion.logo_url}
                     alt={data.institucion.nombre}
@@ -137,7 +141,6 @@ function InstitucionPage() {
           <>
             {esMultiple && (
               <InstitucionHeroMultiple
-                institucion={data.institucion}
                 talleres={talleres}
                 activoId={activo.taller_id}
                 onSeleccionar={setActivoId}

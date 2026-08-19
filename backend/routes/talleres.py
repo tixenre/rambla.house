@@ -597,17 +597,26 @@ def get_taller(slug: str, request: Request):
 @router.get("/instituciones/{slug}")
 def get_institucion(slug: str):
     """Hub público de una institución co-presentadora (ej. "Filmar"): su
-    perfil + todas sus ediciones activas — un solo link para compartir varios
-    niveles/ediciones de la misma institución en vez de uno por taller.
-    Mismo shape de taller que /talleres (sin proxima_edicion/edicion_anterior
-    — igual que list_talleres, campos opcionales en el front). Devuelve la
-    lista plana; el front (`escuelas.instituciones.$slug.lazy.tsx`) decide
-    layout por CANTIDAD — 2+ talleres → hero compartido con selector (N-way,
-    no solo pares) + el activo abajo; 1 solo → esa página tal cual (pedido
-    del dueño 2026-08-19: "esa página compartida lo haría cuando seleccionás
-    la institución… si tiene 1, el que tenga solo"). No hay resolución de
-    pareja acá — reemplaza el "taller hermano" removido, que era un
-    mecanismo aparte para exactamente 2 talleres."""
+    perfil + un representante de cada TALLER (concepto) activo — un solo
+    link para compartir varios talleres/niveles de la misma institución en
+    vez de uno por taller. El front (`escuelas.instituciones.$slug.lazy.tsx`)
+    decide layout por CANTIDAD de talleres — 2+ → hero compartido con
+    selector (N-way, no solo pares) + el activo abajo; 1 solo → esa página
+    tal cual (pedido del dueño 2026-08-19: "esa página compartida lo haría
+    cuando seleccionás la institución… si tiene 1, el que tenga solo"). No
+    hay resolución de pareja acá — reemplaza el "taller hermano" removido,
+    que era un mecanismo aparte para exactamente 2 talleres.
+
+    El switcher es por TALLER, no por EDICIÓN: un mismo taller puede tener
+    2+ ediciones activas a la vez (cohortes con fechas distintas) — el query
+    dedupea por `taller_id` quedándose con la de `fecha_inicio` más próxima
+    como representante. Sin este dedupe, 2 ediciones del MISMO taller
+    aparecían como 2 entradas del switcher (bug real 2026-08-19, confirmado
+    en vivo: "no mezclar las ediciones" — nombre duplicado en el título
+    grande + card repetida para el mismo taller). `proxima_edicion`/
+    `edicion_anterior` (mismo cálculo que `get_taller`) sí se suman acá — a
+    diferencia de `list_talleres` — para que `EdicionesContexto` pueda
+    ofrecer la otra cohorte si la representante se agota."""
     with get_db() as conn:
         ins_row = conn.execute(
             "SELECT * FROM instituciones WHERE slug = %s", (slug,)
@@ -615,22 +624,52 @@ def get_institucion(slug: str):
         if ins_row is None:
             raise HTTPException(404, "Institución no encontrada")
         rows = conn.execute(
-            f"{_EDICION_JOIN_SELECT} "
-            "JOIN taller_instituciones ti ON ti.taller_id = e.taller_id "
-            "WHERE ti.institucion_id = %s AND e.activo = TRUE "
-            "ORDER BY ti.orden, e.id",
+            """
+            SELECT sub.* FROM (
+                SELECT DISTINCT ON (e.taller_id)
+                       e.*, t.nombre, t.subtitulo, t.descripcion, t.resumen,
+                       t.publico_objetivo, t.notif_email, t.slug_base, t.terminos,
+                       t.beneficios, t.pregunta_experiencia, t.mensaje_confirmacion,
+                       t.video_url, t.video_poster_url, t.faqs,
+                       ti.orden AS _orden_institucion
+                FROM ediciones_taller e
+                JOIN talleres t ON t.id = e.taller_id
+                JOIN taller_instituciones ti ON ti.taller_id = e.taller_id
+                WHERE ti.institucion_id = %s AND e.activo = TRUE
+                ORDER BY e.taller_id, e.fecha_inicio ASC
+            ) sub
+            ORDER BY sub._orden_institucion, sub.id
+            """,
             (ins_row["id"],),
         ).fetchall()
-        talleres = [
-            _edicion_to_public_dict(
+        talleres = []
+        for r in rows:
+            d = _edicion_to_public_dict(
                 r, _get_clases(conn, r["id"]), _get_instructores_taller(conn, r["taller_id"]),
                 _get_modalidades(conn, r["id"]),
                 instituciones=_get_instituciones_taller(conn, r["taller_id"]),
                 fotos=_get_edicion_fotos(conn, r["id"]),
                 cuentas_pago=_get_cuentas_pago(conn, r["id"]),
             )
-            for r in rows
-        ]
+            pr = conn.execute(
+                """
+                SELECT * FROM ediciones_taller
+                WHERE taller_id = %s AND numero_edicion > %s AND activo = TRUE
+                ORDER BY numero_edicion ASC LIMIT 1
+                """,
+                (r["taller_id"], r["numero_edicion"]),
+            ).fetchone()
+            d["proxima_edicion"] = _edicion_lite(pr) if pr else None
+            ant = conn.execute(
+                """
+                SELECT * FROM ediciones_taller
+                WHERE taller_id = %s AND numero_edicion < %s AND activo = TRUE
+                ORDER BY numero_edicion DESC LIMIT 1
+                """,
+                (r["taller_id"], r["numero_edicion"]),
+            ).fetchone()
+            d["edicion_anterior"] = _edicion_lite(ant) if ant else None
+            talleres.append(d)
         return {"institucion": _institucion_dict(ins_row), "talleres": talleres}
 
 
