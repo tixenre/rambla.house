@@ -154,7 +154,16 @@ export function InstitucionHeroMultiple({
       <Grain opacity={10} />
       <div className="relative mx-auto py-16 sm:py-24" style={{ width: TALLER_CONTENT_WIDTH }}>
         <p className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa">Talleres</p>
-        <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-12 gap-y-8">
+        <div
+          className={cn(
+            "mt-10 grid grid-cols-1 gap-x-12 gap-y-8",
+            // N-way real, no un grid-cols-3 fijo: con 2 talleres, grid-cols-3
+            // dejaba una tercera columna vacía a la derecha (dead space, bug
+            // real 2026-08-19) — acá el ancho de columna sale de CUÁNTOS
+            // talleres hay, no de un breakpoint que asume 3+.
+            talleres.length === 2 ? "sm:grid-cols-2" : "sm:grid-cols-2 lg:grid-cols-3",
+          )}
+        >
           {talleres.map((t) => (
             <TallerCard
               key={t.taller_id}
