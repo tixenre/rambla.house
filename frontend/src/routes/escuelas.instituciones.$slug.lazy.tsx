@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { createLazyFileRoute } from "@tanstack/react-router";
 import { Calendar, Instagram } from "lucide-react";
@@ -5,50 +6,14 @@ import { Calendar, Instagram } from "lucide-react";
 import { PublicLayout } from "@/components/rental/shell/PublicLayout";
 import { EmptyState } from "@/design-system/composites/EmptyState";
 import { LogoMark } from "@/components/rental/shell/LogoMark";
+import { InstitucionHeroMultiple } from "@/components/talleres/InstitucionHeroMultiple";
 import { TallerHubBlock } from "@/components/talleres/TallerHubBlock";
-import { apiGetInstitucion, type Taller } from "@/lib/api";
+import { apiGetInstitucion } from "@/lib/api";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
 
 export const Route = createLazyFileRoute("/escuelas/instituciones/$slug")({
   component: InstitucionPage,
 });
-
-type BloqueTaller = { taller: Taller; alternativo?: Taller };
-
-/**
- * Cuando 2 talleres de la MISMA institución son "hermanos" entre sí (pareja
- * de marketing, ej. los 2 niveles de Filmar), el hero de pareja de
- * `TallerHubBlock` ya arma el link "Ver este taller" hacia el otro lado —
- * mostrar los DOS bloques completos apilados sería redundante (pedido
- * explícito del dueño: "hero compartido + solo el taller activo abajo").
- * Se agrupan en UN bloque con `alternativo` (el Taller COMPLETO del otro
- * lado, no solo su id) para que `TallerHubBlock` pueda cambiar cuál se
- * muestra sin salir de esta página (pedido del dueño 2026-08-19:
- * "permanecer en esa página al elegir un taller debajo" — antes "Ver este
- * taller" navegaba a `/escuelas/$slug` aunque el otro lado ya estuviera
- * cargado acá mismo). El orden ya viene de `ti.orden`, el que el admin
- * definió al vincularlos a la institución; un taller sin hermano, o cuyo
- * hermano no pertenece a esta institución, se muestra suelto, sin
- * `alternativo` — ahí "Ver este taller" sigue navegando afuera, porque no
- * tenemos el contenido completo del otro lado en esta página. */
-function agruparHermanos(talleres: Taller[]): BloqueTaller[] {
-  const porId = new Map(talleres.map((t) => [t.taller_id, t]));
-  const yaCubierto = new Set<number>();
-  const bloques: BloqueTaller[] = [];
-  for (const t of talleres) {
-    if (yaCubierto.has(t.taller_id)) continue;
-    const hermano = t.taller_hermano;
-    const otroId = hermano
-      ? hermano.principal.taller_id === t.taller_id
-        ? hermano.secundario.taller_id
-        : hermano.principal.taller_id
-      : undefined;
-    const alternativo = otroId != null ? porId.get(otroId) : undefined;
-    if (alternativo) yaCubierto.add(alternativo.taller_id);
-    bloques.push({ taller: t, alternativo });
-  }
-  return bloques;
-}
 
 function InstitucionPage() {
   const { slug } = Route.useParams();
@@ -58,6 +23,17 @@ function InstitucionPage() {
     queryFn: () => apiGetInstitucion(slug),
     staleTime: 1000 * 60 * 5,
   });
+
+  // Layout por CANTIDAD de talleres — reemplaza el "taller hermano" (solo
+  // pares) retirado (pedido del dueño 2026-08-19: "esa página compartida lo
+  // haría cuando seleccionás la institución… si tiene 2 o más, mostrá la
+  // página múltiple. Sino el que tenga solo"). 2+ → hero compartido con
+  // selector N-way + el activo abajo; 1 → ese taller tal cual, con su
+  // propio hero normal (TallerHubBlock sin `ocultarHero`).
+  const talleres = data?.talleres ?? [];
+  const esMultiple = talleres.length >= 2;
+  const [activoId, setActivoId] = useState<number | null>(null);
+  const activo = talleres.find((t) => t.taller_id === activoId) ?? talleres[0];
 
   return (
     <PublicLayout topBar={{ variant: "escuela" }}>
@@ -77,8 +53,7 @@ function InstitucionPage() {
           {data && (
             <>
               {/* Header de la institución — angosto y centrado, a diferencia
-                  de los bloques de taller que van edge-to-edge más abajo
-                  (cada uno arranca con su propio hero de página completa). */}
+                  del hero de abajo (bg-ink, edge-to-edge). */}
               <div className="flex items-center gap-4">
                 {data.institucion.logo_url ? (
                   <img
@@ -121,7 +96,7 @@ function InstitucionPage() {
                 </a>
               )}
 
-              {data.talleres.length === 0 && (
+              {talleres.length === 0 && (
                 <EmptyState
                   icon={<Calendar className="h-6 w-6" />}
                   title="No hay talleres activos por el momento"
@@ -141,18 +116,20 @@ function InstitucionPage() {
           )}
         </div>
 
-        {/* Bloques de taller completos — FUERA del max-w de arriba: cada uno
-            necesita que su hero (bg-ink, edge-to-edge) respire igual que en
-            su propia página individual, no encogido dentro de una card.
-            agruparHermanos: un par (ej. Nivel 1 + Nivel 2) se muestra UNA
-            vez, no 2 heroes completos apilados — TallerHubBlock cambia cuál
-            de los 2 está activo internamente, sin remontar este bloque. */}
-        {data && data.talleres.length > 0 && (
-          <div className="flex flex-col gap-20 mt-8">
-            {agruparHermanos(data.talleres).map(({ taller, alternativo }) => (
-              <TallerHubBlock key={taller.id} taller={taller} alternativo={alternativo} />
-            ))}
-          </div>
+        {/* Contenido del/los taller(es) — FUERA del max-w de arriba: el hero
+            (bg-ink, edge-to-edge) necesita respirar igual que en su propia
+            página individual, no encogido dentro de una card. */}
+        {activo && (
+          <>
+            {esMultiple && (
+              <InstitucionHeroMultiple
+                talleres={talleres}
+                activoId={activo.taller_id}
+                onSeleccionar={setActivoId}
+              />
+            )}
+            <TallerHubBlock key={activo.id} taller={activo} ocultarHero={esMultiple} />
+          </>
         )}
       </div>
     </PublicLayout>

@@ -1,13 +1,11 @@
-import type { ReactNode } from "react";
-import { ArrowRight, Calendar, Clock, MapPin, Users } from "lucide-react";
+import { Calendar, Clock, MapPin, Users } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { Grain } from "@/components/common/Grain";
 import { YouTubeEmbed } from "@/components/common/YouTubeEmbed";
 import { TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
-import { ordinalEdicion, resumenFechas, resumenHorario } from "@/lib/talleres/formato";
+import { ordinalEdicion } from "@/lib/talleres/formato";
 import { trackClickInscribirseTaller } from "@/lib/analytics";
-import { cn } from "@/lib/utils";
-import type { HermanoLado, Taller } from "@/lib/api";
+import type { Taller } from "@/lib/api";
 
 function Titulo({ taller }: { taller: Taller }) {
   return (
@@ -43,20 +41,19 @@ function Titulo({ taller }: { taller: Taller }) {
   );
 }
 
-function EdicionesContexto({
+/** Exportado: reusado tal cual por `InstitucionHeroMultiple` (el selector
+ * N-way del hub de institución) para el taller activo dentro de una card
+ * — misma info de "próxima/anterior edición", sin reimplementarla. */
+export function EdicionesContexto({
   taller,
-  compact,
 }: {
   taller: Pick<Taller, "edicion_anterior" | "proxima_edicion" | "cupos_disponibles">;
-  /** Adentro de una mitad del banner de pareja (`MitadPareja`): menos
-   * margen arriba — ya viene después de `MetaRow` compacto, no del H1. */
-  compact?: boolean;
 }) {
   if (!taller.edicion_anterior && !(taller.proxima_edicion && taller.cupos_disponibles === 0)) {
     return null;
   }
   return (
-    <div className={cn("flex flex-wrap items-center gap-4", compact ? "mt-3" : "mt-5")}>
+    <div className="flex flex-wrap items-center gap-4 mt-5">
       {taller.edicion_anterior && (
         <Link
           to="/escuelas/$slug"
@@ -80,207 +77,33 @@ function EdicionesContexto({
   );
 }
 
-/** Una mitad de la pantalla partida del banner de pareja — nombre +
- * subtítulo + fecha/horario/lugar/cupos de un taller del par. El resumen
- * de fecha/horario usa las MISMAS `resumenFechas`/`resumenHorario` que
- * el taller actual (a partir de `sesiones`, que este lado trae completo)
- * — las 2 mitades formatean igual, no una rica y la otra genérica.
- * Sin fondo/recuadro (pedido del dueño 2026-08-18, segunda vuelta: "el
- * recuadro gris no me gusta, no es ni el fondo ni se distingue bien" —
- * el tinte plano fallaba en los 2 extremos) — la jerarquía la da la
- * TIPOGRAFÍA: el lado ACTUAL es grande/pleno y suma el contexto de
- * edición + el CTA adentro; el otro lado queda apagado (`/45`, `/30`)
- * con un link "Ver este taller" que se ilumina en hover — mismo pedido:
- * "cuando seleccionás uno, que se vuelva más importante". Texto plano si
- * es el taller actual (nada que linkear a sí mismo); si es el otro, un
- * `<button>` cuando `onVerEsteTaller` está presente (el hub de institución
- * cambia cuál se muestra SIN navegar — pedido del dueño 2026-08-19,
- * "permanecer en esa página al elegir un taller debajo") o un `<Link>` a
- * la página individual si no (comportamiento de siempre). */
-function MitadPareja({
-  t,
-  taller,
-  cta,
-  onVerEsteTaller,
-}: {
-  t: HermanoLado;
-  taller: Taller;
-  cta: ReactNode;
-  onVerEsteTaller?: (tallerId: number) => void;
-}) {
-  const optsLong: Intl.DateTimeFormatOptions = { weekday: "long", day: "numeric", month: "long" };
-  const fechaInicioStr = new Date(t.fecha_inicio + "T12:00:00").toLocaleDateString(
-    "es-AR",
-    optsLong,
-  );
-  const fechaFinStr = new Date(t.fecha_fin + "T12:00:00").toLocaleDateString("es-AR", optsLong);
-  const fechasResumen = resumenFechas(t.sesiones, fechaInicioStr, fechaFinStr);
-  const horarioResumen = resumenHorario(t.sesiones, t.horario);
-  const esActual = t.taller_id === taller.taller_id;
-
-  const contenido = (
-    <>
-      <p
-        className={cn(
-          "font-display lowercase leading-tight tracking-[-0.02em] transition-colors",
-          esActual
-            ? "font-black text-background"
-            : "font-bold text-background/45 group-hover:text-background/75",
-        )}
-        style={{
-          fontSize: esActual ? "clamp(1.5rem, 3.2vw, 2.125rem)" : "clamp(1.15rem, 2.4vw, 1.5rem)",
-        }}
-      >
-        {t.nombre}
-      </p>
-      {t.subtitulo && (
-        <p
-          className={cn(
-            "mt-1.5 text-xs transition-colors",
-            esActual ? "text-background/55" : "text-background/30 group-hover:text-background/45",
-          )}
-        >
-          {t.subtitulo}
-        </p>
-      )}
-      <MetaRow
-        fechasResumen={fechasResumen}
-        horarioResumen={horarioResumen}
-        direccion={t.direccion}
-        cuposTotal={t.cupos_total}
-        compact
-        dim={!esActual}
-      />
-      {esActual && <EdicionesContexto taller={taller} compact />}
-      {esActual && <div className="mt-5">{cta}</div>}
-      {!esActual && (
-        <span className="mt-4 inline-flex items-center gap-1.5 text-xs font-semibold text-rosa/70 transition-colors group-hover:text-rosa">
-          Ver este taller
-          <ArrowRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
-        </span>
-      )}
-    </>
-  );
-
-  if (esActual) return <div>{contenido}</div>;
-  if (onVerEsteTaller) {
-    return (
-      <button
-        type="button"
-        onClick={() => onVerEsteTaller(t.taller_id)}
-        className="group block w-full text-left"
-      >
-        {contenido}
-      </button>
-    );
-  }
-  return (
-    <Link to="/escuelas/$slug" params={{ slug: t.slug }} className="group block">
-      {contenido}
-    </Link>
-  );
-}
-
-/**
- * Título de un taller que es parte de una PAREJA de marketing (dos
- * talleres lanzados juntos, ej. nivel inicial + avanzado de la misma
- * institución) — invierte la jerarquía de siempre: el título grande ya
- * NO es el nombre de ESTE taller, es el de la CAMPAÑA
- * (`taller_hermano_titulo`, lo que el dueño tipeó en el admin) — no una
- * unión automática de los 2 nombres. Fallback a esa unión SOLO si no
- * cargó ningún título de campaña (para no dejar el hero sin H1). Debajo,
- * 2 columnas (`MitadPareja`) con peso INTENCIONALMENTE asimétrico: la
- * del taller actual domina (tamaño + color + CTA adentro), la otra queda
- * secundaria con un link de salida — no una franja de igual peso (pedido
- * del dueño 2026-08-18: "cuando seleccionás uno, que se vuelva más
- * importante"). El `cta` se pasa desde `TallerHero`, mismo elemento con
- * `id="hero-cta"` que ya observa `TallerCTABar`. El resto de la página
- * (contenido, form) sigue siendo del taller actual sin cambios.
- */
-function TituloPareja({
-  taller,
-  cta,
-  onVerEsteTaller,
-}: {
-  taller: Taller;
-  cta: ReactNode;
-  onVerEsteTaller?: (tallerId: number) => void;
-}) {
-  const hermano = taller.taller_hermano;
-  if (!hermano) return null;
-  const tituloGrande =
-    hermano.titulo || `${hermano.principal.nombre} × ${hermano.secundario.nombre}`;
-  return (
-    <>
-      <p className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa mb-4">Talleres</p>
-      <h1
-        className="font-display font-black lowercase leading-[0.95] tracking-[-0.02em] text-background"
-        style={{ fontSize: "clamp(1.75rem, 6vw, 4rem)" }}
-      >
-        {tituloGrande}
-      </h1>
-      <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-8">
-        <MitadPareja
-          t={hermano.principal}
-          taller={taller}
-          cta={cta}
-          onVerEsteTaller={onVerEsteTaller}
-        />
-        <MitadPareja
-          t={hermano.secundario}
-          taller={taller}
-          cta={cta}
-          onVerEsteTaller={onVerEsteTaller}
-        />
-      </div>
-    </>
-  );
-}
-
 function MetaRow({
   fechasResumen,
   horarioResumen,
   direccion,
   cuposTotal,
-  compact,
-  dim,
 }: {
   fechasResumen: string;
   horarioResumen: string;
   direccion: string;
   cuposTotal: number;
-  /** Dentro de una mitad del banner de pareja (`MitadPareja`): más chico,
-   * en una sola fila que envuelve si hace falta — no una columna forzada
-   * (pedido del dueño 2026-08-18: "la info me gustaba más en una sola
-   * línea"). */
-  compact?: boolean;
-  /** El lado que NO es el taller actual va más apagado — la jerarquía
-   * (tamaño + color) es la señal de cuál está seleccionado, no un fondo. */
-  dim?: boolean;
 }) {
   return (
-    <div
-      className={cn(
-        "flex flex-wrap items-center",
-        compact
-          ? cn("mt-3 gap-x-4 gap-y-1.5 text-xs", dim ? "text-background/35" : "text-background/55")
-          : "mt-8 gap-x-6 gap-y-3 text-sm text-background/60",
-      )}
-    >
+    <div className="flex flex-wrap items-center mt-8 gap-x-6 gap-y-3 text-sm text-background/60">
       <span className="flex items-center gap-2">
-        <Calendar className={compact ? "h-3.5 w-3.5 shrink-0" : "h-4 w-4 shrink-0"} />
+        <Calendar className="h-4 w-4 shrink-0" />
         {fechasResumen}
       </span>
       <span className="flex items-center gap-2">
-        <Clock className={compact ? "h-3.5 w-3.5 shrink-0" : "h-4 w-4 shrink-0"} />
+        <Clock className="h-4 w-4 shrink-0" />
         {horarioResumen}
       </span>
       <span className="flex items-center gap-2">
-        <MapPin className={compact ? "h-3.5 w-3.5 shrink-0" : "h-4 w-4 shrink-0"} />
+        <MapPin className="h-4 w-4 shrink-0" />
         {direccion}
       </span>
       <span className="flex items-center gap-2">
-        <Users className={compact ? "h-3.5 w-3.5 shrink-0" : "h-4 w-4 shrink-0"} />
+        <Users className="h-4 w-4 shrink-0" />
         {cuposTotal} cupos
       </span>
     </div>
@@ -292,26 +115,6 @@ type Props = {
   formTaller: { direccion: string; cupos_total: number };
   fechasResumen: string;
   horarioResumen: string;
-  /** Sufijo para los ids del CTA/ancla — default "" (`id="hero-cta"`,
-   * `href="#inscripcion"`, el comportamiento de siempre, page-único). El hub
-   * de institución (varios talleres completos en una sola página) pasa el
-   * slug del taller para que cada hero apunte a SU propio formulario en vez
-   * de que las N anclas "#inscripcion" colisionen en la primera. */
-  anchorSuffix?: string;
-  /** Oculta el banner de "pareja" (taller_hermano) aunque el taller lo
-   * tenga — default true (comportamiento de siempre). El hub de
-   * institución lo pasa en false: ya muestra ambos talleres completos uno
-   * debajo del otro, un mini-banner de pareja adentro de cada uno sería
-   * redundante (la propia página ES la unión). */
-  showHermano?: boolean;
-  /** Cuando está presente, "Ver este taller" (el lado apagado del banner de
-   * pareja) llama a esto con el `taller_id` del otro lado en vez de
-   * navegar — el hub de institución lo usa para cambiar cuál de los 2
-   * hermanos se muestra SIN salir de `/escuelas/instituciones/$slug`
-   * (pedido del dueño 2026-08-19: "permanecer en esa página al elegir un
-   * taller debajo"). Sin esto (default), sigue siendo un `<Link>` normal a
-   * la página individual — el comportamiento de siempre. */
-  onVerEsteTaller?: (tallerId: number) => void;
 };
 
 /**
@@ -321,29 +124,23 @@ type Props = {
  * Jime). No hay variante "foto" — F4a solo construyó video hero, no un
  * campo de foto de portada separado; si se pide, es un campo nuevo a sumar
  * junto a video_url, no algo a inventar acá.
+ *
+ * Siempre single-taller: el banner de "taller hermano" (pareja de 2, con
+ * selector hacia el otro) se retiró (pedido del dueño 2026-08-19) —
+ * agrupar talleres es responsabilidad exclusiva del hub de institución
+ * (`InstitucionHeroMultiple`, N-way, no solo pares), no de este hero.
  */
-export function TallerHero({
-  taller,
-  formTaller,
-  fechasResumen,
-  horarioResumen,
-  anchorSuffix,
-  showHermano = true,
-  onVerEsteTaller,
-}: Props) {
-  const anchorId = anchorSuffix ? `inscripcion-${anchorSuffix}` : "inscripcion";
-  const heroCtaId = anchorSuffix ? `hero-cta-${anchorSuffix}` : "hero-cta";
+export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }: Props) {
   const cta = (
     <a
-      id={heroCtaId}
-      href={`#${anchorId}`}
+      id="hero-cta"
+      href="#inscripcion"
       onClick={() => trackClickInscribirseTaller(taller.id)}
       className="inline-flex items-center gap-2 rounded-full bg-rosa text-ink px-7 py-3.5 text-base font-bold hover:brightness-110 active:scale-[0.97] transition-all"
     >
       Quiero inscribirme
     </a>
   );
-  const mostrarHermano = showHermano && taller.taller_hermano;
 
   if (taller.video) {
     return (
@@ -354,21 +151,15 @@ export function TallerHero({
           style={{ width: TALLER_CONTENT_WIDTH }}
         >
           <div>
-            {mostrarHermano ? (
-              <TituloPareja taller={taller} cta={cta} onVerEsteTaller={onVerEsteTaller} />
-            ) : (
-              <>
-                <Titulo taller={taller} />
-                <EdicionesContexto taller={taller} />
-                <MetaRow
-                  fechasResumen={fechasResumen}
-                  horarioResumen={horarioResumen}
-                  direccion={formTaller.direccion}
-                  cuposTotal={formTaller.cupos_total}
-                />
-                <div className="mt-8">{cta}</div>
-              </>
-            )}
+            <Titulo taller={taller} />
+            <EdicionesContexto taller={taller} />
+            <MetaRow
+              fechasResumen={fechasResumen}
+              horarioResumen={horarioResumen}
+              direccion={formTaller.direccion}
+              cuposTotal={formTaller.cupos_total}
+            />
+            <div className="mt-8">{cta}</div>
           </div>
           <YouTubeEmbed
             videoId={taller.video.youtube_id}
@@ -385,21 +176,15 @@ export function TallerHero({
     <section className="relative bg-ink overflow-hidden">
       <Grain opacity={10} />
       <div className="relative mx-auto py-16 sm:py-24" style={{ width: TALLER_CONTENT_WIDTH }}>
-        {mostrarHermano ? (
-          <TituloPareja taller={taller} cta={cta} onVerEsteTaller={onVerEsteTaller} />
-        ) : (
-          <>
-            <Titulo taller={taller} />
-            <EdicionesContexto taller={taller} />
-            <MetaRow
-              fechasResumen={fechasResumen}
-              horarioResumen={horarioResumen}
-              direccion={formTaller.direccion}
-              cuposTotal={formTaller.cupos_total}
-            />
-            <div className="mt-8">{cta}</div>
-          </>
-        )}
+        <Titulo taller={taller} />
+        <EdicionesContexto taller={taller} />
+        <MetaRow
+          fechasResumen={fechasResumen}
+          horarioResumen={horarioResumen}
+          direccion={formTaller.direccion}
+          cuposTotal={formTaller.cupos_total}
+        />
+        <div className="mt-8">{cta}</div>
       </div>
     </section>
   );

@@ -1925,12 +1925,6 @@ export type TallerConcepto = {
   // F4a: video hero (YouTube). '' → sin video.
   video_url: string;
   video_poster_url: string;
-  // Taller hermano (pareja de marketing, 2026-08-17): otro concepto que se
-  // lanza junto a este — su Hero muestra un mini-selector hacia el elegido
-  // acá. Simétrico: si OTRO taller te elige a vos, tu página lo muestra
-  // igual aunque este campo quede en null (ver _resolver_hermano backend).
-  taller_hermano_id: number | null;
-  taller_hermano_titulo: string;
   // F3: instructores como entidad (además de instructor_* legacy arriba).
   instructores: Instructor[];
   // Instituciones co-presentadoras (ej. "Rambla" + "Filmar").

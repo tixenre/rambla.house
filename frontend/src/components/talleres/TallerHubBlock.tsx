@@ -1,5 +1,3 @@
-import { useState } from "react";
-
 import { DescripcionBloques, DescripcionRica } from "@/components/talleres/DescripcionRica";
 import { InstructorCard } from "@/components/talleres/InstructorCard";
 import { InteresadoForm } from "@/components/talleres/InteresadoForm";
@@ -17,51 +15,37 @@ import type { Taller } from "@/lib/api";
 
 /**
  * Contenido COMPLETO de un taller (hero + galería + cuerpo + FAQ), para
- * embeber uno o más talleres enteros en el hub de institución
- * (`/escuelas/instituciones/$slug`, pedido explícito del dueño: "me
- * gustaría que se vean los formularios/página completos", no un resumen).
+ * embeber en el hub de institución (`/escuelas/instituciones/$slug`,
+ * pedido explícito del dueño: "me gustaría que se vean los formularios/
+ * página completos", no un resumen).
  *
  * Espeja la composición de `escuelas.$slug.lazy.tsx` (la página individual)
  * — un reorden de bloques en una se replica en la otra, para que no
- * diverjan — con 2 recortes a propósito para el contexto "puede haber más
- * de un taller en la página":
- *   - `anchorSuffix={taller.slug}` en el hero: sin esto, el CTA de cada hero
- *     apuntaría al mismo "#inscripcion" (colisión — el de abajo scrollearía
- *     al form de arriba).
+ * diverjan — con 2 recortes a propósito para este contexto:
  *   - Sin `InstitucionesRow` (se leería "Presentado por: Filmar" adentro de
  *     la propia página de Filmar) ni `SoldOutModal`/`TallerCTABar` (pensados
  *     para una página con un solo taller).
+ *   - `ocultarHero` (default false): cuando la institución tiene 2+
+ *     talleres, `InstitucionPage` ya renderiza `InstitucionHeroMultiple`
+ *     (el selector compartido) arriba, y pasa `ocultarHero` para que este
+ *     bloque no repita un segundo hero — solo el cuerpo (galería + info +
+ *     form) del taller ACTIVO. Con 1 solo taller, `ocultarHero` queda en
+ *     false y este componente se ve exactamente como la página individual.
  *
- * `showHermano` NO se pisa (queda en su default `true`): si el taller tiene
- * "taller hermano" (pareja de marketing, ej. los 2 niveles de Filmar), el
- * hero SÍ muestra el banner de pareja compartido — pedido explícito del
- * dueño tras ver el hub con 2 heroes completos apilados ("lo pensaba más en
- * este estilo", con captura del banner de pareja). El caller
- * (`escuelas.instituciones.$slug.lazy.tsx`) agrupa: cuando 2 talleres de la
- * misma institución son hermanos entre sí, arma UN bloque con `alternativo`
- * (el Taller completo del otro lado) — este componente guarda cuál de los
- * 2 está activo (`activoId`, arranca en el que llegó por `taller`) y
- * "Ver este taller" en el hero de pareja lo cambia SIN navegar (pedido del
- * dueño 2026-08-19: "permanecer en esa página al elegir un taller debajo")
- * — nunca hay 2 cuerpos completos apilados para un par. `alternativo`
- * ausente (sin hermano, o cuyo hermano no pertenece a esta institución) es
- * el caso suelto: el hero muestra su propio banner normal sin pareja, o si
- * tiene pareja pero no está acá, "Ver este taller" sigue navegando afuera
- * (no tenemos el contenido completo del otro lado cargado en esta página).
- * El `key={taller_id}` del bloque de abajo fuerza un remount limpio al
- * cambiar de activo — el form, el calendario y los acordeones de clases no
+ * `InstitucionPage` decide layout por CANTIDAD de talleres (2+ → múltiple,
+ * 1 → solo) — reemplaza el "taller hermano" retirado (pedido del dueño
+ * 2026-08-19), que solo servía para pares. Cuando cambia cuál taller está
+ * activo, `InstitucionPage` cambia la prop `taller` con un `key` nuevo —
+ * este componente se remonta entero, así el form/calendario/acordeones no
  * arrastran estado del taller anterior.
  */
 export function TallerHubBlock({
-  taller: tallerInicial,
-  alternativo,
+  taller,
+  ocultarHero = false,
 }: {
   taller: Taller;
-  alternativo?: Taller;
+  ocultarHero?: boolean;
 }) {
-  const [activoId, setActivoId] = useState(tallerInicial.taller_id);
-  const taller = activoId === alternativo?.taller_id ? alternativo : tallerInicial;
-
   const proxima = taller.proxima_edicion;
   const isFrozen = taller.frozen_at != null;
   const isFullySoldOut = !isFrozen && taller.cupos_disponibles === 0 && proxima == null;
@@ -83,8 +67,6 @@ export function TallerHubBlock({
     parseDescripcionRica(taller.descripcion),
   );
 
-  const anchorId = `inscripcion-${taller.slug}`;
-
   return (
     <div>
       {taller.borrador && (
@@ -93,26 +75,18 @@ export function TallerHubBlock({
         </div>
       )}
 
-      <TallerHero
-        taller={taller}
-        formTaller={formTaller}
-        fechasResumen={fechasResumen}
-        horarioResumen={horarioResumen}
-        anchorSuffix={taller.slug}
-        onVerEsteTaller={alternativo ? setActivoId : undefined}
-      />
+      {!ocultarHero && (
+        <TallerHero
+          taller={taller}
+          formTaller={formTaller}
+          fechasResumen={fechasResumen}
+          horarioResumen={horarioResumen}
+        />
+      )}
 
-      {/* key={taller.taller_id} en las 2 piezas de abajo (no un wrapper
-          nuevo): al cambiar de activo, fuerza un remount limpio — el form,
-          el calendario y los acordeones de clases no arrastran estado del
-          taller anterior. */}
-      <TallerGaleria key={taller.taller_id} fotos={formTaller.fotos} alt={taller.nombre} />
+      <TallerGaleria fotos={formTaller.fotos} alt={taller.nombre} />
 
-      <div
-        key={taller.taller_id}
-        className="mx-auto py-12 sm:py-16 bg-background"
-        style={{ width: TALLER_CONTENT_WIDTH }}
-      >
+      <div className="mx-auto py-12 sm:py-16 bg-background" style={{ width: TALLER_CONTENT_WIDTH }}>
         <div className="grid lg:grid-cols-[1fr_380px] gap-10 lg:gap-16 items-start">
           <div className="flex flex-col gap-12">
             <SeccionCard eyebrow="De qué se trata">
@@ -150,7 +124,7 @@ export function TallerHubBlock({
           </div>
 
           <div className="lg:sticky lg:top-20">
-            <div id={anchorId} className="scroll-mt-20">
+            <div id="inscripcion" className="scroll-mt-20">
               {isFrozen ? (
                 <div className="rounded-2xl border border-border/60 bg-muted/20 px-5 py-6 text-center">
                   <p className="text-sm font-medium text-ink mb-1">Inscripciones cerradas</p>

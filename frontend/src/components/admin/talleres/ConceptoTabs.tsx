@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Save } from "lucide-react";
 import { toast } from "sonner";
 
@@ -9,18 +9,7 @@ import { Button } from "@/design-system/ui/button";
 import { Input } from "@/design-system/ui/input";
 import { Textarea } from "@/design-system/ui/textarea";
 import { Spinner } from "@/design-system/ui/spinner";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/design-system/ui/select";
 import { updateConceptoInCache } from "./cache";
-
-// Sentinel de Radix Select (no admite value="" para una opción) — se mapea
-// a `null` (sin pareja) al leer/escribir el form.
-const SIN_HERMANO = "__sin_hermano__";
 
 export function ContenidoSection({ concepto }: { concepto: TallerConcepto }) {
   const qc = useQueryClient();
@@ -36,8 +25,6 @@ export function ContenidoSection({ concepto }: { concepto: TallerConcepto }) {
     pregunta_experiencia: concepto.pregunta_experiencia ?? "",
     mensaje_confirmacion: concepto.mensaje_confirmacion ?? "",
     video_url: concepto.video_url ?? "",
-    taller_hermano_id: concepto.taller_hermano_id,
-    taller_hermano_titulo: concepto.taller_hermano_titulo ?? "",
   });
 
   useEffect(() => {
@@ -53,18 +40,8 @@ export function ContenidoSection({ concepto }: { concepto: TallerConcepto }) {
       pregunta_experiencia: concepto.pregunta_experiencia ?? "",
       mensaje_confirmacion: concepto.mensaje_confirmacion ?? "",
       video_url: concepto.video_url ?? "",
-      taller_hermano_id: concepto.taller_hermano_id,
-      taller_hermano_titulo: concepto.taller_hermano_titulo ?? "",
     });
   }, [concepto.id]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Mismo queryKey que la lista admin (talleres.index.lazy.tsx) — comparte
-  // caché, no dispara un fetch nuevo (la página ya la tiene cargada).
-  const { data: todosLosTalleres = [] } = useQuery({
-    queryKey: ["admin", "talleres"],
-    queryFn: talleresAdminApi.list,
-  });
-  const opcionesHermano = todosLosTalleres.filter((t) => t.id !== concepto.id);
 
   const mut = useMutation({
     mutationFn: (body: object) => talleresAdminApi.updateConcepto(concepto.id, body),
@@ -87,11 +64,6 @@ export function ContenidoSection({ concepto }: { concepto: TallerConcepto }) {
       beneficios: form.beneficios,
       pregunta_experiencia: form.pregunta_experiencia,
       mensaje_confirmacion: form.mensaje_confirmacion,
-      // Siempre presente (incluso null) — el backend distingue "sacale la
-      // pareja" de "no lo mandaron" por si la CLAVE vino en el JSON, no por
-      // si el valor es None (ver admin_update_concepto).
-      taller_hermano_id: form.taller_hermano_id,
-      taller_hermano_titulo: form.taller_hermano_titulo,
     };
     // F4a: solo se manda si CAMBIÓ — el backend, al recibirlo, descarga y
     // guarda el poster de YouTube; mandarlo sin cambios en cada guardado
@@ -187,49 +159,6 @@ export function ContenidoSection({ concepto }: { concepto: TallerConcepto }) {
         rows: 2,
         hint: "Se muestra al inscribirse (ej: link al grupo, qué llevar).",
       })}
-      <div className="flex flex-col gap-3 rounded-lg border hairline p-4">
-        <div>
-          <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-            Taller hermano
-          </label>
-          <p className="text-xs text-muted-foreground/70 mt-0.5">
-            Dos talleres lanzados juntos, un solo link — el Hero de los dos muestra un selector
-            hacia el otro. No hace falta configurarlo en los dos lados.
-          </p>
-        </div>
-        <Select
-          value={form.taller_hermano_id === null ? SIN_HERMANO : String(form.taller_hermano_id)}
-          onValueChange={(v) =>
-            setForm((f) => ({ ...f, taller_hermano_id: v === SIN_HERMANO ? null : Number(v) }))
-          }
-        >
-          <SelectTrigger>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={SIN_HERMANO}>— Sin pareja —</SelectItem>
-            {opcionesHermano.map((t) => (
-              <SelectItem key={t.id} value={String(t.id)}>
-                {t.nombre}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        {form.taller_hermano_id !== null && (
-          <div className="flex flex-col gap-1.5">
-            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Título de campaña (opcional)
-            </label>
-            <p className="text-xs text-muted-foreground/70 -mt-1">
-              Ej: "Dos talleres, un solo viaje". Vacío → el header muestra solo los 2 nombres.
-            </p>
-            <Input
-              value={form.taller_hermano_titulo}
-              onChange={(e) => setForm((f) => ({ ...f, taller_hermano_titulo: e.target.value }))}
-            />
-          </div>
-        )}
-      </div>
       <div className="flex justify-end pt-2">
         <Button onClick={handleSave} disabled={mut.isPending} className="gap-2">
           {mut.isPending ? <Spinner size="sm" /> : <Save className="h-4 w-4" />}

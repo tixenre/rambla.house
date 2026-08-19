@@ -460,24 +460,6 @@ export type Sesion = {
  *  (`_cuentas_pago_efectivas`, backend) — nunca se manda de vuelta al editar. */
 export type CuentaPago = { id?: number | null; alias: string; cbu: string; banco: string };
 
-// Un lado del banner de pareja (taller hermano) — trae lo mínimo del
-// concepto (nombre/subtítulo) MÁS los datos de la edición activa que
-// `MitadPareja` necesita para armar su propio resumen de fecha/horario
-// (mismo criterio — `resumenFechas`/`resumenHorario` — que usa el taller
-// actual, para que las 2 mitades del banner formateen igual).
-export type HermanoLado = {
-  taller_id: number;
-  nombre: string;
-  subtitulo: string;
-  slug: string;
-  fecha_inicio: string;
-  fecha_fin: string;
-  horario: string;
-  direccion: string;
-  cupos_total: number;
-  sesiones: SesionFecha[];
-};
-
 // Institución co-presentadora de uno o más talleres (ej. "Rambla" + "Filmar").
 // Entidad propia con su propia URL pública (hub /escuelas/instituciones/$slug
 // que agrupa todos sus talleres) — ver apiGetInstitucion más abajo.
@@ -494,10 +476,9 @@ export type Institucion = {
 
 export type Taller = {
   id: number;
-  // El CONCEPTO (`talleres.id`) — distinto de `id` (la EDICIÓN). Necesario
-  // para comparar contra `taller_hermano.principal/secundario.taller_id`
-  // (ambos referencian concepto, no edición) y saber cuál de los 2 lados
-  // del par es "el que estoy viendo ahora".
+  // El CONCEPTO (`talleres.id`) — distinto de `id` (la EDICIÓN). Usado como
+  // key estable en el hub de institución (`InstitucionHeroMultiple`/
+  // `InstitucionPage`) para saber qué taller está activo entre varios.
   taller_id: number;
   slug: string;
   nombre: string;
@@ -522,12 +503,6 @@ export type Taller = {
   numero_edicion: number;
   proxima_edicion?: EdicionLite | null;
   edicion_anterior?: EdicionLite | null;
-  // Taller hermano (pareja de marketing) — el par YA ORDENADO por el
-  // backend (`principal` = el lado con el puntero seteado, siempre
-  // primero) para que el banner se vea IGUAL sea cual sea la página desde
-  // la que se mira. null si no tiene pareja, o si algún lado no tiene
-  // edición activa a la que linkear.
-  taller_hermano?: { titulo: string; principal: HermanoLado; secundario: HermanoLado } | null;
   activo: boolean;
   tipo_taller: string;
   notif_email: string;
