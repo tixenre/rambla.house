@@ -2247,8 +2247,20 @@ def admin_delete_institucion(institucion_id: int, request: Request):
 
 
 @router.post("/admin/instituciones/{institucion_id}/upload-logo")
+@limiter.limit(ADMIN_UPLOAD_LIMIT)
 async def admin_upload_logo_institucion(institucion_id: int, request: Request):
-    """Sube el logo de una institución a R2 vía el motor de media."""
+    """Sube el logo de una institución a R2 vía el motor de media.
+
+    - SVG: se sube tal cual (con sanitize defensivo de <script>/on*, mismo
+      helper que `routes/marcas.py`) — se sirve con
+      `Content-Type: image/svg+xml`; el front lo puede inlinear para teñirlo
+      vía `currentColor` (`InstitucionHeroMultiple`). No pasa por el motor
+      de media (SVG no es un formato raster — Pillow no lo decodifica), así
+      que `logo_media_id` queda sin tocar (igual que en marcas.py).
+    - Raster (PNG/JPEG/WebP): pipeline no-destructivo de siempre —
+      `store_upload` + `_INSTITUCION_LOGO_SPECS`, actualiza `logo_url` Y
+      `logo_media_id`.
+    """
     require_admin(request)
     with get_db() as conn:
         row = conn.execute(
@@ -2268,8 +2280,25 @@ async def admin_upload_logo_institucion(institucion_id: int, request: Request):
     if len(raw) > FOTO_MAX_MB * 1024 * 1024:
         raise HTTPException(413, f"Archivo muy grande (máx {FOTO_MAX_MB} MB)")
 
+    from services.media.svg import is_svg, sanitize_svg
+
+    filename = getattr(file, "filename", None)
+
     try:
         with get_db() as conn:
+            if is_svg(raw, filename):
+                from services.media.storage import put as _r2_put
+                content = sanitize_svg(raw)
+                path = f"instituciones/{institucion_id}/logo-{int(time.time())}.svg"
+                url = _r2_put(path, content, "image/svg+xml")
+                conn.execute(
+                    "UPDATE instituciones SET logo_url = %s, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                    (url, institucion_id),
+                )
+                conn.commit()
+                return {"ok": True, "url": url, "media_id": None}
+
             asset = store_upload(
                 raw, kind="institucion-logo", derive_specs=_INSTITUCION_LOGO_SPECS, conn=conn
             )
@@ -2281,13 +2310,14 @@ async def admin_upload_logo_institucion(institucion_id: int, request: Request):
                 (asset.id, url, institucion_id),
             )
             conn.commit()
+            return {"ok": True, "url": url, "media_id": asset.id}
     except MediaError as e:
         raise HTTPException(e.status, e.detail)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("upload_logo_institucion: error inesperado: %s", e, exc_info=True)
         raise HTTPException(502, "No se pudo subir el logo. Intentá de nuevo.")
-
-    return {"ok": True, "url": url, "media_id": asset.id}
 
 
 @router.put("/admin/talleres/{taller_id}/instituciones")

@@ -263,37 +263,6 @@ def admin_delete_marca(marca_id: int, request: Request):
             raise
 
 
-def _is_svg(raw: bytes, filename: str | None) -> bool:
-    """Heurística para detectar SVG: o el nombre termina en .svg, o los
-    primeros bytes contienen <?xml o <svg.
-    """
-    if filename and filename.lower().endswith(".svg"):
-        return True
-    head = raw[:512].lstrip().lower()
-    return head.startswith(b"<?xml") or head.startswith(b"<svg")
-
-
-def _sanitize_svg(raw: bytes) -> bytes:
-    """Strip <script> tags y atributos on* del SVG antes de subirlo a R2.
-    Defensa en profundidad — los uploads requieren admin auth pero un
-    admin comprometido podría inyectar XSS en cualquier página que inline
-    el SVG.
-    """
-    text = raw.decode("utf-8", errors="ignore")
-    # <script>...</script> (sin importar atributos)
-    text = re.sub(r"<\s*script\b[^>]*>.*?<\s*/\s*script\s*>",
-                  "", text, flags=re.IGNORECASE | re.DOTALL)
-    # <script ... /> auto-closed
-    text = re.sub(r"<\s*script\b[^>]*/\s*>", "", text, flags=re.IGNORECASE)
-    # atributos on* (onclick, onload, onerror, etc.) — match con/sin comillas
-    text = re.sub(r'\s+on[a-z]+\s*=\s*("[^"]*"|\'[^\']*\'|[^\s>]+)',
-                  "", text, flags=re.IGNORECASE)
-    # <foreignObject> permite HTML arbitrario adentro del SVG → tirarlo.
-    text = re.sub(r"<\s*foreignObject\b[^>]*>.*?<\s*/\s*foreignObject\s*>",
-                  "", text, flags=re.IGNORECASE | re.DOTALL)
-    return text.encode("utf-8")
-
-
 @router.post("/admin/marcas/{marca_id}/upload-logo")
 @limiter.limit(ADMIN_UPLOAD_LIMIT)
 async def admin_upload_marca_logo(marca_id: int, request: Request):
@@ -318,6 +287,8 @@ async def admin_upload_marca_logo(marca_id: int, request: Request):
         raise HTTPException(400, "Archivo vacío")
     if len(raw_content) > 5 * 1024 * 1024:
         raise HTTPException(413, "Logo muy grande (máx 5MB)")
+
+    from services.media.svg import is_svg as _is_svg, sanitize_svg as _sanitize_svg
 
     filename = getattr(file, "filename", None)
     is_svg = _is_svg(raw_content, filename)
