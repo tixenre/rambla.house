@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { DescripcionBloques, DescripcionRica } from "@/components/talleres/DescripcionRica";
 import { InstructorCard } from "@/components/talleres/InstructorCard";
 import { InteresadoForm } from "@/components/talleres/InteresadoForm";
@@ -35,15 +37,31 @@ import type { Taller } from "@/lib/api";
  * hero SÍ muestra el banner de pareja compartido — pedido explícito del
  * dueño tras ver el hub con 2 heroes completos apilados ("lo pensaba más en
  * este estilo", con captura del banner de pareja). El caller
- * (`escuelas.instituciones.$slug.lazy.tsx`) deduplica: cuando 2 talleres de
- * la misma institución son hermanos entre sí, solo renderiza UNO completo
- * (el "activo", con el hero de pareja); el otro se alcanza por el link
- * "Ver este taller" que el propio hero de pareja ya arma — no hay 2 cuerpos
- * completos apilados para un par. Talleres sueltos (sin hermano, o cuyo
- * hermano no pertenece a esta institución) se siguen mostrando cada uno con
- * su propio hero normal, sin pareja.
+ * (`escuelas.instituciones.$slug.lazy.tsx`) agrupa: cuando 2 talleres de la
+ * misma institución son hermanos entre sí, arma UN bloque con `alternativo`
+ * (el Taller completo del otro lado) — este componente guarda cuál de los
+ * 2 está activo (`activoId`, arranca en el que llegó por `taller`) y
+ * "Ver este taller" en el hero de pareja lo cambia SIN navegar (pedido del
+ * dueño 2026-08-19: "permanecer en esa página al elegir un taller debajo")
+ * — nunca hay 2 cuerpos completos apilados para un par. `alternativo`
+ * ausente (sin hermano, o cuyo hermano no pertenece a esta institución) es
+ * el caso suelto: el hero muestra su propio banner normal sin pareja, o si
+ * tiene pareja pero no está acá, "Ver este taller" sigue navegando afuera
+ * (no tenemos el contenido completo del otro lado cargado en esta página).
+ * El `key={taller_id}` del bloque de abajo fuerza un remount limpio al
+ * cambiar de activo — el form, el calendario y los acordeones de clases no
+ * arrastran estado del taller anterior.
  */
-export function TallerHubBlock({ taller }: { taller: Taller }) {
+export function TallerHubBlock({
+  taller: tallerInicial,
+  alternativo,
+}: {
+  taller: Taller;
+  alternativo?: Taller;
+}) {
+  const [activoId, setActivoId] = useState(tallerInicial.taller_id);
+  const taller = activoId === alternativo?.taller_id ? alternativo : tallerInicial;
+
   const proxima = taller.proxima_edicion;
   const isFrozen = taller.frozen_at != null;
   const isFullySoldOut = !isFrozen && taller.cupos_disponibles === 0 && proxima == null;
@@ -81,11 +99,20 @@ export function TallerHubBlock({ taller }: { taller: Taller }) {
         fechasResumen={fechasResumen}
         horarioResumen={horarioResumen}
         anchorSuffix={taller.slug}
+        onVerEsteTaller={alternativo ? setActivoId : undefined}
       />
 
-      <TallerGaleria fotos={formTaller.fotos} alt={taller.nombre} />
+      {/* key={taller.taller_id} en las 2 piezas de abajo (no un wrapper
+          nuevo): al cambiar de activo, fuerza un remount limpio — el form,
+          el calendario y los acordeones de clases no arrastran estado del
+          taller anterior. */}
+      <TallerGaleria key={taller.taller_id} fotos={formTaller.fotos} alt={taller.nombre} />
 
-      <div className="mx-auto py-12 sm:py-16 bg-background" style={{ width: TALLER_CONTENT_WIDTH }}>
+      <div
+        key={taller.taller_id}
+        className="mx-auto py-12 sm:py-16 bg-background"
+        style={{ width: TALLER_CONTENT_WIDTH }}
+      >
         <div className="grid lg:grid-cols-[1fr_380px] gap-10 lg:gap-16 items-start">
           <div className="flex flex-col gap-12">
             <SeccionCard eyebrow="De qué se trata">

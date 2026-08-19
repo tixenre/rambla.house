@@ -13,31 +13,41 @@ export const Route = createLazyFileRoute("/escuelas/instituciones/$slug")({
   component: InstitucionPage,
 });
 
+type BloqueTaller = { taller: Taller; alternativo?: Taller };
+
 /**
  * Cuando 2 talleres de la MISMA institución son "hermanos" entre sí (pareja
  * de marketing, ej. los 2 niveles de Filmar), el hero de pareja de
  * `TallerHubBlock` ya arma el link "Ver este taller" hacia el otro lado —
  * mostrar los DOS bloques completos apilados sería redundante (pedido
  * explícito del dueño: "hero compartido + solo el taller activo abajo").
- * Se queda solo con el primero de cada par (el orden ya viene de
- * `ti.orden`, el que el admin definió al vincularlos a la institución); un
- * taller sin hermano, o cuyo hermano no pertenece a esta institución, se
- * muestra igual, suelto. */
-function dedupHermanos(talleres: Taller[]): Taller[] {
-  const idsEnEstaInstitucion = new Set(talleres.map((t) => t.taller_id));
+ * Se agrupan en UN bloque con `alternativo` (el Taller COMPLETO del otro
+ * lado, no solo su id) para que `TallerHubBlock` pueda cambiar cuál se
+ * muestra sin salir de esta página (pedido del dueño 2026-08-19:
+ * "permanecer en esa página al elegir un taller debajo" — antes "Ver este
+ * taller" navegaba a `/escuelas/$slug` aunque el otro lado ya estuviera
+ * cargado acá mismo). El orden ya viene de `ti.orden`, el que el admin
+ * definió al vincularlos a la institución; un taller sin hermano, o cuyo
+ * hermano no pertenece a esta institución, se muestra suelto, sin
+ * `alternativo` — ahí "Ver este taller" sigue navegando afuera, porque no
+ * tenemos el contenido completo del otro lado en esta página. */
+function agruparHermanos(talleres: Taller[]): BloqueTaller[] {
+  const porId = new Map(talleres.map((t) => [t.taller_id, t]));
   const yaCubierto = new Set<number>();
-  return talleres.filter((t) => {
-    if (yaCubierto.has(t.taller_id)) return false;
+  const bloques: BloqueTaller[] = [];
+  for (const t of talleres) {
+    if (yaCubierto.has(t.taller_id)) continue;
     const hermano = t.taller_hermano;
-    if (hermano) {
-      const otroId =
-        hermano.principal.taller_id === t.taller_id
-          ? hermano.secundario.taller_id
-          : hermano.principal.taller_id;
-      if (idsEnEstaInstitucion.has(otroId)) yaCubierto.add(otroId);
-    }
-    return true;
-  });
+    const otroId = hermano
+      ? hermano.principal.taller_id === t.taller_id
+        ? hermano.secundario.taller_id
+        : hermano.principal.taller_id
+      : undefined;
+    const alternativo = otroId != null ? porId.get(otroId) : undefined;
+    if (alternativo) yaCubierto.add(alternativo.taller_id);
+    bloques.push({ taller: t, alternativo });
+  }
+  return bloques;
 }
 
 function InstitucionPage() {
@@ -134,12 +144,13 @@ function InstitucionPage() {
         {/* Bloques de taller completos — FUERA del max-w de arriba: cada uno
             necesita que su hero (bg-ink, edge-to-edge) respire igual que en
             su propia página individual, no encogido dentro de una card.
-            dedupHermanos: un par (ej. Nivel 1 + Nivel 2) se muestra UNA vez,
-            no 2 heroes completos apilados. */}
+            agruparHermanos: un par (ej. Nivel 1 + Nivel 2) se muestra UNA
+            vez, no 2 heroes completos apilados — TallerHubBlock cambia cuál
+            de los 2 está activo internamente, sin remontar este bloque. */}
         {data && data.talleres.length > 0 && (
           <div className="flex flex-col gap-20 mt-8">
-            {dedupHermanos(data.talleres).map((t) => (
-              <TallerHubBlock key={t.id} taller={t} />
+            {agruparHermanos(data.talleres).map(({ taller, alternativo }) => (
+              <TallerHubBlock key={taller.id} taller={taller} alternativo={alternativo} />
             ))}
           </div>
         )}

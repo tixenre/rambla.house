@@ -92,9 +92,22 @@ function EdicionesContexto({
  * edición + el CTA adentro; el otro lado queda apagado (`/45`, `/30`)
  * con un link "Ver este taller" que se ilumina en hover — mismo pedido:
  * "cuando seleccionás uno, que se vuelva más importante". Texto plano si
- * es el taller actual (nada que linkear a sí mismo), link real si es el
- * otro. */
-function MitadPareja({ t, taller, cta }: { t: HermanoLado; taller: Taller; cta: ReactNode }) {
+ * es el taller actual (nada que linkear a sí mismo); si es el otro, un
+ * `<button>` cuando `onVerEsteTaller` está presente (el hub de institución
+ * cambia cuál se muestra SIN navegar — pedido del dueño 2026-08-19,
+ * "permanecer en esa página al elegir un taller debajo") o un `<Link>` a
+ * la página individual si no (comportamiento de siempre). */
+function MitadPareja({
+  t,
+  taller,
+  cta,
+  onVerEsteTaller,
+}: {
+  t: HermanoLado;
+  taller: Taller;
+  cta: ReactNode;
+  onVerEsteTaller?: (tallerId: number) => void;
+}) {
   const optsLong: Intl.DateTimeFormatOptions = { weekday: "long", day: "numeric", month: "long" };
   const fechaInicioStr = new Date(t.fecha_inicio + "T12:00:00").toLocaleDateString(
     "es-AR",
@@ -150,6 +163,17 @@ function MitadPareja({ t, taller, cta }: { t: HermanoLado; taller: Taller; cta: 
   );
 
   if (esActual) return <div>{contenido}</div>;
+  if (onVerEsteTaller) {
+    return (
+      <button
+        type="button"
+        onClick={() => onVerEsteTaller(t.taller_id)}
+        className="group block w-full text-left"
+      >
+        {contenido}
+      </button>
+    );
+  }
   return (
     <Link to="/escuelas/$slug" params={{ slug: t.slug }} className="group block">
       {contenido}
@@ -173,7 +197,15 @@ function MitadPareja({ t, taller, cta }: { t: HermanoLado; taller: Taller; cta: 
  * `id="hero-cta"` que ya observa `TallerCTABar`. El resto de la página
  * (contenido, form) sigue siendo del taller actual sin cambios.
  */
-function TituloPareja({ taller, cta }: { taller: Taller; cta: ReactNode }) {
+function TituloPareja({
+  taller,
+  cta,
+  onVerEsteTaller,
+}: {
+  taller: Taller;
+  cta: ReactNode;
+  onVerEsteTaller?: (tallerId: number) => void;
+}) {
   const hermano = taller.taller_hermano;
   if (!hermano) return null;
   const tituloGrande =
@@ -188,8 +220,18 @@ function TituloPareja({ taller, cta }: { taller: Taller; cta: ReactNode }) {
         {tituloGrande}
       </h1>
       <div className="mt-10 grid grid-cols-1 sm:grid-cols-2 gap-x-12 gap-y-8">
-        <MitadPareja t={hermano.principal} taller={taller} cta={cta} />
-        <MitadPareja t={hermano.secundario} taller={taller} cta={cta} />
+        <MitadPareja
+          t={hermano.principal}
+          taller={taller}
+          cta={cta}
+          onVerEsteTaller={onVerEsteTaller}
+        />
+        <MitadPareja
+          t={hermano.secundario}
+          taller={taller}
+          cta={cta}
+          onVerEsteTaller={onVerEsteTaller}
+        />
       </div>
     </>
   );
@@ -262,6 +304,14 @@ type Props = {
    * debajo del otro, un mini-banner de pareja adentro de cada uno sería
    * redundante (la propia página ES la unión). */
   showHermano?: boolean;
+  /** Cuando está presente, "Ver este taller" (el lado apagado del banner de
+   * pareja) llama a esto con el `taller_id` del otro lado en vez de
+   * navegar — el hub de institución lo usa para cambiar cuál de los 2
+   * hermanos se muestra SIN salir de `/escuelas/instituciones/$slug`
+   * (pedido del dueño 2026-08-19: "permanecer en esa página al elegir un
+   * taller debajo"). Sin esto (default), sigue siendo un `<Link>` normal a
+   * la página individual — el comportamiento de siempre. */
+  onVerEsteTaller?: (tallerId: number) => void;
 };
 
 /**
@@ -279,6 +329,7 @@ export function TallerHero({
   horarioResumen,
   anchorSuffix,
   showHermano = true,
+  onVerEsteTaller,
 }: Props) {
   const anchorId = anchorSuffix ? `inscripcion-${anchorSuffix}` : "inscripcion";
   const heroCtaId = anchorSuffix ? `hero-cta-${anchorSuffix}` : "hero-cta";
@@ -304,7 +355,7 @@ export function TallerHero({
         >
           <div>
             {mostrarHermano ? (
-              <TituloPareja taller={taller} cta={cta} />
+              <TituloPareja taller={taller} cta={cta} onVerEsteTaller={onVerEsteTaller} />
             ) : (
               <>
                 <Titulo taller={taller} />
@@ -335,7 +386,7 @@ export function TallerHero({
       <Grain opacity={10} />
       <div className="relative mx-auto py-16 sm:py-24" style={{ width: TALLER_CONTENT_WIDTH }}>
         {mostrarHermano ? (
-          <TituloPareja taller={taller} cta={cta} />
+          <TituloPareja taller={taller} cta={cta} onVerEsteTaller={onVerEsteTaller} />
         ) : (
           <>
             <Titulo taller={taller} />
