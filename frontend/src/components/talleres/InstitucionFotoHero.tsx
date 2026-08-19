@@ -71,9 +71,11 @@ export function InstitucionFotoHero({
         )}
 
         {institucion.descripcion && (
-          <p className="text-background/85 text-sm leading-relaxed max-w-2xl">
-            {institucion.descripcion}
-          </p>
+          // Sin max-w-2xl: mismo ajuste que ya se hizo en el header plano
+          // (2026-08-19) — un cap angosto adentro de una columna que ya es
+          // TALLER_CONTENT_WIDTH duplicaba la restricción y dejaba el
+          // párrafo con demasiados renglones cortos.
+          <p className="text-background/85 text-sm leading-relaxed">{institucion.descripcion}</p>
         )}
 
         {institucion.instagram && (
