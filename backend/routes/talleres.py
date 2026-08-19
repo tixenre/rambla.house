@@ -343,108 +343,6 @@ def _video_dict(row) -> dict | None:
     }
 
 
-def _taller_publico_lite(conn, taller_id: int) -> dict | None:
-    """Datos de la edición activa más reciente de un CONCEPTO para mostrar
-    una mitad completa del banner de pareja (`MitadPareja` en el front,
-    pedido del dueño 2026-08-18: la info de fecha/horario/cupos va DENTRO
-    del recuadro de cada taller, no en una fila genérica aparte) + armar el
-    link a `/escuelas/$slug`. Trae `sesiones` (mismo shape que
-    `_edicion_to_public_dict`) para que el front pueda calcular
-    `resumenFechas`/`resumenHorario` con el MISMO criterio que usa para el
-    taller actual — así las 2 mitades formatean igual, no una rica y la
-    otra genérica. El subtítulo es lo que deja diferenciar "nivel inicial"/
-    "nivel avanzado" sin inventar un campo nuevo. None si el concepto no
-    existe o no tiene ninguna edición activa (nada a dónde linkear)."""
-    t = conn.execute(
-        "SELECT id, nombre, subtitulo FROM talleres WHERE id = %s", (taller_id,)
-    ).fetchone()
-    if not t:
-        return None
-    ed = conn.execute(
-        "SELECT id, slug, fecha_inicio, fecha_fin, horario, direccion, "
-        "cupos_total, cupos_confirmados FROM ediciones_taller "
-        "WHERE taller_id = %s AND activo = TRUE ORDER BY numero_edicion DESC LIMIT 1",
-        (taller_id,),
-    ).fetchone()
-    if not ed:
-        return None
-    return {
-        "taller_id": t["id"],
-        "nombre": t["nombre"],
-        "subtitulo": t["subtitulo"],
-        "slug": ed["slug"],
-        "fecha_inicio": str(ed["fecha_inicio"]),
-        "fecha_fin": str(ed["fecha_fin"]),
-        "horario": ed["horario"],
-        "direccion": ed["direccion"],
-        # cupos_total (no cupos_disponibles) — mismo campo que MetaRow ya
-        # muestra para el taller actual (formTaller.cupos_total); las 2
-        # mitades del banner tienen que decir lo mismo con el mismo criterio.
-        "cupos_total": ed["cupos_total"],
-        "sesiones": _get_clases(conn, ed["id"]),
-    }
-
-
-def _resolver_hermano(conn, mi_taller_id: int) -> dict | None:
-    """Taller hermano (pareja de marketing): resuelve SIMÉTRICO — si YO
-    apunto a otro (`taller_hermano_id`), o si OTRO me apunta a mí, en
-    cualquier caso devuelve el par. No hace falta setear el vínculo en los
-    2 lados.
-
-    Devuelve el par YA ORDENADO por **id** — el de menor id siempre
-    `principal`, el de mayor siempre `secundario`, sin importar desde qué
-    página se mira NI de qué lado(s) esté seteado `taller_hermano_id`.
-    Bug real confirmado en vivo (2026-08-19, "no quiero que se den vuelta"):
-    la versión anterior ordenaba "dueño_id = mi_taller_id si MI fila tiene
-    el puntero seteado" — funciona si el vínculo se configuró desde UN
-    solo concepto, pero la UI del admin no impide configurarlo desde LOS
-    DOS (cada tab de "Taller hermano" es independiente); con el puntero
-    seteado en ambos lados, cada página se "adueña" del rol principal al
-    mirarla y el orden se invierte según cuál estés viendo — exactamente
-    el síntoma reportado. Ordenar por id (un dato fijo, no por "quién
-    tiene el puntero") es estable sea uno, el otro, o los dos lados los que
-    tengan `taller_hermano_id` seteado. El front decide cuál de los dos es
-    un link (el que NO coincide con el taller actual) — acá solo se fija
-    el orden, no la interactividad.
-
-    El título de campaña (`taller_hermano_titulo`) se resuelve con el mismo
-    criterio: se lee de CUALQUIER lado que lo tenga (prioriza el de menor
-    id, por las dudas se haya tipeado distinto en cada tab) — nunca "el
-    de la página que estás mirando", mismo motivo que el orden.
-
-    None si no hay hermano, o si algún lado del par no tiene ninguna
-    edición activa a la que linkear — el front no debe romper por un
-    vínculo a medio configurar."""
-    mio = conn.execute(
-        "SELECT taller_hermano_id FROM talleres WHERE id = %s",
-        (mi_taller_id,),
-    ).fetchone()
-    if mio and mio["taller_hermano_id"]:
-        otro_id = mio["taller_hermano_id"]
-    else:
-        otro = conn.execute(
-            "SELECT id FROM talleres WHERE taller_hermano_id = %s ORDER BY id LIMIT 1",
-            (mi_taller_id,),
-        ).fetchone()
-        if not otro:
-            return None
-        otro_id = otro["id"]
-
-    id_menor, id_mayor = sorted((mi_taller_id, otro_id))
-    titulos = conn.execute(
-        "SELECT id, taller_hermano_titulo FROM talleres WHERE id IN (%s, %s)",
-        (id_menor, id_mayor),
-    ).fetchall()
-    por_id = {r["id"]: r["taller_hermano_titulo"] for r in titulos}
-    titulo = por_id.get(id_menor) or por_id.get(id_mayor) or ""
-
-    principal = _taller_publico_lite(conn, id_menor)
-    secundario = _taller_publico_lite(conn, id_mayor)
-    if not principal or not secundario:
-        return None
-    return {"titulo": titulo, "principal": principal, "secundario": secundario}
-
-
 def _edicion_lite(row) -> dict:
     """Datos mínimos de una edición para mostrar en el contexto de otra."""
     return {
@@ -620,8 +518,6 @@ def _concepto_to_admin_dict(
         "mensaje_confirmacion": _row_get(taller_row, "mensaje_confirmacion", ""),
         "video_url": _row_get(taller_row, "video_url", ""),
         "video_poster_url": _row_get(taller_row, "video_poster_url", ""),
-        "taller_hermano_id": _row_get(taller_row, "taller_hermano_id", None),
-        "taller_hermano_titulo": _row_get(taller_row, "taller_hermano_titulo", ""),
         "instructores": instructores if instructores is not None else [],
         "instituciones": instituciones if instituciones is not None else [],
         "ediciones": ediciones if ediciones is not None else [],
@@ -695,8 +591,6 @@ def get_taller(slug: str, request: Request):
             (row["taller_id"], row["numero_edicion"]),
         ).fetchone()
         d["edicion_anterior"] = _edicion_lite(ant) if ant else None
-
-        d["taller_hermano"] = _resolver_hermano(conn, row["taller_id"])
     return d
 
 
@@ -705,14 +599,15 @@ def get_institucion(slug: str):
     """Hub público de una institución co-presentadora (ej. "Filmar"): su
     perfil + todas sus ediciones activas — un solo link para compartir varios
     niveles/ediciones de la misma institución en vez de uno por taller.
-    Mismo shape de taller que /talleres (sin proxima_edicion/edicion_anterior —
-    igual que list_talleres, campos opcionales en el front). SÍ incluye
-    `taller_hermano`: cuando 2 talleres de esta institución son pareja de
-    marketing entre sí, el front (`TallerHubBlock`/`dedupHermanos`) lo usa para
-    mostrar el hero compartido una sola vez en vez de 2 heroes completos
-    apilados (pedido del dueño 2026-08-19, "hero compartido + solo el taller
-    activo abajo") — sin este campo, `dedupHermanos` no tiene con qué
-    detectar el par."""
+    Mismo shape de taller que /talleres (sin proxima_edicion/edicion_anterior
+    — igual que list_talleres, campos opcionales en el front). Devuelve la
+    lista plana; el front (`escuelas.instituciones.$slug.lazy.tsx`) decide
+    layout por CANTIDAD — 2+ talleres → hero compartido con selector (N-way,
+    no solo pares) + el activo abajo; 1 solo → esa página tal cual (pedido
+    del dueño 2026-08-19: "esa página compartida lo haría cuando seleccionás
+    la institución… si tiene 1, el que tenga solo"). No hay resolución de
+    pareja acá — reemplaza el "taller hermano" removido, que era un
+    mecanismo aparte para exactamente 2 talleres."""
     with get_db() as conn:
         ins_row = conn.execute(
             "SELECT * FROM instituciones WHERE slug = %s", (slug,)
@@ -726,17 +621,16 @@ def get_institucion(slug: str):
             "ORDER BY ti.orden, e.id",
             (ins_row["id"],),
         ).fetchall()
-        talleres = []
-        for r in rows:
-            d = _edicion_to_public_dict(
+        talleres = [
+            _edicion_to_public_dict(
                 r, _get_clases(conn, r["id"]), _get_instructores_taller(conn, r["taller_id"]),
                 _get_modalidades(conn, r["id"]),
                 instituciones=_get_instituciones_taller(conn, r["taller_id"]),
                 fotos=_get_edicion_fotos(conn, r["id"]),
                 cuentas_pago=_get_cuentas_pago(conn, r["id"]),
             )
-            d["taller_hermano"] = _resolver_hermano(conn, r["taller_id"])
-            talleres.append(d)
+            for r in rows
+        ]
         return {"institucion": _institucion_dict(ins_row), "talleres": talleres}
 
 
@@ -1417,13 +1311,6 @@ class TallerConceptoUpdateBody(BaseModel):
     video_url: str | None = None
     # F4c: FAQ del concepto — [{pregunta, respuesta}]. Ninguna es obligatoria.
     faqs: list[FaqItemBody] | None = None
-    # Taller hermano (pareja de marketing) — único campo NULLABLE real del
-    # body: `None` es ambiguo entre "no lo mandaron" y "lo quiero borrar", a
-    # diferencia de los strings de arriba (que usan '' como su propio
-    # sentinel de borrado). Se resuelve con `exclude_unset`, no con "is not
-    # None" — ver admin_update_concepto.
-    taller_hermano_id: int | None = None
-    taller_hermano_titulo: str | None = None
 
 
 class EdicionUpdateBody(BaseModel):
@@ -1771,16 +1658,8 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
         sets.append("faqs = %s::jsonb"); params.append(_json.dumps(faqs_limpio, ensure_ascii=False))
 
     video_url_provisto = body.video_url is not None
-    if body.taller_hermano_titulo is not None:
-        sets.append("taller_hermano_titulo = %s"); params.append(body.taller_hermano_titulo.strip())
-    # `taller_hermano_id` es el único FK nullable del body: a diferencia de
-    # los strings (que usan '' como su propio sentinel de borrado), acá
-    # `None` es un valor real y válido ("sacale la pareja"). `is not None`
-    # lo confundiría con "no lo mandaron" — se resuelve mirando si la CLAVE
-    # vino en el JSON, no si el valor es None.
-    hermano_id_provisto = "taller_hermano_id" in body.model_fields_set
 
-    if not sets and not video_url_provisto and not hermano_id_provisto:
+    if not sets and not video_url_provisto:
         raise HTTPException(400, "No hay campos para actualizar")
 
     with get_db() as conn:
@@ -1788,18 +1667,6 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
             existing = conn.execute("SELECT id FROM talleres WHERE id = %s", (taller_id,)).fetchone()
             if existing is None:
                 raise HTTPException(404, "Taller no encontrado")
-
-            if hermano_id_provisto:
-                hermano_id = body.taller_hermano_id
-                if hermano_id is not None:
-                    if hermano_id == taller_id:
-                        raise HTTPException(400, "Un taller no puede ser su propio hermano")
-                    hermano_row = conn.execute(
-                        "SELECT id FROM talleres WHERE id = %s", (hermano_id,)
-                    ).fetchone()
-                    if hermano_row is None:
-                        raise HTTPException(400, "El taller hermano no existe")
-                sets.append("taller_hermano_id = %s"); params.append(hermano_id)
 
             if video_url_provisto:
                 nuevo_video = body.video_url.strip()
