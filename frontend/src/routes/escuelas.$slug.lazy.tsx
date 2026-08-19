@@ -178,9 +178,11 @@ function TallerLandingPage() {
             <div className="grid lg:grid-cols-[1fr_380px] gap-10 lg:gap-16 items-start">
               {/* Columna principal */}
               <div className="flex flex-col gap-12">
-                {/* Orden: de qué se trata → a quién está orientado → cuándo es
-                    (chequeo rápido antes de invertir tiempo en leer) → el
-                    desarrollo completo del programa. */}
+                {/* Orden: de qué se trata → a quién está orientado → el
+                    desarrollo completo del programa → cuándo es (pedido
+                    explícito del dueño: las fechas van después de las
+                    clases, no antes — ya se sabe de qué se trata el taller
+                    antes de mostrar el calendario). */}
                 <SeccionCard eyebrow="De qué se trata">
                   <DescripcionBloques
                     bloques={bloquesDescripcion}
@@ -197,10 +199,6 @@ function TallerLandingPage() {
                   </SeccionCard>
                 )}
 
-                {formTaller.sesiones.length > 0 && (
-                  <TallerCalendario sesiones={formTaller.sesiones} horario={formTaller.horario} />
-                )}
-
                 {bloquesPrograma && bloquesPrograma.length > 0 && (
                   <SeccionCard eyebrow="Programa">
                     <DescripcionBloques
@@ -210,6 +208,11 @@ function TallerLandingPage() {
                   </SeccionCard>
                 )}
                 <ProgramaSection clases={clases} />
+
+                {formTaller.sesiones.length > 0 && (
+                  <TallerCalendario sesiones={formTaller.sesiones} horario={formTaller.horario} />
+                )}
+
                 <InstitucionesRow taller={taller} />
                 <InstructorCard taller={taller} />
                 <TallerTrabajos trabajos={taller.trabajos} />

@@ -7,7 +7,7 @@ const TITULO_GENERICO_RE = /^Clase \d+$/;
 
 /** Sin temario/nota/portada y con un título tipo "Clase N" (o vacío), una
  * clase no tiene nada propio que mostrar — solo repetiría fecha/hora, que ya
- * están en el calendario de arriba. */
+ * están en el calendario de abajo. */
 function esClaseGenerica(clase: Sesion): boolean {
   const titulo = clase.titulo.trim();
   const tituloGenerico = titulo === "" || TITULO_GENERICO_RE.test(titulo);

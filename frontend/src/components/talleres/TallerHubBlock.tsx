@@ -19,9 +19,10 @@ import type { Taller } from "@/lib/api";
  * (`/escuelas/instituciones/$slug`, pedido explícito del dueño: "me
  * gustaría que se vean los formularios/página completos", no un resumen).
  *
- * Espeja la composición de `escuelas.$slug.lazy.tsx` (la página individual,
- * que NO se tocó — cero riesgo de regresión ahí), con 2 recortes a
- * propósito para el contexto "puede haber más de un taller en la página":
+ * Espeja la composición de `escuelas.$slug.lazy.tsx` (la página individual)
+ * — un reorden de bloques en una se replica en la otra, para que no
+ * diverjan — con 2 recortes a propósito para el contexto "puede haber más
+ * de un taller en la página":
  *   - `anchorSuffix={taller.slug}` en el hero: sin esto, el CTA de cada hero
  *     apuntaría al mismo "#inscripcion" (colisión — el de abajo scrollearía
  *     al form de arriba).
@@ -103,10 +104,6 @@ export function TallerHubBlock({ taller }: { taller: Taller }) {
               </SeccionCard>
             )}
 
-            {formTaller.sesiones.length > 0 && (
-              <TallerCalendario sesiones={formTaller.sesiones} horario={formTaller.horario} />
-            )}
-
             {bloquesPrograma && bloquesPrograma.length > 0 && (
               <SeccionCard eyebrow="Programa">
                 <DescripcionBloques
@@ -116,6 +113,11 @@ export function TallerHubBlock({ taller }: { taller: Taller }) {
               </SeccionCard>
             )}
             <ProgramaSection clases={clases} />
+
+            {formTaller.sesiones.length > 0 && (
+              <TallerCalendario sesiones={formTaller.sesiones} horario={formTaller.horario} />
+            )}
+
             <InstructorCard taller={taller} />
             <TallerTrabajos trabajos={taller.trabajos} />
           </div>
