@@ -46,6 +46,15 @@ function InstitucionPage() {
   const bloqueMedioVacio =
     !isLoading && !isError && !!data && !!data.institucion.foto_destacada && talleres.length > 0;
 
+  // Pedido del dueño 2026-08-19: "la foto esa de header + el listado de
+  // talleres, que ocupe lo que ocupa la pantalla de alto dinámicamente,
+  // así se ve toda la info y no se corta" — con foto Y switcher (2+
+  // talleres) los dos comparten un `min-h-dvh` (mínimo, no fijo: si el
+  // contenido real necesita más alto —descripción larga, 3+ talleres—
+  // crece más, no se recorta). Sin uno de los dos no hay "combo" que
+  // encajar a pantalla completa — cada cual sigue solo, como antes.
+  const heroCombinado = esMultiple && !!data?.institucion.foto_destacada;
+
   return (
     <PublicLayout topBar={{ variant: "escuela" }}>
       <div className="min-h-dvh bg-background pb-16">
@@ -55,8 +64,24 @@ function InstitucionPage() {
             foto". Solo si la institución cargó una (`institucion_fotos`,
             `es_principal`) — sin foto, el bloque de abajo sigue con el
             header plano de siempre. */}
-        {data?.institucion.foto_destacada && (
-          <InstitucionFotoHero institucion={data.institucion} h1SrOnly={talleres.length !== 1} />
+        {data && activo && heroCombinado ? (
+          <div className="flex flex-col min-h-dvh">
+            <InstitucionFotoHero
+              institucion={data.institucion}
+              h1SrOnly={talleres.length !== 1}
+              className="flex-1"
+            />
+            <InstitucionHeroMultiple
+              talleres={talleres}
+              activoId={activo.taller_id}
+              onSeleccionar={setActivoId}
+              className="flex-1"
+            />
+          </div>
+        ) : (
+          data?.institucion.foto_destacada && (
+            <InstitucionFotoHero institucion={data.institucion} h1SrOnly={talleres.length !== 1} />
+          )
         )}
         <div
           className={cn("mx-auto flex flex-col gap-8", !bloqueMedioVacio && "py-10 sm:py-14")}
@@ -177,7 +202,11 @@ function InstitucionPage() {
             TALLER_CONTENT_WIDTH). */}
         {data && activo && (
           <>
-            {esMultiple && (
+            {/* Sin foto destacada, el switcher sigue en su lugar de
+                siempre — el combo min-h-dvh de arriba solo aplica cuando
+                HAY foto (`heroCombinado`); ya se renderizó ahí si
+                corresponde, no de nuevo acá. */}
+            {esMultiple && !heroCombinado && (
               <InstitucionHeroMultiple
                 talleres={talleres}
                 activoId={activo.taller_id}

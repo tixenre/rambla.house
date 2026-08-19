@@ -1,6 +1,7 @@
 import { Instagram } from "lucide-react";
 import { Grain } from "@/components/common/Grain";
 import { TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
+import { cn } from "@/lib/utils";
 import type { Institucion } from "@/lib/api";
 
 /**
@@ -27,15 +28,25 @@ import type { Institucion } from "@/lib/api";
 export function InstitucionFotoHero({
   institucion,
   h1SrOnly,
+  className,
 }: {
   institucion: Institucion;
   h1SrOnly: boolean;
+  // `flex-1` cuando comparte pantalla con InstitucionHeroMultiple (ver ese
+  // componente) — juntos ocupan min-h-dvh; `items-end` ya ancla el
+  // contenido abajo sin importar cuánta altura extra le toque.
+  className?: string;
 }) {
   const foto = institucion.foto_destacada;
   if (!foto) return null;
 
   return (
-    <section className="relative bg-ink overflow-hidden min-h-[420px] sm:min-h-[520px] flex items-end">
+    <section
+      className={cn(
+        "relative bg-ink overflow-hidden min-h-[420px] sm:min-h-[520px] flex items-end",
+        className,
+      )}
+    >
       <img
         src={foto.url_avif || foto.url}
         alt=""

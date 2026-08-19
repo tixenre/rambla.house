@@ -134,10 +134,15 @@ export function InstitucionHeroMultiple({
   talleres,
   activoId,
   onSeleccionar,
+  className,
 }: {
   talleres: Taller[];
   activoId: number;
   onSeleccionar: (tallerId: number) => void;
+  // `flex-1` cuando comparte pantalla con InstitucionFotoHero (ver ese
+  // componente) — juntos ocupan min-h-dvh; `justify-center` centra la
+  // columna de contenido si le toca más alto que su tamaño natural.
+  className?: string;
 }) {
   const activo = talleres.find((t) => t.taller_id === activoId) ?? talleres[0];
   const cta = (
@@ -152,7 +157,9 @@ export function InstitucionHeroMultiple({
   );
 
   return (
-    <section className="relative bg-ink overflow-hidden">
+    <section
+      className={cn("relative bg-ink overflow-hidden flex flex-col justify-center", className)}
+    >
       <Grain opacity={10} />
       <div className="relative mx-auto py-16 sm:py-24" style={{ width: TALLER_CONTENT_WIDTH }}>
         <p className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa">Talleres</p>
