@@ -49,11 +49,21 @@ function InstitucionPage() {
   // Pedido del dueño 2026-08-19: "la foto esa de header + el listado de
   // talleres, que ocupe lo que ocupa la pantalla de alto dinámicamente,
   // así se ve toda la info y no se corta" — con foto Y switcher (2+
-  // talleres) los dos comparten un `min-h-dvh` (mínimo, no fijo: si el
-  // contenido real necesita más alto —descripción larga, 3+ talleres—
-  // crece más, no se recorta). Sin uno de los dos no hay "combo" que
-  // encajar a pantalla completa — cada cual sigue solo, como antes.
+  // talleres) los dos comparten un mínimo de "1 pantalla" (mínimo, no
+  // fijo: si el contenido real necesita más alto —descripción larga, 3+
+  // talleres— crece más, no se recorta). Sin uno de los dos no hay
+  // "combo" que encajar a pantalla completa — cada cual sigue solo, como
+  // antes.
   const heroCombinado = esMultiple && !!data?.institucion.foto_destacada;
+  // "1 pantalla" = el viewport MENOS el topbar (`h-16` = 4rem, fuente
+  // única en TopBar.tsx — mismo alto siempre, sin variante responsive):
+  // el wrapper vive DENTRO de <main>, debajo del topbar sticky de
+  // PublicLayout, así que un `min-h-dvh` liso ahí contaba el 100% del
+  // viewport DE NUEVO, después de los 4rem que ya se comió el topbar —
+  // el combo terminaba más abajo del fondo de pantalla real (bug real,
+  // confirmado en vivo: "me sigue quedando espacio solapado... por la
+  // barra rosa de arriba").
+  const HERO_COMBO_MIN_H = "calc(100dvh - 4rem)";
 
   return (
     <PublicLayout topBar={{ variant: "escuela" }}>
@@ -65,7 +75,7 @@ function InstitucionPage() {
             `es_principal`) — sin foto, el bloque de abajo sigue con el
             header plano de siempre. */}
         {data && activo && heroCombinado ? (
-          <div className="flex flex-col min-h-dvh">
+          <div className="flex flex-col" style={{ minHeight: HERO_COMBO_MIN_H }}>
             <InstitucionFotoHero
               institucion={data.institucion}
               h1SrOnly={talleres.length !== 1}
