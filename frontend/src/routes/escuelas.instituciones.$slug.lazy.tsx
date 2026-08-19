@@ -98,7 +98,11 @@ function InstitucionPage() {
               )}
 
               {data.institucion.descripcion && (
-                <p className="text-muted-foreground text-sm leading-relaxed max-w-prose">
+                // Sin max-w-prose (65ch): con una descripción larga se leía
+                // angosta/apretada adentro del contenedor de 900px — usa el
+                // ancho completo de esa columna, como el resto del header
+                // (pedido del dueño 2026-08-19, con captura real).
+                <p className="text-muted-foreground text-sm leading-relaxed">
                   {data.institucion.descripcion}
                 </p>
               )}
