@@ -213,7 +213,9 @@ export const talleresAdminApi = {
     return authedFetch(`/api/admin/instituciones/${institucionId}/upload-logo`, {
       method: "POST",
       body: fd,
-    }).then((r) => _ok<{ ok: boolean; url: string; media_id: number }>(r));
+      // media_id viene null para un logo SVG (no pasa por el motor de
+      // media — no es un formato raster, ver services/media/svg.py).
+    }).then((r) => _ok<{ ok: boolean; url: string; media_id: number | null }>(r));
   },
 
   setTallerInstituciones: (conceptoId: number, institucionIds: number[]) =>

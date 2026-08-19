@@ -6,7 +6,7 @@ import { EdicionesContexto } from "@/components/talleres/TallerHero";
 import { resumenFechas, resumenHorario } from "@/lib/talleres/formato";
 import { trackClickInscribirseTaller } from "@/lib/analytics";
 import { cn } from "@/lib/utils";
-import type { Taller } from "@/lib/api";
+import type { Institucion, Taller } from "@/lib/api";
 
 /** Una card del selector — nombre + subtítulo + fecha/horario/lugar/cupos
  * de un taller de la institución. Sin fondo/recuadro (mismo criterio que
@@ -120,12 +120,21 @@ function TallerCard({
  * página múltiple". Con exactamente 1 taller, este componente no se usa —
  * `TallerHubBlock` muestra su propio `TallerHero` normal (`InstitucionPage`
  * decide por cantidad).
+ *
+ * El logo (si la institución cargó uno) va arriba del eyebrow, como
+ * `<img>` liso — funciona igual para raster y SVG (el navegador renderiza
+ * SVG nativo vía `src`, sin necesitar `InlineSvg`) y a propósito NO fuerza
+ * `currentColor`: es el logo REAL de un tercero (a diferencia del wordmark
+ * propio de Rambla o el muro de marcas de equipos en `BrandCard`, donde SÍ
+ * se homogeniza a un color), tiene que verse con sus colores originales.
  */
 export function InstitucionHeroMultiple({
+  institucion,
   talleres,
   activoId,
   onSeleccionar,
 }: {
+  institucion: Institucion;
   talleres: Taller[];
   activoId: number;
   onSeleccionar: (tallerId: number) => void;
@@ -147,6 +156,13 @@ export function InstitucionHeroMultiple({
     <section className="relative bg-ink overflow-hidden">
       <Grain opacity={10} />
       <div className="relative mx-auto py-16 sm:py-24" style={{ width: TALLER_CONTENT_WIDTH }}>
+        {institucion.logo_url && (
+          <img
+            src={institucion.logo_url}
+            alt={institucion.nombre}
+            className="h-14 w-14 rounded-2xl object-contain bg-background/10 mb-5"
+          />
+        )}
         <p className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa mb-4">Talleres</p>
         <h1
           className="font-display font-black lowercase leading-[0.95] tracking-[-0.02em] text-background"

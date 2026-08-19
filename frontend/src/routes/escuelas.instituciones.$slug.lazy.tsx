@@ -119,10 +119,11 @@ function InstitucionPage() {
         {/* Contenido del/los taller(es) — FUERA del max-w de arriba: el hero
             (bg-ink, edge-to-edge) necesita respirar igual que en su propia
             página individual, no encogido dentro de una card. */}
-        {activo && (
+        {data && activo && (
           <>
             {esMultiple && (
               <InstitucionHeroMultiple
+                institucion={data.institucion}
                 talleres={talleres}
                 activoId={activo.taller_id}
                 onSeleccionar={setActivoId}

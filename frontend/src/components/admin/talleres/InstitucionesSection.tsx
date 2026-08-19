@@ -298,7 +298,7 @@ function InstitucionDialog({
               {/* eslint-disable-next-line no-restricted-syntax -- input file: no hay componente DS */}
               <input
                 type="file"
-                accept="image/jpeg,image/png,image/webp"
+                accept="image/jpeg,image/png,image/webp,image/svg+xml"
                 onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)}
                 className="text-sm"
               />
