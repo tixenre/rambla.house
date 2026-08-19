@@ -6,12 +6,39 @@ import { PublicLayout } from "@/components/rental/shell/PublicLayout";
 import { EmptyState } from "@/design-system/composites/EmptyState";
 import { LogoMark } from "@/components/rental/shell/LogoMark";
 import { TallerHubBlock } from "@/components/talleres/TallerHubBlock";
-import { apiGetInstitucion } from "@/lib/api";
+import { apiGetInstitucion, type Taller } from "@/lib/api";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
 
 export const Route = createLazyFileRoute("/escuelas/instituciones/$slug")({
   component: InstitucionPage,
 });
+
+/**
+ * Cuando 2 talleres de la MISMA institución son "hermanos" entre sí (pareja
+ * de marketing, ej. los 2 niveles de Filmar), el hero de pareja de
+ * `TallerHubBlock` ya arma el link "Ver este taller" hacia el otro lado —
+ * mostrar los DOS bloques completos apilados sería redundante (pedido
+ * explícito del dueño: "hero compartido + solo el taller activo abajo").
+ * Se queda solo con el primero de cada par (el orden ya viene de
+ * `ti.orden`, el que el admin definió al vincularlos a la institución); un
+ * taller sin hermano, o cuyo hermano no pertenece a esta institución, se
+ * muestra igual, suelto. */
+function dedupHermanos(talleres: Taller[]): Taller[] {
+  const idsEnEstaInstitucion = new Set(talleres.map((t) => t.taller_id));
+  const yaCubierto = new Set<number>();
+  return talleres.filter((t) => {
+    if (yaCubierto.has(t.taller_id)) return false;
+    const hermano = t.taller_hermano;
+    if (hermano) {
+      const otroId =
+        hermano.principal.taller_id === t.taller_id
+          ? hermano.secundario.taller_id
+          : hermano.principal.taller_id;
+      if (idsEnEstaInstitucion.has(otroId)) yaCubierto.add(otroId);
+    }
+    return true;
+  });
+}
 
 function InstitucionPage() {
   const { slug } = Route.useParams();
@@ -106,10 +133,12 @@ function InstitucionPage() {
 
         {/* Bloques de taller completos — FUERA del max-w de arriba: cada uno
             necesita que su hero (bg-ink, edge-to-edge) respire igual que en
-            su propia página individual, no encogido dentro de una card. */}
+            su propia página individual, no encogido dentro de una card.
+            dedupHermanos: un par (ej. Nivel 1 + Nivel 2) se muestra UNA vez,
+            no 2 heroes completos apilados. */}
         {data && data.talleres.length > 0 && (
           <div className="flex flex-col gap-20 mt-8">
-            {data.talleres.map((t) => (
+            {dedupHermanos(data.talleres).map((t) => (
               <TallerHubBlock key={t.id} taller={t} />
             ))}
           </div>

@@ -15,22 +15,32 @@ import type { Taller } from "@/lib/api";
 
 /**
  * Contenido COMPLETO de un taller (hero + galería + cuerpo + FAQ), para
- * embeber varios talleres enteros en una sola página — el hub de
- * institución (`/escuelas/instituciones/$slug`, pedido explícito del dueño:
- * "me gustaría que se vean los formularios/página completos", no un resumen).
+ * embeber uno o más talleres enteros en el hub de institución
+ * (`/escuelas/instituciones/$slug`, pedido explícito del dueño: "me
+ * gustaría que se vean los formularios/página completos", no un resumen).
  *
  * Espeja la composición de `escuelas.$slug.lazy.tsx` (la página individual,
- * que NO se tocó — cero riesgo de regresión ahí) con 3 recortes a propósito
- * para el contexto "varios talleres en una página":
+ * que NO se tocó — cero riesgo de regresión ahí), con 2 recortes a
+ * propósito para el contexto "puede haber más de un taller en la página":
  *   - `anchorSuffix={taller.slug}` en el hero: sin esto, el CTA de cada hero
  *     apuntaría al mismo "#inscripcion" (colisión — el de abajo scrollearía
  *     al form de arriba).
- *   - `showHermano={false}`: si el taller tiene "taller hermano" (pareja de
- *     marketing, ej. los 2 niveles de Filmar), el hero NO repite el mini-
- *     banner de la pareja — el hub YA ES la unión de ambos, completos.
  *   - Sin `InstitucionesRow` (se leería "Presentado por: Filmar" adentro de
  *     la propia página de Filmar) ni `SoldOutModal`/`TallerCTABar` (pensados
- *     para una página con un solo taller — acá conviven varios).
+ *     para una página con un solo taller).
+ *
+ * `showHermano` NO se pisa (queda en su default `true`): si el taller tiene
+ * "taller hermano" (pareja de marketing, ej. los 2 niveles de Filmar), el
+ * hero SÍ muestra el banner de pareja compartido — pedido explícito del
+ * dueño tras ver el hub con 2 heroes completos apilados ("lo pensaba más en
+ * este estilo", con captura del banner de pareja). El caller
+ * (`escuelas.instituciones.$slug.lazy.tsx`) deduplica: cuando 2 talleres de
+ * la misma institución son hermanos entre sí, solo renderiza UNO completo
+ * (el "activo", con el hero de pareja); el otro se alcanza por el link
+ * "Ver este taller" que el propio hero de pareja ya arma — no hay 2 cuerpos
+ * completos apilados para un par. Talleres sueltos (sin hermano, o cuyo
+ * hermano no pertenece a esta institución) se siguen mostrando cada uno con
+ * su propio hero normal, sin pareja.
  */
 export function TallerHubBlock({ taller }: { taller: Taller }) {
   const proxima = taller.proxima_edicion;
@@ -70,7 +80,6 @@ export function TallerHubBlock({ taller }: { taller: Taller }) {
         fechasResumen={fechasResumen}
         horarioResumen={horarioResumen}
         anchorSuffix={taller.slug}
-        showHermano={false}
       />
 
       <TallerGaleria fotos={formTaller.fotos} alt={taller.nombre} />
