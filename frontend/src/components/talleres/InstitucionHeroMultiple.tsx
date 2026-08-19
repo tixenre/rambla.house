@@ -42,13 +42,13 @@ function TallerCard({
     <>
       <p
         className={cn(
-          "font-display lowercase leading-tight tracking-[-0.02em] transition-colors",
+          "font-display lowercase tracking-[-0.02em] transition-colors",
           activo
-            ? "font-black text-background"
-            : "font-bold text-background/45 group-hover:text-background/75",
+            ? "font-black leading-[0.95] text-rosa"
+            : "font-bold leading-tight text-background/45 group-hover:text-background/75",
         )}
         style={{
-          fontSize: activo ? "clamp(1.5rem, 3.2vw, 2.125rem)" : "clamp(1.15rem, 2.4vw, 1.5rem)",
+          fontSize: activo ? "clamp(2rem, 5vw, 3.25rem)" : "clamp(1.15rem, 2.4vw, 1.5rem)",
         }}
       >
         {taller.nombre}
@@ -56,8 +56,10 @@ function TallerCard({
       {taller.subtitulo && (
         <p
           className={cn(
-            "mt-1.5 text-xs transition-colors",
-            activo ? "text-background/55" : "text-background/30 group-hover:text-background/45",
+            "text-xs transition-colors",
+            activo
+              ? "mt-2.5 text-background/60"
+              : "mt-1.5 text-background/30 group-hover:text-background/45",
           )}
         >
           {taller.subtitulo}
@@ -65,8 +67,8 @@ function TallerCard({
       )}
       <div
         className={cn(
-          "flex flex-wrap items-center mt-3 gap-x-4 gap-y-1.5 text-xs",
-          activo ? "text-background/55" : "text-background/35",
+          "flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs",
+          activo ? "mt-4 text-background/55" : "mt-3 text-background/35",
         )}
       >
         <span className="flex items-center gap-2">
