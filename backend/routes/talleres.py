@@ -3025,6 +3025,61 @@ def admin_reorder_fotos_edicion(edicion_id: int, body: EdicionReorderFotosBody, 
     return {"fotos": fotos}
 
 
+class ImportarFotosInstitucionBody(BaseModel):
+    institucion_foto_ids: list[int]
+
+
+@router.post("/admin/ediciones/{edicion_id}/fotos/importar")
+@limiter.limit(ADMIN_WRITE_LIMIT)
+def admin_importar_fotos_institucion(
+    edicion_id: int, body: ImportarFotosInstitucionBody, request: Request
+):
+    """Copia fotos YA subidas a la galería de una institución dentro de la
+    galería de ESTA edición, sin volver a subir el archivo — pedido del
+    dueño 2026-08-19: "no subir las mismas fotos a los dos talleres". Copia
+    por referencia (mismo `url`/`path`); `media_id` de la copia queda en
+    NULL a propósito — no reclama dueño del asset: borrar la copia nunca
+    purga R2 (no tiene `media_id`), borrar el original en la institución sí
+    lo hace y la copia queda con una URL rota. Trade-off aceptado a cambio
+    de no duplicar el archivo. Sin chequeo de que las fotos pertenezcan a
+    una institución vinculada a este taller — endpoint admin-only, el picker
+    del front ya es el gate real de qué se ofrece."""
+    require_admin(request)
+    if not body.institucion_foto_ids:
+        raise HTTPException(400, "No se especificaron fotos para importar")
+
+    with get_db() as conn:
+        edicion = conn.execute(
+            "SELECT id FROM ediciones_taller WHERE id = %s", (edicion_id,)
+        ).fetchone()
+        if edicion is None:
+            raise HTTPException(404, "Edición no encontrada")
+
+        rows = conn.execute(
+            "SELECT url, url_sm, url_avif, url_sm_avif, path "
+            "FROM institucion_fotos WHERE id = ANY(%s)",
+            (body.institucion_foto_ids,),
+        ).fetchall()
+        if not rows:
+            raise HTTPException(404, "Fotos no encontradas")
+
+        for r in rows:
+            _insert_edicion_foto(
+                conn,
+                edicion_id,
+                url=r["url"],
+                path=r["path"],
+                media_id=None,
+                url_sm=r["url_sm"],
+                url_avif=r["url_avif"],
+                url_sm_avif=r["url_sm_avif"],
+            )
+
+        fotos = _get_edicion_fotos(conn, edicion_id)
+
+    return {"fotos": fotos}
+
+
 # ── Inscripciones (admin) ─────────────────────────────────────────────────────
 
 @router.get("/admin/talleres/{taller_id}/inscripciones")

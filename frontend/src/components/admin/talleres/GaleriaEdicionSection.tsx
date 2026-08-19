@@ -5,7 +5,9 @@ import { toast } from "sonner";
 import { PhotoGallery, type GalleryFoto } from "@/components/common/PhotoGallery";
 import { uploadEdicionFile } from "@/lib/talleres/photos";
 import { talleresAdminApi } from "@/lib/admin/api";
-import type { EdicionFotoOrdenItem } from "@/lib/admin/api/types";
+import type { EdicionFotoOrdenItem, Institucion } from "@/lib/admin/api/types";
+import { Button } from "@/design-system/ui/button";
+import { ImportarFotosInstitucionDialog } from "./ImportarFotosInstitucionDialog";
 
 // Subir todo el FileList de una — el input acepta `multiple` y la UI invita
 // a elegir varias — disparaba N requests simultáneos sin tope; un lote de
@@ -22,14 +24,21 @@ const UPLOAD_CONCURRENCY = 3;
 export function GaleriaEdicionSection({
   edicionId,
   fotos,
+  instituciones = [],
   onChanged,
 }: {
   edicionId: number;
   fotos: Array<{ id: number; url: string; orden: number; es_principal: boolean }>;
+  // Instituciones co-presentadoras de este taller — si alguna ya tiene fotos
+  // propias, se puede importar de ahí en vez de volver a subir el archivo
+  // (pedido del dueño 2026-08-19: "no subir las mismas fotos a los dos
+  // talleres").
+  instituciones?: Institucion[];
   onChanged: () => void;
 }) {
   const qc = useQueryClient();
   const [uploading, setUploading] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
 
   async function handleUpload(files: FileList) {
     setUploading(true);
@@ -90,9 +99,22 @@ export function GaleriaEdicionSection({
 
   return (
     <div>
-      <p className="text-xs text-muted-foreground mb-4">
-        La foto marcada como principal es la portada de esta edición en la página pública.
-      </p>
+      <div className="flex items-start justify-between gap-3 mb-4">
+        <p className="text-xs text-muted-foreground">
+          La foto marcada como principal es la portada de esta edición en la página pública.
+        </p>
+        {instituciones.length > 0 && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => setPickerOpen(true)}
+            className="shrink-0"
+          >
+            Importar de instituciones
+          </Button>
+        )}
+      </div>
       <PhotoGallery
         fotos={fotos}
         onUpload={handleUpload}
@@ -102,6 +124,15 @@ export function GaleriaEdicionSection({
         uploading={uploading}
         disabled={deleteMut.isPending || reorderMut.isPending}
       />
+      {pickerOpen && (
+        <ImportarFotosInstitucionDialog
+          edicionId={edicionId}
+          instituciones={instituciones}
+          urlsActuales={fotos.map((f) => f.url)}
+          onClose={() => setPickerOpen(false)}
+          onImported={onChanged}
+        />
+      )}
     </div>
   );
 }

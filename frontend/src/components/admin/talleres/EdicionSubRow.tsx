@@ -264,6 +264,7 @@ export function EdicionSubRow({
               <GaleriaEdicionSection
                 edicionId={edicion.id}
                 fotos={edicion.fotos}
+                instituciones={concepto.instituciones}
                 onChanged={() => qc.invalidateQueries({ queryKey: ["admin", "talleres"] })}
               />
             )}

@@ -74,6 +74,16 @@ export const talleresAdminApi = {
       body: JSON.stringify({ fotos }),
     }),
 
+  // Copia fotos ya subidas a la galería de una institución dentro de la de
+  // esta edición, sin volver a subir el archivo (pedido del dueño
+  // 2026-08-19: "no subir las mismas fotos a los dos talleres").
+  importarFotosDeInstitucion: (edicionId: number, institucionFotoIds: number[]) =>
+    authedJson<{ fotos: EdicionFoto[] }>(`/api/admin/ediciones/${edicionId}/fotos/importar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ institucion_foto_ids: institucionFotoIds }),
+    }),
+
   // F2: portada de una clase (solo clases guardadas — necesitan id).
   uploadPortadaClase: (claseId: number, file: File) => {
     const fd = new FormData();
