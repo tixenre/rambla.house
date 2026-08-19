@@ -2230,6 +2230,32 @@ def _init_db_schema(conn):
         END $$;
     """)
 
+    # Galería de fotos por INSTITUCIÓN (pedido del dueño 2026-08-19: "que sea
+    # por institución, así no subo fotos repetidas" en cada taller). Espejo
+    # exacto de `edicion_fotos`, scoped a `institucion_id` en vez de a una
+    # edición puntual — una institución (ej. "Filmar") solo tiene una tanda
+    # de fotos, reusada por todos sus talleres. `es_principal` marca la foto
+    # destacada que usa el hero público del hub de institución.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS institucion_fotos (
+            id             SERIAL PRIMARY KEY,
+            institucion_id INTEGER NOT NULL REFERENCES instituciones(id) ON DELETE CASCADE,
+            url            TEXT NOT NULL,
+            url_sm         TEXT,
+            url_avif       TEXT,
+            url_sm_avif    TEXT,
+            path           TEXT,
+            media_id       BIGINT REFERENCES media_assets(id) ON DELETE SET NULL,
+            orden          INTEGER NOT NULL DEFAULT 0,
+            es_principal   BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_institucion_fotos_institucion_orden "
+        "ON institucion_fotos(institucion_id, orden)"
+    )
+
     # Escuela v2 F4a: video hero (YouTube) del concepto. Mismo extractor que
     # estudio_trabajos (services.media.youtube.extract_video_id), pero acá SÍ
     # se descarga y guarda el poster en R2 (store_youtube_poster) — es

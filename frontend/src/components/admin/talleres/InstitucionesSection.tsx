@@ -180,7 +180,11 @@ export function InstitucionesSection({ concepto }: { concepto: TallerConcepto })
   );
 }
 
-function InstitucionDialog({
+/** Exportado: reusado tal cual por `InstitucionesAdminSection` (la sección
+ * standalone `/admin/talleres/instituciones`) — el CRUD de campos básicos
+ * (nombre/descripción/instagram/web/logo) no depende de estar linkeado a
+ * un `concepto`, así que no hace falta duplicarlo. */
+export function InstitucionDialog({
   institucion,
   onClose,
   onCreated,

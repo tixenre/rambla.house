@@ -670,7 +670,14 @@ def get_institucion(slug: str):
             ).fetchone()
             d["edicion_anterior"] = _edicion_lite(ant) if ant else None
             talleres.append(d)
-        return {"institucion": _institucion_dict(ins_row), "talleres": talleres}
+        # `foto_destacada`: solo acá (no en `_institucion_dict` en general —
+        # ese helper también arma la lista chica de "instituciones
+        # co-presentadoras" de CADA taller, N veces por listado; sumarle una
+        # query de fotos ahí sería N+1 innecesario). El hub público es la
+        # ÚNICA superficie que necesita la foto para su hero de fondo.
+        institucion = _institucion_dict(ins_row)
+        institucion["foto_destacada"] = _institucion_foto_destacada(conn, ins_row["id"])
+        return {"institucion": institucion, "talleres": talleres}
 
 
 async def _procesar_upload_comprobante(request: Request, ref: str) -> dict:
@@ -2357,6 +2364,248 @@ async def admin_upload_logo_institucion(institucion_id: int, request: Request):
     except Exception as e:
         logger.error("upload_logo_institucion: error inesperado: %s", e, exc_info=True)
         raise HTTPException(502, "No se pudo subir el logo. Intentá de nuevo.")
+
+
+# ── Galería de fotos por INSTITUCIÓN ────────────────────────────────────────
+# Espejo exacto de la galería de EDICIÓN (arriba), scoped a `institucion_id`
+# — pedido del dueño: "que sea por institución, así no subo fotos repetidas"
+# (una institución como Filmar carga su tanda de fotos una sola vez, reusada
+# por todos sus talleres). `es_principal` marca la foto destacada que usa el
+# hero público del hub de institución (`InstitucionPage`).
+
+
+def _get_institucion_fotos(conn, institucion_id: int) -> list:
+    cur = conn.execute(
+        "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
+        "FROM institucion_fotos WHERE institucion_id = %s ORDER BY orden, id",
+        (institucion_id,),
+    )
+    rows = cur.fetchall()
+    return [
+        {
+            "id": r["id"],
+            "url": r["url"],
+            "url_sm": r["url_sm"],
+            "url_avif": r["url_avif"],
+            "url_sm_avif": r["url_sm_avif"],
+            "path": r["path"],
+            "orden": r["orden"],
+            "es_principal": bool(r["es_principal"]),
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows
+    ]
+
+
+def _institucion_foto_destacada(conn, institucion_id: int) -> dict | None:
+    """La foto destacada (es_principal) de una institución, o None. Consumida
+    por `get_institucion` (público) para el hero con foto de fondo."""
+    cur = conn.execute(
+        "SELECT id, url, url_sm, url_avif, url_sm_avif "
+        "FROM institucion_fotos WHERE institucion_id = %s "
+        "ORDER BY es_principal DESC, orden, id LIMIT 1",
+        (institucion_id,),
+    )
+    r = cur.fetchone()
+    if r is None:
+        return None
+    return {
+        "url": r["url"],
+        "url_sm": r["url_sm"],
+        "url_avif": r["url_avif"],
+        "url_sm_avif": r["url_sm_avif"],
+    }
+
+
+def _insert_institucion_foto(
+    conn,
+    institucion_id: int,
+    url: str,
+    path: str,
+    media_id: int | None = None,
+    url_sm: str | None = None,
+    url_avif: str | None = None,
+    url_sm_avif: str | None = None,
+) -> dict:
+    cur = conn.execute(
+        "SELECT COALESCE(MAX(orden), -1) + 1 AS next_orden FROM institucion_fotos "
+        "WHERE institucion_id = %s",
+        (institucion_id,),
+    )
+    orden = cur.fetchone()["next_orden"]
+
+    cur2 = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM institucion_fotos WHERE institucion_id = %s",
+        (institucion_id,),
+    )
+    is_first = cur2.fetchone()["cnt"] == 0
+
+    conn.execute(
+        "INSERT INTO institucion_fotos "
+        "(institucion_id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, media_id) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (institucion_id, url, url_sm, url_avif, url_sm_avif, path, orden, is_first, media_id),
+    )
+    conn.commit()
+
+    cur3 = conn.execute(
+        "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
+        "FROM institucion_fotos WHERE path = %s AND institucion_id = %s",
+        (path, institucion_id),
+    )
+    r = cur3.fetchone()
+    return {
+        "id": r["id"],
+        "url": r["url"],
+        "url_sm": r["url_sm"],
+        "url_avif": r["url_avif"],
+        "url_sm_avif": r["url_sm_avif"],
+        "path": r["path"],
+        "orden": r["orden"],
+        "es_principal": bool(r["es_principal"]),
+        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+    }
+
+
+@router.get("/admin/instituciones/{institucion_id}/fotos")
+def admin_list_fotos_institucion(institucion_id: int, request: Request):
+    require_admin(request)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM instituciones WHERE id = %s", (institucion_id,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "Institución no encontrada")
+        return {"fotos": _get_institucion_fotos(conn, institucion_id)}
+
+
+@router.post("/admin/instituciones/{institucion_id}/upload-foto")
+@limiter.limit(ADMIN_UPLOAD_LIMIT)
+async def admin_upload_foto_institucion(institucion_id: int, request: Request):
+    """Sube un archivo (multipart, campo 'file') a R2 y lo registra en institucion_fotos."""
+    require_admin(request)
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM instituciones WHERE id = %s", (institucion_id,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "Institución no encontrada")
+
+    form = await request.form()
+    file = form.get("file")
+    if file is None or not hasattr(file, "read"):
+        raise HTTPException(400, "Falta el campo 'file' en el form-data")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Archivo vacío")
+    if len(raw) > 20 * 1024 * 1024:
+        raise HTTPException(413, "Archivo muy grande (máx 20 MB)")
+
+    with get_db() as conn:
+        try:
+            with media_http():
+                asset = store_upload(
+                    raw,
+                    kind="institucion",
+                    derive_specs=[
+                        DISPLAY_KEEP_ASPECT,
+                        DISPLAY_KEEP_ASPECT_SM,
+                        DISPLAY_KEEP_ASPECT_AVIF,
+                        DISPLAY_KEEP_ASPECT_SM_AVIF,
+                    ],
+                    conn=conn,
+                )
+            display = asset.variant("display")
+            display_sm = asset.variant("display-sm")
+            display_avif = asset.variant("display-avif")
+            display_sm_avif = asset.variant("display-sm-avif")
+            foto = _insert_institucion_foto(
+                conn,
+                institucion_id,
+                url=display.url,
+                path=display.key,
+                media_id=asset.id,
+                url_sm=display_sm.url if display_sm else None,
+                url_avif=display_avif.url if display_avif else None,
+                url_sm_avif=display_sm_avif.url if display_sm_avif else None,
+            )
+        except Exception:
+            conn.rollback()
+            raise
+
+    return {
+        "id": foto["id"],
+        "public_url": display.url,
+        "path": display.key,
+        "size": display.bytes,
+        "size_original": len(raw),
+        "content_type": display.content_type,
+        "width": display.width or None,
+        "height": display.height or None,
+    }
+
+
+@router.delete("/admin/instituciones/fotos/{foto_id}")
+@limiter.limit(ADMIN_WRITE_LIMIT)
+def admin_delete_foto_institucion(foto_id: int, request: Request):
+    require_admin(request)
+
+    with get_db() as conn:
+        cur = conn.execute(
+            "SELECT path, media_id FROM institucion_fotos WHERE id = %s", (foto_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Foto no encontrada")
+        path = row["path"]
+        media_id = row["media_id"]
+
+        r2_keys: list[str] = []
+        if media_id:
+            r2_keys = collect_asset_keys(conn, media_id)
+
+        conn.execute("DELETE FROM institucion_fotos WHERE id = %s", (foto_id,))
+        if media_id:
+            conn.execute("DELETE FROM media_assets WHERE id = %s", (media_id,))
+        conn.commit()
+
+    if r2_keys:
+        purge_r2(r2_keys)
+
+    return {"ok": True}
+
+
+class InstitucionFotoOrdenItem(BaseModel):
+    id: int
+    orden: int
+    es_principal: bool
+
+
+class InstitucionReorderFotosBody(BaseModel):
+    fotos: list[InstitucionFotoOrdenItem]
+
+
+@router.patch("/admin/instituciones/{institucion_id}/fotos/orden")
+@limiter.limit(ADMIN_WRITE_LIMIT)
+def admin_reorder_fotos_institucion(
+    institucion_id: int, body: InstitucionReorderFotosBody, request: Request
+):
+    require_admin(request)
+
+    with get_db() as conn:
+        for f in body.fotos:
+            conn.execute(
+                "UPDATE institucion_fotos SET orden = %s, es_principal = %s "
+                "WHERE id = %s AND institucion_id = %s "
+                "AND (orden IS DISTINCT FROM %s OR es_principal IS DISTINCT FROM %s)",
+                (f.orden, f.es_principal, f.id, institucion_id, f.orden, f.es_principal),
+            )
+        conn.commit()
+        fotos = _get_institucion_fotos(conn, institucion_id)
+
+    return {"fotos": fotos}
 
 
 @router.put("/admin/talleres/{taller_id}/instituciones")

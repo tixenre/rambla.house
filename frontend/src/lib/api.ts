@@ -472,6 +472,17 @@ export type Institucion = {
   web: string;
   logo_url: string;
   logo_media_id: number | null;
+  // Foto principal de institucion_fotos (o null sin galería cargada aún) —
+  // solo poblada por GET /instituciones/{slug} (ver services/media/svg.py-
+  // adyacente routes/talleres.py::get_institucion), no por list_talleres/
+  // get_taller — el hero público la usa como fondo del hero
+  // (InstitucionFotoHero); sin ella, InstitucionPage cae al header plano.
+  foto_destacada: {
+    url: string;
+    url_sm: string | null;
+    url_avif: string | null;
+    url_sm_avif: string | null;
+  } | null;
 };
 
 export type Taller = {

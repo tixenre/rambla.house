@@ -9,6 +9,8 @@ import type {
   TallerConcepto,
   Inscripcion,
   Institucion,
+  InstitucionFoto,
+  InstitucionFotoOrdenItem,
   Instructor,
   Interesado,
   PedidoGeneradoEdicion,
@@ -225,6 +227,26 @@ export const talleresAdminApi = {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ institucion_ids: institucionIds }),
+      },
+    ),
+
+  // Galería propia de una institución (espejo de la de edición, líneas
+  // arriba) — mismo patrón, scoped a institucionId.
+  listFotosInstitucion: (institucionId: number) =>
+    authedJson<{ fotos: InstitucionFoto[] }>(`/api/admin/instituciones/${institucionId}/fotos`),
+
+  deleteFotoInstitucion: (fotoId: number) =>
+    authedJson<{ ok: boolean }>(`/api/admin/instituciones/fotos/${fotoId}`, {
+      method: "DELETE",
+    }),
+
+  reorderFotosInstitucion: (institucionId: number, fotos: InstitucionFotoOrdenItem[]) =>
+    authedJson<{ fotos: InstitucionFoto[] }>(
+      `/api/admin/instituciones/${institucionId}/fotos/orden`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fotos }),
       },
     ),
 

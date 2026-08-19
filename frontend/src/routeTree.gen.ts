@@ -79,6 +79,9 @@ const AdminEquiposIndexLazyRouteImport = createFileRoute('/admin/equipos/')()
 const AdminContabilidadIndexLazyRouteImport = createFileRoute(
   '/admin/contabilidad/',
 )()
+const AdminTalleresInstitucionesLazyRouteImport = createFileRoute(
+  '/admin/talleres/instituciones',
+)()
 const AdminSpecsDefinitionsLazyRouteImport = createFileRoute(
   '/admin/specs/definitions',
 )()
@@ -447,6 +450,14 @@ const AdminContabilidadIndexLazyRoute =
   } as any).lazy(() =>
     import('./routes/admin/contabilidad.index.lazy').then((d) => d.Route),
   )
+const AdminTalleresInstitucionesLazyRoute =
+  AdminTalleresInstitucionesLazyRouteImport.update({
+    id: '/instituciones',
+    path: '/instituciones',
+    getParentRoute: () => AdminTalleresRoute,
+  } as any).lazy(() =>
+    import('./routes/admin/talleres.instituciones.lazy').then((d) => d.Route),
+  )
 const AdminSpecsDefinitionsLazyRoute =
   AdminSpecsDefinitionsLazyRouteImport.update({
     id: '/specs/definitions',
@@ -677,6 +688,7 @@ export interface FileRoutesByFullPath {
   '/admin/pedidos/$id': typeof AdminPedidosIdLazyRoute
   '/admin/pedidos/nuevo': typeof AdminPedidosNuevoLazyRoute
   '/admin/specs/definitions': typeof AdminSpecsDefinitionsLazyRoute
+  '/admin/talleres/instituciones': typeof AdminTalleresInstitucionesLazyRoute
   '/admin/contabilidad/': typeof AdminContabilidadIndexLazyRoute
   '/admin/equipos/': typeof AdminEquiposIndexLazyRoute
   '/admin/estudio/': typeof AdminEstudioIndexLazyRoute
@@ -748,6 +760,7 @@ export interface FileRoutesByTo {
   '/admin/pedidos/$id': typeof AdminPedidosIdLazyRoute
   '/admin/pedidos/nuevo': typeof AdminPedidosNuevoLazyRoute
   '/admin/specs/definitions': typeof AdminSpecsDefinitionsLazyRoute
+  '/admin/talleres/instituciones': typeof AdminTalleresInstitucionesLazyRoute
   '/admin/contabilidad': typeof AdminContabilidadIndexLazyRoute
   '/admin/equipos': typeof AdminEquiposIndexLazyRoute
   '/admin/estudio': typeof AdminEstudioIndexLazyRoute
@@ -828,6 +841,7 @@ export interface FileRoutesById {
   '/admin/pedidos/$id': typeof AdminPedidosIdLazyRoute
   '/admin/pedidos/nuevo': typeof AdminPedidosNuevoLazyRoute
   '/admin/specs/definitions': typeof AdminSpecsDefinitionsLazyRoute
+  '/admin/talleres/instituciones': typeof AdminTalleresInstitucionesLazyRoute
   '/admin/contabilidad/': typeof AdminContabilidadIndexLazyRoute
   '/admin/equipos/': typeof AdminEquiposIndexLazyRoute
   '/admin/estudio/': typeof AdminEstudioIndexLazyRoute
@@ -909,6 +923,7 @@ export interface FileRouteTypes {
     | '/admin/pedidos/$id'
     | '/admin/pedidos/nuevo'
     | '/admin/specs/definitions'
+    | '/admin/talleres/instituciones'
     | '/admin/contabilidad/'
     | '/admin/equipos/'
     | '/admin/estudio/'
@@ -980,6 +995,7 @@ export interface FileRouteTypes {
     | '/admin/pedidos/$id'
     | '/admin/pedidos/nuevo'
     | '/admin/specs/definitions'
+    | '/admin/talleres/instituciones'
     | '/admin/contabilidad'
     | '/admin/equipos'
     | '/admin/estudio'
@@ -1059,6 +1075,7 @@ export interface FileRouteTypes {
     | '/admin/pedidos/$id'
     | '/admin/pedidos/nuevo'
     | '/admin/specs/definitions'
+    | '/admin/talleres/instituciones'
     | '/admin/contabilidad/'
     | '/admin/equipos/'
     | '/admin/estudio/'
@@ -1481,6 +1498,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminContabilidadIndexLazyRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/talleres/instituciones': {
+      id: '/admin/talleres/instituciones'
+      path: '/instituciones'
+      fullPath: '/admin/talleres/instituciones'
+      preLoaderRoute: typeof AdminTalleresInstitucionesLazyRouteImport
+      parentRoute: typeof AdminTalleresRoute
+    }
     '/admin/specs/definitions': {
       id: '/admin/specs/definitions'
       path: '/specs/definitions'
@@ -1670,10 +1694,12 @@ const AdminEstudioRouteWithChildren = AdminEstudioRoute._addFileChildren(
 )
 
 interface AdminTalleresRouteChildren {
+  AdminTalleresInstitucionesLazyRoute: typeof AdminTalleresInstitucionesLazyRoute
   AdminTalleresIndexLazyRoute: typeof AdminTalleresIndexLazyRoute
 }
 
 const AdminTalleresRouteChildren: AdminTalleresRouteChildren = {
+  AdminTalleresInstitucionesLazyRoute: AdminTalleresInstitucionesLazyRoute,
   AdminTalleresIndexLazyRoute: AdminTalleresIndexLazyRoute,
 }
 

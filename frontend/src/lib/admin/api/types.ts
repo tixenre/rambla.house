@@ -1860,6 +1860,18 @@ export type EdicionFoto = {
 
 export type EdicionFotoOrdenItem = { id: number; orden: number; es_principal: boolean };
 
+// Galería propia de una institución (mismo shape que EdicionFoto) — una
+// institución carga su tanda de fotos una sola vez, reusada por todos sus
+// talleres (pedido del dueño 2026-08-19: "así no subo fotos repetidas").
+export type InstitucionFoto = {
+  id: number;
+  url: string;
+  orden: number;
+  es_principal: boolean;
+};
+
+export type InstitucionFotoOrdenItem = { id: number; orden: number; es_principal: boolean };
+
 // F4c: mini-KPIs de una edición — plata ya resuelta por el backend (el front
 // solo la muestra, nunca la calcula).
 export type EdicionKpis = {
