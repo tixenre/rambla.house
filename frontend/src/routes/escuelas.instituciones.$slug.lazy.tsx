@@ -8,6 +8,7 @@ import { EmptyState } from "@/design-system/composites/EmptyState";
 import { LogoMark } from "@/components/rental/shell/LogoMark";
 import { InstitucionHeroMultiple } from "@/components/talleres/InstitucionHeroMultiple";
 import { TallerHubBlock } from "@/components/talleres/TallerHubBlock";
+import { TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
 import { apiGetInstitucion } from "@/lib/api";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
 
@@ -38,7 +39,10 @@ function InstitucionPage() {
   return (
     <PublicLayout topBar={{ variant: "escuela" }}>
       <div className="min-h-dvh bg-background pb-16">
-        <div className="max-w-[900px] mx-auto px-4 sm:px-6 py-10 sm:py-14 flex flex-col gap-8">
+        <div
+          className="mx-auto py-10 sm:py-14 flex flex-col gap-8"
+          style={{ width: TALLER_CONTENT_WIDTH }}
+        >
           {isLoading && (
             <div className="py-16 text-center text-muted-foreground text-sm">Cargando…</div>
           )}
@@ -52,9 +56,17 @@ function InstitucionPage() {
 
           {data && (
             <>
-              {/* Header de la institución — angosto y centrado, a diferencia
-                  del hero de abajo (bg-ink, edge-to-edge). Con logo: SOLO el
-                  logo, centrado, sin fondo ni texto al lado — el logo YA es
+              {/* Header de la institución — mismo ancho que el hero de abajo
+                  (TALLER_CONTENT_WIDTH, antes era un max-w-[900px] angosto
+                  y desalineado — pedido del dueño 2026-08-19: "que ocupe el
+                  mismo ancho de abajo"), pero SIGUE en `bg-background`
+                  (cream): el fondo negro unificado se probó y se descartó
+                  el mismo día — un párrafo largo en texto claro sobre negro
+                  se lee peor que texto oscuro sobre claro, así que el
+                  header se queda claro y "mejorar el hero" pasa por el
+                  hero en sí (`InstitucionHeroMultiple`), no por pintarlo
+                  todo negro. Con logo: SOLO el logo, centrado, sin fondo ni
+                  texto al lado — el logo YA es
                   un wordmark (ej. "FILMAR") y a partir de acá ES el título
                   visual de la página (pedido del dueño 2026-08-19, con
                   captura real: primero "que el logo no tenga fondo, que esté
@@ -138,9 +150,11 @@ function InstitucionPage() {
           )}
         </div>
 
-        {/* Contenido del/los taller(es) — FUERA del max-w de arriba: el hero
-            (bg-ink, edge-to-edge) necesita respirar igual que en su propia
-            página individual, no encogido dentro de una card. */}
+        {/* Contenido del/los taller(es) — FUERA del contenedor de arriba: el
+            hero (bg-ink, edge-to-edge) necesita respirar igual que en su
+            propia página individual, no encogido dentro de una card (su
+            ancho interno igual coincide con el del header, vía la misma
+            TALLER_CONTENT_WIDTH). */}
         {data && activo && (
           <>
             {esMultiple && (
