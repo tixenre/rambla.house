@@ -53,31 +53,45 @@ function InstitucionPage() {
           {data && (
             <>
               {/* Header de la institución — angosto y centrado, a diferencia
-                  del hero de abajo (bg-ink, edge-to-edge). */}
-              <div className="flex items-center gap-4">
-                {data.institucion.logo_url ? (
+                  del hero de abajo (bg-ink, edge-to-edge). Con logo: SOLO el
+                  logo, centrado, sin fondo ni texto al lado — el logo YA es
+                  un wordmark (ej. "FILMAR"), repetir el nombre en texto al
+                  lado lo dice 2 veces (pedido del dueño 2026-08-19, con
+                  captura real). El h1 visible de la página pasa a ponerlo el
+                  hero de abajo (InstitucionHeroMultiple o TallerHero, según
+                  cantidad de talleres); acá va un h1 sr-only SOLO si no hay
+                  ningún taller activo (no hay hero abajo en ese caso — sin
+                  esto la página quedaría sin ningún h1). Sin logo
+                  (fallback): se mantiene el tratamiento de siempre (ícono +
+                  "Talleres con" + h1 visible) — no hay wordmark que haga de
+                  identidad visual. */}
+              {data.institucion.logo_url ? (
+                <div className="flex flex-col items-center text-center">
+                  {talleres.length === 0 && <h1 className="sr-only">{data.institucion.nombre}</h1>}
                   <img
                     src={data.institucion.logo_url}
                     alt={data.institucion.nombre}
-                    className="h-16 w-16 rounded-2xl object-contain bg-muted/30 shrink-0"
+                    className="h-20 sm:h-24 w-auto max-w-full object-contain"
                   />
-                ) : (
+                </div>
+              ) : (
+                <div className="flex items-center gap-4">
                   <div className="h-16 w-16 rounded-2xl bg-ink shrink-0 grid place-items-center">
                     <LogoMark className="h-9 w-9 text-rosa/70" />
                   </div>
-                )}
-                <div className="min-w-0">
-                  <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa mb-1">
-                    Talleres con
-                  </p>
-                  <h1
-                    className="font-display font-black lowercase leading-[0.95] tracking-[-0.015em] text-ink"
-                    style={{ fontSize: "clamp(1.6rem, 3.5vw, 2.4rem)" }}
-                  >
-                    {data.institucion.nombre}
-                  </h1>
+                  <div className="min-w-0">
+                    <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa mb-1">
+                      Talleres con
+                    </p>
+                    <h1
+                      className="font-display font-black lowercase leading-[0.95] tracking-[-0.015em] text-ink"
+                      style={{ fontSize: "clamp(1.6rem, 3.5vw, 2.4rem)" }}
+                    >
+                      {data.institucion.nombre}
+                    </h1>
+                  </div>
                 </div>
-              </div>
+              )}
 
               {data.institucion.descripcion && (
                 <p className="text-muted-foreground text-sm leading-relaxed max-w-prose">
