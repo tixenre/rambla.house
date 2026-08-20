@@ -2,7 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft } from "lucide-react";
 
 import { PublicLayout } from "@/components/rental/shell/PublicLayout";
-import { LAST_UPDATED, TALLER_TERMS_SECTIONS } from "@/data/legal";
+import { LAST_UPDATED_TALLERES, TALLER_TERMS_SECTIONS } from "@/data/legal";
 import { SITE_URL } from "@/lib/site";
 
 export const Route = createFileRoute("/terminos-talleres")({
@@ -38,7 +38,9 @@ function TerminosTalleresPage() {
         <h1 className="font-display text-3xl md:text-4xl text-ink mt-1">
           Términos y condiciones de talleres
         </h1>
-        <p className="text-sm text-muted-foreground mt-2">Última actualización: {LAST_UPDATED}</p>
+        <p className="text-sm text-muted-foreground mt-2">
+          Última actualización: {LAST_UPDATED_TALLERES}
+        </p>
 
         <article className="mt-8 space-y-6 text-15 leading-relaxed text-foreground/90">
           {TALLER_TERMS_SECTIONS.map((s) => (

@@ -24,6 +24,10 @@
 import { CONTACT } from "@/data/contact";
 
 export const LAST_UPDATED = "11 de mayo de 2026";
+// Fecha propia — TALLER_TERMS_SECTIONS se escribió en otra fecha que
+// LAST_UPDATED (Rental); reusar esa constante mostraría una fecha vieja
+// sobre contenido nuevo.
+export const LAST_UPDATED_TALLERES = "20 de agosto de 2026";
 
 // ── Política de privacidad ─────────────────────────────────────────────────
 
