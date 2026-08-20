@@ -143,6 +143,42 @@ function SectionLabel({ label }: { label: string }) {
   );
 }
 
+// Sub-label de escuela: más chico/tenue que SectionLabel — es un nivel
+// subordinado (Próximos/En curso/Ediciones anteriores manda arriba), no un
+// peer. A propósito texto plano, sin logo — la fila "En alianza con" (logo
+// grande, flotando sola arriba de todo) quedó rechazada por el dueño en
+// vivo: "queda como si todo el listado fuera de esa institución". Esto es
+// lo opuesto: chico, subordinado, scoped SOLO al bloque de cards debajo.
+function InstitucionDivider({ label }: { label: string }) {
+  return (
+    <p className="font-mono text-2xs tracking-[0.2em] uppercase text-muted-foreground/70 mt-2 mb-0.5">
+      {label}
+    </p>
+  );
+}
+
+// Pedido del dueño: "que las escuelas dividan" los talleres — SIN
+// reordenar el orden temporal que ya tiene cada sección (Próximos/En
+// curso/Ediciones anteriores). Mismo criterio que un changelog agrupado:
+// se inserta un divisor con el nombre de la escuela SOLO cuando cambia de
+// una card a la siguiente — no se agrupan/reordenan las cards para que
+// una escuela quede en un solo bloque. Un taller sin institución (Rambla
+// propio) no lleva divisor — sigue sin encabezado hasta el próximo cambio
+// real. El estado de "última escuela vista" es local a cada sección (no
+// cruza de Próximos a En curso, por ej.).
+function talleresConDivisores(items: Taller[]) {
+  let ultimaClave = "";
+  return items.flatMap((t) => {
+    const clave = t.instituciones.map((i) => i.nombre).join(" × ");
+    const mostrarDivisor = clave !== "" && clave !== ultimaClave;
+    ultimaClave = clave;
+    return [
+      mostrarDivisor && <InstitucionDivider key={`div-${t.id}`} label={clave} />,
+      <WorkshopCard key={t.id} taller={t} />,
+    ];
+  });
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 function TalleresPage() {
   const contact = useBusinessContact();
@@ -216,27 +252,21 @@ function TalleresPage() {
         {proximos.length > 0 && (
           <>
             <SectionLabel label="Próximos" />
-            {proximos.map((t) => (
-              <WorkshopCard key={t.id} taller={t} />
-            ))}
+            {talleresConDivisores(proximos)}
           </>
         )}
 
         {enCurso.length > 0 && (
           <>
             <SectionLabel label="En curso" />
-            {enCurso.map((t) => (
-              <WorkshopCard key={t.id} taller={t} />
-            ))}
+            {talleresConDivisores(enCurso)}
           </>
         )}
 
         {pasadosApi.length > 0 && (
           <>
             <SectionLabel label="Ediciones anteriores" />
-            {pasadosApi.map((t) => (
-              <WorkshopCard key={t.id} taller={t} />
-            ))}
+            {talleresConDivisores(pasadosApi)}
           </>
         )}
       </div>
