@@ -74,7 +74,7 @@ export function ClaseCard({
           {numero}
         </span>
         <div className="flex-1 min-w-0">
-          <p className="font-display text-base font-bold text-ink lowercase tracking-tight truncate">
+          <p className="font-display text-base font-bold text-ink lowercase tracking-tight">
             {clase.titulo || `Clase ${numero}`}
           </p>
           <p className="text-xs text-muted-foreground mt-0.5">
