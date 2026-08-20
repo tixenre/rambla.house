@@ -20,6 +20,7 @@ import {
   ShieldCheck,
   FolderTree,
   Building2,
+  Landmark,
   Database,
   Ruler,
   Wallet,
@@ -82,7 +83,8 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     items: [
       { title: "Reservas", url: "/admin/estudio/reservas", icon: CalendarClock },
       { title: "Estudio", url: "/admin/estudio", icon: Clapperboard, exact: true },
-      { title: "Talleres", url: "/admin/talleres", icon: GraduationCap },
+      { title: "Talleres", url: "/admin/talleres", icon: GraduationCap, exact: true },
+      { title: "Instituciones", url: "/admin/talleres/instituciones", icon: Landmark },
     ],
   },
   {

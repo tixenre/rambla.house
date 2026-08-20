@@ -32,6 +32,10 @@ PUBLIC_API_READONLY = (
     "/api/equipos",
     "/api/categorias",
     "/api/disponibilidad",
+    # Hub público de una institución co-presentadora (ej. "Filmar") — solo
+    # lectura, GET /api/instituciones/{slug}. El CRUD admin vive bajo
+    # /api/admin/instituciones con su propio require_admin.
+    "/api/instituciones",
 )
 
 # Prefijos públicos que aceptan POST a propósito (cada uno valida adentro lo suyo).

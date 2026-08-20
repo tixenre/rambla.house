@@ -160,6 +160,16 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
     numberOfMonths >= 4 ? "md:text-3xs" : numberOfMonths === 3 ? "md:text-2xs" : "";
   const weekdayTextClass = numberOfMonths >= 3 ? "md:text-3xs" : "";
   const grupos = agruparPorPatron(sorted);
+  // El resumen solo aporta cuando COMPRIME (ej. 16 sesiones → 1 pill "16
+  // jueves · 3 sep – 17 dic — 19-21hs") — con un patrón que nunca se repite
+  // (día/horario distinto cada semana, ej. sábados cortos y largos alternados)
+  // ningún grupo comprime, `grupos.length` queda igual a `sorted.length` y la
+  // lista degenera en una fila por sesión: puro re-listado de lo que el
+  // calendario de arriba ya muestra (día) y "Programa" ya muestra por clase
+  // (día + horario). Con una sola sesión total no hay "lista larga" que
+  // recortar — se deja (puede ser la única fuente de horario si Programa no
+  // tiene contenido propio para esa clase).
+  const resumenComprime = sorted.length <= 1 || grupos.length < sorted.length;
 
   return (
     <div className="rounded-2xl bg-rosa/5 border border-rosa/20 overflow-hidden">
@@ -265,12 +275,15 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
 
       {/* Resumen agrupado por patrón (día de semana + horario) — misma card
           que el calendario, separado por una línea en vez de ser su propio
-          bloque aparte. */}
-      <div className="flex flex-col divide-y divide-rosa/15 border-t border-rosa/20 px-5">
-        {grupos.map((g) => (
-          <GrupoPill key={g.fechaDesde} grupo={g} />
-        ))}
-      </div>
+          bloque aparte. Solo si comprime (ver resumenComprime más arriba) —
+          si no, es puro ruido debajo del calendario y se omite. */}
+      {resumenComprime && (
+        <div className="flex flex-col divide-y divide-rosa/15 border-t border-rosa/20 px-5">
+          {grupos.map((g) => (
+            <GrupoPill key={g.fechaDesde} grupo={g} />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

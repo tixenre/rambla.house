@@ -180,7 +180,11 @@ export function InstitucionesSection({ concepto }: { concepto: TallerConcepto })
   );
 }
 
-function InstitucionDialog({
+/** Exportado: reusado tal cual por `InstitucionesAdminSection` (la sección
+ * standalone `/admin/talleres/instituciones`) — el CRUD de campos básicos
+ * (nombre/descripción/instagram/web/logo) no depende de estar linkeado a
+ * un `concepto`, así que no hace falta duplicarlo. */
+export function InstitucionDialog({
   institucion,
   onClose,
   onCreated,
@@ -298,7 +302,7 @@ function InstitucionDialog({
               {/* eslint-disable-next-line no-restricted-syntax -- input file: no hay componente DS */}
               <input
                 type="file"
-                accept="image/jpeg,image/png,image/webp"
+                accept="image/jpeg,image/png,image/webp,image/svg+xml"
                 onChange={(e) => setPendingFile(e.target.files?.[0] ?? null)}
                 className="text-sm"
               />

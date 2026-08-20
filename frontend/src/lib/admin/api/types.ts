@@ -1860,6 +1860,18 @@ export type EdicionFoto = {
 
 export type EdicionFotoOrdenItem = { id: number; orden: number; es_principal: boolean };
 
+// Galería propia de una institución (mismo shape que EdicionFoto) — una
+// institución carga su tanda de fotos una sola vez, reusada por todos sus
+// talleres (pedido del dueño 2026-08-19: "así no subo fotos repetidas").
+export type InstitucionFoto = {
+  id: number;
+  url: string;
+  orden: number;
+  es_principal: boolean;
+};
+
+export type InstitucionFotoOrdenItem = { id: number; orden: number; es_principal: boolean };
+
 // F4c: mini-KPIs de una edición — plata ya resuelta por el backend (el front
 // solo la muestra, nunca la calcula).
 export type EdicionKpis = {
@@ -1925,12 +1937,6 @@ export type TallerConcepto = {
   // F4a: video hero (YouTube). '' → sin video.
   video_url: string;
   video_poster_url: string;
-  // Taller hermano (pareja de marketing, 2026-08-17): otro concepto que se
-  // lanza junto a este — su Hero muestra un mini-selector hacia el elegido
-  // acá. Simétrico: si OTRO taller te elige a vos, tu página lo muestra
-  // igual aunque este campo quede en null (ver _resolver_hermano backend).
-  taller_hermano_id: number | null;
-  taller_hermano_titulo: string;
   // F3: instructores como entidad (además de instructor_* legacy arriba).
   instructores: Instructor[];
   // Instituciones co-presentadoras (ej. "Rambla" + "Filmar").

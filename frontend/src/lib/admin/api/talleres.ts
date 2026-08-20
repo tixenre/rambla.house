@@ -9,6 +9,8 @@ import type {
   TallerConcepto,
   Inscripcion,
   Institucion,
+  InstitucionFoto,
+  InstitucionFotoOrdenItem,
   Instructor,
   Interesado,
   PedidoGeneradoEdicion,
@@ -70,6 +72,16 @@ export const talleresAdminApi = {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ fotos }),
+    }),
+
+  // Copia fotos ya subidas a la galería de una institución dentro de la de
+  // esta edición, sin volver a subir el archivo (pedido del dueño
+  // 2026-08-19: "no subir las mismas fotos a los dos talleres").
+  importarFotosDeInstitucion: (edicionId: number, institucionFotoIds: number[]) =>
+    authedJson<{ fotos: EdicionFoto[] }>(`/api/admin/ediciones/${edicionId}/fotos/importar`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ institucion_foto_ids: institucionFotoIds }),
     }),
 
   // F2: portada de una clase (solo clases guardadas — necesitan id).
@@ -213,7 +225,9 @@ export const talleresAdminApi = {
     return authedFetch(`/api/admin/instituciones/${institucionId}/upload-logo`, {
       method: "POST",
       body: fd,
-    }).then((r) => _ok<{ ok: boolean; url: string; media_id: number }>(r));
+      // media_id viene null para un logo SVG (no pasa por el motor de
+      // media — no es un formato raster, ver services/media/svg.py).
+    }).then((r) => _ok<{ ok: boolean; url: string; media_id: number | null }>(r));
   },
 
   setTallerInstituciones: (conceptoId: number, institucionIds: number[]) =>
@@ -223,6 +237,26 @@ export const talleresAdminApi = {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ institucion_ids: institucionIds }),
+      },
+    ),
+
+  // Galería propia de una institución (espejo de la de edición, líneas
+  // arriba) — mismo patrón, scoped a institucionId.
+  listFotosInstitucion: (institucionId: number) =>
+    authedJson<{ fotos: InstitucionFoto[] }>(`/api/admin/instituciones/${institucionId}/fotos`),
+
+  deleteFotoInstitucion: (fotoId: number) =>
+    authedJson<{ ok: boolean }>(`/api/admin/instituciones/fotos/${fotoId}`, {
+      method: "DELETE",
+    }),
+
+  reorderFotosInstitucion: (institucionId: number, fotos: InstitucionFotoOrdenItem[]) =>
+    authedJson<{ fotos: InstitucionFoto[] }>(
+      `/api/admin/instituciones/${institucionId}/fotos/orden`,
+      {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ fotos }),
       },
     ),
 

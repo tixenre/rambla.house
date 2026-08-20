@@ -1,12 +1,13 @@
-import { useState, type FormEvent } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { createLazyFileRoute, Link, notFound } from "@tanstack/react-router";
-import { CheckCircle2, X } from "lucide-react";
+import { X } from "lucide-react";
 
 import { PublicLayout } from "@/components/rental/shell/PublicLayout";
 import { Button } from "@/design-system/ui/button";
 import { IconButton } from "@/design-system/ui/icon-button";
 import { ModalBackdrop } from "@/design-system/ui/modal-backdrop";
+import { InteresadoForm } from "@/components/talleres/InteresadoForm";
 import { WorkshopInscripcionForm } from "@/components/talleres/WorkshopInscripcionForm";
 import { DescripcionRica, DescripcionBloques } from "@/components/talleres/DescripcionRica";
 import { SeccionCard } from "@/components/talleres/SeccionCard";
@@ -16,11 +17,9 @@ import { TallerGaleria, TALLER_CONTENT_WIDTH } from "@/components/talleres/Talle
 import { TallerCalendario } from "@/components/talleres/TallerCalendario";
 import { ProgramaSection } from "@/components/talleres/ProgramaSection";
 import { InstructorCard } from "@/components/talleres/InstructorCard";
-import { InstitucionesRow } from "@/components/talleres/InstitucionesRow";
 import { TallerTrabajos } from "@/components/talleres/TallerTrabajos";
 import { TallerFAQ } from "@/components/talleres/TallerFAQ";
 import { TallerCTABar } from "@/components/talleres/TallerCTABar";
-import { Input } from "@/design-system/ui/input";
 import { apiGetTaller, type EdicionLite, type Taller } from "@/lib/api";
 import { ordinalEdicion, resumenFechas, resumenHorario } from "@/lib/talleres/formato";
 
@@ -85,83 +84,6 @@ function SoldOutModal({
         </button>
       </div>
     </ModalBackdrop>
-  );
-}
-
-// ── InteresadoForm ────────────────────────────────────────────────────────────
-
-function InteresadoForm({ slug }: { slug: string }) {
-  const [form, setForm] = useState({ nombre: "", email: "", telefono: "" });
-  const [status, setStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
-  const [errorMsg, setErrorMsg] = useState("");
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    if (!form.nombre.trim() || !form.email.trim()) return;
-    setStatus("sending");
-    try {
-      const res = await fetch(`/api/talleres/${slug}/interesado`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j?.detail ?? `Error ${res.status}`);
-      }
-      setStatus("ok");
-    } catch (err) {
-      setErrorMsg((err as Error).message);
-      setStatus("error");
-    }
-  }
-
-  if (status === "ok") {
-    return (
-      <div className="rounded-2xl border border-verde/40 bg-verde/10 px-5 py-6 text-center">
-        <CheckCircle2 className="h-8 w-8 text-verde mx-auto mb-3" strokeWidth={1.5} />
-        <p className="font-semibold text-ink">¡Anotado/a!</p>
-        <p className="text-sm text-muted-foreground mt-1">Te avisamos cuando haya nuevas fechas.</p>
-      </div>
-    );
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-      <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-        Avisame si hay más fechas
-      </p>
-      <Input
-        required
-        type="text"
-        placeholder="Tu nombre"
-        value={form.nombre}
-        onChange={(e) => setForm((f) => ({ ...f, nombre: e.target.value }))}
-      />
-      <Input
-        required
-        type="email"
-        placeholder="Tu email"
-        value={form.email}
-        onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-      />
-      <Input
-        type="tel"
-        placeholder="Tu teléfono (opcional)"
-        value={form.telefono}
-        onChange={(e) => setForm((f) => ({ ...f, telefono: e.target.value }))}
-      />
-      {status === "error" && <p className="text-xs text-destructive">{errorMsg}</p>}
-      <Button
-        type="submit"
-        variant="amber"
-        shape="pill"
-        disabled={status === "sending"}
-        className="w-full py-3.5 text-base font-bold"
-      >
-        {status === "sending" ? "Enviando…" : "Avisame"}
-      </Button>
-    </form>
   );
 }
 
@@ -255,9 +177,11 @@ function TallerLandingPage() {
             <div className="grid lg:grid-cols-[1fr_380px] gap-10 lg:gap-16 items-start">
               {/* Columna principal */}
               <div className="flex flex-col gap-12">
-                {/* Orden: de qué se trata → a quién está orientado → cuándo es
-                    (chequeo rápido antes de invertir tiempo en leer) → el
-                    desarrollo completo del programa. */}
+                {/* Orden: de qué se trata → a quién está orientado → el
+                    desarrollo completo del programa → cuándo es (pedido
+                    explícito del dueño: las fechas van después de las
+                    clases, no antes — ya se sabe de qué se trata el taller
+                    antes de mostrar el calendario). */}
                 <SeccionCard eyebrow="De qué se trata">
                   <DescripcionBloques
                     bloques={bloquesDescripcion}
@@ -274,10 +198,6 @@ function TallerLandingPage() {
                   </SeccionCard>
                 )}
 
-                {formTaller.sesiones.length > 0 && (
-                  <TallerCalendario sesiones={formTaller.sesiones} horario={formTaller.horario} />
-                )}
-
                 {bloquesPrograma && bloquesPrograma.length > 0 && (
                   <SeccionCard eyebrow="Programa">
                     <DescripcionBloques
@@ -287,7 +207,11 @@ function TallerLandingPage() {
                   </SeccionCard>
                 )}
                 <ProgramaSection clases={clases} />
-                <InstitucionesRow taller={taller} />
+
+                {formTaller.sesiones.length > 0 && (
+                  <TallerCalendario sesiones={formTaller.sesiones} horario={formTaller.horario} />
+                )}
+
                 <InstructorCard taller={taller} />
                 <TallerTrabajos trabajos={taller.trabajos} />
               </div>

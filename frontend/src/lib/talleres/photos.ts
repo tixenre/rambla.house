@@ -34,3 +34,23 @@ export async function uploadEdicionFile(edicionId: number, file: File): Promise<
   }
   return res.json() as Promise<UploadResponse>;
 }
+
+/** Espejo de `uploadEdicionFile`, scoped a la galería propia de una
+ * institución (endpoint: POST /api/admin/instituciones/{institucionId}/upload-foto). */
+export async function uploadInstitucionFile(
+  institucionId: number,
+  file: File,
+): Promise<UploadResponse> {
+  const fd = new FormData();
+  fd.append("file", file);
+
+  const res = await authedFetch(`/api/admin/instituciones/${institucionId}/upload-foto`, {
+    method: "POST",
+    body: fd,
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => ({}));
+    throw new Error(detail?.detail ?? `upload-foto → ${res.status}`);
+  }
+  return res.json() as Promise<UploadResponse>;
+}

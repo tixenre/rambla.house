@@ -2192,6 +2192,70 @@ def _init_db_schema(conn):
         "ON taller_instituciones(institucion_id)"
     )
 
+    # instituciones.slug (migración institucslug): URL pública del hub de
+    # talleres de una institución (/escuelas/instituciones/$slug). Tabla
+    # chica (pocas instituciones) — a diferencia de equipos.slug, se
+    # backfillea e impone NOT NULL + UNIQUE de una, sin fase transicional.
+    conn.execute("ALTER TABLE instituciones ADD COLUMN IF NOT EXISTS slug TEXT")
+    from dataio.slug import slugify, slug_unico
+
+    _pendientes_ins = conn.execute(
+        "SELECT id, nombre FROM instituciones WHERE slug IS NULL"
+    ).fetchall()
+    if _pendientes_ins:
+        _ocupados_ins = {
+            r["slug"]
+            for r in conn.execute(
+                "SELECT slug FROM instituciones WHERE slug IS NOT NULL"
+            ).fetchall()
+        }
+        for r in _pendientes_ins:
+            base = slugify(r["nombre"]) or f"institucion-{r['id']}"
+            slug = slug_unico(base, _ocupados_ins)
+            _ocupados_ins.add(slug)
+            conn.execute(
+                "UPDATE instituciones SET slug = %s WHERE id = %s", (slug, r["id"])
+            )
+    conn.execute("ALTER TABLE instituciones ALTER COLUMN slug SET NOT NULL")
+    conn.execute("""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'instituciones_slug_key'
+                  AND conrelid = 'instituciones'::regclass
+            ) THEN
+                ALTER TABLE instituciones ADD CONSTRAINT instituciones_slug_key UNIQUE (slug);
+            END IF;
+        END $$;
+    """)
+
+    # Galería de fotos por INSTITUCIÓN (pedido del dueño 2026-08-19: "que sea
+    # por institución, así no subo fotos repetidas" en cada taller). Espejo
+    # exacto de `edicion_fotos`, scoped a `institucion_id` en vez de a una
+    # edición puntual — una institución (ej. "Filmar") solo tiene una tanda
+    # de fotos, reusada por todos sus talleres. `es_principal` marca la foto
+    # destacada que usa el hero público del hub de institución.
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS institucion_fotos (
+            id             SERIAL PRIMARY KEY,
+            institucion_id INTEGER NOT NULL REFERENCES instituciones(id) ON DELETE CASCADE,
+            url            TEXT NOT NULL,
+            url_sm         TEXT,
+            url_avif       TEXT,
+            url_sm_avif    TEXT,
+            path           TEXT,
+            media_id       BIGINT REFERENCES media_assets(id) ON DELETE SET NULL,
+            orden          INTEGER NOT NULL DEFAULT 0,
+            es_principal   BOOLEAN NOT NULL DEFAULT FALSE,
+            created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_institucion_fotos_institucion_orden "
+        "ON institucion_fotos(institucion_id, orden)"
+    )
+
     # Escuela v2 F4a: video hero (YouTube) del concepto. Mismo extractor que
     # estudio_trabajos (services.media.youtube.extract_video_id), pero acá SÍ
     # se descarga y guarda el poster en R2 (store_youtube_poster) — es
@@ -2200,18 +2264,6 @@ def _init_db_schema(conn):
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_url TEXT NOT NULL DEFAULT ''")
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_poster_media_id BIGINT REFERENCES media_assets(id) ON DELETE SET NULL")
     conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS video_poster_url TEXT NOT NULL DEFAULT ''")
-    # Taller hermano (pareja de marketing, pedido del dueño 2026-08-17): dos
-    # talleres lanzados juntos comparten un solo link — cada uno sigue siendo
-    # un concepto independiente con su propia página; el Hero de cualquiera
-    # de los dos muestra un mini-selector hacia el otro. El vínculo se
-    # resuelve SIMÉTRICO desde el lado que lo tenga seteado (ver
-    # `_resolver_hermano` en routes/talleres.py) — no hace falta setearlo en
-    # los 2 lados. `taller_hermano_titulo` es un copy corto opcional de esa
-    # campaña ("Dos talleres, un solo viaje"); '' → el header muestra solo
-    # los 2 nombres, sin bloque de texto de más.
-    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS taller_hermano_id INTEGER REFERENCES talleres(id) ON DELETE SET NULL")
-    conn.execute("ALTER TABLE talleres ADD COLUMN IF NOT EXISTS taller_hermano_titulo TEXT NOT NULL DEFAULT ''")
-
     # Escuela v2 F4a: modalidades de pago por edición — `monto_total` (costo
     # total del plan) y `n_cuotas` cargados a mano por el admin; el monto POR
     # cuota se deriva (`monto_total / n_cuotas`, redondeado) — nunca se tipea

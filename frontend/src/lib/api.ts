@@ -460,30 +460,41 @@ export type Sesion = {
  *  (`_cuentas_pago_efectivas`, backend) — nunca se manda de vuelta al editar. */
 export type CuentaPago = { id?: number | null; alias: string; cbu: string; banco: string };
 
-// Un lado del banner de pareja (taller hermano) — trae lo mínimo del
-// concepto (nombre/subtítulo) MÁS los datos de la edición activa que
-// `MitadPareja` necesita para armar su propio resumen de fecha/horario
-// (mismo criterio — `resumenFechas`/`resumenHorario` — que usa el taller
-// actual, para que las 2 mitades del banner formateen igual).
-export type HermanoLado = {
-  taller_id: number;
-  nombre: string;
-  subtitulo: string;
+// Institución co-presentadora de uno o más talleres (ej. "Rambla" + "Filmar").
+// Entidad propia con su propia URL pública (hub /escuelas/instituciones/$slug
+// que agrupa todos sus talleres) — ver apiGetInstitucion más abajo.
+export type Institucion = {
+  id: number;
   slug: string;
-  fecha_inicio: string;
-  fecha_fin: string;
-  horario: string;
-  direccion: string;
-  cupos_total: number;
-  sesiones: SesionFecha[];
+  nombre: string;
+  descripcion: string;
+  instagram: string;
+  web: string;
+  logo_url: string;
+  logo_media_id: number | null;
+  // Foto principal de institucion_fotos (o null sin galería cargada aún) —
+  // solo poblada por GET /instituciones/{slug} (ver services/media/svg.py-
+  // adyacente routes/talleres.py::get_institucion), no por list_talleres/
+  // get_taller — el hero público la usa como fondo del hero
+  // (InstitucionFotoHero); sin ella, InstitucionPage cae al header plano.
+  foto_destacada: {
+    url: string;
+    url_sm: string | null;
+    url_avif: string | null;
+    url_sm_avif: string | null;
+  } | null;
+  // Cantidad de talleres activos de esta institución — SOLO poblada por
+  // GET /talleres/{slug} (get_taller), no por list_talleres/get_institucion
+  // (el hub no necesita linkearse a sí mismo). Alimenta el link "Ver los N
+  // talleres de X" en InstitucionesRow, hacia /escuelas/instituciones/$slug.
+  talleres_count?: number;
 };
 
 export type Taller = {
   id: number;
-  // El CONCEPTO (`talleres.id`) — distinto de `id` (la EDICIÓN). Necesario
-  // para comparar contra `taller_hermano.principal/secundario.taller_id`
-  // (ambos referencian concepto, no edición) y saber cuál de los 2 lados
-  // del par es "el que estoy viendo ahora".
+  // El CONCEPTO (`talleres.id`) — distinto de `id` (la EDICIÓN). Usado como
+  // key estable en el hub de institución (`InstitucionHeroMultiple`/
+  // `InstitucionPage`) para saber qué taller está activo entre varios.
   taller_id: number;
   slug: string;
   nombre: string;
@@ -508,12 +519,6 @@ export type Taller = {
   numero_edicion: number;
   proxima_edicion?: EdicionLite | null;
   edicion_anterior?: EdicionLite | null;
-  // Taller hermano (pareja de marketing) — el par YA ORDENADO por el
-  // backend (`principal` = el lado con el puntero seteado, siempre
-  // primero) para que el banner se vea IGUAL sea cual sea la página desde
-  // la que se mira. null si no tiene pareja, o si algún lado no tiene
-  // edición activa a la que linkear.
-  taller_hermano?: { titulo: string; principal: HermanoLado; secundario: HermanoLado } | null;
   activo: boolean;
   tipo_taller: string;
   notif_email: string;
@@ -539,15 +544,7 @@ export type Taller = {
     proyectos: string;
   }[];
   // Instituciones co-presentadoras (ej. "Rambla" + "Filmar").
-  instituciones: {
-    id: number;
-    nombre: string;
-    descripcion: string;
-    instagram: string;
-    web: string;
-    logo_url: string;
-    logo_media_id: number | null;
-  }[];
+  instituciones: Institucion[];
   sesiones: Sesion[];
   // F4a: video hero (YouTube) — null si no hay video configurado o la URL no
   // se pudo interpretar. El embed es siempre youtube-nocookie.com.
@@ -623,6 +620,12 @@ export function apiGetTalleres() {
 
 export function apiGetTaller(slug: string) {
   return get<Taller>(`/api/talleres/${slug}`);
+}
+
+// Hub público de una institución co-presentadora (ej. "Filmar"): su perfil +
+// todos sus talleres con edición activa, para /escuelas/instituciones/$slug.
+export function apiGetInstitucion(slug: string) {
+  return get<{ institucion: Institucion; talleres: Taller[] }>(`/api/instituciones/${slug}`);
 }
 
 export async function apiUploadComprobante(

@@ -1,0 +1,121 @@
+{
+  "nombre": "Taller de Rodaje — Nivel Principiante",
+  "subtitulo": "Nivel Principiante",
+  "resumen": "Taller práctico de rodaje para quienes recién empiezan: rol por rol, de la preproducción al set, con un cortometraje real de cierre.",
+  "descripcion": "Un recorrido práctico por todos los roles que hacen al rodaje —dirección, fotografía, cámara, luces, arte y producción— pensado para quienes recién empiezan: no hace falta experiencia previa.\n\nA lo largo de la cursada vas a experimentar cada área en carne propia, formar una mirada crítica sobre la dramaturgia (qué recursos se usan para contar una idea) y entender la técnica como una herramienta narrativa, no como un fin en sí mismo.\n\nAl finalizar, te vas con un portafolio profesional para seguir mejor posicionado en tu carrera.",
+  "publico_objetivo": "No hace falta tener experiencia previa.",
+  "notif_email": "",
+  "beneficios": "Los estudiantes de FILMAR obtienen 15% off en el alquiler de equipos y estudio de Rambla Rental y Rambla Estudio para proyectos extracurriculares. En las clases del taller, todos los equipos están incluidos.",
+  "instructor": {
+    "nombre": "TODO — falta el/la instructora"
+  },
+  "edicion": {
+    "tipo_taller": "semanal",
+    "horario": "Sábados de 8:30 a 12:30 hs (última clase, combinada, de 8:30 a 16:30 hs)",
+    "cupos_total": 12,
+    "precio_total": 720000,
+    "precio_sena": 0,
+    "direccion": null,
+    "pago_alias": "",
+    "pago_cbu": "",
+    "pago_banco": "",
+    "usa_estudio": false,
+    "valor_estudio": 0,
+    "valor_estudio_modo": "mensual",
+    "usa_equipos": false,
+    "valor_equipos": 0,
+    "valor_equipos_modo": "mensual",
+    "modalidades": [
+      {
+        "codigo": "total",
+        "label": "Pago único (10% off)",
+        "monto_total": 648000
+      },
+      {
+        "codigo": "cuotas3",
+        "label": "3 cuotas sin interés",
+        "monto_total": 720000,
+        "n_cuotas": 3
+      }
+    ],
+    "clases": [
+      {
+        "fecha": "2026-09-05",
+        "hora_inicio_min": 510,
+        "hora_fin_min": 750,
+        "titulo": "Clase 1",
+        "descripcion": "Presentación del taller\nAreas que hacen al rodaje (Dirección, producción, arte, fotografía y sonido)\nDesenvolvimiento en set\nProtocolo y responsabilidades a la hora de grabar\nEjercicio: guion literario, guion técnico y plan de rodaje"
+      },
+      {
+        "fecha": "2026-09-12",
+        "hora_inicio_min": 510,
+        "hora_fin_min": 750,
+        "titulo": "Clase 2",
+        "descripcion": "# Lenguaje audiovisual\nValores de plano, composición, encuadre, profundidad de campo\nSoportes de cámara y sus diferencias narrativas y técnicas\nTrípode, ronin, steady, carro, cámara en mano\nEjercicio: valores de plano con diferentes lentes y soportes"
+      },
+      {
+        "fecha": "2026-09-19",
+        "hora_inicio_min": 510,
+        "hora_fin_min": 750,
+        "titulo": "Clase 3",
+        "descripcion": "# La luz es todo\nLuz suave vs. luz dura, luz lateral vs. luz cenital, luz led vs. luz tungsteno\nManipulación de luces y armado de puestas\nEjercicio: puestas de luces"
+      },
+      {
+        "fecha": "2026-09-26",
+        "hora_inicio_min": 510,
+        "hora_fin_min": 750,
+        "titulo": "Clase 4",
+        "descripcion": "# La cámara\nArmado y seteo de cámara\nCodecs, formatos, resolución, fps, temperatura de color, diafragma, tiempo de obturación\nEjercicio: armado de cámara"
+      },
+      {
+        "fecha": "2026-10-03",
+        "hora_inicio_min": 510,
+        "hora_fin_min": 750,
+        "titulo": "Clase 5",
+        "descripcion": "Presupuestos y presentaciones\nPedido en el rental\nEjercicio: armado de propuestas"
+      },
+      {
+        "fecha": "2026-10-10",
+        "hora_inicio_min": 510,
+        "hora_fin_min": 750,
+        "titulo": "Clase 6",
+        "descripcion": "Rodaje: publicidad"
+      },
+      {
+        "fecha": "2026-10-17",
+        "hora_inicio_min": 510,
+        "hora_fin_min": 750,
+        "titulo": "Clase 7",
+        "descripcion": "Rodaje: video clip"
+      },
+      {
+        "fecha": "2026-10-24",
+        "hora_inicio_min": 510,
+        "hora_fin_min": 750,
+        "titulo": "Clase 8",
+        "descripcion": "Rodaje: fashion film"
+      },
+      {
+        "fecha": "2026-10-31",
+        "hora_inicio_min": 510,
+        "hora_fin_min": 750,
+        "titulo": "Clase 9",
+        "descripcion": "Rodaje: streaming / podcasts"
+      },
+      {
+        "fecha": "2026-11-07",
+        "hora_inicio_min": 510,
+        "hora_fin_min": 750,
+        "titulo": "Clase 10",
+        "descripcion": "Pitchs de cortometrajes a rodar\nRodaje: cine de género"
+      },
+      {
+        "fecha": "2026-11-14",
+        "hora_inicio_min": 510,
+        "hora_fin_min": 990,
+        "titulo": "Clase 11 y 12 — Rodaje de cortometraje",
+        "descripcion": "# Rodaje final: cortometraje\nClases 11 y 12 combinadas en una sola jornada, para tener 8 hs seguidas de rodaje"
+      }
+    ]
+  }
+}

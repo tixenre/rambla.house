@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { XIcon, ChevronLeft, ChevronRight } from "lucide-react";
 import { ModalBackdrop } from "@/design-system/ui/modal-backdrop";
 
@@ -16,12 +16,23 @@ interface LightboxProps {
 }
 
 /**
- * Lightbox fullscreen — visor de fotos con nav por teclado/botones y
- * pinch-zoom nativo en mobile. Reutilizable para cualquier galería del repo.
+ * Lightbox fullscreen — visor de fotos con nav por teclado/botones/swipe
+ * táctil/gesto de trackpad y pinch-zoom nativo en mobile. Reutilizable para
+ * cualquier galería del repo (talleres, equipo.$slug, MediaGallery).
  *
  * Props: `photos` (url + alt), `index` controlado, `onIndexChange`, `onClose`.
  */
 export function Lightbox({ open, onClose, photos, index, onIndexChange }: LightboxProps) {
+  // No wrap-around a propósito (a diferencia del carrusel chico de
+  // TallerGaleria): en pantalla completa, llegar a la última foto y que
+  // "siguiente" salte a la primera desorienta más de lo que ayuda.
+  const goPrev = () => {
+    if (index > 0) onIndexChange(index - 1);
+  };
+  const goNext = () => {
+    if (index < photos.length - 1) onIndexChange(index + 1);
+  };
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -36,6 +47,65 @@ export function Lightbox({ open, onClose, photos, index, onIndexChange }: Lightb
       document.body.style.overflow = "";
     };
   }, [open, index, photos.length, onClose, onIndexChange]);
+
+  // Swipe táctil + gesto de 2 dedos del trackpad — pedido del dueño, mismo
+  // patrón que TallerGaleria. El listener de wheel es nativo (no el
+  // `onWheel` sintético de React): wheel es passive por default en React,
+  // así que `preventDefault()` adentro se ignora en silencio.
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  function handleTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  }
+  function handleTouchEnd(e: React.TouchEvent) {
+    if (!touchStart.current) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStart.current.x;
+    const dy = t.clientY - touchStart.current.y;
+    touchStart.current = null;
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+      if (dx > 0) goPrev();
+      else goNext();
+    }
+  }
+
+  // Acumula el deltaX de TODA la ráfaga de un swipe físico (el trackpad
+  // manda muchos eventos wheel seguidos, con "momentum" que sigue después
+  // de levantar los dedos) y decide UNA sola vez cuando la ráfaga se queda
+  // quieta — throttle por-evento saltaba 2-3 fotos en un swipe largo (bug
+  // real, reportado por el dueño: "se mueve raro"). `preventDefault()` en
+  // TODO evento horizontal, no solo el que navega — sin eso el browser ve
+  // delta sin frenar en el resto de la ráfaga y puede disparar su propio
+  // gesto de "volver atrás" (reportado: "se me fue para la pantalla
+  // anterior").
+  const imgAreaRef = useRef<HTMLDivElement>(null);
+  const wheelAccum = useRef(0);
+  const wheelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    const el = imgAreaRef.current;
+    if (!open || !el || photos.length <= 1) return;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      wheelAccum.current += e.deltaX;
+      if (wheelTimer.current) clearTimeout(wheelTimer.current);
+      wheelTimer.current = setTimeout(() => {
+        const total = wheelAccum.current;
+        wheelAccum.current = 0;
+        if (Math.abs(total) < 60) return;
+        if (total > 0) {
+          if (index < photos.length - 1) onIndexChange(index + 1);
+        } else if (index > 0) {
+          onIndexChange(index - 1);
+        }
+      }, 100);
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      if (wheelTimer.current) clearTimeout(wheelTimer.current);
+    };
+  }, [open, index, photos.length, onIndexChange]);
 
   if (!open || photos.length === 0) return null;
   const current = photos[Math.min(index, photos.length - 1)];
@@ -66,8 +136,11 @@ export function Lightbox({ open, onClose, photos, index, onIndexChange }: Lightb
 
       {/* Imagen — pinch-zoom nativo en mobile. */}
       <div
-        className="flex-1 flex items-center justify-center overflow-auto px-2"
+        ref={imgAreaRef}
+        className="flex-1 flex items-center justify-center overflow-auto [overscroll-behavior-x:none] px-2"
         onClick={(e) => e.stopPropagation()}
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
         style={{ touchAction: "pinch-zoom" }}
       >
         <img
@@ -94,7 +167,7 @@ export function Lightbox({ open, onClose, photos, index, onIndexChange }: Lightb
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onIndexChange(index - 1);
+                goPrev();
               }}
               className="hidden sm:grid absolute left-3 top-1/2 -translate-y-1/2 h-12 w-12 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20 transition"
               aria-label="Foto anterior"
@@ -107,7 +180,7 @@ export function Lightbox({ open, onClose, photos, index, onIndexChange }: Lightb
               type="button"
               onClick={(e) => {
                 e.stopPropagation();
-                onIndexChange(index + 1);
+                goNext();
               }}
               className="hidden sm:grid absolute right-3 top-1/2 -translate-y-1/2 h-12 w-12 place-items-center rounded-full bg-white/10 text-white hover:bg-white/20 transition"
               aria-label="Foto siguiente"

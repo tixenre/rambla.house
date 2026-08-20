@@ -3,42 +3,35 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { PhotoGallery, type GalleryFoto } from "@/components/common/PhotoGallery";
-import { uploadEdicionFile } from "@/lib/talleres/photos";
+import { uploadInstitucionFile } from "@/lib/talleres/photos";
 import { talleresAdminApi } from "@/lib/admin/api";
-import type { EdicionFotoOrdenItem, Institucion } from "@/lib/admin/api/types";
-import { Button } from "@/design-system/ui/button";
-import { ImportarFotosInstitucionDialog } from "./ImportarFotosInstitucionDialog";
+import type { InstitucionFotoOrdenItem } from "@/lib/admin/api/types";
 
-// Subir todo el FileList de una — el input acepta `multiple` y la UI invita
-// a elegir varias — disparaba N requests simultáneos sin tope; un lote de
-// ~15-20 fotos agotaba el rate limit de `upload-foto` (20/minuto, backend)
-// en la primera ráfaga y tiraba 429. De a tandas chicas, encadenadas.
+// Mismo tope que GaleriaEdicionSection: de a tandas chicas, no todo el
+// FileList a la vez (agotaba el rate limit de upload-foto en la primera
+// ráfaga).
 const UPLOAD_CONCURRENCY = 3;
 
 /**
- * Galería de fotos de una EDICIÓN de taller (portada + galería pública) —
- * espejo de GaleriaSection (Estudio), scoped a `edicionId` en vez del
- * singleton. Confirmado con el dueño: portada+galería son por edición, no
- * por concepto (a diferencia del video hero, que sí es del concepto).
+ * Galería de fotos propia de una INSTITUCIÓN — espejo exacto de
+ * `GaleriaEdicionSection`, scoped a `institucionId` en vez de `edicionId`.
+ * Pedido del dueño 2026-08-19: "que sea por institución también, así no
+ * subo fotos repetidas" — una institución (ej. Filmar) carga su tanda de
+ * fotos una sola vez, reusada por todos sus talleres, en vez de repetirla
+ * en cada edición. La foto `es_principal` es la "foto destacada" que usa
+ * el hero público del hub de institución (`InstitucionPage`).
  */
-export function GaleriaEdicionSection({
-  edicionId,
+export function GaleriaInstitucionSection({
+  institucionId,
   fotos,
-  instituciones = [],
   onChanged,
 }: {
-  edicionId: number;
+  institucionId: number;
   fotos: Array<{ id: number; url: string; orden: number; es_principal: boolean }>;
-  // Instituciones co-presentadoras de este taller — si alguna ya tiene fotos
-  // propias, se puede importar de ahí en vez de volver a subir el archivo
-  // (pedido del dueño 2026-08-19: "no subir las mismas fotos a los dos
-  // talleres").
-  instituciones?: Institucion[];
   onChanged: () => void;
 }) {
   const qc = useQueryClient();
   const [uploading, setUploading] = useState(false);
-  const [pickerOpen, setPickerOpen] = useState(false);
 
   async function handleUpload(files: FileList) {
     setUploading(true);
@@ -48,7 +41,7 @@ export function GaleriaEdicionSection({
       for (let i = 0; i < fileArray.length; i += UPLOAD_CONCURRENCY) {
         const tanda = fileArray.slice(i, i + UPLOAD_CONCURRENCY);
         const resultados = await Promise.allSettled(
-          tanda.map((f) => uploadEdicionFile(edicionId, f)),
+          tanda.map((f) => uploadInstitucionFile(institucionId, f)),
         );
         fallidas += resultados.filter((r) => r.status === "rejected").length;
       }
@@ -69,7 +62,7 @@ export function GaleriaEdicionSection({
   }
 
   const deleteMut = useMutation({
-    mutationFn: (id: number) => talleresAdminApi.deleteFotoEdicion(id),
+    mutationFn: (id: number) => talleresAdminApi.deleteFotoInstitucion(id),
     onSuccess: () => {
       toast.success("Foto eliminada");
       onChanged();
@@ -78,10 +71,10 @@ export function GaleriaEdicionSection({
   });
 
   const reorderMut = useMutation({
-    mutationFn: (items: EdicionFotoOrdenItem[]) =>
-      talleresAdminApi.reorderFotosEdicion(edicionId, items),
+    mutationFn: (items: InstitucionFotoOrdenItem[]) =>
+      talleresAdminApi.reorderFotosInstitucion(institucionId, items),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["admin", "talleres"] });
+      qc.invalidateQueries({ queryKey: ["admin", "instituciones"] });
     },
     onError: (e) => toast.error("Error reordenando", { description: (e as Error).message }),
   });
@@ -99,22 +92,9 @@ export function GaleriaEdicionSection({
 
   return (
     <div>
-      <div className="flex items-start justify-between gap-3 mb-4">
-        <p className="text-xs text-muted-foreground">
-          La foto marcada como principal es la portada de esta edición en la página pública.
-        </p>
-        {instituciones.length > 0 && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => setPickerOpen(true)}
-            className="shrink-0"
-          >
-            Importar de instituciones
-          </Button>
-        )}
-      </div>
+      <p className="text-xs text-muted-foreground mb-4">
+        La foto marcada como principal es la destacada del hero público del hub de esta institución.
+      </p>
       <PhotoGallery
         fotos={fotos}
         onUpload={handleUpload}
@@ -124,15 +104,6 @@ export function GaleriaEdicionSection({
         uploading={uploading}
         disabled={deleteMut.isPending || reorderMut.isPending}
       />
-      {pickerOpen && (
-        <ImportarFotosInstitucionDialog
-          edicionId={edicionId}
-          instituciones={instituciones}
-          urlsActuales={fotos.map((f) => f.url)}
-          onClose={() => setPickerOpen(false)}
-          onImported={onChanged}
-        />
-      )}
     </div>
   );
 }

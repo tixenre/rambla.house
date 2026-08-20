@@ -45,6 +45,7 @@ import { Route as AdminLoginRouteImport } from './routes/admin.login'
 import { Route as AdminEstudioRouteImport } from './routes/admin/estudio'
 import { Route as AdminEquiposRouteImport } from './routes/admin/equipos'
 import { Route as EscuelasSenaTokenRouteImport } from './routes/escuelas.sena.$token'
+import { Route as EscuelasInstitucionesSlugRouteImport } from './routes/escuelas.instituciones.$slug'
 import { Route as EscuelaSenaTokenRouteImport } from './routes/escuela.sena.$token'
 
 const AdminIndexLazyRouteImport = createFileRoute('/admin/')()
@@ -77,6 +78,9 @@ const AdminEstudioIndexLazyRouteImport = createFileRoute('/admin/estudio/')()
 const AdminEquiposIndexLazyRouteImport = createFileRoute('/admin/equipos/')()
 const AdminContabilidadIndexLazyRouteImport = createFileRoute(
   '/admin/contabilidad/',
+)()
+const AdminTalleresInstitucionesLazyRouteImport = createFileRoute(
+  '/admin/talleres/instituciones',
 )()
 const AdminSpecsDefinitionsLazyRouteImport = createFileRoute(
   '/admin/specs/definitions',
@@ -446,6 +450,14 @@ const AdminContabilidadIndexLazyRoute =
   } as any).lazy(() =>
     import('./routes/admin/contabilidad.index.lazy').then((d) => d.Route),
   )
+const AdminTalleresInstitucionesLazyRoute =
+  AdminTalleresInstitucionesLazyRouteImport.update({
+    id: '/instituciones',
+    path: '/instituciones',
+    getParentRoute: () => AdminTalleresRoute,
+  } as any).lazy(() =>
+    import('./routes/admin/talleres.instituciones.lazy').then((d) => d.Route),
+  )
 const AdminSpecsDefinitionsLazyRoute =
   AdminSpecsDefinitionsLazyRouteImport.update({
     id: '/specs/definitions',
@@ -583,6 +595,14 @@ const EscuelasSenaTokenRoute = EscuelasSenaTokenRouteImport.update({
 } as any).lazy(() =>
   import('./routes/escuelas.sena.$token.lazy').then((d) => d.Route),
 )
+const EscuelasInstitucionesSlugRoute =
+  EscuelasInstitucionesSlugRouteImport.update({
+    id: '/instituciones/$slug',
+    path: '/instituciones/$slug',
+    getParentRoute: () => EscuelasRoute,
+  } as any).lazy(() =>
+    import('./routes/escuelas.instituciones.$slug.lazy').then((d) => d.Route),
+  )
 const EscuelaSenaTokenRoute = EscuelaSenaTokenRouteImport.update({
   id: '/sena/$token',
   path: '/sena/$token',
@@ -649,6 +669,7 @@ export interface FileRoutesByFullPath {
   '/workshops/': typeof WorkshopsIndexRoute
   '/admin/': typeof AdminIndexLazyRoute
   '/escuela/sena/$token': typeof EscuelaSenaTokenRoute
+  '/escuelas/instituciones/$slug': typeof EscuelasInstitucionesSlugRoute
   '/escuelas/sena/$token': typeof EscuelasSenaTokenRoute
   '/admin/contabilidad/cuentas': typeof AdminContabilidadCuentasLazyRoute
   '/admin/contabilidad/estudio': typeof AdminContabilidadEstudioLazyRoute
@@ -667,6 +688,7 @@ export interface FileRoutesByFullPath {
   '/admin/pedidos/$id': typeof AdminPedidosIdLazyRoute
   '/admin/pedidos/nuevo': typeof AdminPedidosNuevoLazyRoute
   '/admin/specs/definitions': typeof AdminSpecsDefinitionsLazyRoute
+  '/admin/talleres/instituciones': typeof AdminTalleresInstitucionesLazyRoute
   '/admin/contabilidad/': typeof AdminContabilidadIndexLazyRoute
   '/admin/equipos/': typeof AdminEquiposIndexLazyRoute
   '/admin/estudio/': typeof AdminEstudioIndexLazyRoute
@@ -719,6 +741,7 @@ export interface FileRoutesByTo {
   '/workshops': typeof WorkshopsIndexRoute
   '/admin': typeof AdminIndexLazyRoute
   '/escuela/sena/$token': typeof EscuelaSenaTokenRoute
+  '/escuelas/instituciones/$slug': typeof EscuelasInstitucionesSlugRoute
   '/escuelas/sena/$token': typeof EscuelasSenaTokenRoute
   '/admin/contabilidad/cuentas': typeof AdminContabilidadCuentasLazyRoute
   '/admin/contabilidad/estudio': typeof AdminContabilidadEstudioLazyRoute
@@ -737,6 +760,7 @@ export interface FileRoutesByTo {
   '/admin/pedidos/$id': typeof AdminPedidosIdLazyRoute
   '/admin/pedidos/nuevo': typeof AdminPedidosNuevoLazyRoute
   '/admin/specs/definitions': typeof AdminSpecsDefinitionsLazyRoute
+  '/admin/talleres/instituciones': typeof AdminTalleresInstitucionesLazyRoute
   '/admin/contabilidad': typeof AdminContabilidadIndexLazyRoute
   '/admin/equipos': typeof AdminEquiposIndexLazyRoute
   '/admin/estudio': typeof AdminEstudioIndexLazyRoute
@@ -798,6 +822,7 @@ export interface FileRoutesById {
   '/workshops/': typeof WorkshopsIndexRoute
   '/admin/': typeof AdminIndexLazyRoute
   '/escuela/sena/$token': typeof EscuelaSenaTokenRoute
+  '/escuelas/instituciones/$slug': typeof EscuelasInstitucionesSlugRoute
   '/escuelas/sena/$token': typeof EscuelasSenaTokenRoute
   '/admin/contabilidad/cuentas': typeof AdminContabilidadCuentasLazyRoute
   '/admin/contabilidad/estudio': typeof AdminContabilidadEstudioLazyRoute
@@ -816,6 +841,7 @@ export interface FileRoutesById {
   '/admin/pedidos/$id': typeof AdminPedidosIdLazyRoute
   '/admin/pedidos/nuevo': typeof AdminPedidosNuevoLazyRoute
   '/admin/specs/definitions': typeof AdminSpecsDefinitionsLazyRoute
+  '/admin/talleres/instituciones': typeof AdminTalleresInstitucionesLazyRoute
   '/admin/contabilidad/': typeof AdminContabilidadIndexLazyRoute
   '/admin/equipos/': typeof AdminEquiposIndexLazyRoute
   '/admin/estudio/': typeof AdminEstudioIndexLazyRoute
@@ -878,6 +904,7 @@ export interface FileRouteTypes {
     | '/workshops/'
     | '/admin/'
     | '/escuela/sena/$token'
+    | '/escuelas/instituciones/$slug'
     | '/escuelas/sena/$token'
     | '/admin/contabilidad/cuentas'
     | '/admin/contabilidad/estudio'
@@ -896,6 +923,7 @@ export interface FileRouteTypes {
     | '/admin/pedidos/$id'
     | '/admin/pedidos/nuevo'
     | '/admin/specs/definitions'
+    | '/admin/talleres/instituciones'
     | '/admin/contabilidad/'
     | '/admin/equipos/'
     | '/admin/estudio/'
@@ -948,6 +976,7 @@ export interface FileRouteTypes {
     | '/workshops'
     | '/admin'
     | '/escuela/sena/$token'
+    | '/escuelas/instituciones/$slug'
     | '/escuelas/sena/$token'
     | '/admin/contabilidad/cuentas'
     | '/admin/contabilidad/estudio'
@@ -966,6 +995,7 @@ export interface FileRouteTypes {
     | '/admin/pedidos/$id'
     | '/admin/pedidos/nuevo'
     | '/admin/specs/definitions'
+    | '/admin/talleres/instituciones'
     | '/admin/contabilidad'
     | '/admin/equipos'
     | '/admin/estudio'
@@ -1026,6 +1056,7 @@ export interface FileRouteTypes {
     | '/workshops/'
     | '/admin/'
     | '/escuela/sena/$token'
+    | '/escuelas/instituciones/$slug'
     | '/escuelas/sena/$token'
     | '/admin/contabilidad/cuentas'
     | '/admin/contabilidad/estudio'
@@ -1044,6 +1075,7 @@ export interface FileRouteTypes {
     | '/admin/pedidos/$id'
     | '/admin/pedidos/nuevo'
     | '/admin/specs/definitions'
+    | '/admin/talleres/instituciones'
     | '/admin/contabilidad/'
     | '/admin/equipos/'
     | '/admin/estudio/'
@@ -1466,6 +1498,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminContabilidadIndexLazyRouteImport
       parentRoute: typeof AdminRoute
     }
+    '/admin/talleres/instituciones': {
+      id: '/admin/talleres/instituciones'
+      path: '/instituciones'
+      fullPath: '/admin/talleres/instituciones'
+      preLoaderRoute: typeof AdminTalleresInstitucionesLazyRouteImport
+      parentRoute: typeof AdminTalleresRoute
+    }
     '/admin/specs/definitions': {
       id: '/admin/specs/definitions'
       path: '/specs/definitions'
@@ -1592,6 +1631,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EscuelasSenaTokenRouteImport
       parentRoute: typeof EscuelasRoute
     }
+    '/escuelas/instituciones/$slug': {
+      id: '/escuelas/instituciones/$slug'
+      path: '/instituciones/$slug'
+      fullPath: '/escuelas/instituciones/$slug'
+      preLoaderRoute: typeof EscuelasInstitucionesSlugRouteImport
+      parentRoute: typeof EscuelasRoute
+    }
     '/escuela/sena/$token': {
       id: '/escuela/sena/$token'
       path: '/sena/$token'
@@ -1648,10 +1694,12 @@ const AdminEstudioRouteWithChildren = AdminEstudioRoute._addFileChildren(
 )
 
 interface AdminTalleresRouteChildren {
+  AdminTalleresInstitucionesLazyRoute: typeof AdminTalleresInstitucionesLazyRoute
   AdminTalleresIndexLazyRoute: typeof AdminTalleresIndexLazyRoute
 }
 
 const AdminTalleresRouteChildren: AdminTalleresRouteChildren = {
+  AdminTalleresInstitucionesLazyRoute: AdminTalleresInstitucionesLazyRoute,
   AdminTalleresIndexLazyRoute: AdminTalleresIndexLazyRoute,
 }
 
@@ -1778,12 +1826,14 @@ const EscuelaRouteWithChildren =
 interface EscuelasRouteChildren {
   EscuelasSlugRoute: typeof EscuelasSlugRoute
   EscuelasIndexRoute: typeof EscuelasIndexRoute
+  EscuelasInstitucionesSlugRoute: typeof EscuelasInstitucionesSlugRoute
   EscuelasSenaTokenRoute: typeof EscuelasSenaTokenRoute
 }
 
 const EscuelasRouteChildren: EscuelasRouteChildren = {
   EscuelasSlugRoute: EscuelasSlugRoute,
   EscuelasIndexRoute: EscuelasIndexRoute,
+  EscuelasInstitucionesSlugRoute: EscuelasInstitucionesSlugRoute,
   EscuelasSenaTokenRoute: EscuelasSenaTokenRoute,
 }
 

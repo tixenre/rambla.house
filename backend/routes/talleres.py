@@ -173,6 +173,7 @@ def _get_instructores_taller(conn, taller_id: int) -> list[dict]:
 def _institucion_dict(row) -> dict:
     return {
         "id": row["id"],
+        "slug": row["slug"],
         "nombre": row["nombre"],
         "descripcion": row["descripcion"],
         "instagram": row["instagram"],
@@ -340,108 +341,6 @@ def _video_dict(row) -> dict | None:
         "embed_url": youtube_nocookie_url(vid),
         "poster": _row_get(row, "video_poster_url", "") or None,
     }
-
-
-def _taller_publico_lite(conn, taller_id: int) -> dict | None:
-    """Datos de la edición activa más reciente de un CONCEPTO para mostrar
-    una mitad completa del banner de pareja (`MitadPareja` en el front,
-    pedido del dueño 2026-08-18: la info de fecha/horario/cupos va DENTRO
-    del recuadro de cada taller, no en una fila genérica aparte) + armar el
-    link a `/escuelas/$slug`. Trae `sesiones` (mismo shape que
-    `_edicion_to_public_dict`) para que el front pueda calcular
-    `resumenFechas`/`resumenHorario` con el MISMO criterio que usa para el
-    taller actual — así las 2 mitades formatean igual, no una rica y la
-    otra genérica. El subtítulo es lo que deja diferenciar "nivel inicial"/
-    "nivel avanzado" sin inventar un campo nuevo. None si el concepto no
-    existe o no tiene ninguna edición activa (nada a dónde linkear)."""
-    t = conn.execute(
-        "SELECT id, nombre, subtitulo FROM talleres WHERE id = %s", (taller_id,)
-    ).fetchone()
-    if not t:
-        return None
-    ed = conn.execute(
-        "SELECT id, slug, fecha_inicio, fecha_fin, horario, direccion, "
-        "cupos_total, cupos_confirmados FROM ediciones_taller "
-        "WHERE taller_id = %s AND activo = TRUE ORDER BY numero_edicion DESC LIMIT 1",
-        (taller_id,),
-    ).fetchone()
-    if not ed:
-        return None
-    return {
-        "taller_id": t["id"],
-        "nombre": t["nombre"],
-        "subtitulo": t["subtitulo"],
-        "slug": ed["slug"],
-        "fecha_inicio": str(ed["fecha_inicio"]),
-        "fecha_fin": str(ed["fecha_fin"]),
-        "horario": ed["horario"],
-        "direccion": ed["direccion"],
-        # cupos_total (no cupos_disponibles) — mismo campo que MetaRow ya
-        # muestra para el taller actual (formTaller.cupos_total); las 2
-        # mitades del banner tienen que decir lo mismo con el mismo criterio.
-        "cupos_total": ed["cupos_total"],
-        "sesiones": _get_clases(conn, ed["id"]),
-    }
-
-
-def _resolver_hermano(conn, mi_taller_id: int) -> dict | None:
-    """Taller hermano (pareja de marketing): resuelve SIMÉTRICO — si YO
-    apunto a otro (`taller_hermano_id`), o si OTRO me apunta a mí, en
-    cualquier caso devuelve el par. No hace falta setear el vínculo en los
-    2 lados.
-
-    Devuelve el par YA ORDENADO por **id** — el de menor id siempre
-    `principal`, el de mayor siempre `secundario`, sin importar desde qué
-    página se mira NI de qué lado(s) esté seteado `taller_hermano_id`.
-    Bug real confirmado en vivo (2026-08-19, "no quiero que se den vuelta"):
-    la versión anterior ordenaba "dueño_id = mi_taller_id si MI fila tiene
-    el puntero seteado" — funciona si el vínculo se configuró desde UN
-    solo concepto, pero la UI del admin no impide configurarlo desde LOS
-    DOS (cada tab de "Taller hermano" es independiente); con el puntero
-    seteado en ambos lados, cada página se "adueña" del rol principal al
-    mirarla y el orden se invierte según cuál estés viendo — exactamente
-    el síntoma reportado. Ordenar por id (un dato fijo, no por "quién
-    tiene el puntero") es estable sea uno, el otro, o los dos lados los que
-    tengan `taller_hermano_id` seteado. El front decide cuál de los dos es
-    un link (el que NO coincide con el taller actual) — acá solo se fija
-    el orden, no la interactividad.
-
-    El título de campaña (`taller_hermano_titulo`) se resuelve con el mismo
-    criterio: se lee de CUALQUIER lado que lo tenga (prioriza el de menor
-    id, por las dudas se haya tipeado distinto en cada tab) — nunca "el
-    de la página que estás mirando", mismo motivo que el orden.
-
-    None si no hay hermano, o si algún lado del par no tiene ninguna
-    edición activa a la que linkear — el front no debe romper por un
-    vínculo a medio configurar."""
-    mio = conn.execute(
-        "SELECT taller_hermano_id FROM talleres WHERE id = %s",
-        (mi_taller_id,),
-    ).fetchone()
-    if mio and mio["taller_hermano_id"]:
-        otro_id = mio["taller_hermano_id"]
-    else:
-        otro = conn.execute(
-            "SELECT id FROM talleres WHERE taller_hermano_id = %s ORDER BY id LIMIT 1",
-            (mi_taller_id,),
-        ).fetchone()
-        if not otro:
-            return None
-        otro_id = otro["id"]
-
-    id_menor, id_mayor = sorted((mi_taller_id, otro_id))
-    titulos = conn.execute(
-        "SELECT id, taller_hermano_titulo FROM talleres WHERE id IN (%s, %s)",
-        (id_menor, id_mayor),
-    ).fetchall()
-    por_id = {r["id"]: r["taller_hermano_titulo"] for r in titulos}
-    titulo = por_id.get(id_menor) or por_id.get(id_mayor) or ""
-
-    principal = _taller_publico_lite(conn, id_menor)
-    secundario = _taller_publico_lite(conn, id_mayor)
-    if not principal or not secundario:
-        return None
-    return {"titulo": titulo, "principal": principal, "secundario": secundario}
 
 
 def _edicion_lite(row) -> dict:
@@ -619,8 +518,6 @@ def _concepto_to_admin_dict(
         "mensaje_confirmacion": _row_get(taller_row, "mensaje_confirmacion", ""),
         "video_url": _row_get(taller_row, "video_url", ""),
         "video_poster_url": _row_get(taller_row, "video_poster_url", ""),
-        "taller_hermano_id": _row_get(taller_row, "taller_hermano_id", None),
-        "taller_hermano_titulo": _row_get(taller_row, "taller_hermano_titulo", ""),
         "instructores": instructores if instructores is not None else [],
         "instituciones": instituciones if instituciones is not None else [],
         "ediciones": ediciones if ediciones is not None else [],
@@ -672,6 +569,25 @@ def get_taller(slug: str, request: Request):
             fotos=_get_edicion_fotos(conn, row["id"]),
             cuentas_pago=_get_cuentas_pago(conn, row["id"]),
         )
+        # `talleres_count` por institución — SOLO acá, no en `_institucion_dict`
+        # (ese helper corre N veces por listado, ver comentario en
+        # `get_institucion`; sumarle esta cuenta ahí sería N+1 en el catálogo).
+        # Acá el loop está acotado a las instituciones co-presentadoras de UN
+        # taller (1, casi siempre), así que una query extra por institución no
+        # pesa. Alimenta el link "Ver los N talleres de X" hacia el hub
+        # (pedido del dueño 2026-08-20: desde un taller individual no había
+        # forma de enterarse de que su institución tenía más talleres).
+        for inst in d["instituciones"]:
+            cnt = conn.execute(
+                """
+                SELECT COUNT(DISTINCT ti.taller_id) AS n
+                FROM taller_instituciones ti
+                JOIN ediciones_taller e ON e.taller_id = ti.taller_id AND e.activo = TRUE
+                WHERE ti.institucion_id = %s
+                """,
+                (inst["id"],),
+            ).fetchone()
+            inst["talleres_count"] = cnt["n"] if cnt else 0
 
         # Próxima edición: misma concepto (taller_id), numero_edicion mayor
         pr = conn.execute(
@@ -694,9 +610,93 @@ def get_taller(slug: str, request: Request):
             (row["taller_id"], row["numero_edicion"]),
         ).fetchone()
         d["edicion_anterior"] = _edicion_lite(ant) if ant else None
-
-        d["taller_hermano"] = _resolver_hermano(conn, row["taller_id"])
     return d
+
+
+@router.get("/instituciones/{slug}")
+def get_institucion(slug: str):
+    """Hub público de una institución co-presentadora (ej. "Filmar"): su
+    perfil + un representante de cada TALLER (concepto) activo — un solo
+    link para compartir varios talleres/niveles de la misma institución en
+    vez de uno por taller. El front (`escuelas.instituciones.$slug.lazy.tsx`)
+    decide layout por CANTIDAD de talleres — 2+ → hero compartido con
+    selector (N-way, no solo pares) + el activo abajo; 1 solo → esa página
+    tal cual (pedido del dueño 2026-08-19: "esa página compartida lo haría
+    cuando seleccionás la institución… si tiene 1, el que tenga solo"). No
+    hay resolución de pareja acá — reemplaza el "taller hermano" removido,
+    que era un mecanismo aparte para exactamente 2 talleres.
+
+    El switcher es por TALLER, no por EDICIÓN: un mismo taller puede tener
+    2+ ediciones activas a la vez (cohortes con fechas distintas) — el query
+    dedupea por `taller_id` quedándose con la de `fecha_inicio` más próxima
+    como representante. Sin este dedupe, 2 ediciones del MISMO taller
+    aparecían como 2 entradas del switcher (bug real 2026-08-19, confirmado
+    en vivo: "no mezclar las ediciones" — nombre duplicado en el título
+    grande + card repetida para el mismo taller). `proxima_edicion`/
+    `edicion_anterior` (mismo cálculo que `get_taller`) sí se suman acá — a
+    diferencia de `list_talleres` — para que `EdicionesContexto` pueda
+    ofrecer la otra cohorte si la representante se agota."""
+    with get_db() as conn:
+        ins_row = conn.execute(
+            "SELECT * FROM instituciones WHERE slug = %s", (slug,)
+        ).fetchone()
+        if ins_row is None:
+            raise HTTPException(404, "Institución no encontrada")
+        rows = conn.execute(
+            """
+            SELECT sub.* FROM (
+                SELECT DISTINCT ON (e.taller_id)
+                       e.*, t.nombre, t.subtitulo, t.descripcion, t.resumen,
+                       t.publico_objetivo, t.notif_email, t.slug_base, t.terminos,
+                       t.beneficios, t.pregunta_experiencia, t.mensaje_confirmacion,
+                       t.video_url, t.video_poster_url, t.faqs,
+                       ti.orden AS _orden_institucion
+                FROM ediciones_taller e
+                JOIN talleres t ON t.id = e.taller_id
+                JOIN taller_instituciones ti ON ti.taller_id = e.taller_id
+                WHERE ti.institucion_id = %s AND e.activo = TRUE
+                ORDER BY e.taller_id, e.fecha_inicio ASC
+            ) sub
+            ORDER BY sub._orden_institucion, sub.id
+            """,
+            (ins_row["id"],),
+        ).fetchall()
+        talleres = []
+        for r in rows:
+            d = _edicion_to_public_dict(
+                r, _get_clases(conn, r["id"]), _get_instructores_taller(conn, r["taller_id"]),
+                _get_modalidades(conn, r["id"]),
+                instituciones=_get_instituciones_taller(conn, r["taller_id"]),
+                fotos=_get_edicion_fotos(conn, r["id"]),
+                cuentas_pago=_get_cuentas_pago(conn, r["id"]),
+            )
+            pr = conn.execute(
+                """
+                SELECT * FROM ediciones_taller
+                WHERE taller_id = %s AND numero_edicion > %s AND activo = TRUE
+                ORDER BY numero_edicion ASC LIMIT 1
+                """,
+                (r["taller_id"], r["numero_edicion"]),
+            ).fetchone()
+            d["proxima_edicion"] = _edicion_lite(pr) if pr else None
+            ant = conn.execute(
+                """
+                SELECT * FROM ediciones_taller
+                WHERE taller_id = %s AND numero_edicion < %s AND activo = TRUE
+                ORDER BY numero_edicion DESC LIMIT 1
+                """,
+                (r["taller_id"], r["numero_edicion"]),
+            ).fetchone()
+            d["edicion_anterior"] = _edicion_lite(ant) if ant else None
+            talleres.append(d)
+        # `foto_destacada`: solo acá (no en `_institucion_dict` en general —
+        # ese helper también arma la lista chica de "instituciones
+        # co-presentadoras" de CADA taller, N veces por listado; sumarle una
+        # query de fotos ahí sería N+1 innecesario). El hub público es la
+        # ÚNICA superficie que necesita la foto para su hero de fondo.
+        institucion = _institucion_dict(ins_row)
+        institucion["foto_destacada"] = _institucion_foto_destacada(conn, ins_row["id"])
+        return {"institucion": institucion, "talleres": talleres}
 
 
 async def _procesar_upload_comprobante(request: Request, ref: str) -> dict:
@@ -1376,13 +1376,6 @@ class TallerConceptoUpdateBody(BaseModel):
     video_url: str | None = None
     # F4c: FAQ del concepto — [{pregunta, respuesta}]. Ninguna es obligatoria.
     faqs: list[FaqItemBody] | None = None
-    # Taller hermano (pareja de marketing) — único campo NULLABLE real del
-    # body: `None` es ambiguo entre "no lo mandaron" y "lo quiero borrar", a
-    # diferencia de los strings de arriba (que usan '' como su propio
-    # sentinel de borrado). Se resuelve con `exclude_unset`, no con "is not
-    # None" — ver admin_update_concepto.
-    taller_hermano_id: int | None = None
-    taller_hermano_titulo: str | None = None
 
 
 class EdicionUpdateBody(BaseModel):
@@ -1730,16 +1723,8 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
         sets.append("faqs = %s::jsonb"); params.append(_json.dumps(faqs_limpio, ensure_ascii=False))
 
     video_url_provisto = body.video_url is not None
-    if body.taller_hermano_titulo is not None:
-        sets.append("taller_hermano_titulo = %s"); params.append(body.taller_hermano_titulo.strip())
-    # `taller_hermano_id` es el único FK nullable del body: a diferencia de
-    # los strings (que usan '' como su propio sentinel de borrado), acá
-    # `None` es un valor real y válido ("sacale la pareja"). `is not None`
-    # lo confundiría con "no lo mandaron" — se resuelve mirando si la CLAVE
-    # vino en el JSON, no si el valor es None.
-    hermano_id_provisto = "taller_hermano_id" in body.model_fields_set
 
-    if not sets and not video_url_provisto and not hermano_id_provisto:
+    if not sets and not video_url_provisto:
         raise HTTPException(400, "No hay campos para actualizar")
 
     with get_db() as conn:
@@ -1747,18 +1732,6 @@ def admin_update_concepto(taller_id: int, body: TallerConceptoUpdateBody, reques
             existing = conn.execute("SELECT id FROM talleres WHERE id = %s", (taller_id,)).fetchone()
             if existing is None:
                 raise HTTPException(404, "Taller no encontrado")
-
-            if hermano_id_provisto:
-                hermano_id = body.taller_hermano_id
-                if hermano_id is not None:
-                    if hermano_id == taller_id:
-                        raise HTTPException(400, "Un taller no puede ser su propio hermano")
-                    hermano_row = conn.execute(
-                        "SELECT id FROM talleres WHERE id = %s", (hermano_id,)
-                    ).fetchone()
-                    if hermano_row is None:
-                        raise HTTPException(400, "El taller hermano no existe")
-                sets.append("taller_hermano_id = %s"); params.append(hermano_id)
 
             if video_url_provisto:
                 nuevo_video = body.video_url.strip()
@@ -2262,11 +2235,18 @@ def admin_create_institucion(body: InstitucionBody, request: Request):
     if not body.nombre.strip():
         raise HTTPException(400, "El nombre es obligatorio")
     with get_db() as conn:
+        # Slug estable generado una sola vez, al crear (mismo criterio que
+        # talleres: no se regenera solo porque el nombre se edita después —
+        # evitaría romper un link ya compartido del hub /escuelas/instituciones).
+        ocupados = {
+            r["slug"] for r in conn.execute("SELECT slug FROM instituciones").fetchall()
+        }
+        slug = slug_unico(slugify(body.nombre.strip()) or "institucion", ocupados)
         cur = conn.execute(
-            "INSERT INTO instituciones (nombre, descripcion, instagram, web) "
-            "VALUES (%s, %s, %s, %s) RETURNING id",
+            "INSERT INTO instituciones (nombre, descripcion, instagram, web, slug) "
+            "VALUES (%s, %s, %s, %s, %s) RETURNING id",
             (body.nombre.strip(), body.descripcion.strip(),
-             body.instagram.strip(), body.web.strip()),
+             body.instagram.strip(), body.web.strip(), slug),
         )
         institucion_id = cur.fetchone()["id"]
         conn.commit()
@@ -2332,8 +2312,20 @@ def admin_delete_institucion(institucion_id: int, request: Request):
 
 
 @router.post("/admin/instituciones/{institucion_id}/upload-logo")
+@limiter.limit(ADMIN_UPLOAD_LIMIT)
 async def admin_upload_logo_institucion(institucion_id: int, request: Request):
-    """Sube el logo de una institución a R2 vía el motor de media."""
+    """Sube el logo de una institución a R2 vía el motor de media.
+
+    - SVG: se sube tal cual (con sanitize defensivo de <script>/on*, mismo
+      helper que `routes/marcas.py`) — se sirve con
+      `Content-Type: image/svg+xml`; el front lo puede inlinear para teñirlo
+      vía `currentColor` (`InstitucionHeroMultiple`). No pasa por el motor
+      de media (SVG no es un formato raster — Pillow no lo decodifica), así
+      que `logo_media_id` queda sin tocar (igual que en marcas.py).
+    - Raster (PNG/JPEG/WebP): pipeline no-destructivo de siempre —
+      `store_upload` + `_INSTITUCION_LOGO_SPECS`, actualiza `logo_url` Y
+      `logo_media_id`.
+    """
     require_admin(request)
     with get_db() as conn:
         row = conn.execute(
@@ -2353,8 +2345,25 @@ async def admin_upload_logo_institucion(institucion_id: int, request: Request):
     if len(raw) > FOTO_MAX_MB * 1024 * 1024:
         raise HTTPException(413, f"Archivo muy grande (máx {FOTO_MAX_MB} MB)")
 
+    from services.media.svg import is_svg, sanitize_svg
+
+    filename = getattr(file, "filename", None)
+
     try:
         with get_db() as conn:
+            if is_svg(raw, filename):
+                from services.media.storage import put as _r2_put
+                content = sanitize_svg(raw)
+                path = f"instituciones/{institucion_id}/logo-{int(time.time())}.svg"
+                url = _r2_put(path, content, "image/svg+xml")
+                conn.execute(
+                    "UPDATE instituciones SET logo_url = %s, "
+                    "updated_at = CURRENT_TIMESTAMP WHERE id = %s",
+                    (url, institucion_id),
+                )
+                conn.commit()
+                return {"ok": True, "url": url, "media_id": None}
+
             asset = store_upload(
                 raw, kind="institucion-logo", derive_specs=_INSTITUCION_LOGO_SPECS, conn=conn
             )
@@ -2366,13 +2375,256 @@ async def admin_upload_logo_institucion(institucion_id: int, request: Request):
                 (asset.id, url, institucion_id),
             )
             conn.commit()
+            return {"ok": True, "url": url, "media_id": asset.id}
     except MediaError as e:
         raise HTTPException(e.status, e.detail)
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("upload_logo_institucion: error inesperado: %s", e, exc_info=True)
         raise HTTPException(502, "No se pudo subir el logo. Intentá de nuevo.")
 
-    return {"ok": True, "url": url, "media_id": asset.id}
+
+# ── Galería de fotos por INSTITUCIÓN ────────────────────────────────────────
+# Espejo exacto de la galería de EDICIÓN (arriba), scoped a `institucion_id`
+# — pedido del dueño: "que sea por institución, así no subo fotos repetidas"
+# (una institución como Filmar carga su tanda de fotos una sola vez, reusada
+# por todos sus talleres). `es_principal` marca la foto destacada que usa el
+# hero público del hub de institución (`InstitucionPage`).
+
+
+def _get_institucion_fotos(conn, institucion_id: int) -> list:
+    cur = conn.execute(
+        "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
+        "FROM institucion_fotos WHERE institucion_id = %s ORDER BY orden, id",
+        (institucion_id,),
+    )
+    rows = cur.fetchall()
+    return [
+        {
+            "id": r["id"],
+            "url": r["url"],
+            "url_sm": r["url_sm"],
+            "url_avif": r["url_avif"],
+            "url_sm_avif": r["url_sm_avif"],
+            "path": r["path"],
+            "orden": r["orden"],
+            "es_principal": bool(r["es_principal"]),
+            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+        }
+        for r in rows
+    ]
+
+
+def _institucion_foto_destacada(conn, institucion_id: int) -> dict | None:
+    """La foto destacada (es_principal) de una institución, o None. Consumida
+    por `get_institucion` (público) para el hero con foto de fondo."""
+    cur = conn.execute(
+        "SELECT id, url, url_sm, url_avif, url_sm_avif "
+        "FROM institucion_fotos WHERE institucion_id = %s "
+        "ORDER BY es_principal DESC, orden, id LIMIT 1",
+        (institucion_id,),
+    )
+    r = cur.fetchone()
+    if r is None:
+        return None
+    return {
+        "url": r["url"],
+        "url_sm": r["url_sm"],
+        "url_avif": r["url_avif"],
+        "url_sm_avif": r["url_sm_avif"],
+    }
+
+
+def _insert_institucion_foto(
+    conn,
+    institucion_id: int,
+    url: str,
+    path: str,
+    media_id: int | None = None,
+    url_sm: str | None = None,
+    url_avif: str | None = None,
+    url_sm_avif: str | None = None,
+) -> dict:
+    cur = conn.execute(
+        "SELECT COALESCE(MAX(orden), -1) + 1 AS next_orden FROM institucion_fotos "
+        "WHERE institucion_id = %s",
+        (institucion_id,),
+    )
+    orden = cur.fetchone()["next_orden"]
+
+    cur2 = conn.execute(
+        "SELECT COUNT(*) AS cnt FROM institucion_fotos WHERE institucion_id = %s",
+        (institucion_id,),
+    )
+    is_first = cur2.fetchone()["cnt"] == 0
+
+    conn.execute(
+        "INSERT INTO institucion_fotos "
+        "(institucion_id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, media_id) "
+        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+        (institucion_id, url, url_sm, url_avif, url_sm_avif, path, orden, is_first, media_id),
+    )
+    conn.commit()
+
+    cur3 = conn.execute(
+        "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
+        "FROM institucion_fotos WHERE path = %s AND institucion_id = %s",
+        (path, institucion_id),
+    )
+    r = cur3.fetchone()
+    return {
+        "id": r["id"],
+        "url": r["url"],
+        "url_sm": r["url_sm"],
+        "url_avif": r["url_avif"],
+        "url_sm_avif": r["url_sm_avif"],
+        "path": r["path"],
+        "orden": r["orden"],
+        "es_principal": bool(r["es_principal"]),
+        "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+    }
+
+
+@router.get("/admin/instituciones/{institucion_id}/fotos")
+def admin_list_fotos_institucion(institucion_id: int, request: Request):
+    require_admin(request)
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM instituciones WHERE id = %s", (institucion_id,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "Institución no encontrada")
+        return {"fotos": _get_institucion_fotos(conn, institucion_id)}
+
+
+@router.post("/admin/instituciones/{institucion_id}/upload-foto")
+@limiter.limit(ADMIN_UPLOAD_LIMIT)
+async def admin_upload_foto_institucion(institucion_id: int, request: Request):
+    """Sube un archivo (multipart, campo 'file') a R2 y lo registra en institucion_fotos."""
+    require_admin(request)
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT id FROM instituciones WHERE id = %s", (institucion_id,)
+        ).fetchone()
+        if row is None:
+            raise HTTPException(404, "Institución no encontrada")
+
+    form = await request.form()
+    file = form.get("file")
+    if file is None or not hasattr(file, "read"):
+        raise HTTPException(400, "Falta el campo 'file' en el form-data")
+
+    raw = await file.read()
+    if not raw:
+        raise HTTPException(400, "Archivo vacío")
+    if len(raw) > 20 * 1024 * 1024:
+        raise HTTPException(413, "Archivo muy grande (máx 20 MB)")
+
+    with get_db() as conn:
+        try:
+            with media_http():
+                asset = store_upload(
+                    raw,
+                    kind="institucion",
+                    derive_specs=[
+                        DISPLAY_KEEP_ASPECT,
+                        DISPLAY_KEEP_ASPECT_SM,
+                        DISPLAY_KEEP_ASPECT_AVIF,
+                        DISPLAY_KEEP_ASPECT_SM_AVIF,
+                    ],
+                    conn=conn,
+                )
+            display = asset.variant("display")
+            display_sm = asset.variant("display-sm")
+            display_avif = asset.variant("display-avif")
+            display_sm_avif = asset.variant("display-sm-avif")
+            foto = _insert_institucion_foto(
+                conn,
+                institucion_id,
+                url=display.url,
+                path=display.key,
+                media_id=asset.id,
+                url_sm=display_sm.url if display_sm else None,
+                url_avif=display_avif.url if display_avif else None,
+                url_sm_avif=display_sm_avif.url if display_sm_avif else None,
+            )
+        except Exception:
+            conn.rollback()
+            raise
+
+    return {
+        "id": foto["id"],
+        "public_url": display.url,
+        "path": display.key,
+        "size": display.bytes,
+        "size_original": len(raw),
+        "content_type": display.content_type,
+        "width": display.width or None,
+        "height": display.height or None,
+    }
+
+
+@router.delete("/admin/instituciones/fotos/{foto_id}")
+@limiter.limit(ADMIN_WRITE_LIMIT)
+def admin_delete_foto_institucion(foto_id: int, request: Request):
+    require_admin(request)
+
+    with get_db() as conn:
+        cur = conn.execute(
+            "SELECT path, media_id FROM institucion_fotos WHERE id = %s", (foto_id,)
+        )
+        row = cur.fetchone()
+        if not row:
+            raise HTTPException(404, "Foto no encontrada")
+        path = row["path"]
+        media_id = row["media_id"]
+
+        r2_keys: list[str] = []
+        if media_id:
+            r2_keys = collect_asset_keys(conn, media_id)
+
+        conn.execute("DELETE FROM institucion_fotos WHERE id = %s", (foto_id,))
+        if media_id:
+            conn.execute("DELETE FROM media_assets WHERE id = %s", (media_id,))
+        conn.commit()
+
+    if r2_keys:
+        purge_r2(r2_keys)
+
+    return {"ok": True}
+
+
+class InstitucionFotoOrdenItem(BaseModel):
+    id: int
+    orden: int
+    es_principal: bool
+
+
+class InstitucionReorderFotosBody(BaseModel):
+    fotos: list[InstitucionFotoOrdenItem]
+
+
+@router.patch("/admin/instituciones/{institucion_id}/fotos/orden")
+@limiter.limit(ADMIN_WRITE_LIMIT)
+def admin_reorder_fotos_institucion(
+    institucion_id: int, body: InstitucionReorderFotosBody, request: Request
+):
+    require_admin(request)
+
+    with get_db() as conn:
+        for f in body.fotos:
+            conn.execute(
+                "UPDATE institucion_fotos SET orden = %s, es_principal = %s "
+                "WHERE id = %s AND institucion_id = %s "
+                "AND (orden IS DISTINCT FROM %s OR es_principal IS DISTINCT FROM %s)",
+                (f.orden, f.es_principal, f.id, institucion_id, f.orden, f.es_principal),
+            )
+        conn.commit()
+        fotos = _get_institucion_fotos(conn, institucion_id)
+
+    return {"fotos": fotos}
 
 
 @router.put("/admin/talleres/{taller_id}/instituciones")
@@ -2787,6 +3039,61 @@ def admin_reorder_fotos_edicion(edicion_id: int, body: EdicionReorderFotosBody, 
                 (f.orden, f.es_principal, f.id, edicion_id, f.orden, f.es_principal),
             )
         conn.commit()
+        fotos = _get_edicion_fotos(conn, edicion_id)
+
+    return {"fotos": fotos}
+
+
+class ImportarFotosInstitucionBody(BaseModel):
+    institucion_foto_ids: list[int]
+
+
+@router.post("/admin/ediciones/{edicion_id}/fotos/importar")
+@limiter.limit(ADMIN_WRITE_LIMIT)
+def admin_importar_fotos_institucion(
+    edicion_id: int, body: ImportarFotosInstitucionBody, request: Request
+):
+    """Copia fotos YA subidas a la galería de una institución dentro de la
+    galería de ESTA edición, sin volver a subir el archivo — pedido del
+    dueño 2026-08-19: "no subir las mismas fotos a los dos talleres". Copia
+    por referencia (mismo `url`/`path`); `media_id` de la copia queda en
+    NULL a propósito — no reclama dueño del asset: borrar la copia nunca
+    purga R2 (no tiene `media_id`), borrar el original en la institución sí
+    lo hace y la copia queda con una URL rota. Trade-off aceptado a cambio
+    de no duplicar el archivo. Sin chequeo de que las fotos pertenezcan a
+    una institución vinculada a este taller — endpoint admin-only, el picker
+    del front ya es el gate real de qué se ofrece."""
+    require_admin(request)
+    if not body.institucion_foto_ids:
+        raise HTTPException(400, "No se especificaron fotos para importar")
+
+    with get_db() as conn:
+        edicion = conn.execute(
+            "SELECT id FROM ediciones_taller WHERE id = %s", (edicion_id,)
+        ).fetchone()
+        if edicion is None:
+            raise HTTPException(404, "Edición no encontrada")
+
+        rows = conn.execute(
+            "SELECT url, url_sm, url_avif, url_sm_avif, path "
+            "FROM institucion_fotos WHERE id = ANY(%s)",
+            (body.institucion_foto_ids,),
+        ).fetchall()
+        if not rows:
+            raise HTTPException(404, "Fotos no encontradas")
+
+        for r in rows:
+            _insert_edicion_foto(
+                conn,
+                edicion_id,
+                url=r["url"],
+                path=r["path"],
+                media_id=None,
+                url_sm=r["url_sm"],
+                url_avif=r["url_avif"],
+                url_sm_avif=r["url_sm_avif"],
+            )
+
         fotos = _get_edicion_fotos(conn, edicion_id)
 
     return {"fotos": fotos}
