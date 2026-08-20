@@ -22,15 +22,23 @@ type Variant = "light" | "dark";
 export function InstitucionEyebrow({
   taller,
   ocultarInstituciones = false,
+  size = "lg",
 }: {
   taller: Taller;
   ocultarInstituciones?: boolean;
+  // "lg" = hero del taller (default, sin cambios). "sm" = eyebrow de una
+  // card compacta (ej. WorkshopCard del listado /escuelas) — mismo
+  // componente, logo más chico para no pesar más que el título de la card.
+  size?: "lg" | "sm";
 }) {
+  const mb = size === "lg" ? "mb-4" : "mb-2";
   if (ocultarInstituciones || taller.instituciones.length === 0) {
-    return <p className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa mb-4">Taller</p>;
+    return (
+      <p className={`font-mono text-2xs tracking-[0.3em] uppercase text-rosa ${mb}`}>Taller</p>
+    );
   }
   return (
-    <div className="flex flex-wrap items-center gap-4 mb-4">
+    <div className={`flex flex-wrap items-center gap-3 ${mb}`}>
       {taller.instituciones.map((inst) => (
         <Link
           key={inst.id}
@@ -49,7 +57,11 @@ export function InstitucionEyebrow({
             <img
               src={inst.logo_url}
               alt={inst.nombre}
-              className="h-8 sm:h-10 w-auto max-w-[9rem] object-contain"
+              className={
+                size === "lg"
+                  ? "h-8 sm:h-10 w-auto max-w-[9rem] object-contain"
+                  : "h-5 w-auto max-w-[6rem] object-contain"
+              }
             />
           ) : (
             <span className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa">

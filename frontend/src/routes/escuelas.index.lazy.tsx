@@ -7,6 +7,7 @@ import { SectionBanner } from "@/components/rental/landing/SectionBanner";
 import { EmptyState } from "@/design-system/composites/EmptyState";
 import { Grain } from "@/components/common/Grain";
 import { LogoMark } from "@/components/rental/shell/LogoMark";
+import { InstitucionEyebrow } from "@/components/talleres/InstitucionesRow";
 import { apiGetTalleres, type Taller } from "@/lib/api";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
 import { heroImgProps } from "@/lib/studio/hero-photos";
@@ -94,7 +95,7 @@ function WorkshopCard({ taller }: { taller: Taller }) {
       {/* Cuerpo derecho */}
       <div className="flex-1 px-6 sm:px-8 py-5 flex flex-col gap-3">
         <div>
-          <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa mb-2">Taller</p>
+          <InstitucionEyebrow taller={taller} size="sm" />
           <h2
             className="font-display font-black lowercase leading-[0.95] tracking-[-0.015em] text-ink"
             style={{ fontSize: "clamp(1.2rem, 2vw, 1.5rem)" }}
