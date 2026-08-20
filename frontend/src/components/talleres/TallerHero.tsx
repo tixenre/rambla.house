@@ -2,16 +2,22 @@ import { Calendar, Clock, MapPin, Users } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { Grain } from "@/components/common/Grain";
 import { YouTubeEmbed } from "@/components/common/YouTubeEmbed";
-import { InstitucionesRow } from "@/components/talleres/InstitucionesRow";
+import { InstitucionesRow, InstitucionEyebrow } from "@/components/talleres/InstitucionesRow";
 import { TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
 import { ordinalEdicion } from "@/lib/talleres/formato";
 import { trackClickInscribirseTaller } from "@/lib/analytics";
 import type { Taller } from "@/lib/api";
 
-function Titulo({ taller }: { taller: Taller }) {
+function Titulo({
+  taller,
+  ocultarInstituciones,
+}: {
+  taller: Taller;
+  ocultarInstituciones: boolean;
+}) {
   return (
     <>
-      <p className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa mb-4">Taller</p>
+      <InstitucionEyebrow taller={taller} ocultarInstituciones={ocultarInstituciones} />
       <h1
         className="font-display font-black lowercase leading-[0.88] tracking-[-0.02em] text-background"
         style={{ fontSize: "clamp(3rem, 9vw, 6rem)" }}
@@ -165,7 +171,7 @@ export function TallerHero({
           style={{ width: TALLER_CONTENT_WIDTH }}
         >
           <div>
-            <Titulo taller={taller} />
+            <Titulo taller={taller} ocultarInstituciones={ocultarInstituciones} />
             <EdicionesContexto taller={taller} />
             <MetaRow
               fechasResumen={fechasResumen}
@@ -193,7 +199,7 @@ export function TallerHero({
     <section className="relative bg-ink overflow-hidden">
       <Grain opacity={10} />
       <div className="relative mx-auto py-16 sm:py-24" style={{ width: TALLER_CONTENT_WIDTH }}>
-        <Titulo taller={taller} />
+        <Titulo taller={taller} ocultarInstituciones={ocultarInstituciones} />
         <EdicionesContexto taller={taller} />
         <MetaRow
           fechasResumen={fechasResumen}

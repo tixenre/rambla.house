@@ -3,76 +3,74 @@ import { ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Taller } from "@/lib/api";
 
-type InstitucionEntity = Taller["instituciones"][number];
 type Variant = "light" | "dark";
 
-function InstitucionPill({
-  institucion,
-  variant,
+/** Eyebrow de arriba del H1 (`TallerHero`, función `Titulo`): "Taller" en
+ * rosa por default — o el logo (nombre en texto si no hay logo cargado) de
+ * la/s institución/es co-presentadoras cuando el taller tiene alguna.
+ * Pedido del dueño 2026-08-20: "que el logo esté donde dice taller en
+ * rosa" — el logo pasa al lugar más prominente de la jerarquía (lo primero
+ * que se lee, antes del título), reemplazando el pill que vivía después
+ * del CTA (ver `InstitucionesRow` más abajo, que ahora solo linkea).
+ *
+ * `ocultarInstituciones` (la institución en SU PROPIO hub, ver
+ * `TallerHubBlock`) cae al "Taller" de siempre — mostrar su propio logo
+ * ahí sería la misma circularidad que ya evita el resto de esta fila. Sin
+ * logo cargado, el nombre queda de fallback con el mismo tratamiento
+ * tipográfico (mono, rosa, tracking ancho) que el eyebrow que reemplaza —
+ * nunca deja un hueco vacío arriba del título. */
+export function InstitucionEyebrow({
+  taller,
+  ocultarInstituciones = false,
 }: {
-  institucion: InstitucionEntity;
-  variant: Variant;
+  taller: Taller;
+  ocultarInstituciones?: boolean;
 }) {
+  if (ocultarInstituciones || taller.instituciones.length === 0) {
+    return <p className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa mb-4">Taller</p>;
+  }
   return (
-    <Link
-      to="/escuelas/instituciones/$slug"
-      params={{ slug: institucion.slug }}
-      // Sin "Presentado por" visible al lado (pedido del dueño 2026-08-20:
-      // "que sea solo el logo"), el aria-label es el único contexto que le
-      // queda a un lector de pantalla — lo mantiene explícito.
-      aria-label={`Presentado por ${institucion.nombre}`}
-      className="transition hover:opacity-70"
-    >
-      {institucion.logo_url ? (
-        // Logo desnudo — sin caja/borde alrededor: mismo tratamiento que
-        // `InstitucionFotoHero` (el hero propio de la institución), la
-        // única otra superficie que muestra este logo sobre fondo oscuro.
-        // Un pill con borde acá se leía como "otro botón" compitiendo con
-        // el CTA rosa, no como parte del diseño (feedback del dueño en
-        // vivo, con captura: "queda chico, raro con muchas cajitas
-        // chiquitas, no parece integrado al diseño").
-        <img
-          src={institucion.logo_url}
-          alt={institucion.nombre}
-          className="h-12 sm:h-14 w-auto max-w-[10rem] object-contain"
-        />
-      ) : (
-        // Sin logo cargado: el nombre queda como texto plano con
-        // subrayado al hover — mismo lenguaje de link que "Ver los N
-        // talleres" de abajo, no una caja aparte.
-        <span
-          className={cn(
-            "text-sm font-medium underline-offset-4 hover:underline",
-            variant === "dark" ? "text-background" : "text-ink",
-          )}
+    <div className="flex flex-wrap items-center gap-4 mb-4">
+      {taller.instituciones.map((inst) => (
+        <Link
+          key={inst.id}
+          to="/escuelas/instituciones/$slug"
+          params={{ slug: inst.slug }}
+          aria-label={`Presentado por ${inst.nombre}`}
+          className="transition hover:opacity-70"
         >
-          {institucion.nombre}
-        </span>
-      )}
-    </Link>
+          {inst.logo_url ? (
+            // Logo desnudo — sin caja/borde alrededor: mismo tratamiento
+            // que `InstitucionFotoHero` (el hero propio de la institución).
+            // Un pill con borde se leía como "otro botón" compitiendo con
+            // el CTA rosa (feedback del dueño en vivo, con captura: "queda
+            // chico, raro con muchas cajitas chiquitas, no parece
+            // integrado al diseño") — mismo criterio acá.
+            <img
+              src={inst.logo_url}
+              alt={inst.nombre}
+              className="h-8 sm:h-10 w-auto max-w-[9rem] object-contain"
+            />
+          ) : (
+            <span className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa">
+              {inst.nombre}
+            </span>
+          )}
+        </Link>
+      ))}
+    </div>
   );
 }
 
-/** Logo(s) de las instituciones co-presentadoras (ej. "Rambla" + "Filmar").
- * Data-driven: sin instituciones vinculadas, no se muestra nada (Jime y el
- * resto de los talleres sin institución siguen viéndose igual que siempre).
- *
- * Sin ningún label visible ("Presentado por" se sacó — pedido del dueño
- * 2026-08-20, "que sea solo el logo"; queda como `aria-label` de cada link,
- * único contexto que le llega a un lector de pantalla ahora). El pill es
- * SOLO el logo (sin nombre al lado tampoco — mismo pedido, un paso antes)
- * y clickeable hacia el hub interno (`/escuelas/instituciones/$slug`, no
- * `institucion.web` — siempre existe, a diferencia de la web externa, que
- * muchas instituciones no cargan). Sin logo cargado, el nombre queda de
- * fallback visible (mismo destino) para que el link nunca se vea vacío.
- *
- * Debajo, si alguna institución tiene MÁS de 1 taller activo, un segundo
- * link al mismo hub ("Ver los N talleres", sin repetir el nombre — el logo
- * de arriba ya identifica cuál institución) — pedido del dueño 2026-08-20:
- * quien aterriza directo en un taller (no por el hub) no tenía forma de
- * enterarse de que su institución ofrece más. Con exactamente 1 taller no
- * se muestra: el hub mostraría ese mismo taller, un click sin destino
- * nuevo (el logo de arriba igual lleva ahí). */
+/** Debajo del CTA del hero: si alguna institución co-presentadora tiene MÁS
+ * de 1 taller activo, un link al hub ("Ver los N talleres") — pedido del
+ * dueño 2026-08-20: quien aterriza directo en un taller (no por el hub) no
+ * tenía forma de enterarse de que su institución ofrece más. El logo que
+ * identifica CUÁL institución ya se muestra arriba del título
+ * (`InstitucionEyebrow`) — acá no se repite, solo el link. Con exactamente
+ * 1 taller no se muestra: el hub mostraría ese mismo taller, un click sin
+ * destino nuevo. Data-driven: sin instituciones con 2+ talleres, no se
+ * muestra nada. */
 export function InstitucionesRow({
   taller,
   variant = "light",
@@ -80,25 +78,18 @@ export function InstitucionesRow({
 }: {
   taller: Taller;
   // "dark" = sobre el hero (bg-ink) — usado por TallerHero, único lugar
-  // donde se muestra esta fila (se sacó del cuerpo claro de la página,
-  // pedido del dueño 2026-08-20: quería el bloque junto al CTA del hero,
-  // no más abajo). El default "light" queda por si se reusa en un
-  // contexto claro a futuro.
+  // donde se muestra esta fila. El default "light" queda por si se reusa
+  // en un contexto claro a futuro.
   variant?: Variant;
   // El caller pone su propio margen acá (no en un wrapper aparte) — así,
-  // sin instituciones vinculadas, el `return null` de abajo no deja un
-  // wrapper con margen vacío colgando en el hero.
+  // sin nada que mostrar, el `return null` de abajo no deja un wrapper con
+  // margen vacío colgando en el hero.
   className?: string;
 }) {
-  if (taller.instituciones.length === 0) return null;
   const conMasTalleres = taller.instituciones.filter((i) => (i.talleres_count ?? 0) > 1);
+  if (conMasTalleres.length === 0) return null;
   return (
     <div className={cn("flex flex-col gap-2", className)}>
-      <div className="flex flex-wrap items-center gap-4">
-        {taller.instituciones.map((inst) => (
-          <InstitucionPill key={inst.id} institucion={inst} variant={variant} />
-        ))}
-      </div>
       {conMasTalleres.map((inst) => (
         <Link
           key={`hub-${inst.id}`}
