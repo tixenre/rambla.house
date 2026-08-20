@@ -18,6 +18,7 @@ import { Pill, type PillTone } from "@/design-system/ui/Pill";
 import { ListSkeleton } from "@/components/admin/skeletons";
 import { ErrorState } from "@/components/admin/ErrorState";
 import { EmptyState } from "@/design-system/composites/EmptyState";
+import { ComprobanteLink } from "./ComprobanteLink";
 
 function fmtDate(iso: string | null) {
   if (!iso) return "—";
@@ -100,6 +101,10 @@ export function AlumnosAdminSection() {
           <Pill tone={ESTADO_TONE[key] ?? "neutral"}>{ESTADO_LABEL[key] ?? a.estado ?? "—"}</Pill>
         );
       },
+    },
+    {
+      header: "Comp.",
+      cell: (a) => <ComprobanteLink url={a.comprobante_url} />,
     },
     {
       header: "Fecha",
