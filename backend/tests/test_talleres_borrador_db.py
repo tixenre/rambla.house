@@ -39,14 +39,25 @@ TALLER_ID = 9_860_001
 EDICION_ID = 9_860_101
 SLUG = "test-borrador-zzq"
 
+# Segundo taller/edición — solo para el test cross-taller de la vista global
+# "Sin enviar" (admin_listar_borradores_global). El resto de los tests no lo
+# toca, pero vive en la misma limpieza para no dejar residuos si un test
+# nuevo lo usa sin acordarse de agregarlo acá.
+TALLER_ID_2 = 9_860_002
+EDICION_ID_2 = 9_860_102
+SLUG_2 = "test-borrador-zzq-2"
+
 
 def _limpiar(conn):
     conn.execute(
-        "DELETE FROM taller_inscripciones_borrador WHERE edicion_id = %s", (EDICION_ID,)
+        "DELETE FROM taller_inscripciones_borrador WHERE edicion_id IN (%s, %s)",
+        (EDICION_ID, EDICION_ID_2),
     )
-    conn.execute("DELETE FROM taller_inscripciones WHERE edicion_id = %s", (EDICION_ID,))
-    conn.execute("DELETE FROM ediciones_taller WHERE id = %s", (EDICION_ID,))
-    conn.execute("DELETE FROM talleres WHERE id = %s", (TALLER_ID,))
+    conn.execute(
+        "DELETE FROM taller_inscripciones WHERE edicion_id IN (%s, %s)", (EDICION_ID, EDICION_ID_2)
+    )
+    conn.execute("DELETE FROM ediciones_taller WHERE id IN (%s, %s)", (EDICION_ID, EDICION_ID_2))
+    conn.execute("DELETE FROM talleres WHERE id IN (%s, %s)", (TALLER_ID, TALLER_ID_2))
 
 
 @pytest.fixture
@@ -66,6 +77,16 @@ def conn():
             "(id, taller_id, slug, fecha_inicio, fecha_fin, cupos_total, cupos_confirmados, activo) "
             "VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE)",
             (EDICION_ID, TALLER_ID, SLUG, "2099-01-01", "2099-01-02", 5, 0),
+        )
+        c.execute(
+            "INSERT INTO talleres (id, slug, nombre) VALUES (%s, %s, %s)",
+            (TALLER_ID_2, SLUG_2 + "-base", "Taller Test Borrador 2"),
+        )
+        c.execute(
+            "INSERT INTO ediciones_taller "
+            "(id, taller_id, slug, fecha_inicio, fecha_fin, cupos_total, cupos_confirmados, activo) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE)",
+            (EDICION_ID_2, TALLER_ID_2, SLUG_2, "2099-01-01", "2099-01-02", 5, 0),
         )
         c.commit()
     finally:
@@ -154,6 +175,50 @@ def test_listar_borradores_admin_kpis(conn):
     assert d["total"] == 2
     assert d["con_contacto"] == 1
     assert d["abandonados"] == 0
+
+
+def test_listar_borradores_admin_global_cross_taller(conn):
+    """Vista "Sin enviar" del sidebar — cruza borradores de TODOS los
+    talleres, con el taller/edición al que pertenece cada uno."""
+    from services.talleres_borrador import heartbeat_upsert, listar_borradores_admin_global
+
+    heartbeat_upsert(
+        conn, str(uuid.uuid4()), EDICION_ID, nombre="Del taller 1", email="uno@example.com", telefono=None
+    )
+    heartbeat_upsert(
+        conn,
+        str(uuid.uuid4()),
+        EDICION_ID_2,
+        nombre="Del taller 2",
+        email="dos@example.com",
+        telefono=None,
+    )
+    conn.commit()
+
+    d = listar_borradores_admin_global(conn)
+    assert d["total"] == 2
+    por_taller = {b["taller_id"]: b for b in d["borradores"]}
+    assert por_taller[TALLER_ID]["taller_nombre"] == "Taller Test Borrador"
+    assert por_taller[TALLER_ID]["email"] == "uno@example.com"
+    assert por_taller[TALLER_ID_2]["taller_nombre"] == "Taller Test Borrador 2"
+    assert por_taller[TALLER_ID_2]["email"] == "dos@example.com"
+
+
+def test_listar_borradores_admin_global_confirmado_no_aparece(conn):
+    from services.talleres_borrador import (
+        heartbeat_upsert,
+        marcar_confirmado,
+        listar_borradores_admin_global,
+    )
+
+    sid = str(uuid.uuid4())
+    heartbeat_upsert(conn, sid, EDICION_ID, nombre="Confirmada", email="ok@example.com", telefono=None)
+    conn.commit()
+    assert listar_borradores_admin_global(conn)["total"] == 1
+
+    marcar_confirmado(conn, sid, EDICION_ID)
+    conn.commit()
+    assert listar_borradores_admin_global(conn)["total"] == 0
 
 
 def test_heartbeat_endpoint_end_to_end(monkeypatch):

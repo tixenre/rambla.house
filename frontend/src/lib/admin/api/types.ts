@@ -2014,6 +2014,14 @@ export type Borrador = {
   abandonado: boolean;
   created_at: string;
   updated_at: string;
+  // Solo en GET /admin/borradores (vista global "Sin enviar") — ausente en
+  // el listado scoped a una edición puntual.
+  edicion_id?: number;
+  numero_edicion?: number;
+  edicion_slug?: string;
+  taller_id?: number;
+  taller_nombre?: string;
+  taller_slug?: string;
 };
 
 export type BorradoresResp = {

@@ -107,6 +107,10 @@ export const talleresAdminApi = {
   listBorradores: (edicionId: number) =>
     authedJson<BorradoresResp>(`/api/admin/ediciones/${edicionId}/borradores`),
 
+  // Vista global "Sin enviar" (sidebar) — borradores sin confirmar de todos
+  // los talleres, con el taller/edición al que pertenece cada uno.
+  listBorradoresGlobal: () => authedJson<BorradoresResp>("/api/admin/borradores"),
+
   // F4c: mini-KPIs de una edición (señas + plata, ya resuelta por el backend).
   getEdicionKpis: (edicionId: number) =>
     authedJson<EdicionKpis>(`/api/admin/ediciones/${edicionId}/kpis`),

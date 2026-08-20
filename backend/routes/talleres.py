@@ -69,6 +69,7 @@ from services.talleres.queries.economia import _revenue_inscriptos, _valor_efect
 from services.talleres_borrador import (
     heartbeat_upsert as _borrador_heartbeat_upsert,
     listar_borradores_admin as _listar_borradores_admin,
+    listar_borradores_admin_global as _listar_borradores_admin_global,
     marcar_confirmado as _borrador_marcar_confirmado,
 )
 
@@ -838,6 +839,15 @@ def admin_listar_borradores(edicion_id: int, request: Request, horas: int = 72):
     require_admin(request)
     with get_db() as conn:
         return _listar_borradores_admin(conn, edicion_id, horas)
+
+
+@router.get("/admin/borradores")
+def admin_listar_borradores_global(request: Request, horas: int = 72):
+    """Vista "Sin enviar" — borradores sin confirmar de TODOS los talleres
+    (sidebar "Estudio y talleres", junto a Alumnos/Profesores)."""
+    require_admin(request)
+    with get_db() as conn:
+        return _listar_borradores_admin_global(conn, horas)
 
 
 @router.post("/talleres/{slug}/inscripcion")

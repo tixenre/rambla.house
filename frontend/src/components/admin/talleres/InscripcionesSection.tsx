@@ -25,6 +25,7 @@ import type {
   TallerConcepto,
 } from "@/lib/admin/api/types";
 import { whatsappLink } from "@/lib/whatsapp";
+import { buildBorradorWhatsappMessage } from "@/lib/talleres/borrador";
 import { Button } from "@/design-system/ui/button";
 import { Pill } from "@/design-system/ui/Pill";
 import { Textarea } from "@/design-system/ui/textarea";
@@ -387,15 +388,8 @@ export function InscripcionesSection({
   );
 }
 
-/** Mensaje de WhatsApp pre-armado — mismo criterio que `CarritoCard`. */
-function buildWhatsappMessage(b: Borrador): string {
-  const nombre = b.nombre?.trim().split(/\s+/)[0];
-  const saludo = nombre ? `Hola ${nombre}` : "Hola";
-  return `${saludo}, te escribo de Rambla 👋 Vi que estabas por anotarte a uno de nuestros talleres. ¿Te ayudo a terminar la inscripción?`;
-}
-
 function BorradorRow({ borrador: b }: { borrador: Borrador }) {
-  const wasaLink = whatsappLink({ phone: b.telefono, message: buildWhatsappMessage(b) });
+  const wasaLink = whatsappLink({ phone: b.telefono, message: buildBorradorWhatsappMessage(b) });
   const ultimaActividad = formatDistanceToNow(new Date(b.updated_at), {
     addSuffix: true,
     locale: es,
