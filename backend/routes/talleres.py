@@ -1402,12 +1402,6 @@ class EdicionUpdateBody(BaseModel):
     # fuera de Rambla — nace #1 y hay que pasarlo a la #5 real). NO toca el
     # slug (queda fijo desde la creación, no se re-deriva del número nuevo).
     numero_edicion: int | None = None
-    # Edición manual del slug (pedido del dueño 2026-08-20: un taller
-    # renombrado — "Nivel 2" → "Nivel Avanzado" — quedaba con la URL vieja
-    # para siempre, ya que el slug NO se re-deriva del nombre nunca, ni acá
-    # ni en la corrección de numero_edicion de arriba). Rompe cualquier link
-    # ya compartido con el slug viejo — acción deliberada, no automática.
-    slug: str | None = None
     # Economía del taller — ver comentario gemelo en EdicionCreateBody.
     usa_estudio: bool | None = None
     valor_estudio: int | None = None
@@ -1884,7 +1878,6 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
         and new_clases is None
         and new_modalidades is None
         and new_cuentas_pago is None
-        and body.slug is None
     ):
         raise HTTPException(400, "No hay campos para actualizar")
 
@@ -1899,19 +1892,6 @@ def admin_update_edicion(edicion_id: int, body: EdicionUpdateBody, request: Requ
             ).fetchone()
             if existing is None:
                 raise HTTPException(404, "Edición no encontrada")
-
-            if body.slug is not None:
-                nuevo_slug = slugify(body.slug.strip())
-                if not nuevo_slug:
-                    raise HTTPException(400, "Slug inválido")
-                tomado = conn.execute(
-                    "SELECT 1 FROM ediciones_taller WHERE slug = %s AND id != %s",
-                    (nuevo_slug, edicion_id),
-                ).fetchone()
-                if tomado:
-                    raise HTTPException(400, f"El slug «{nuevo_slug}» ya está en uso por otra edición")
-                sets.append("slug = %s")
-                params.append(nuevo_slug)
 
             if body.numero_edicion is not None:
                 conflicto = conn.execute(
@@ -2429,9 +2409,14 @@ async def admin_upload_logo_institucion(institucion_id: int, request: Request):
 
 
 def _get_institucion_fotos(conn, institucion_id: int) -> list:
+    # `es_principal DESC` primero: mismo criterio que el carrusel público
+    # (TallerGaleria/hero, "principal primero, después orden") — sin esto, la
+    # grilla del admin mostraba un orden distinto al que ve el público
+    # (bug real, 2026-08-20: la "Principal" quedaba enterrada en el medio de
+    # la grilla en vez de primera).
     cur = conn.execute(
         "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
-        "FROM institucion_fotos WHERE institucion_id = %s ORDER BY orden, id",
+        "FROM institucion_fotos WHERE institucion_id = %s ORDER BY es_principal DESC, orden, id",
         (institucion_id,),
     )
     rows = cur.fetchall()
@@ -2885,9 +2870,11 @@ def admin_delete_portada_clase(clase_id: int, request: Request):
 
 
 def _get_edicion_fotos(conn, edicion_id: int) -> list:
+    # `es_principal DESC` primero — ver comentario gemelo en
+    # `_get_institucion_fotos` (mismo bug real, 2026-08-20).
     cur = conn.execute(
         "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
-        "FROM edicion_fotos WHERE edicion_id = %s ORDER BY orden, id",
+        "FROM edicion_fotos WHERE edicion_id = %s ORDER BY es_principal DESC, orden, id",
         (edicion_id,),
     )
     rows = cur.fetchall()

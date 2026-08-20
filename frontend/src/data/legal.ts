@@ -13,11 +13,21 @@
  *   aceptables jurisdiccionalmente.
  *
  * Última revisión: 2026-05-11.
+ *
+ * `TALLER_TERMS_SECTIONS` (2026-08-20) es el mismo tipo de DRAFT, para el
+ * fallback que ve quien se inscribe a un taller sin `terminos` propio
+ * cargado (antes caía en los términos de RENTAL — depósito/daños de
+ * equipos/seguro, nada relacionado). Un taller puede seguir sobreescribiendo
+ * con su propio texto vía el campo `terminos` del admin.
  */
 
 import { CONTACT } from "@/data/contact";
 
 export const LAST_UPDATED = "11 de mayo de 2026";
+// Fecha propia — TALLER_TERMS_SECTIONS se escribió en otra fecha que
+// LAST_UPDATED (Rental); reusar esa constante mostraría una fecha vieja
+// sobre contenido nuevo.
+export const LAST_UPDATED_TALLERES = "20 de agosto de 2026";
 
 // ── Política de privacidad ─────────────────────────────────────────────────
 
@@ -279,5 +289,81 @@ renuncia a cualquier otro fuero o jurisdicción que pudiera corresponder.`,
 - Email: ${CONTACT.email}
 - WhatsApp: ${CONTACT.phoneDisplay}
 - Dirección: Rambla Rental, ${CONTACT.address.line2 || CONTACT.address.city}, ${CONTACT.address.country}`,
+  },
+];
+
+// ── Términos y condiciones de Talleres (Escuela) ──────────────────────────
+
+export const TALLER_TERMS_SECTIONS: Section[] = [
+  {
+    id: "intro",
+    title: "1. Aceptación",
+    content: `Al inscribirte a un taller de Rambla aceptás estos términos y condiciones.
+Si un taller en particular tiene condiciones propias (cargadas en su página),
+esas rigen sobre este documento general. Rambla se reserva el derecho de
+modificar estos términos en cualquier momento; la versión vigente es la
+publicada en el sitio al momento de la inscripción.`,
+  },
+  {
+    id: "que-es",
+    title: "2. Qué es un taller de Rambla",
+    content: `Los talleres son actividades de formación práctica en producción
+audiovisual, dictadas por Rambla y/o instituciones y docentes invitados
+(ej. escuelas de cine co-presentadoras), en Mar del Plata, Argentina.`,
+  },
+  {
+    id: "inscripcion",
+    title: "3. Inscripción y cupos",
+    content: `Tu inscripción queda pendiente hasta confirmar tu lugar (pagando la seña y
+subiendo el comprobante). Si el cupo está completo, quedás en lista de
+espera; si se libera un lugar, te avisamos y tenés un tiempo limitado para
+confirmarlo — pasado ese plazo, el cupo pasa al siguiente de la lista.`,
+  },
+  {
+    id: "pago",
+    title: "4. Pago y forma de pago",
+    content: `Aceptamos transferencia bancaria. Según el taller, podés pagar el total de
+una vez o en cuotas — las opciones disponibles se muestran al inscribirte.
+Para reservar tu lugar pedimos la seña indicada en la página del taller;
+subís el comprobante y confirmamos tu cupo.`,
+  },
+  {
+    id: "cancelacion",
+    title: "5. Cancelación",
+    content: `Una vez confirmada la inscripción, la seña/pago no tiene devolución. Si
+tenés un imprevisto, escribinos por WhatsApp — buscamos soluciones
+flexibles cuando hay buena comunicación (ej. ceder tu lugar a otra persona,
+si el taller lo permite).`,
+  },
+  {
+    id: "equipamiento",
+    title: "6. Uso de equipos y estudio durante las clases",
+    content: `El equipamiento e instalaciones que se usan durante las clases del taller
+están incluidos y cubiertos por Rambla — no se cobra a los alumnos por
+daños accidentales del uso normal de la actividad.`,
+  },
+  {
+    id: "imagen",
+    title: "7. Derecho de imagen",
+    content: `Al inscribirte autorizás a Rambla a usar fotos y videos tomados durante las
+clases y los proyectos realizados en el taller, para redes sociales y
+material de marketing de Rambla y de las instituciones co-presentadoras. Si
+preferís no aparecer, avisanos antes de que empiece el taller.`,
+  },
+  {
+    id: "jurisdiccion-talleres",
+    title: "8. Jurisdicción",
+    content: `Cualquier disputa derivada de estos términos se somete a la competencia
+ordinaria de los Tribunales del Departamento Judicial de Mar del Plata, con
+renuncia a cualquier otro fuero o jurisdicción que pudiera corresponder.`,
+  },
+  {
+    id: "contacto-terms-talleres",
+    title: "9. Contacto",
+    content: `Para consultas sobre estos términos:
+
+- Email: ${CONTACT.email}
+- WhatsApp: ${CONTACT.phoneDisplay}
+- Dirección: Rambla, ${CONTACT.address.line2 || CONTACT.address.city}, ${CONTACT.address.country}`,
   },
 ];

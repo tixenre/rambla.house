@@ -23,6 +23,7 @@ export type SesionFecha = {
   hora_fin_min: number;
   hora_inicio_str?: string;
   hora_fin_str?: string;
+  titulo?: string;
 };
 
 /** "sábado 11 de julio y sábado 18 de julio" (≤2 clases, el caso intensivo)
@@ -48,23 +49,74 @@ export function resumenFechas(
     : `${clases.length} clases entre ${mesInicio} y ${mesFin}`;
 }
 
+/** Agrupa las clases por franja horaria distinta y arma un resumen tipo
+ * "Preproducción 14:30 – 16:30 hs · Rodaje 14:30 – 21:30 hs", derivado
+ * SIEMPRE de las clases reales — nunca de un campo de texto aparte, que
+ * puede desincronizarse en silencio (bug real: el `horario` libre de un
+ * taller quedó con los horarios viejos después de reprogramar las clases
+ * en el calendario, 2026-08-20 — invisible mientras cayó al genérico, recién
+ * se vio al empezar a mostrarlo). El label de cada franja es el título más
+ * repetido entre sus clases, sin el número final ("Rodaje 1" → "Rodaje") —
+ * tolera que una clase suelta (ej. "Proyección y devoluciones") comparta
+ * franja con otra sin arruinar el resumen. `null` si hay una sola franja
+ * (nada que agrupar) o ninguna clase tiene título cargado (nada que ofrezca
+ * más que el genérico de siempre). */
+function derivarHorarioPorFranja(clases: SesionFecha[]): string | null {
+  type Franja = {
+    inicio: number;
+    fin: number;
+    inicioStr: string;
+    finStr: string;
+    conteo: Map<string, number>;
+  };
+  const franjas: Franja[] = [];
+  for (const c of clases) {
+    let franja = franjas.find((f) => f.inicio === c.hora_inicio_min && f.fin === c.hora_fin_min);
+    if (!franja) {
+      franja = {
+        inicio: c.hora_inicio_min,
+        fin: c.hora_fin_min,
+        inicioStr: c.hora_inicio_str ?? fmtHhmm(c.hora_inicio_min),
+        finStr: c.hora_fin_str ?? fmtHhmm(c.hora_fin_min),
+        conteo: new Map(),
+      };
+      franjas.push(franja);
+    }
+    const label = (c.titulo ?? "").replace(/\s*\d+\s*$/, "").trim();
+    if (label) franja.conteo.set(label, (franja.conteo.get(label) ?? 0) + 1);
+  }
+  if (franjas.length < 2 || franjas.every((f) => f.conteo.size === 0)) return null;
+  return franjas
+    .map((f) => {
+      let label = "";
+      let max = 0;
+      for (const [l, n] of f.conteo) {
+        if (n > max) {
+          max = n;
+          label = l;
+        }
+      }
+      return label ? `${label} ${f.inicioStr} – ${f.finStr} hs` : `${f.inicioStr} – ${f.finStr} hs`;
+    })
+    .join(" · ");
+}
+
 /** Horario de la landing: si todas las clases comparten franja horaria,
  * "08:30 — 12:30 hs" (o "Jueves 19:00 — 21:00 hs" si además caen siempre el
  * mismo día de la semana, el caso común del taller semanal); si varían (ej.
- * preproducción vs. rodaje), el `horario` libre del taller (ej.
- * "Preproducción 13:30 a 16:00 hs · Rodaje 13:30 a 21:30 hs") — mostrar solo
- * la primera franja mentiría sobre el resto, pero un genérico "según la
- * clase" sin el detalle real tampoco ayuda si el dato ya está cargado
- * (pedido del dueño, 2026-08-20). Sin ESE campo tampoco cargado, recién ahí
- * cae al genérico. Sin clases cargadas (borrador recién creado), el mismo
- * `fallback` hace de horario principal. */
+ * preproducción vs. rodaje), el detalle real derivado de las clases (ver
+ * `derivarHorarioPorFranja`) — mostrar solo la primera franja mentiría sobre
+ * el resto. Sin títulos que permitan derivarlo, cae al `horario` libre del
+ * taller; sin ESE campo tampoco cargado, al genérico. Sin clases cargadas
+ * (borrador recién creado), el `fallback` hace de horario principal. */
 export function resumenHorario(clases: SesionFecha[], fallback: string): string {
   if (clases.length === 0) return fallback;
   const [primero] = clases;
   const mismaFranja = clases.every(
     (c) => c.hora_inicio_min === primero.hora_inicio_min && c.hora_fin_min === primero.hora_fin_min,
   );
-  if (!mismaFranja) return fallback || "Horarios según la clase";
+  if (!mismaFranja)
+    return derivarHorarioPorFranja(clases) ?? (fallback || "Horarios según la clase");
   const horario = `${primero.hora_inicio_str ?? fmtHhmm(primero.hora_inicio_min)} — ${primero.hora_fin_str ?? fmtHhmm(primero.hora_fin_min)} hs`;
   const primerDia = new Date(primero.fecha + "T12:00:00").getDay();
   const mismoDia = clases.every((c) => new Date(c.fecha + "T12:00:00").getDay() === primerDia);

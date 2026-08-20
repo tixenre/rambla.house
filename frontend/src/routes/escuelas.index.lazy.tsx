@@ -1,6 +1,6 @@
 import { createLazyFileRoute, Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { ArrowRight, Calendar, MapPin, Users } from "lucide-react";
+import { ArrowRight, Calendar, Clock, MapPin, Users } from "lucide-react";
 
 import { PublicLayout } from "@/components/rental/shell/PublicLayout";
 import { SectionBanner } from "@/components/rental/landing/SectionBanner";
@@ -9,6 +9,7 @@ import { Grain } from "@/components/common/Grain";
 import { LogoMark } from "@/components/rental/shell/LogoMark";
 import { InstitucionEyebrow } from "@/components/talleres/InstitucionesRow";
 import { TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
+import { resumenHorario } from "@/lib/talleres/formato";
 import { apiGetTalleres, type Taller } from "@/lib/api";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
 import { heroImgProps } from "@/lib/studio/hero-photos";
@@ -26,6 +27,12 @@ function WorkshopCard({ taller }: { taller: Taller }) {
     fechaInicio.getTime() === fechaFin.getTime()
       ? fechaInicio.toLocaleDateString("es-AR", optsDate)
       : `${fechaInicio.toLocaleDateString("es-AR", optsDate)} – ${fechaFin.toLocaleDateString("es-AR", optsDate)}`;
+
+  // Mismo criterio que TallerHero (página del taller): si las clases varían
+  // de franja, deriva el detalle real ("Preproducción 14:30 – 16:30 hs ·
+  // Rodaje 14:30 – 21:30 hs") de las clases en vez del `horario` libre, que
+  // puede quedar desactualizado (bug real, 2026-08-20).
+  const horarioResumen = resumenHorario(taller.sesiones, taller.horario);
 
   const soldOut = taller.cupos_disponibles === 0;
   const cuposLabel =
@@ -105,13 +112,16 @@ function WorkshopCard({ taller }: { taller: Taller }) {
           </h2>
           <p className="text-muted-foreground mt-1 text-sm">{taller.subtitulo}</p>
         </div>
-        <div className="flex flex-col gap-3 text-sm">
-          <span className="flex items-baseline gap-1.5 font-semibold text-ink">
+        <div className="flex flex-col gap-1.5 text-sm">
+          <span className="flex items-center gap-1.5 font-semibold text-ink text-base">
             <Calendar className="h-4 w-4 shrink-0" />
-            <span className="text-base">{fechaStr}</span>
-            <span className="text-muted-foreground font-normal">· {taller.horario}</span>
+            {fechaStr}
           </span>
-          <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-muted-foreground">
+          <span className="flex items-start gap-1.5 text-muted-foreground">
+            <Clock className="h-3.5 w-3.5 shrink-0 mt-0.5" />
+            {horarioResumen}
+          </span>
+          <div className="flex flex-wrap gap-x-5 gap-y-1.5 text-muted-foreground mt-1.5">
             <span className="flex items-center gap-1.5">
               <MapPin className="h-3.5 w-3.5 shrink-0" />
               {taller.direccion}
