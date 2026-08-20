@@ -51,17 +51,20 @@ export function resumenFechas(
 /** Horario de la landing: si todas las clases comparten franja horaria,
  * "08:30 — 12:30 hs" (o "Jueves 19:00 — 21:00 hs" si además caen siempre el
  * mismo día de la semana, el caso común del taller semanal); si varían (ej.
- * preproducción vs. rodaje), un texto genérico en vez de mostrar solo la
- * primera y mentir sobre el resto. Sin clases cargadas (borrador recién
- * creado), cae al `horario` libre del taller — el único lector que le queda
- * a ese campo legacy. */
+ * preproducción vs. rodaje), el `horario` libre del taller (ej.
+ * "Preproducción 13:30 a 16:00 hs · Rodaje 13:30 a 21:30 hs") — mostrar solo
+ * la primera franja mentiría sobre el resto, pero un genérico "según la
+ * clase" sin el detalle real tampoco ayuda si el dato ya está cargado
+ * (pedido del dueño, 2026-08-20). Sin ESE campo tampoco cargado, recién ahí
+ * cae al genérico. Sin clases cargadas (borrador recién creado), el mismo
+ * `fallback` hace de horario principal. */
 export function resumenHorario(clases: SesionFecha[], fallback: string): string {
   if (clases.length === 0) return fallback;
   const [primero] = clases;
   const mismaFranja = clases.every(
     (c) => c.hora_inicio_min === primero.hora_inicio_min && c.hora_fin_min === primero.hora_fin_min,
   );
-  if (!mismaFranja) return "Horarios según la clase";
+  if (!mismaFranja) return fallback || "Horarios según la clase";
   const horario = `${primero.hora_inicio_str ?? fmtHhmm(primero.hora_inicio_min)} — ${primero.hora_fin_str ?? fmtHhmm(primero.hora_fin_min)} hs`;
   const primerDia = new Date(primero.fecha + "T12:00:00").getDay();
   const mismoDia = clases.every((c) => new Date(c.fecha + "T12:00:00").getDay() === primerDia);
