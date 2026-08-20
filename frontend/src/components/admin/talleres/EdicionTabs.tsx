@@ -34,10 +34,12 @@ export function ClasesSection({ edicion }: { edicion: EdicionAdmin }) {
   const [editing, setEditing] = useState(false);
   const [clases, setClases] = useState<ClaseBody[]>(edicion.clases ?? []);
   const [numeroEdicion, setNumeroEdicion] = useState(String(edicion.numero_edicion));
+  const [slug, setSlug] = useState(edicion.slug);
 
   useEffect(() => {
     setClases(edicion.clases ?? []);
     setNumeroEdicion(String(edicion.numero_edicion));
+    setSlug(edicion.slug);
   }, [edicion.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const mut = useMutation({
@@ -58,6 +60,20 @@ export function ClasesSection({ edicion }: { edicion: EdicionAdmin }) {
       talleresAdminApi.updateEdicion(edicion.id, { numero_edicion }),
     onSuccess: (updated) => {
       toast.success("Número de edición actualizado");
+      updateEdicionInCache(qc, updated);
+    },
+    onError: (e) => toast.error((e as Error).message),
+  });
+
+  // El slug queda fijo desde la creación (no se re-deriva de un rename) —
+  // cambiarlo acá es una acción manual y deliberada: rompe cualquier link
+  // ya compartido con el slug viejo (WhatsApp, redes, favoritos).
+  const slugMut = useMutation({
+    mutationFn: (nuevoSlug: string) =>
+      talleresAdminApi.updateEdicion(edicion.id, { slug: nuevoSlug }),
+    onSuccess: (updated) => {
+      toast.success("Link actualizado");
+      setSlug(updated.slug);
       updateEdicionInCache(qc, updated);
     },
     onError: (e) => toast.error((e as Error).message),
@@ -111,6 +127,29 @@ export function ClasesSection({ edicion }: { edicion: EdicionAdmin }) {
         >
           {numeroMut.isPending ? <Spinner size="xs" /> : "Guardar"}
         </Button>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        <div className="flex items-end gap-2">
+          <div className="flex flex-col gap-1.5 flex-1">
+            <label className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
+              Link (slug)
+            </label>
+            <Input value={slug} onChange={(e) => setSlug(e.target.value)} />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => slug.trim() && slug !== edicion.slug && slugMut.mutate(slug.trim())}
+            disabled={slugMut.isPending || !slug.trim() || slug === edicion.slug}
+            className="gap-2"
+          >
+            {slugMut.isPending ? <Spinner size="xs" /> : "Guardar"}
+          </Button>
+        </div>
+        <p className="text-2xs text-muted-foreground">
+          rambla.house/escuelas/{slug || edicion.slug} — cambiarlo rompe cualquier link ya
+          compartido con el anterior (WhatsApp, redes, favoritos).
+        </p>
       </div>
       {edicion.clases && edicion.clases.length > 0 ? (
         <TallerCalendario sesiones={edicion.clases} horario={edicion.horario} />

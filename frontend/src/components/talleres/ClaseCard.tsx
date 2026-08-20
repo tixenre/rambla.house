@@ -63,6 +63,36 @@ export function ClaseCard({
   const horaLabel = clase.hora_fin_str
     ? `${clase.hora_inicio_str} – ${clase.hora_fin_str}`
     : clase.hora_inicio_str;
+  // Sin temario/nota/portada no hay nada que expandir — un chevron que abre
+  // a un panel vacío es un affordance mentiroso (pedido del dueño). El
+  // título propio (ej. "rodaje 1" vs "preproducción 1") sigue siendo info
+  // real y se muestra igual, solo que como fila estática.
+  const tieneContenido = grupos.length > 0 || !!clase.nota || !!clase.portada_url;
+
+  const encabezado = (
+    <>
+      <span className="shrink-0 w-8 h-8 rounded-full bg-ink text-background text-sm font-bold grid place-items-center">
+        {numero}
+      </span>
+      <div className="flex-1 min-w-0">
+        <p className="font-display text-base font-bold text-ink lowercase tracking-tight">
+          {clase.titulo || `Clase ${numero}`}
+        </p>
+        <p className="text-xs text-muted-foreground mt-0.5">
+          {fmtFechaCorta(clase.fecha)}
+          {horaLabel && ` · ${horaLabel}`}
+        </p>
+      </div>
+    </>
+  );
+
+  if (!tieneContenido) {
+    return (
+      <div className="flex w-full items-center gap-4 rounded-2xl border border-border/60 px-5 py-4">
+        {encabezado}
+      </div>
+    );
+  }
 
   return (
     <Collapsible
@@ -70,18 +100,7 @@ export function ClaseCard({
       className="rounded-2xl border border-border/60 overflow-hidden"
     >
       <CollapsibleTrigger className="group flex w-full items-center gap-4 px-5 py-4 text-left hover:bg-muted/20 transition-colors">
-        <span className="shrink-0 w-8 h-8 rounded-full bg-ink text-background text-sm font-bold grid place-items-center">
-          {numero}
-        </span>
-        <div className="flex-1 min-w-0">
-          <p className="font-display text-base font-bold text-ink lowercase tracking-tight">
-            {clase.titulo || `Clase ${numero}`}
-          </p>
-          <p className="text-xs text-muted-foreground mt-0.5">
-            {fmtFechaCorta(clase.fecha)}
-            {horaLabel && ` · ${horaLabel}`}
-          </p>
-        </div>
+        {encabezado}
         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground/60 transition-transform duration-200 group-data-[state=open]:rotate-180" />
       </CollapsibleTrigger>
       <CollapsibleContent>

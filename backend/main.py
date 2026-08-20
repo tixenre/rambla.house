@@ -1259,7 +1259,7 @@ def workshop_page(slug: str, request: Request):
             desc_raw = desc_raw[:197].rstrip() + "…"
         if not desc_raw:
             desc_raw = f"Taller con {identidad} en Rambla, Mar del Plata." if identidad else "Talleres audiovisuales en Mar del Plata."
-        title = f"{nombre} con {identidad} — Rambla" if identidad else f"{nombre} — Rambla"
+        title = f"{nombre} con {identidad} en Rambla" if identidad else f"{nombre} en Rambla"
         if not og_img.startswith("http"):
             # og-image.png (1200×630, ya encuadrada para OG) — no icon-512.png
             # (ícono cuadrado): el mismo bug ya se había corregido en /c/{token}
@@ -1318,15 +1318,11 @@ def workshop_page(slug: str, request: Request):
             "provider": {"@type": "Organization", "name": "Rambla", "sameAs": SITE_URL},
             "hasCourseInstance": course_instance,
         }
-        if taller["precio_total"] is not None:
-            course_schema["offers"] = {
-                "@type": "Offer",
-                "price": taller["precio_total"],
-                "priceCurrency": "ARS",
-                "availability": "https://schema.org/InStock",
-                "url": taller_url,
-                "category": "Free" if taller["precio_total"] == 0 else "Paid",
-            }
+        # Sin `offers`/precio a propósito (pedido del dueño, 2026-08-20): un
+        # crawler/preview que lea el `Offer.price` de este JSON-LD podía
+        # mostrar el precio en un link preview mobile — el precio se ve en
+        # la página, no se publica como dato estructurado. Mismo criterio en
+        # el head() del cliente (escuelas.$slug.tsx).
         schemas = [course_schema]
         # FAQPage — condicionado a que el taller tenga FAQs cargadas (hoy
         # ninguno las tiene todavía, ver FaqSection del admin): empieza a

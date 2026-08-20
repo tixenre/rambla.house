@@ -37,8 +37,8 @@ export const Route = createFileRoute("/escuelas/$slug")({
     const instructoresStr = taller.instructores.map((i) => i.nombre).join(" y ");
     const identidad = institucionPrincipal?.nombre || instructoresStr;
     const title = identidad
-      ? `${taller.nombre} con ${identidad} — Rambla Rental`
-      : `${taller.nombre} — Rambla Rental`;
+      ? `${taller.nombre} con ${identidad} en Rambla Rental`
+      : `${taller.nombre} en Rambla Rental`;
     const desc = `${taller.descripcion}`.slice(0, 155).replace(/\s+/g, " ").trim();
 
     // `Course` (no `Event`): es el tipo que Google trata distinto cuando
@@ -83,14 +83,9 @@ export const Route = createFileRoute("/escuelas/$slug")({
             }
           : {}),
       },
-      offers: {
-        "@type": "Offer",
-        price: taller.precio_total,
-        priceCurrency: "ARS",
-        availability: "https://schema.org/InStock",
-        url,
-        category: taller.precio_total === 0 ? "Free" : "Paid",
-      },
+      // Sin `offers`/precio a propósito — ver comentario gemelo en
+      // `workshop_page` (backend/main.py): un preview mobile podía leer el
+      // `Offer.price` y mostrar el precio en el link preview.
     };
 
     // FAQPage — mismas FAQs que muestra <TallerFAQ> (editables desde el admin,
