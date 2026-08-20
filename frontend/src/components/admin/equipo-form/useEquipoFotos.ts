@@ -64,11 +64,15 @@ export function useEquipoFotos(initial: Equipo | null | undefined, open: boolean
   ) {
     if (!initial?.id) return;
     const equipoId = initial.id;
+    // El orden final lo decide la posición de selección, no quién termina
+    // de procesarse primero — ver `uploadEquipoFoto`.
+    const base = fotos.length;
+    const items = files.map((file, i) => ({ file, orden: base + i }));
     const { ok, failed } = await runInBatches(
-      files,
+      items,
       UPLOAD_CONCURRENCY,
-      (file) => uploadEquipoFoto(equipoId, file),
-      (file, fileOk, error) =>
+      ({ file, orden }) => uploadEquipoFoto(equipoId, file, orden),
+      ({ file }, fileOk, error) =>
         onFileSettled(
           file,
           fileOk,

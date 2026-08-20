@@ -860,15 +860,28 @@ def _sync_principal_denorm(conn, equipo_id: int) -> None:
     )
 
 
-def _insert_equipo_foto(conn, equipo_id: int, url: str, path: str, media_id: int | None = None) -> dict:
+def _insert_equipo_foto(
+    conn,
+    equipo_id: int,
+    url: str,
+    path: str,
+    media_id: int | None = None,
+    orden: int | None = None,
+) -> dict:
     """Inserta una fila en equipo_fotos y sincroniza equipos.foto_url con la principal.
     La primera foto del equipo se marca como principal automáticamente.
+
+    `orden` explícito gana — mismo criterio que `_insert_edicion_foto`
+    (routes/talleres.py): con upload concurrente, inferirlo acá corre una
+    carrera (la foto que termina de procesarse primero, no la que el
+    usuario eligió primero, gana el primer lugar).
     """
-    cur = conn.execute(
-        "SELECT COALESCE(MAX(orden), -1) + 1 AS next_orden FROM equipo_fotos WHERE equipo_id = %s",
-        (equipo_id,),
-    )
-    orden = cur.fetchone()["next_orden"]
+    if orden is None:
+        cur = conn.execute(
+            "SELECT COALESCE(MAX(orden), -1) + 1 AS next_orden FROM equipo_fotos WHERE equipo_id = %s",
+            (equipo_id,),
+        )
+        orden = cur.fetchone()["next_orden"]
 
     cur2 = conn.execute("SELECT COUNT(*) AS cnt FROM equipo_fotos WHERE equipo_id = %s", (equipo_id,))
     is_first = cur2.fetchone()["cnt"] == 0
@@ -927,6 +940,8 @@ async def upload_equipo_foto(equipo_id: int, request: Request):
         raise HTTPException(400, "Archivo vacío")
     if len(raw) > 20 * 1024 * 1024:
         raise HTTPException(413, "Archivo muy grande (máx 20 MB)")
+    orden_raw = form.get("orden")
+    orden = int(orden_raw) if orden_raw not in (None, "") else None
 
     with get_db() as conn:
         try:
@@ -936,7 +951,7 @@ async def upload_equipo_foto(equipo_id: int, request: Request):
             with media_http():
                 asset = store_upload(raw, kind="equipo", derive_specs=EQUIPO_DERIVE_SPECS, conn=conn)
             display = asset.variant("display")
-            foto = _insert_equipo_foto(conn, equipo_id, display.url, display.key, asset.id)
+            foto = _insert_equipo_foto(conn, equipo_id, display.url, display.key, asset.id, orden=orden)
         except Exception:
             conn.rollback()
             raise

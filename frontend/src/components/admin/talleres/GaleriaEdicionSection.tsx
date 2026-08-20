@@ -46,11 +46,16 @@ export function GaleriaEdicionSection({
     files: File[],
     onFileSettled: (file: File, ok: boolean, error?: string) => void,
   ) {
+    // El orden final lo decide la POSICIÓN DE SELECCIÓN del archivo, no
+    // quién termina de subir/procesarse primero (con UPLOAD_CONCURRENCY > 1,
+    // eso es una carrera — ver comentario en `uploadEdicionFile`).
+    const base = fotos.length;
+    const items = files.map((file, i) => ({ file, orden: base + i }));
     const { ok, failed } = await runInBatches(
-      files,
+      items,
       UPLOAD_CONCURRENCY,
-      (file) => uploadEdicionFile(edicionId, file),
-      (file, fileOk, error) =>
+      ({ file, orden }) => uploadEdicionFile(edicionId, file, orden),
+      ({ file }, fileOk, error) =>
         onFileSettled(
           file,
           fileOk,

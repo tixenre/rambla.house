@@ -2460,13 +2460,17 @@ def _insert_institucion_foto(
     url_sm: str | None = None,
     url_avif: str | None = None,
     url_sm_avif: str | None = None,
+    orden: int | None = None,
 ) -> dict:
-    cur = conn.execute(
-        "SELECT COALESCE(MAX(orden), -1) + 1 AS next_orden FROM institucion_fotos "
-        "WHERE institucion_id = %s",
-        (institucion_id,),
-    )
-    orden = cur.fetchone()["next_orden"]
+    # `orden` explícito gana — ver comentario en `_insert_edicion_foto`
+    # (misma carrera bajo upload concurrente).
+    if orden is None:
+        cur = conn.execute(
+            "SELECT COALESCE(MAX(orden), -1) + 1 AS next_orden FROM institucion_fotos "
+            "WHERE institucion_id = %s",
+            (institucion_id,),
+        )
+        orden = cur.fetchone()["next_orden"]
 
     cur2 = conn.execute(
         "SELECT COUNT(*) AS cnt FROM institucion_fotos WHERE institucion_id = %s",
@@ -2536,6 +2540,8 @@ async def admin_upload_foto_institucion(institucion_id: int, request: Request):
         raise HTTPException(400, "Archivo vacío")
     if len(raw) > 20 * 1024 * 1024:
         raise HTTPException(413, "Archivo muy grande (máx 20 MB)")
+    orden_raw = form.get("orden")
+    orden = int(orden_raw) if orden_raw not in (None, "") else None
 
     with get_db() as conn:
         try:
@@ -2564,6 +2570,7 @@ async def admin_upload_foto_institucion(institucion_id: int, request: Request):
                 url_sm=display_sm.url if display_sm else None,
                 url_avif=display_avif.url if display_avif else None,
                 url_sm_avif=display_sm_avif.url if display_sm_avif else None,
+                orden=orden,
             )
         except Exception:
             conn.rollback()
@@ -2889,12 +2896,21 @@ def _insert_edicion_foto(
     url_sm: str | None = None,
     url_avif: str | None = None,
     url_sm_avif: str | None = None,
+    orden: int | None = None,
 ) -> dict:
-    cur = conn.execute(
-        "SELECT COALESCE(MAX(orden), -1) + 1 AS next_orden FROM edicion_fotos WHERE edicion_id = %s",
-        (edicion_id,),
-    )
-    orden = cur.fetchone()["next_orden"]
+    # `orden` explícito (el front lo manda con la posición real de selección
+    # del archivo) gana sobre inferirlo acá. Con upload concurrente
+    # (UPLOAD_CONCURRENCY en PhotoGallery), calcular MAX(orden)+1 en cada
+    # request corría una carrera: la foto que termina de procesarse
+    # primero (no la que el usuario eligió primero) se quedaba con el
+    # primer lugar — bug real reportado por el dueño ("las galerías no se
+    # muestran en orden"). Mismo patrón en institucion/estudio/equipo_fotos.
+    if orden is None:
+        cur = conn.execute(
+            "SELECT COALESCE(MAX(orden), -1) + 1 AS next_orden FROM edicion_fotos WHERE edicion_id = %s",
+            (edicion_id,),
+        )
+        orden = cur.fetchone()["next_orden"]
 
     cur2 = conn.execute(
         "SELECT COUNT(*) AS cnt FROM edicion_fotos WHERE edicion_id = %s", (edicion_id,)
@@ -2951,6 +2967,8 @@ async def admin_upload_foto_edicion(edicion_id: int, request: Request):
         raise HTTPException(400, "Archivo vacío")
     if len(raw) > 20 * 1024 * 1024:
         raise HTTPException(413, "Archivo muy grande (máx 20 MB)")
+    orden_raw = form.get("orden")
+    orden = int(orden_raw) if orden_raw not in (None, "") else None
 
     with get_db() as conn:
         try:
@@ -2979,6 +2997,7 @@ async def admin_upload_foto_edicion(edicion_id: int, request: Request):
                 url_sm=display_sm.url if display_sm else None,
                 url_avif=display_avif.url if display_avif else None,
                 url_sm_avif=display_sm_avif.url if display_sm_avif else None,
+                orden=orden,
             )
         except Exception:
             conn.rollback()
