@@ -7,8 +7,9 @@ import { SectionBanner } from "@/components/rental/landing/SectionBanner";
 import { EmptyState } from "@/design-system/composites/EmptyState";
 import { Grain } from "@/components/common/Grain";
 import { LogoMark } from "@/components/rental/shell/LogoMark";
-import { InstitucionEyebrow } from "@/components/talleres/InstitucionesRow";
-import { apiGetTalleres, type Taller } from "@/lib/api";
+import { InstitucionEyebrow, InstitucionLogoLink } from "@/components/talleres/InstitucionesRow";
+import { TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
+import { apiGetTalleres, type Institucion, type Taller } from "@/lib/api";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
 import { heroImgProps } from "@/lib/studio/hero-photos";
 
@@ -95,7 +96,7 @@ function WorkshopCard({ taller }: { taller: Taller }) {
       {/* Cuerpo derecho */}
       <div className="flex-1 px-6 sm:px-8 py-5 flex flex-col gap-3">
         <div>
-          <InstitucionEyebrow taller={taller} size="sm" />
+          <InstitucionEyebrow taller={taller} size="sm" asLink={false} />
           <h2
             className="font-display font-black lowercase leading-[0.95] tracking-[-0.015em] text-ink"
             style={{ fontSize: "clamp(1.2rem, 2vw, 1.5rem)" }}
@@ -131,6 +132,29 @@ function WorkshopCard({ taller }: { taller: Taller }) {
         </div>
       </div>
     </Link>
+  );
+}
+
+// ── Fila "En alianza con" ────────────────────────────────────────────────────
+// De-dupe de instituciones entre todos los talleres traídos — no un
+// carrusel: con 1 sola institución un carrusel/marquee se ve roto (un
+// logo solo "scrolleando"). Una fila estática escala igual de bien a 1
+// que a N (envuelve a la línea siguiente), y cada logo linkea a su hub
+// (mismo `InstitucionLogoLink` que usa el eyebrow del taller — no se
+// recrea el ternario logo-o-texto acá).
+function InstitucionesStrip({ instituciones }: { instituciones: Institucion[] }) {
+  if (instituciones.length === 0) return null;
+  return (
+    <div className="flex flex-col gap-3 pb-2">
+      <p className="font-mono text-2xs tracking-[0.25em] uppercase text-muted-foreground">
+        En alianza con
+      </p>
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-4">
+        {instituciones.map((inst) => (
+          <InstitucionLogoLink key={inst.id} institucion={inst} size="lg" />
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -178,11 +202,22 @@ function TalleresPage() {
 
   const hayTalleres = talleres.length > 0;
 
+  // De-dupe por id — un mismo taller/institución puede repetirse entre
+  // próximos/en curso/pasados.
+  const instituciones = Array.from(
+    new Map(talleres.flatMap((t) => t.instituciones).map((i) => [i.id, i])).values(),
+  );
+
   return (
     <PublicLayout topBar={{ variant: "escuela" }}>
       <SectionBanner section="escuela" />
 
-      <div className="max-w-[900px] mx-auto px-4 sm:px-6 py-10 sm:py-14 flex flex-col gap-4">
+      <div
+        className="mx-auto py-10 sm:py-14 flex flex-col gap-4"
+        style={{ width: TALLER_CONTENT_WIDTH }}
+      >
+        {!isLoading && !isError && <InstitucionesStrip instituciones={instituciones} />}
+
         {isLoading && (
           <div className="py-16 text-center text-muted-foreground text-sm">Cargando talleres…</div>
         )}
