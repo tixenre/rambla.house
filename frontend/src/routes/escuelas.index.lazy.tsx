@@ -8,9 +8,9 @@ import { EmptyState } from "@/design-system/composites/EmptyState";
 import { Separator } from "@/design-system/ui/separator";
 import { Grain } from "@/components/common/Grain";
 import { LogoMark } from "@/components/rental/shell/LogoMark";
-import { InstitucionEyebrow } from "@/components/talleres/InstitucionesRow";
+import { InstitucionEyebrow, InstitucionLogoLink } from "@/components/talleres/InstitucionesRow";
 import { TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
-import { apiGetTalleres, type Taller } from "@/lib/api";
+import { apiGetTalleres, type Institucion, type Taller } from "@/lib/api";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
 import { heroImgProps } from "@/lib/studio/hero-photos";
 
@@ -144,51 +144,77 @@ function SectionLabel({ label }: { label: string }) {
   );
 }
 
-// Sub-label de escuela: más chico/tenue que SectionLabel — es un nivel
-// subordinado (Próximos/En curso/Ediciones anteriores manda arriba), no un
-// peer. A propósito texto plano, sin logo — la fila "En alianza con" (logo
-// grande, flotando sola arriba de todo) quedó rechazada por el dueño en
-// vivo: "queda como si todo el listado fuera de esa institución". Esto es
-// lo opuesto: chico, subordinado, scoped SOLO al bloque de cards debajo.
-//
-// Primera versión (solo texto, sin línea) leía como una etiqueta duplicada
-// —casi el mismo peso que SectionLabel arriba, y la card de abajo YA repite
-// el mismo nombre en su propio badge— así que el dueño no la percibía como
-// una división real ("no veo ninguna division", 2026-08-20, confirmado en
-// vivo con 2 escuelas de prueba). Una línea es lo que hace que un separador
-// SE LEA como separador, con o sin más de un grupo — el texto solo aporta
-// contexto de a quién pertenece lo de abajo.
-function InstitucionDivider({ label }: { label: string }) {
+// Deduplica las instituciones que aparecen en un grupo de talleres (por id,
+// primera aparición gana el orden) — insumo del banner de abajo.
+function institucionesUnicas(items: Taller[]): Institucion[] {
+  const vistas = new Map<number, Institucion>();
+  for (const t of items) {
+    for (const inst of t.instituciones) {
+      if (!vistas.has(inst.id)) vistas.set(inst.id, inst);
+    }
+  }
+  return [...vistas.values()];
+}
+
+// Instructores de talleres SIN institución — el instructor dicta la clase
+// por su cuenta, no en nombre de una escuela. Pedido del dueño en vivo:
+// "para el baner de instituciones, pondria las que hay, y despues los
+// profesores independientes que hay" — el banner no es solo de escuelas,
+// es de TODO "quién dio esto": instituciones primero, profesores
+// independientes después. Un taller CON institución no aporta acá aunque
+// tenga instructores propios — esos ya quedan representados por su escuela.
+function instructoresIndependientesUnicos(items: Taller[]): Taller["instructores"] {
+  const vistos = new Map<number, Taller["instructores"][number]>();
+  for (const t of items) {
+    if (t.instituciones.length > 0) continue;
+    for (const ins of t.instructores) {
+      if (!vistos.has(ins.id)) vistos.set(ins.id, ins);
+    }
+  }
+  return [...vistos.values()];
+}
+
+// Banner de "quién dio esto": el punto donde el listado pasa de lo ACTIVO
+// (Próximos + En curso) al ARCHIVO (Ediciones anteriores) — un solo quiebre
+// visual en toda la página, no un divisor repetido por escuela dentro de
+// cada sección (esa primera versión salió mal dos veces: primero muy tenue
+// para leerse como división — "no veo ninguna division" — y al reforzarla
+// quedó claro que además el pedido real era otro — "por que aparece filmar
+// en cada linea? la idea era dividir los pasados con los actuales y
+// proximos, como un baner de marcas, y que los pasados queden debajo",
+// 2026-08-20). A diferencia de la fila "En alianza con" ya rechazada una
+// vez (logo grande flotando arriba de TODO el listado — "parece que todo es
+// de Filmar"), este banner vive pegado a "Ediciones anteriores": el
+// contexto dice que es sobre LO ARCHIVADO, no la página entera. Instituciones
+// primero (logo real — son "marcas"), profesores independientes después
+// (nombre — son personas, no marcas, tratamiento tipográfico en vez de
+// logo). Si lo pasado no tiene ni institución ni instructor suelto (solo
+// talleres propios de Rambla sin instructor cargado), no hay nada que
+// banner-ear — no se muestra.
+function InstitucionesBanner({
+  instituciones,
+  instructoresIndependientes,
+}: {
+  instituciones: Institucion[];
+  instructoresIndependientes: Taller["instructores"];
+}) {
+  if (instituciones.length === 0 && instructoresIndependientes.length === 0) return null;
   return (
-    <div className="flex items-center gap-3 mt-6 pt-1">
-      <span className="font-mono text-2xs tracking-[0.25em] uppercase text-muted-foreground whitespace-nowrap">
-        {label}
-      </span>
+    <div className="flex items-center gap-4 mt-1 mb-2 flex-wrap">
+      {instituciones.map((inst) => (
+        <InstitucionLogoLink key={`inst-${inst.id}`} institucion={inst} size="sm" />
+      ))}
+      {instructoresIndependientes.map((ins) => (
+        <span
+          key={`prof-${ins.id}`}
+          className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa whitespace-nowrap"
+        >
+          {ins.nombre}
+        </span>
+      ))}
       <Separator className="flex-1" />
     </div>
   );
-}
-
-// Pedido del dueño: "que las escuelas dividan" los talleres — SIN
-// reordenar el orden temporal que ya tiene cada sección (Próximos/En
-// curso/Ediciones anteriores). Mismo criterio que un changelog agrupado:
-// se inserta un divisor con el nombre de la escuela SOLO cuando cambia de
-// una card a la siguiente — no se agrupan/reordenan las cards para que
-// una escuela quede en un solo bloque. Un taller sin institución (Rambla
-// propio) no lleva divisor — sigue sin encabezado hasta el próximo cambio
-// real. El estado de "última escuela vista" es local a cada sección (no
-// cruza de Próximos a En curso, por ej.).
-function talleresConDivisores(items: Taller[]) {
-  let ultimaClave = "";
-  return items.flatMap((t) => {
-    const clave = t.instituciones.map((i) => i.nombre).join(" × ");
-    const mostrarDivisor = clave !== "" && clave !== ultimaClave;
-    ultimaClave = clave;
-    return [
-      mostrarDivisor && <InstitucionDivider key={`div-${t.id}`} label={clave} />,
-      <WorkshopCard key={t.id} taller={t} />,
-    ];
-  });
 }
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -224,6 +250,9 @@ function TalleresPage() {
   const pasadosApi = talleres
     .filter((t) => new Date(t.fecha_fin + "T00:00:00") < hoy)
     .sort((a, b) => new Date(b.fecha_inicio).getTime() - new Date(a.fecha_inicio).getTime());
+
+  const institucionesPasadas = institucionesUnicas(pasadosApi);
+  const instructoresPasados = instructoresIndependientesUnicos(pasadosApi);
 
   const hayTalleres = talleres.length > 0;
 
@@ -264,21 +293,31 @@ function TalleresPage() {
         {proximos.length > 0 && (
           <>
             <SectionLabel label="Próximos" />
-            {talleresConDivisores(proximos)}
+            {proximos.map((t) => (
+              <WorkshopCard key={t.id} taller={t} />
+            ))}
           </>
         )}
 
         {enCurso.length > 0 && (
           <>
             <SectionLabel label="En curso" />
-            {talleresConDivisores(enCurso)}
+            {enCurso.map((t) => (
+              <WorkshopCard key={t.id} taller={t} />
+            ))}
           </>
         )}
 
         {pasadosApi.length > 0 && (
           <>
             <SectionLabel label="Ediciones anteriores" />
-            {talleresConDivisores(pasadosApi)}
+            <InstitucionesBanner
+              instituciones={institucionesPasadas}
+              instructoresIndependientes={instructoresPasados}
+            />
+            {pasadosApi.map((t) => (
+              <WorkshopCard key={t.id} taller={t} />
+            ))}
           </>
         )}
       </div>
