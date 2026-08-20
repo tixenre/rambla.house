@@ -458,7 +458,7 @@ export function WorkshopInscripcionForm({ taller, onSuccess }: Props) {
             </button>
           ) : (
             <a
-              href="/terminos"
+              href="/terminos-talleres"
               target="_blank"
               rel="noopener noreferrer"
               className="text-ink font-medium underline underline-offset-2 hover:text-rosa transition"

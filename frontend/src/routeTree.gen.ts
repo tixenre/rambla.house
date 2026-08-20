@@ -12,6 +12,7 @@ import { createFileRoute } from '@tanstack/react-router'
 
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as WorkshopsRouteImport } from './routes/workshops'
+import { Route as TerminosTalleresRouteImport } from './routes/terminos-talleres'
 import { Route as TerminosRouteImport } from './routes/terminos'
 import { Route as RentalRouteImport } from './routes/rental'
 import { Route as PrivacidadRouteImport } from './routes/privacidad'
@@ -144,6 +145,11 @@ const AdminEquiposIdEditarLazyRouteImport = createFileRoute(
 const WorkshopsRoute = WorkshopsRouteImport.update({
   id: '/workshops',
   path: '/workshops',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const TerminosTalleresRoute = TerminosTalleresRouteImport.update({
+  id: '/terminos-talleres',
+  path: '/terminos-talleres',
   getParentRoute: () => rootRouteImport,
 } as any)
 const TerminosRoute = TerminosRouteImport.update({
@@ -652,6 +658,7 @@ export interface FileRoutesByFullPath {
   '/privacidad': typeof PrivacidadRoute
   '/rental': typeof RentalRoute
   '/terminos': typeof TerminosRoute
+  '/terminos-talleres': typeof TerminosTalleresRoute
   '/workshops': typeof WorkshopsRouteWithChildren
   '/admin/equipos': typeof AdminEquiposRouteWithChildren
   '/admin/estudio': typeof AdminEstudioRouteWithChildren
@@ -730,6 +737,7 @@ export interface FileRoutesByTo {
   '/privacidad': typeof PrivacidadRoute
   '/rental': typeof RentalRoute
   '/terminos': typeof TerminosRoute
+  '/terminos-talleres': typeof TerminosTalleresRoute
   '/admin/login': typeof AdminLoginRoute
   '/admin/novedades': typeof AdminNovedadesRoute
   '/c/$token': typeof CTokenRoute
@@ -809,6 +817,7 @@ export interface FileRoutesById {
   '/privacidad': typeof PrivacidadRoute
   '/rental': typeof RentalRoute
   '/terminos': typeof TerminosRoute
+  '/terminos-talleres': typeof TerminosTalleresRoute
   '/workshops': typeof WorkshopsRouteWithChildren
   '/admin/equipos': typeof AdminEquiposRouteWithChildren
   '/admin/estudio': typeof AdminEstudioRouteWithChildren
@@ -893,6 +902,7 @@ export interface FileRouteTypes {
     | '/privacidad'
     | '/rental'
     | '/terminos'
+    | '/terminos-talleres'
     | '/workshops'
     | '/admin/equipos'
     | '/admin/estudio'
@@ -971,6 +981,7 @@ export interface FileRouteTypes {
     | '/privacidad'
     | '/rental'
     | '/terminos'
+    | '/terminos-talleres'
     | '/admin/login'
     | '/admin/novedades'
     | '/c/$token'
@@ -1049,6 +1060,7 @@ export interface FileRouteTypes {
     | '/privacidad'
     | '/rental'
     | '/terminos'
+    | '/terminos-talleres'
     | '/workshops'
     | '/admin/equipos'
     | '/admin/estudio'
@@ -1132,6 +1144,7 @@ export interface RootRouteChildren {
   PrivacidadRoute: typeof PrivacidadRoute
   RentalRoute: typeof RentalRoute
   TerminosRoute: typeof TerminosRoute
+  TerminosTalleresRoute: typeof TerminosTalleresRoute
   WorkshopsRoute: typeof WorkshopsRouteWithChildren
   CTokenRoute: typeof CTokenRoute
   CategoriaSlugRoute: typeof CategoriaSlugRoute
@@ -1145,6 +1158,13 @@ declare module '@tanstack/react-router' {
       path: '/workshops'
       fullPath: '/workshops'
       preLoaderRoute: typeof WorkshopsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/terminos-talleres': {
+      id: '/terminos-talleres'
+      path: '/terminos-talleres'
+      fullPath: '/terminos-talleres'
+      preLoaderRoute: typeof TerminosTalleresRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/terminos': {
@@ -1920,6 +1940,7 @@ const rootRouteChildren: RootRouteChildren = {
   PrivacidadRoute: PrivacidadRoute,
   RentalRoute: RentalRoute,
   TerminosRoute: TerminosRoute,
+  TerminosTalleresRoute: TerminosTalleresRoute,
   WorkshopsRoute: WorkshopsRouteWithChildren,
   CTokenRoute: CTokenRoute,
   CategoriaSlugRoute: CategoriaSlugRoute,
