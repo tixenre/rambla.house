@@ -79,12 +79,19 @@ export const ADMIN_NAV: AdminNavGroup[] = [
     ],
   },
   {
-    id: "estudio-talleres",
-    label: "Estudio y talleres",
+    id: "estudio",
+    label: "Estudio",
     defaultOpen: true,
     items: [
       { title: "Reservas", url: "/admin/estudio/reservas", icon: CalendarClock },
       { title: "Estudio", url: "/admin/estudio", icon: Clapperboard, exact: true },
+    ],
+  },
+  {
+    id: "talleres",
+    label: "Talleres",
+    defaultOpen: true,
+    items: [
       { title: "Talleres", url: "/admin/talleres", icon: GraduationCap, exact: true },
       { title: "Instituciones", url: "/admin/talleres/instituciones", icon: Landmark },
       { title: "Alumnos", url: "/admin/talleres/alumnos", icon: Users },

@@ -151,7 +151,7 @@ function AdminSidebarFicha() {
       <div className="rounded-xl border hairline p-4">
         <div className="t-eyebrow mb-2">AdminSidebar — organismo</div>
         <ul className="flex flex-col gap-1.5 text-sm text-muted-foreground">
-          <li>· Cinco grupos por dominio, colapsables.</li>
+          <li>· Grupos por dominio, colapsables.</li>
           <li>· Buscador global ⌘F arriba de todo (abre la paleta de comandos).</li>
           <li>· Resalta la sección activa y auto-expande su grupo al navegar.</li>
           <li>· Colapsa a un riel de iconos para ganar espacio.</li>
