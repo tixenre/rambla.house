@@ -13,47 +13,56 @@ function InstitucionPill({
   institucion: InstitucionEntity;
   variant: Variant;
 }) {
-  const content = (
-    <>
-      {institucion.logo_url && (
-        <img
-          src={institucion.logo_url}
-          alt={institucion.nombre}
-          className="h-5 w-auto max-w-16 object-contain"
-        />
-      )}
-      <span
-        className={cn("text-sm font-medium", variant === "dark" ? "text-background" : "text-ink")}
-      >
-        {institucion.nombre}
-      </span>
-    </>
-  );
   const cls = cn(
     "flex items-center gap-2 rounded-full border px-3 py-1.5 transition",
     variant === "dark"
       ? "border-background/20 bg-background/10 hover:border-background/40"
       : "border-border/50 bg-muted/20 hover:border-border",
   );
-  if (institucion.web) {
-    return (
-      <a href={institucion.web} target="_blank" rel="noopener noreferrer" className={cls}>
-        {content}
-      </a>
-    );
-  }
-  return <div className={cls}>{content}</div>;
+  return (
+    <Link
+      to="/escuelas/instituciones/$slug"
+      params={{ slug: institucion.slug }}
+      className={cls}
+      aria-label={institucion.nombre}
+    >
+      {institucion.logo_url ? (
+        <img
+          src={institucion.logo_url}
+          alt={institucion.nombre}
+          className="h-5 w-auto max-w-16 object-contain"
+        />
+      ) : (
+        // Sin logo cargado: el nombre queda como fallback visible — el
+        // pill NUNCA se ve vacío.
+        <span
+          className={cn("text-sm font-medium", variant === "dark" ? "text-background" : "text-ink")}
+        >
+          {institucion.nombre}
+        </span>
+      )}
+    </Link>
+  );
 }
 
 /** "Presentado por" — instituciones co-presentadoras (ej. "Rambla" + "Filmar").
  * Data-driven: sin instituciones vinculadas, no se muestra nada (Jime y el
  * resto de los talleres sin institución siguen viéndose igual que siempre).
  *
- * Debajo, si alguna institución tiene MÁS de 1 taller activo, un link al hub
- * (`/escuelas/instituciones/$slug`) — pedido del dueño 2026-08-20: quien
- * aterriza directo en un taller (no por el hub) no tenía forma de enterarse
- * de que su institución ofrece más. Con exactamente 1 taller no se muestra:
- * el hub mostraría ese mismo taller, un click sin destino nuevo. */
+ * El pill es SOLO el logo (sin nombre al lado — pedido del dueño
+ * 2026-08-20, "no le pondría el texto al lado del logo") y clickeable
+ * hacia el hub interno (`/escuelas/instituciones/$slug`, no `institucion.web`
+ * — siempre existe, a diferencia de la web externa, que muchas instituciones
+ * no cargan). Sin logo cargado, el nombre queda de fallback visible (mismo
+ * destino) para que el pill nunca se vea vacío.
+ *
+ * Debajo, si alguna institución tiene MÁS de 1 taller activo, un segundo
+ * link al mismo hub ("Ver los N talleres", sin repetir el nombre — el logo
+ * de arriba ya identifica cuál institución) — pedido del dueño 2026-08-20:
+ * quien aterriza directo en un taller (no por el hub) no tenía forma de
+ * enterarse de que su institución ofrece más. Con exactamente 1 taller no
+ * se muestra: el hub mostraría ese mismo taller, un click sin destino
+ * nuevo (el logo de arriba igual lleva ahí). */
 export function InstitucionesRow({
   taller,
   variant = "light",
@@ -98,7 +107,7 @@ export function InstitucionesRow({
             variant === "dark" ? "text-background" : "text-ink",
           )}
         >
-          Ver los {inst.talleres_count} talleres de {inst.nombre}
+          Ver los {inst.talleres_count} talleres
           <ArrowRight className="h-3.5 w-3.5" />
         </Link>
       ))}
