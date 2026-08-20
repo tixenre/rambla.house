@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { TallerFoto } from "@/lib/api";
 import { heroImgProps, type HeroPhoto } from "@/lib/studio/hero-photos";
@@ -43,9 +43,11 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
     return () => clearInterval(id);
   }, [fotos.length, paused, reducedMotion, lightboxOpen, selected]);
 
-  if (fotos.length === 0) return null;
-
   // Mismo orden que el hero del catálogo: principal primero, después `orden`.
+  // Calculado ANTES del early-return de abajo (fotos.length === 0) porque
+  // los hooks de acá abajo (useRef/useEffect) lo necesitan — un hook no
+  // puede quedar después de un return condicional (Rules of Hooks: mismo
+  // orden en todos los renders). Sobre `fotos=[]` da `sorted=[]` sin error.
   const sorted = [...fotos].sort(
     (a, b) => Number(b.es_principal) - Number(a.es_principal) || a.orden - b.orden || a.id - b.id,
   );
@@ -58,6 +60,76 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
 
   const portada = sorted[Math.min(selected, sorted.length - 1)];
   const isCarousel = sorted.length > 1;
+
+  // Pedido del dueño: navegar el carrusel con flechas de teclado, swipe
+  // táctil y el gesto de 2 dedos del trackpad — además de los botones/clicks
+  // que ya había. `goPrev`/`goNext` quedan como funciones planas (no
+  // `useCallback`): las usan handlers JSX normales (botones, teclado,
+  // touch), que no tienen el problema de dependencias de un `useEffect`.
+  const goPrev = () => setSelected((i) => (i - 1 + sorted.length) % sorted.length);
+  const goNext = () => setSelected((i) => (i + 1) % sorted.length);
+
+  // Teclado: SOLO mientras el carrusel (o algo adentro) tiene foco — a
+  // diferencia del Lightbox (modal, escucha global), acá secuestrar las
+  // flechas del `window` entero rompería scroll/otros controles de la
+  // página cuando el foco está en cualquier otro lado.
+  function handleCarouselKeyDown(e: React.KeyboardEvent) {
+    if (!isCarousel) return;
+    if (e.key === "ArrowLeft") {
+      e.preventDefault();
+      goPrev();
+    } else if (e.key === "ArrowRight") {
+      e.preventDefault();
+      goNext();
+    }
+  }
+
+  const touchStart = useRef<{ x: number; y: number } | null>(null);
+  function handleTouchStart(e: React.TouchEvent) {
+    const t = e.touches[0];
+    touchStart.current = { x: t.clientX, y: t.clientY };
+  }
+  function handleTouchEnd(e: React.TouchEvent) {
+    if (!touchStart.current || !isCarousel) return;
+    const t = e.changedTouches[0];
+    const dx = t.clientX - touchStart.current.x;
+    const dy = t.clientY - touchStart.current.y;
+    touchStart.current = null;
+    // Umbral + más horizontal que vertical: swipe intencional, no un toque
+    // que tiembla un poco al scrollear la página verticalmente.
+    if (Math.abs(dx) > 40 && Math.abs(dx) > Math.abs(dy)) {
+      if (dx > 0) goPrev();
+      else goNext();
+    }
+  }
+
+  // Wheel = el gesto de 2 dedos del trackpad (deltaX dominante). Listener
+  // NATIVO vía ref, no el `onWheel` sintético de React: React marca
+  // wheel/touchstart/touchmove como passive por default (perf), así que un
+  // `e.preventDefault()` adentro de un `onWheel` de JSX se ignora en
+  // silencio — necesitamos bloquear el scroll horizontal real de la página
+  // mientras se navega. Throttle porque UN swipe dispara muchos eventos
+  // wheel seguidos (si no, salta varias fotos de una).
+  const carouselRef = useRef<HTMLDivElement>(null);
+  const lastWheelNav = useRef(0);
+  useEffect(() => {
+    const el = carouselRef.current;
+    if (!el || !isCarousel) return;
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      e.preventDefault();
+      const now = Date.now();
+      if (now - lastWheelNav.current < 450) return;
+      lastWheelNav.current = now;
+      setSelected((i) =>
+        e.deltaX > 0 ? (i + 1) % sorted.length : (i - 1 + sorted.length) % sorted.length,
+      );
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, [isCarousel, sorted.length]);
+
+  if (fotos.length === 0) return null;
 
   // Antes h-[vh] puro: en pantallas anchas la altura no seguía el ancho, así
   // que el recorte se iba mucho más allá de panorámico (una foto vertical/
@@ -79,7 +151,17 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
         // todo del translateX que ya lo posiciona (confirmado midiendo
         // getBoundingClientRect: apareció un scrollLeft de 466px después de
         // un solo click). clip nunca crea ese contenedor scrolleable.
-        <div className="relative overflow-clip">
+        <div
+          ref={carouselRef}
+          className="relative overflow-clip outline-none focus-visible:ring-2 focus-visible:ring-amber/60 focus-visible:ring-offset-2 focus-visible:ring-offset-ink"
+          tabIndex={0}
+          role="region"
+          aria-roledescription="carousel"
+          aria-label="Galería de fotos"
+          onKeyDown={handleCarouselKeyDown}
+          onTouchStart={handleTouchStart}
+          onTouchEnd={handleTouchEnd}
+        >
           <div
             className="flex transition-transform duration-500 ease-out"
             style={{ transform: `translateX(calc(50% - ${(selected + 0.5) * SLIDE_WIDTH}%))` }}
@@ -130,7 +212,7 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
 
           <button
             type="button"
-            onClick={() => setSelected((i) => (i - 1 + sorted.length) % sorted.length)}
+            onClick={goPrev}
             aria-label="Foto anterior"
             className="absolute left-3 top-1/2 z-10 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
           >
@@ -138,7 +220,7 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
           </button>
           <button
             type="button"
-            onClick={() => setSelected((i) => (i + 1) % sorted.length)}
+            onClick={goNext}
             aria-label="Foto siguiente"
             className="absolute right-3 top-1/2 z-10 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-white/10 text-white transition hover:bg-white/20"
           >
