@@ -36,11 +36,6 @@ function WorkshopCard({ taller }: { taller: Taller }) {
   const portada = [...taller.fotos].sort(
     (a, b) => Number(b.es_principal) - Number(a.es_principal) || a.orden - b.orden || a.id - b.id,
   )[0] as (typeof taller.fotos)[number] | undefined;
-  // Variante en prueba: el logo va sobre la foto (chip semi-opaco, esquina
-  // opuesta a "Sold out") en vez del eyebrow de abajo. Con 2+ instituciones
-  // co-presentando, un solo chip por foto — la primera con logo cargado (el
-  // eyebrow de `InstitucionesRow`/hero sigue mostrando la lista completa).
-  const logoInstitucion = taller.instituciones.find((i) => i.logo_url);
   const imgProps = portada
     ? heroImgProps(
         {
@@ -95,27 +90,12 @@ function WorkshopCard({ taller }: { taller: Taller }) {
             Sold out
           </span>
         )}
-        {/* Logo de la institución sobre la foto — variante en prueba
-            (pedido del dueño) contra el logo en el eyebrow de abajo. Mismo
-            tratamiento de contraste garantizado que "Sold out" (chip
-            semi-opaco con blur, NUNCA forzar el logo a un color: un logo de
-            varios colores se aplana a una mancha sin forma). Esquina
-            opuesta a "Sold out" — pueden coexistir sin pisarse. */}
-        {logoInstitucion && (
-          <span className="absolute right-4 top-4 inline-flex items-center rounded-full bg-background/90 backdrop-blur-sm px-3 py-1.5 shadow-sm">
-            <img
-              src={logoInstitucion.logo_url}
-              alt={logoInstitucion.nombre}
-              className="h-5 w-auto max-w-[6.5rem] object-contain"
-            />
-          </span>
-        )}
       </div>
 
       {/* Cuerpo derecho */}
       <div className="flex-1 px-6 sm:px-8 py-5 flex flex-col gap-3">
         <div>
-          <InstitucionEyebrow taller={taller} size="sm" ocultarInstituciones={!!logoInstitucion} />
+          <InstitucionEyebrow taller={taller} size="sm" />
           <h2
             className="font-display font-black lowercase leading-[0.95] tracking-[-0.015em] text-ink"
             style={{ fontSize: "clamp(1.2rem, 2vw, 1.5rem)" }}

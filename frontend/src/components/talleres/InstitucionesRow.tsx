@@ -60,7 +60,7 @@ export function InstitucionEyebrow({
               className={
                 size === "lg"
                   ? "h-8 sm:h-10 w-auto max-w-[9rem] object-contain"
-                  : "h-5 w-auto max-w-[6rem] object-contain"
+                  : "h-6 w-auto max-w-[8rem] object-contain"
               }
             />
           ) : (
