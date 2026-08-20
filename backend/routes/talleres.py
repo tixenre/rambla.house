@@ -2053,11 +2053,26 @@ _INSTRUCTOR_PERFIL_SPECS = [
 
 @router.get("/admin/instructores")
 def admin_list_instructores(request: Request):
-    """Lista todos los instructores (para el selector del taller)."""
+    """Lista todos los instructores, con los talleres que dicta cada uno —
+    alimenta tanto el selector del taller (ignora `talleres`) como la vista
+    global "Profesores" (la muestra)."""
     require_admin(request)
     with get_db() as conn:
         rows = conn.execute("SELECT * FROM instructores ORDER BY nombre").fetchall()
-        return [_instructor_dict(r) for r in rows]
+        talleres_rows = conn.execute(
+            "SELECT ti.instructor_id, t.id, t.nombre, t.slug_base "
+            "FROM taller_instructores ti JOIN talleres t ON t.id = ti.taller_id "
+            "ORDER BY ti.instructor_id, ti.orden"
+        ).fetchall()
+        talleres_por_instructor: dict[int, list[dict]] = {}
+        for tr in talleres_rows:
+            talleres_por_instructor.setdefault(tr["instructor_id"], []).append(
+                {"id": tr["id"], "nombre": tr["nombre"], "slug_base": tr["slug_base"]}
+            )
+        return [
+            {**_instructor_dict(r), "talleres": talleres_por_instructor.get(r["id"], [])}
+            for r in rows
+        ]
 
 
 @router.post("/admin/instructores", status_code=201)
@@ -3101,6 +3116,32 @@ def admin_importar_fotos_institucion(
 
 # ── Inscripciones (admin) ─────────────────────────────────────────────────────
 
+def _inscripcion_dict(row, *, con_taller: bool = False) -> dict:
+    d = {
+        "id": row["id"],
+        "nombre": row["nombre"],
+        "email": row["email"],
+        "telefono": row["telefono"],
+        "experiencia": row["experiencia"],
+        "comprobante_url": _comprobante_url_fresca(row["comprobante_key"], row["comprobante_url"]),
+        "en_lista_espera": row["en_lista_espera"],
+        "estado": row["estado"],
+        "edicion_id": row["edicion_id"],
+        "numero_edicion": row["numero_edicion"],
+        "edicion_slug": row["edicion_slug"],
+        "created_at": row["created_at"].isoformat() if row["created_at"] else None,
+        "tyc_aceptado_at": row["tyc_aceptado_at"].isoformat() if row["tyc_aceptado_at"] else None,
+        "modalidad_codigo": row["modalidad_codigo"],
+        "modalidad_label": row["modalidad_label"],
+        "modalidad_monto": row["modalidad_monto"],
+    }
+    if con_taller:
+        d["taller_id"] = row["taller_id"]
+        d["taller_nombre"] = row["taller_nombre"]
+        d["taller_slug"] = row["taller_slug"]
+    return d
+
+
 @router.get("/admin/talleres/{taller_id}/inscripciones")
 def admin_list_inscripciones(taller_id: int, request: Request):
     """Lista todas las inscripciones del concepto (todas sus ediciones)."""
@@ -3116,27 +3157,28 @@ def admin_list_inscripciones(taller_id: int, request: Request):
             """,
             (taller_id,),
         ).fetchall()
-    return [
-        {
-            "id": r["id"],
-            "nombre": r["nombre"],
-            "email": r["email"],
-            "telefono": r["telefono"],
-            "experiencia": r["experiencia"],
-            "comprobante_url": _comprobante_url_fresca(r["comprobante_key"], r["comprobante_url"]),
-            "en_lista_espera": r["en_lista_espera"],
-            "estado": r["estado"],
-            "edicion_id": r["edicion_id"],
-            "numero_edicion": r["numero_edicion"],
-            "edicion_slug": r["edicion_slug"],
-            "created_at": r["created_at"].isoformat() if r["created_at"] else None,
-            "tyc_aceptado_at": r["tyc_aceptado_at"].isoformat() if r["tyc_aceptado_at"] else None,
-            "modalidad_codigo": r["modalidad_codigo"],
-            "modalidad_label": r["modalidad_label"],
-            "modalidad_monto": r["modalidad_monto"],
-        }
-        for r in rows
-    ]
+    return [_inscripcion_dict(r) for r in rows]
+
+
+@router.get("/admin/inscripciones")
+def admin_list_inscripciones_global(request: Request):
+    """Vista "Alumnos" — todas las inscripciones activas de TODOS los
+    talleres con el taller/edición al que pertenece cada una (sidebar
+    "Estudio y talleres", junto a Talleres/Instituciones/Profesores)."""
+    require_admin(request)
+    with get_db() as conn:
+        rows = conn.execute(
+            """
+            SELECT ti.*, e.numero_edicion, e.slug AS edicion_slug,
+                   t.nombre AS taller_nombre, t.slug_base AS taller_slug
+            FROM taller_inscripciones ti
+            JOIN talleres t ON t.id = ti.taller_id
+            LEFT JOIN ediciones_taller e ON e.id = ti.edicion_id
+            WHERE ti.eliminado_at IS NULL
+            ORDER BY ti.created_at DESC
+            """
+        ).fetchall()
+    return [_inscripcion_dict(r, con_taller=True) for r in rows]
 
 
 @router.get("/admin/ediciones/{edicion_id}/inscripciones")

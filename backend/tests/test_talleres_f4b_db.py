@@ -612,3 +612,80 @@ def test_lista_inscripciones_sin_key_cae_al_fallback(taller_base):
 
     listado = t.admin_list_inscripciones_edicion(ed["id"], None)
     assert listado[0]["comprobante_url"] == "https://legacy.example/foto.jpg"
+
+
+def _insertar_instructor(nombre="Test F4b Instructor"):
+    from database import get_db
+
+    with get_db() as conn:
+        row = conn.execute(
+            "INSERT INTO instructores (nombre) VALUES (%s) RETURNING id", (nombre,)
+        ).fetchone()
+        conn.commit()
+    return row["id"]
+
+
+def test_admin_list_instructores_incluye_talleres_vinculados(taller_base):
+    """Vista global "Profesores" (sidebar, #1338-ish): la lista de
+    instructores tiene que traer los talleres que dicta cada uno, no solo
+    su ficha propia — si no, la página global no puede mostrar "quién da
+    qué" sin entrar taller por taller."""
+    from database import get_db
+
+    t = taller_base
+    instructor_id = _insertar_instructor()
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO taller_instructores (taller_id, instructor_id, orden) "
+            "VALUES (%s, %s, 0)",
+            (TALLER_ID, instructor_id),
+        )
+        conn.commit()
+
+    try:
+        listado = t.admin_list_instructores(None)
+        mio = next(i for i in listado if i["id"] == instructor_id)
+        assert mio["talleres"] == [{"id": TALLER_ID, "nombre": "Taller F4b", "slug_base": SLUG}]
+
+        # Un instructor sin ningún taller vinculado no rompe — lista vacía.
+        sin_vinculo_id = _insertar_instructor("Test F4b Sin Taller")
+        try:
+            listado2 = t.admin_list_instructores(None)
+            suelto = next(i for i in listado2 if i["id"] == sin_vinculo_id)
+            assert suelto["talleres"] == []
+        finally:
+            with get_db() as conn:
+                conn.execute("DELETE FROM instructores WHERE id = %s", (sin_vinculo_id,))
+                conn.commit()
+    finally:
+        with get_db() as conn:
+            conn.execute(
+                "DELETE FROM taller_instructores WHERE instructor_id = %s", (instructor_id,)
+            )
+            conn.execute("DELETE FROM instructores WHERE id = %s", (instructor_id,))
+            conn.commit()
+
+
+def test_admin_list_inscripciones_global_incluye_taller_y_excluye_eliminadas(taller_base):
+    """Vista global "Alumnos" (sidebar): todas las inscripciones de todos
+    los talleres, con el taller/edición al que pertenece cada una — y
+    respeta el mismo soft-delete (`eliminado_at`) que el listado scoped a
+    un taller puntual (mismo `_inscripcion_dict`, misma fuente)."""
+    t = taller_base
+    ed = _crear_edicion_activa(t)
+    activa_id = _insertar_inscripcion(ed["id"], en_lista_espera=False, estado="pendiente_sena")
+    eliminada_id = _insertar_inscripcion(
+        ed["id"], en_lista_espera=False, estado="pendiente_sena", email="elim-global@example.com"
+    )
+    t.admin_delete_inscripcion(TALLER_ID, eliminada_id, None)
+
+    listado = t.admin_list_inscripciones_global(None)
+    ids = {r["id"] for r in listado}
+    assert activa_id in ids
+    assert eliminada_id not in ids
+
+    mia = next(r for r in listado if r["id"] == activa_id)
+    assert mia["taller_id"] == TALLER_ID
+    assert mia["taller_nombre"] == "Taller F4b"
+    assert mia["taller_slug"] == SLUG
+    assert mia["edicion_id"] == ed["id"]
