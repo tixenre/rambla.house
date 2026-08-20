@@ -29,19 +29,25 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
   const [lightboxIndex, setLightboxIndex] = useState(0);
   const [selected, setSelected] = useState(0);
   const [paused, setPaused] = useState(false);
+  // Se prende en la PRIMERA navegación manual (teclado/touch/wheel/click) y
+  // apaga el autoplay para siempre — no solo reinicia su cuenta regresiva.
+  // Antes, el autoplay podía volver a disparar en medio de una sesión de
+  // uso activo (una pausa de unos segundos entre gestos alcanzaba) y
+  // competía con lo que el usuario estaba haciendo con el trackpad: se
+  // sentía "raro"/como si saltara solo (bug real reportado por el dueño).
+  const [userInteracted, setUserInteracted] = useState(false);
   const reducedMotion = useReducedMotion();
 
   // Auto-avanza como un carrusel; se detiene con el mouse encima, con el
-  // lightbox abierto (no pelear con la navegación de ahí) o con reduced
-  // motion. `selected` en las deps reinicia el conteo tras un click manual
-  // en una miniatura, en vez de saltar a la próxima segundos después.
+  // lightbox abierto (no pelear con la navegación de ahí), con reduced
+  // motion, o apenas el usuario tocó un control manual una vez.
   useEffect(() => {
-    if (fotos.length <= 1 || paused || reducedMotion || lightboxOpen) return;
+    if (fotos.length <= 1 || paused || reducedMotion || lightboxOpen || userInteracted) return;
     const id = setInterval(() => {
       setSelected((i) => (i + 1) % fotos.length);
     }, AUTOPLAY_MS);
     return () => clearInterval(id);
-  }, [fotos.length, paused, reducedMotion, lightboxOpen, selected]);
+  }, [fotos.length, paused, reducedMotion, lightboxOpen, userInteracted]);
 
   // Mismo orden que el hero del catálogo: principal primero, después `orden`.
   // Calculado ANTES del early-return de abajo (fotos.length === 0) porque
@@ -66,8 +72,14 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
   // que ya había. `goPrev`/`goNext` quedan como funciones planas (no
   // `useCallback`): las usan handlers JSX normales (botones, teclado,
   // touch), que no tienen el problema de dependencias de un `useEffect`.
-  const goPrev = () => setSelected((i) => (i - 1 + sorted.length) % sorted.length);
-  const goNext = () => setSelected((i) => (i + 1) % sorted.length);
+  const goPrev = () => {
+    setUserInteracted(true);
+    setSelected((i) => (i - 1 + sorted.length) % sorted.length);
+  };
+  const goNext = () => {
+    setUserInteracted(true);
+    setSelected((i) => (i + 1) % sorted.length);
+  };
 
   // Teclado: SOLO mientras el carrusel (o algo adentro) tiene foco — a
   // diferencia del Lightbox (modal, escucha global), acá secuestrar las
@@ -103,30 +115,47 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
     }
   }
 
-  // Wheel = el gesto de 2 dedos del trackpad (deltaX dominante). Listener
-  // NATIVO vía ref, no el `onWheel` sintético de React: React marca
-  // wheel/touchstart/touchmove como passive por default (perf), así que un
-  // `e.preventDefault()` adentro de un `onWheel` de JSX se ignora en
-  // silencio — necesitamos bloquear el scroll horizontal real de la página
-  // mientras se navega. Throttle porque UN swipe dispara muchos eventos
-  // wheel seguidos (si no, salta varias fotos de una).
+  // Wheel = el gesto de 2 dedos del trackpad. Acumula el deltaX de TODA la
+  // ráfaga que dispara un swipe físico (el trackpad manda muchos eventos
+  // wheel seguidos, con "momentum" que sigue después de levantar los
+  // dedos) y decide UNA sola vez cuando la ráfaga se queda quieta —
+  // versión anterior navegaba por-evento con throttle, así que un swipe
+  // largo/con momentum podía saltar 2-3 fotos de una (bug real, reportado
+  // por el dueño: "se mueve raro"). `preventDefault()` en TODO evento
+  // horizontal, no solo en el que dispara la navegación — sin eso el
+  // browser sigue viendo delta sin frenar en la parte de la ráfaga que no
+  // navega, y en algunos browsers alcanza para disparar su propio gesto de
+  // "volver atrás" (reportado: "se me fue para la pantalla anterior").
+  // Listener NATIVO vía ref, no el `onWheel` sintético de React: React
+  // marca wheel/touch como passive por default (perf), así que un
+  // `preventDefault()` adentro de un `onWheel` de JSX se ignora en
+  // silencio.
   const carouselRef = useRef<HTMLDivElement>(null);
-  const lastWheelNav = useRef(0);
+  const wheelAccum = useRef(0);
+  const wheelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const el = carouselRef.current;
     if (!el || !isCarousel) return;
     const onWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
       e.preventDefault();
-      const now = Date.now();
-      if (now - lastWheelNav.current < 450) return;
-      lastWheelNav.current = now;
-      setSelected((i) =>
-        e.deltaX > 0 ? (i + 1) % sorted.length : (i - 1 + sorted.length) % sorted.length,
-      );
+      wheelAccum.current += e.deltaX;
+      if (wheelTimer.current) clearTimeout(wheelTimer.current);
+      wheelTimer.current = setTimeout(() => {
+        const total = wheelAccum.current;
+        wheelAccum.current = 0;
+        if (Math.abs(total) < 60) return; // ruido/cola de momentum casi nula
+        setUserInteracted(true);
+        setSelected((i) =>
+          total > 0 ? (i + 1) % sorted.length : (i - 1 + sorted.length) % sorted.length,
+        );
+      }, 100);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      if (wheelTimer.current) clearTimeout(wheelTimer.current);
+    };
   }, [isCarousel, sorted.length]);
 
   if (fotos.length === 0) return null;
@@ -153,7 +182,7 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
         // un solo click). clip nunca crea ese contenedor scrolleable.
         <div
           ref={carouselRef}
-          className="relative overflow-clip outline-none focus-visible:ring-2 focus-visible:ring-amber/60 focus-visible:ring-offset-2 focus-visible:ring-offset-ink"
+          className="relative overflow-clip outline-none [overscroll-behavior-x:none] focus-visible:ring-2 focus-visible:ring-amber/60 focus-visible:ring-offset-2 focus-visible:ring-offset-ink"
           tabIndex={0}
           role="region"
           aria-roledescription="carousel"
@@ -182,6 +211,7 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
                     }`}
                     onClick={() => {
                       if (!active) {
+                        setUserInteracted(true);
                         setSelected(i);
                         return;
                       }
@@ -258,7 +288,10 @@ export function TallerGaleria({ fotos, alt }: { fotos: TallerFoto[]; alt: string
               key={f.id}
               type="button"
               role="listitem"
-              onClick={() => setSelected(i)}
+              onClick={() => {
+                setUserInteracted(true);
+                setSelected(i);
+              }}
               aria-label={`Foto ${i + 1}${f.es_principal ? " (portada)" : ""}`}
               aria-pressed={i === selected}
               className={`shrink-0 w-16 h-16 rounded overflow-hidden border-2 transition-colors ${

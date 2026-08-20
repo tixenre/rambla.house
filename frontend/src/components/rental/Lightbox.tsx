@@ -69,25 +69,42 @@ export function Lightbox({ open, onClose, photos, index, onIndexChange }: Lightb
     }
   }
 
+  // Acumula el deltaX de TODA la ráfaga de un swipe físico (el trackpad
+  // manda muchos eventos wheel seguidos, con "momentum" que sigue después
+  // de levantar los dedos) y decide UNA sola vez cuando la ráfaga se queda
+  // quieta — throttle por-evento saltaba 2-3 fotos en un swipe largo (bug
+  // real, reportado por el dueño: "se mueve raro"). `preventDefault()` en
+  // TODO evento horizontal, no solo el que navega — sin eso el browser ve
+  // delta sin frenar en el resto de la ráfaga y puede disparar su propio
+  // gesto de "volver atrás" (reportado: "se me fue para la pantalla
+  // anterior").
   const imgAreaRef = useRef<HTMLDivElement>(null);
-  const lastWheelNav = useRef(0);
+  const wheelAccum = useRef(0);
+  const wheelTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     const el = imgAreaRef.current;
     if (!open || !el || photos.length <= 1) return;
     const onWheel = (e: WheelEvent) => {
       if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
       e.preventDefault();
-      const now = Date.now();
-      if (now - lastWheelNav.current < 450) return;
-      lastWheelNav.current = now;
-      if (e.deltaX > 0) {
-        if (index < photos.length - 1) onIndexChange(index + 1);
-      } else if (index > 0) {
-        onIndexChange(index - 1);
-      }
+      wheelAccum.current += e.deltaX;
+      if (wheelTimer.current) clearTimeout(wheelTimer.current);
+      wheelTimer.current = setTimeout(() => {
+        const total = wheelAccum.current;
+        wheelAccum.current = 0;
+        if (Math.abs(total) < 60) return;
+        if (total > 0) {
+          if (index < photos.length - 1) onIndexChange(index + 1);
+        } else if (index > 0) {
+          onIndexChange(index - 1);
+        }
+      }, 100);
     };
     el.addEventListener("wheel", onWheel, { passive: false });
-    return () => el.removeEventListener("wheel", onWheel);
+    return () => {
+      el.removeEventListener("wheel", onWheel);
+      if (wheelTimer.current) clearTimeout(wheelTimer.current);
+    };
   }, [open, index, photos.length, onIndexChange]);
 
   if (!open || photos.length === 0) return null;
@@ -120,7 +137,7 @@ export function Lightbox({ open, onClose, photos, index, onIndexChange }: Lightb
       {/* Imagen — pinch-zoom nativo en mobile. */}
       <div
         ref={imgAreaRef}
-        className="flex-1 flex items-center justify-center overflow-auto px-2"
+        className="flex-1 flex items-center justify-center overflow-auto [overscroll-behavior-x:none] px-2"
         onClick={(e) => e.stopPropagation()}
         onTouchStart={handleTouchStart}
         onTouchEnd={handleTouchEnd}
