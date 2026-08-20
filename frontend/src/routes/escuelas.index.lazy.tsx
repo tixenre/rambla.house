@@ -5,12 +5,11 @@ import { ArrowRight, Calendar, MapPin, Users } from "lucide-react";
 import { PublicLayout } from "@/components/rental/shell/PublicLayout";
 import { SectionBanner } from "@/components/rental/landing/SectionBanner";
 import { EmptyState } from "@/design-system/composites/EmptyState";
-import { Separator } from "@/design-system/ui/separator";
 import { Grain } from "@/components/common/Grain";
 import { LogoMark } from "@/components/rental/shell/LogoMark";
-import { InstitucionEyebrow, InstitucionLogoLink } from "@/components/talleres/InstitucionesRow";
+import { InstitucionEyebrow } from "@/components/talleres/InstitucionesRow";
 import { TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
-import { apiGetTalleres, type Institucion, type Taller } from "@/lib/api";
+import { apiGetTalleres, type Taller } from "@/lib/api";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
 import { heroImgProps } from "@/lib/studio/hero-photos";
 
@@ -144,79 +143,6 @@ function SectionLabel({ label }: { label: string }) {
   );
 }
 
-// Deduplica las instituciones que aparecen en un grupo de talleres (por id,
-// primera aparición gana el orden) — insumo del banner de abajo.
-function institucionesUnicas(items: Taller[]): Institucion[] {
-  const vistas = new Map<number, Institucion>();
-  for (const t of items) {
-    for (const inst of t.instituciones) {
-      if (!vistas.has(inst.id)) vistas.set(inst.id, inst);
-    }
-  }
-  return [...vistas.values()];
-}
-
-// Instructores de talleres SIN institución — el instructor dicta la clase
-// por su cuenta, no en nombre de una escuela. Pedido del dueño en vivo:
-// "para el baner de instituciones, pondria las que hay, y despues los
-// profesores independientes que hay" — el banner no es solo de escuelas,
-// es de TODO "quién dio esto": instituciones primero, profesores
-// independientes después. Un taller CON institución no aporta acá aunque
-// tenga instructores propios — esos ya quedan representados por su escuela.
-function instructoresIndependientesUnicos(items: Taller[]): Taller["instructores"] {
-  const vistos = new Map<number, Taller["instructores"][number]>();
-  for (const t of items) {
-    if (t.instituciones.length > 0) continue;
-    for (const ins of t.instructores) {
-      if (!vistos.has(ins.id)) vistos.set(ins.id, ins);
-    }
-  }
-  return [...vistos.values()];
-}
-
-// Banner de "quién dio esto": el punto donde el listado pasa de lo ACTIVO
-// (Próximos + En curso) al ARCHIVO (Ediciones anteriores) — un solo quiebre
-// visual en toda la página, no un divisor repetido por escuela dentro de
-// cada sección (esa primera versión salió mal dos veces: primero muy tenue
-// para leerse como división — "no veo ninguna division" — y al reforzarla
-// quedó claro que además el pedido real era otro — "por que aparece filmar
-// en cada linea? la idea era dividir los pasados con los actuales y
-// proximos, como un baner de marcas, y que los pasados queden debajo",
-// 2026-08-20). A diferencia de la fila "En alianza con" ya rechazada una
-// vez (logo grande flotando arriba de TODO el listado — "parece que todo es
-// de Filmar"), este banner vive pegado a "Ediciones anteriores": el
-// contexto dice que es sobre LO ARCHIVADO, no la página entera. Instituciones
-// primero (logo real — son "marcas"), profesores independientes después
-// (nombre — son personas, no marcas, tratamiento tipográfico en vez de
-// logo). Si lo pasado no tiene ni institución ni instructor suelto (solo
-// talleres propios de Rambla sin instructor cargado), no hay nada que
-// banner-ear — no se muestra.
-function InstitucionesBanner({
-  instituciones,
-  instructoresIndependientes,
-}: {
-  instituciones: Institucion[];
-  instructoresIndependientes: Taller["instructores"];
-}) {
-  if (instituciones.length === 0 && instructoresIndependientes.length === 0) return null;
-  return (
-    <div className="flex items-center gap-4 mt-1 mb-2 flex-wrap">
-      {instituciones.map((inst) => (
-        <InstitucionLogoLink key={`inst-${inst.id}`} institucion={inst} size="sm" />
-      ))}
-      {instructoresIndependientes.map((ins) => (
-        <span
-          key={`prof-${ins.id}`}
-          className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa whitespace-nowrap"
-        >
-          {ins.nombre}
-        </span>
-      ))}
-      <Separator className="flex-1" />
-    </div>
-  );
-}
-
 // ── Page ──────────────────────────────────────────────────────────────────────
 function TalleresPage() {
   const contact = useBusinessContact();
@@ -250,9 +176,6 @@ function TalleresPage() {
   const pasadosApi = talleres
     .filter((t) => new Date(t.fecha_fin + "T00:00:00") < hoy)
     .sort((a, b) => new Date(b.fecha_inicio).getTime() - new Date(a.fecha_inicio).getTime());
-
-  const institucionesPasadas = institucionesUnicas(pasadosApi);
-  const instructoresPasados = instructoresIndependientesUnicos(pasadosApi);
 
   const hayTalleres = talleres.length > 0;
 
@@ -310,10 +233,6 @@ function TalleresPage() {
 
         {pasadosApi.length > 0 && (
           <>
-            <InstitucionesBanner
-              instituciones={institucionesPasadas}
-              instructoresIndependientes={instructoresPasados}
-            />
             <SectionLabel label="Ediciones anteriores" />
             {pasadosApi.map((t) => (
               <WorkshopCard key={t.id} taller={t} />
