@@ -638,9 +638,9 @@ export function EquipoFormDialog({
             fotos={gallery.fotos}
             onUpload={gallery.handleGalleryUpload}
             onDelete={gallery.onDelete}
+            onDeleteMany={gallery.handleGalleryDeleteMany}
             onReorder={gallery.handleGalleryReorder}
             onSetPrincipal={gallery.handleGallerySetPrincipal}
-            uploading={gallery.galleryUploading}
             disabled={gallery.mutating}
           />
         </section>

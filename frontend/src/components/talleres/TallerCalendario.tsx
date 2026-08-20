@@ -231,6 +231,16 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
           }}
           className={cellSizeClass}
           classNames={{
+            // Sin flechas prev/next — mismo criterio que `onDayClick`/
+            // `pointer-events-none` de arriba: esto no es un selector, es un
+            // dato mostrado. `numberOfMonths` ya muestra TODOS los meses del
+            // taller a la vez (`startMonth`/`endMonth` acotan el rango
+            // exacto) — no hay ningún mes más al que "navegar", así que las
+            // flechas solo insinuaban una interacción que no existe (pedido
+            // explícito: "solo se muestran los meses de los rodajes, no es
+            // para seleccionar nada"). `month_caption` (el nombre del mes)
+            // es un nodo aparte — se sigue viendo.
+            nav: "hidden",
             // md:flex-wrap (no nowrap) a propósito: con el --cell-size chico
             // de arriba, N meses entran lado a lado en una fila — pero si algún
             // taller tuviera tantos meses que igual no entren, esto los manda a

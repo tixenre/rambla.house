@@ -1312,6 +1312,78 @@ def workshop_page(slug: str, request: Request):
         return _serve_frontend("index.html")
 
 
+@app.get("/escuelas/instituciones/{slug}", include_in_schema=False)
+def institucion_page(slug: str):
+    """Sirve el SPA del hub de institución con OG tags dinámicos (foto
+    destacada o logo) + JSON-LD `Organization` — mismo patrón que
+    `workshop_page` de acá arriba, para crawlers/agentes que no ejecutan JS
+    (WhatsApp entre ellos: sin esto, compartir el link del hub mostraba el
+    OG genérico del sitio en vez de la institución real — el `head()` de la
+    ruta cliente, `escuelas.instituciones.$slug.tsx`, ya arma lo mismo, pero
+    solo aplica DESPUÉS de que React hidrata, y esta app es SPA pura, sin
+    SSR). Ante cualquier error sirve el index.html plano — nunca rompe la
+    página."""
+    try:
+        index_file = FRONT_NEW / "index.html"
+        if not index_file.exists():
+            return _serve_frontend("index.html")
+        conn = get_db()
+        try:
+            ins_row = conn.execute(
+                "SELECT id, nombre, descripcion, logo_url FROM instituciones WHERE slug = %s",
+                (slug,),
+            ).fetchone()
+            if ins_row is None:
+                return _serve_frontend("index.html")
+            foto_row = conn.execute(
+                "SELECT url FROM institucion_fotos "
+                "WHERE institucion_id = %s AND es_principal = TRUE LIMIT 1",
+                (ins_row["id"],),
+            ).fetchone()
+        finally:
+            conn.close()
+        nombre = (ins_row["nombre"] or "").strip()
+        desc_raw = (ins_row["descripcion"] or "").strip()
+        if len(desc_raw) > 200:
+            desc_raw = desc_raw[:197].rstrip() + "…"
+        if not desc_raw:
+            desc_raw = f"Talleres de {nombre} en Rambla, Mar del Plata."
+        title = f"Talleres de {nombre} en Rambla"
+        # Misma preferencia que el resto de las páginas con OG dinámico: la
+        # foto más rica primero (foto_destacada, pensada para una card
+        # social), el logo como segunda opción (mejor que nada, aunque su
+        # proporción no sea ideal), y recién ahí el genérico del sitio. El
+        # `head()` del cliente (mismo route) solo usa el logo porque ahí ya
+        # se ve la página real con JS corriendo; acá, sin JS, el `og:image`
+        # es lo único que un link preview llega a mostrar.
+        og_img = (foto_row["url"].strip() if foto_row and foto_row["url"] else "")
+        if not og_img:
+            og_img = (ins_row["logo_url"] or "").strip()
+        if not og_img.startswith("http"):
+            og_img = f"{SITE_URL}/og-image.png"
+        institucion_url = f"{SITE_URL}/escuelas/instituciones/{slug}"
+        html_text = _inject_og_meta(
+            index_file.read_text(encoding="utf-8"),
+            title=title, description=desc_raw, image=og_img, url=institucion_url,
+        )
+        org_schema: dict = {
+            "@context": "https://schema.org",
+            "@type": "Organization",
+            "name": nombre,
+            "description": desc_raw,
+            "url": institucion_url,
+        }
+        if og_img.startswith("http"):
+            org_schema["logo"] = og_img
+        html_text = _inject_json_ld(html_text, org_schema)
+        return HTMLResponse(content=html_text)
+    except Exception:
+        logger.warning(
+            "OG injection falló para la institución %s — sirvo index plano", slug, exc_info=True
+        )
+        return _serve_frontend("index.html")
+
+
 @app.get("/preguntas-frecuentes", include_in_schema=False)
 def preguntas_frecuentes_page():
     """Sirve el SPA de preguntas frecuentes, inyectando FAQPage JSON-LD

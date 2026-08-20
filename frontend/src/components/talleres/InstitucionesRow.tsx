@@ -1,9 +1,56 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { Taller } from "@/lib/api";
+import type { Institucion, Taller } from "@/lib/api";
 
 type Variant = "light" | "dark";
+
+/** Logo (o nombre en texto si no hay logo cargado) de UNA institución,
+ * clickeable a su hub — la pieza atómica que reusan `InstitucionEyebrow`
+ * (una fila por taller) y `InstitucionesStrip` (la fila "En alianza con"
+ * del listado `/escuelas`, de-dupe entre talleres). Nunca se recrea el
+ * ternario logo-o-texto en un tercer lugar. */
+export function InstitucionLogoLink({
+  institucion,
+  size = "lg",
+  asLink = true,
+}: {
+  institucion: Institucion;
+  size?: "lg" | "sm";
+  // false cuando el caller YA vive adentro de un <a>/<Link> ajeno (ej.
+  // WorkshopCard: la card entera del listado es un solo Link) — anidar
+  // <a> es HTML inválido y React tira error de hidratación en runtime.
+  // Sin link, el logo sigue siendo clickeable indirectamente vía el link
+  // del padre (misma UX que hoy — la card entera navega al taller).
+  asLink?: boolean;
+}) {
+  const content = institucion.logo_url ? (
+    <img
+      src={institucion.logo_url}
+      alt={institucion.nombre}
+      className={
+        size === "lg"
+          ? "h-8 sm:h-10 w-auto max-w-[9rem] object-contain"
+          : "h-6 w-auto max-w-[8rem] object-contain"
+      }
+    />
+  ) : (
+    <span className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa">
+      {institucion.nombre}
+    </span>
+  );
+  if (!asLink) return content;
+  return (
+    <Link
+      to="/escuelas/instituciones/$slug"
+      params={{ slug: institucion.slug }}
+      aria-label={`Presentado por ${institucion.nombre}`}
+      className="transition hover:opacity-70"
+    >
+      {content}
+    </Link>
+  );
+}
 
 /** Eyebrow de arriba del H1 (`TallerHero`, función `Titulo`): "Taller" en
  * rosa por default — o el logo (nombre en texto si no hay logo cargado) de
@@ -22,41 +69,36 @@ type Variant = "light" | "dark";
 export function InstitucionEyebrow({
   taller,
   ocultarInstituciones = false,
+  size = "lg",
+  asLink = true,
 }: {
   taller: Taller;
   ocultarInstituciones?: boolean;
+  // "lg" = hero del taller (default, sin cambios). "sm" = eyebrow de una
+  // card compacta (ej. WorkshopCard del listado /escuelas) — mismo
+  // componente, logo más chico para no pesar más que el título de la card.
+  size?: "lg" | "sm";
+  // false cuando este eyebrow vive DENTRO de un <Link> ajeno (ej.
+  // WorkshopCard, donde la card entera es un solo Link al taller) —
+  // evita anidar <a> (HTML inválido, error de hidratación). Ver
+  // `InstitucionLogoLink`.
+  asLink?: boolean;
 }) {
+  const mb = size === "lg" ? "mb-4" : "mb-2";
   if (ocultarInstituciones || taller.instituciones.length === 0) {
-    return <p className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa mb-4">Taller</p>;
+    return (
+      <p className={`font-mono text-2xs tracking-[0.3em] uppercase text-rosa ${mb}`}>Taller</p>
+    );
   }
   return (
-    <div className="flex flex-wrap items-center gap-4 mb-4">
+    <div className={`flex flex-wrap items-center gap-3 ${mb}`}>
+      {/* Logo desnudo — sin caja/borde alrededor: mismo tratamiento que
+          `InstitucionFotoHero` (el hero propio de la institución). Un pill
+          con borde se leía como "otro botón" compitiendo con el CTA rosa
+          (feedback del dueño en vivo, con captura: "queda chico, raro con
+          muchas cajitas chiquitas, no parece integrado al diseño"). */}
       {taller.instituciones.map((inst) => (
-        <Link
-          key={inst.id}
-          to="/escuelas/instituciones/$slug"
-          params={{ slug: inst.slug }}
-          aria-label={`Presentado por ${inst.nombre}`}
-          className="transition hover:opacity-70"
-        >
-          {inst.logo_url ? (
-            // Logo desnudo — sin caja/borde alrededor: mismo tratamiento
-            // que `InstitucionFotoHero` (el hero propio de la institución).
-            // Un pill con borde se leía como "otro botón" compitiendo con
-            // el CTA rosa (feedback del dueño en vivo, con captura: "queda
-            // chico, raro con muchas cajitas chiquitas, no parece
-            // integrado al diseño") — mismo criterio acá.
-            <img
-              src={inst.logo_url}
-              alt={inst.nombre}
-              className="h-8 sm:h-10 w-auto max-w-[9rem] object-contain"
-            />
-          ) : (
-            <span className="font-mono text-2xs tracking-[0.3em] uppercase text-rosa">
-              {inst.nombre}
-            </span>
-          )}
-        </Link>
+        <InstitucionLogoLink key={inst.id} institucion={inst} size={size} asLink={asLink} />
       ))}
     </div>
   );

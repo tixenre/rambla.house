@@ -7,6 +7,8 @@ import { SectionBanner } from "@/components/rental/landing/SectionBanner";
 import { EmptyState } from "@/design-system/composites/EmptyState";
 import { Grain } from "@/components/common/Grain";
 import { LogoMark } from "@/components/rental/shell/LogoMark";
+import { InstitucionEyebrow } from "@/components/talleres/InstitucionesRow";
+import { TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
 import { apiGetTalleres, type Taller } from "@/lib/api";
 import { useBusinessContact } from "@/hooks/useBusinessContact";
 import { heroImgProps } from "@/lib/studio/hero-photos";
@@ -94,7 +96,7 @@ function WorkshopCard({ taller }: { taller: Taller }) {
       {/* Cuerpo derecho */}
       <div className="flex-1 px-6 sm:px-8 py-5 flex flex-col gap-3">
         <div>
-          <p className="font-mono text-2xs tracking-[0.25em] uppercase text-rosa mb-2">Taller</p>
+          <InstitucionEyebrow taller={taller} size="sm" asLink={false} />
           <h2
             className="font-display font-black lowercase leading-[0.95] tracking-[-0.015em] text-ink"
             style={{ fontSize: "clamp(1.2rem, 2vw, 1.5rem)" }}
@@ -181,7 +183,10 @@ function TalleresPage() {
     <PublicLayout topBar={{ variant: "escuela" }}>
       <SectionBanner section="escuela" />
 
-      <div className="max-w-[900px] mx-auto px-4 sm:px-6 py-10 sm:py-14 flex flex-col gap-4">
+      <div
+        className="mx-auto py-10 sm:py-14 flex flex-col gap-4"
+        style={{ width: TALLER_CONTENT_WIDTH }}
+      >
         {isLoading && (
           <div className="py-16 text-center text-muted-foreground text-sm">Cargando talleres…</div>
         )}

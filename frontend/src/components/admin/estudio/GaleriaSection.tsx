@@ -1,11 +1,17 @@
-import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { PhotoGallery, type GalleryFoto } from "@/components/common/PhotoGallery";
 import { uploadStudioFile } from "@/lib/studio/photos";
 import { estudioAdminApi, type EstudioConfig, type FotoOrdenItem } from "@/lib/admin/api";
+import { runInBatches } from "@/lib/concurrency";
 import { Section } from "./shared";
+
+// Espejo de GaleriaEdicionSection (talleres): de a tandas chicas para no
+// agotar el rate limit de `upload-foto` (20/minuto, backend) con un lote
+// grande de una sola vez.
+const UPLOAD_CONCURRENCY = 3;
+const DELETE_CONCURRENCY = 5;
 
 export function GaleriaSection({
   fotos,
@@ -15,20 +21,46 @@ export function GaleriaSection({
   onChanged: () => void;
 }) {
   const qc = useQueryClient();
-  const [uploading, setUploading] = useState(false);
 
-  async function handleUpload(files: FileList) {
-    setUploading(true);
-    try {
-      const uploads = Array.from(files).map((f) => uploadStudioFile(f));
-      await Promise.all(uploads);
-      toast.success(files.length === 1 ? "Foto subida" : `${files.length} fotos subidas`);
-      onChanged();
-    } catch (e) {
-      toast.error("Error subiendo foto", { description: (e as Error).message });
-    } finally {
-      setUploading(false);
+  async function handleUpload(
+    files: File[],
+    onFileSettled: (file: File, ok: boolean, error?: string) => void,
+  ) {
+    const { ok, failed } = await runInBatches(
+      files,
+      UPLOAD_CONCURRENCY,
+      (file) => uploadStudioFile(file),
+      (file, fileOk, error) =>
+        onFileSettled(
+          file,
+          fileOk,
+          fileOk ? undefined : ((error as Error)?.message ?? "Error al subir"),
+        ),
+    );
+    if (failed === 0) {
+      toast.success(ok === 1 ? "Foto subida" : `${ok} fotos subidas`);
+    } else if (ok === 0) {
+      toast.error("No se pudo subir ninguna foto");
+    } else {
+      toast.warning(`${ok} fotos subidas, ${failed} con error`, {
+        description: "Probá subir de nuevo las que fallaron.",
+      });
     }
+    if (ok > 0) onChanged();
+  }
+
+  async function handleDeleteMany(ids: number[]) {
+    const { ok, failed } = await runInBatches(ids, DELETE_CONCURRENCY, (id) =>
+      estudioAdminApi.deleteFoto(id),
+    );
+    if (failed === 0) {
+      toast.success(ok === 1 ? "Foto eliminada" : `${ok} fotos eliminadas`);
+    } else if (ok === 0) {
+      toast.error("No se pudo eliminar ninguna foto");
+    } else {
+      toast.warning(`${ok} fotos eliminadas, ${failed} con error`);
+    }
+    if (ok > 0) onChanged();
   }
 
   const deleteMut = useMutation({
@@ -70,9 +102,9 @@ export function GaleriaSection({
         fotos={fotos}
         onUpload={handleUpload}
         onDelete={(id) => deleteMut.mutate(id)}
+        onDeleteMany={handleDeleteMany}
         onReorder={handleReorder}
         onSetPrincipal={handleSetPrincipal}
-        uploading={uploading}
         disabled={deleteMut.isPending || reorderMut.isPending}
       />
     </Section>

@@ -248,16 +248,6 @@ export function WorkshopInscripcionForm({ taller, onSuccess }: Props) {
             ? "Los cupos están completos, pero te anotamos en la lista de espera. Te avisamos si se libera un lugar."
             : "Recibimos tu inscripción. Te enviamos un mail de confirmación con los datos de pago."}
         </p>
-        {!isEspera && (
-          <div className="mt-6 rounded-xl bg-muted/40 p-4 text-left text-sm">
-            <p className="font-medium text-ink mb-2">
-              Datos para la seña ({formatARS(taller.precio_sena)})
-            </p>
-            <p className="text-muted-foreground leading-relaxed">
-              <DatosPago cuentas={taller.cuentas_pago} variant="success" />
-            </p>
-          </div>
-        )}
         {taller.mensaje_confirmacion && (
           <p className="mt-5 text-xs text-muted-foreground">{taller.mensaje_confirmacion}</p>
         )}

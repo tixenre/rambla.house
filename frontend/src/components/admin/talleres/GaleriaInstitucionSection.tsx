@@ -1,16 +1,17 @@
-import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 
 import { PhotoGallery, type GalleryFoto } from "@/components/common/PhotoGallery";
 import { uploadInstitucionFile } from "@/lib/talleres/photos";
 import { talleresAdminApi } from "@/lib/admin/api";
+import { runInBatches } from "@/lib/concurrency";
 import type { InstitucionFotoOrdenItem } from "@/lib/admin/api/types";
 
 // Mismo tope que GaleriaEdicionSection: de a tandas chicas, no todo el
 // FileList a la vez (agotaba el rate limit de upload-foto en la primera
 // ráfaga).
 const UPLOAD_CONCURRENCY = 3;
+const DELETE_CONCURRENCY = 5;
 
 /**
  * Galería de fotos propia de una INSTITUCIÓN — espejo exacto de
@@ -31,34 +32,46 @@ export function GaleriaInstitucionSection({
   onChanged: () => void;
 }) {
   const qc = useQueryClient();
-  const [uploading, setUploading] = useState(false);
 
-  async function handleUpload(files: FileList) {
-    setUploading(true);
-    const fileArray = Array.from(files);
-    let fallidas = 0;
-    try {
-      for (let i = 0; i < fileArray.length; i += UPLOAD_CONCURRENCY) {
-        const tanda = fileArray.slice(i, i + UPLOAD_CONCURRENCY);
-        const resultados = await Promise.allSettled(
-          tanda.map((f) => uploadInstitucionFile(institucionId, f)),
-        );
-        fallidas += resultados.filter((r) => r.status === "rejected").length;
-      }
-      const subidas = fileArray.length - fallidas;
-      if (fallidas === 0) {
-        toast.success(subidas === 1 ? "Foto subida" : `${subidas} fotos subidas`);
-      } else if (subidas === 0) {
-        toast.error("No se pudo subir ninguna foto");
-      } else {
-        toast.warning(`${subidas} fotos subidas, ${fallidas} con error`, {
-          description: "Probá subir de nuevo las que fallaron.",
-        });
-      }
-      if (subidas > 0) onChanged();
-    } finally {
-      setUploading(false);
+  async function handleUpload(
+    files: File[],
+    onFileSettled: (file: File, ok: boolean, error?: string) => void,
+  ) {
+    const { ok, failed } = await runInBatches(
+      files,
+      UPLOAD_CONCURRENCY,
+      (file) => uploadInstitucionFile(institucionId, file),
+      (file, fileOk, error) =>
+        onFileSettled(
+          file,
+          fileOk,
+          fileOk ? undefined : ((error as Error)?.message ?? "Error al subir"),
+        ),
+    );
+    if (failed === 0) {
+      toast.success(ok === 1 ? "Foto subida" : `${ok} fotos subidas`);
+    } else if (ok === 0) {
+      toast.error("No se pudo subir ninguna foto");
+    } else {
+      toast.warning(`${ok} fotos subidas, ${failed} con error`, {
+        description: "Probá subir de nuevo las que fallaron.",
+      });
     }
+    if (ok > 0) onChanged();
+  }
+
+  async function handleDeleteMany(ids: number[]) {
+    const { ok, failed } = await runInBatches(ids, DELETE_CONCURRENCY, (id) =>
+      talleresAdminApi.deleteFotoInstitucion(id),
+    );
+    if (failed === 0) {
+      toast.success(ok === 1 ? "Foto eliminada" : `${ok} fotos eliminadas`);
+    } else if (ok === 0) {
+      toast.error("No se pudo eliminar ninguna foto");
+    } else {
+      toast.warning(`${ok} fotos eliminadas, ${failed} con error`);
+    }
+    if (ok > 0) onChanged();
   }
 
   const deleteMut = useMutation({
@@ -99,9 +112,9 @@ export function GaleriaInstitucionSection({
         fotos={fotos}
         onUpload={handleUpload}
         onDelete={(id) => deleteMut.mutate(id)}
+        onDeleteMany={handleDeleteMany}
         onReorder={handleReorder}
         onSetPrincipal={handleSetPrincipal}
-        uploading={uploading}
         disabled={deleteMut.isPending || reorderMut.isPending}
       />
     </div>

@@ -29,7 +29,7 @@ export const Route = createFileRoute("/escuelas/instituciones/$slug")({
     }
     const { institucion, talleres } = data;
     const url = `${SITE_URL}/escuelas/instituciones/${institucion.slug}`;
-    const title = `Talleres con ${institucion.nombre} — Rambla Rental`;
+    const title = `Talleres de ${institucion.nombre} en Rambla`;
     const desc = (institucion.descripcion || `Talleres de ${institucion.nombre} en Rambla.`)
       .slice(0, 155)
       .replace(/\s+/g, " ")
