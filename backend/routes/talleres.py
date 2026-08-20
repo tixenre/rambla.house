@@ -569,6 +569,25 @@ def get_taller(slug: str, request: Request):
             fotos=_get_edicion_fotos(conn, row["id"]),
             cuentas_pago=_get_cuentas_pago(conn, row["id"]),
         )
+        # `talleres_count` por institución — SOLO acá, no en `_institucion_dict`
+        # (ese helper corre N veces por listado, ver comentario en
+        # `get_institucion`; sumarle esta cuenta ahí sería N+1 en el catálogo).
+        # Acá el loop está acotado a las instituciones co-presentadoras de UN
+        # taller (1, casi siempre), así que una query extra por institución no
+        # pesa. Alimenta el link "Ver los N talleres de X" hacia el hub
+        # (pedido del dueño 2026-08-20: desde un taller individual no había
+        # forma de enterarse de que su institución tenía más talleres).
+        for inst in d["instituciones"]:
+            cnt = conn.execute(
+                """
+                SELECT COUNT(DISTINCT ti.taller_id) AS n
+                FROM taller_instituciones ti
+                JOIN ediciones_taller e ON e.taller_id = ti.taller_id AND e.activo = TRUE
+                WHERE ti.institucion_id = %s
+                """,
+                (inst["id"],),
+            ).fetchone()
+            inst["talleres_count"] = cnt["n"] if cnt else 0
 
         # Próxima edición: misma concepto (taller_id), numero_edicion mayor
         pr = conn.execute(

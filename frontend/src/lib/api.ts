@@ -483,6 +483,11 @@ export type Institucion = {
     url_avif: string | null;
     url_sm_avif: string | null;
   } | null;
+  // Cantidad de talleres activos de esta institución — SOLO poblada por
+  // GET /talleres/{slug} (get_taller), no por list_talleres/get_institucion
+  // (el hub no necesita linkearse a sí mismo). Alimenta el link "Ver los N
+  // talleres de X" en InstitucionesRow, hacia /escuelas/instituciones/$slug.
+  talleres_count?: number;
 };
 
 export type Taller = {
