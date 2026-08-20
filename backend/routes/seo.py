@@ -137,8 +137,30 @@ def sitemap():
                 ORDER BY c.nombre
             """).fetchall()
             # Workshops individuales — indexables por Google y agentes LLM.
+            # `/escuelas/{slug}` resuelve contra `ediciones_taller.slug`, NO
+            # `talleres.slug` (_get_edicion_row en routes/talleres.py): un
+            # taller con más de una edición tiene un slug DISTINTO por
+            # edición, y solo coinciden por construcción para la primera
+            # (`slug_base`). Leer `talleres.slug` dejaba afuera del sitemap
+            # cualquier edición #2+ y podía listar una edición ya vencida
+            # (`activo=FALSE`) para siempre (bug 2026-08-20). Mismo filtro
+            # que `GET /talleres` (routes/talleres.py::list_talleres, "una
+            # card por edición") — fuente única de qué está públicamente vivo.
             talleres = conn.execute(
-                "SELECT slug FROM talleres WHERE activo = TRUE ORDER BY slug"
+                """
+                SELECT e.slug, e.updated_at
+                FROM ediciones_taller e
+                JOIN talleres t ON t.id = e.taller_id
+                WHERE e.activo = TRUE AND t.activo = TRUE
+                ORDER BY e.slug
+                """
+            ).fetchall()
+
+            # Hubs de institución (/escuelas/instituciones/{slug}) — indexables
+            # (main.py::institucion_page arma OG/JSON-LD dedicado) pero no
+            # tenían entrada en el sitemap hasta ahora.
+            instituciones = conn.execute(
+                "SELECT slug, updated_at FROM instituciones ORDER BY slug"
             ).fetchall()
 
         for r in equipos:
@@ -170,14 +192,34 @@ def sitemap():
             })
 
         for r in talleres:
-            taller_slug = (r["slug"] or "").strip()
-            if taller_slug:
-                urls.append({
-                    "loc": f"{SITE_URL}/escuelas/{taller_slug}",
-                    "lastmod": today,
-                    "changefreq": "monthly",
-                    "priority": "0.7",
-                })
+            edicion_slug = (r["slug"] or "").strip()
+            if not edicion_slug:
+                continue
+            lastmod_raw = r["updated_at"]
+            lastmod = (
+                lastmod_raw.strftime("%Y-%m-%d") if hasattr(lastmod_raw, "strftime") else today
+            )
+            urls.append({
+                "loc": f"{SITE_URL}/escuelas/{edicion_slug}",
+                "lastmod": lastmod,
+                "changefreq": "monthly",
+                "priority": "0.7",
+            })
+
+        for r in instituciones:
+            inst_slug = (r["slug"] or "").strip()
+            if not inst_slug:
+                continue
+            lastmod_raw = r["updated_at"]
+            lastmod = (
+                lastmod_raw.strftime("%Y-%m-%d") if hasattr(lastmod_raw, "strftime") else today
+            )
+            urls.append({
+                "loc": f"{SITE_URL}/escuelas/instituciones/{inst_slug}",
+                "lastmod": lastmod,
+                "changefreq": "monthly",
+                "priority": "0.6",
+            })
     except Exception:
         logger.error("sitemap: error al generar URLs de equipos y categorías desde BD", exc_info=True)
 
