@@ -310,11 +310,11 @@ function TalleresPage() {
 
         {pasadosApi.length > 0 && (
           <>
-            <SectionLabel label="Ediciones anteriores" />
             <InstitucionesBanner
               instituciones={institucionesPasadas}
               instructoresIndependientes={instructoresPasados}
             />
+            <SectionLabel label="Ediciones anteriores" />
             {pasadosApi.map((t) => (
               <WorkshopCard key={t.id} taller={t} />
             ))}
