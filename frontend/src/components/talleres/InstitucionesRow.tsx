@@ -17,7 +17,10 @@ function InstitucionPill({
     <Link
       to="/escuelas/instituciones/$slug"
       params={{ slug: institucion.slug }}
-      aria-label={institucion.nombre}
+      // Sin "Presentado por" visible al lado (pedido del dueño 2026-08-20:
+      // "que sea solo el logo"), el aria-label es el único contexto que le
+      // queda a un lector de pantalla — lo mantiene explícito.
+      aria-label={`Presentado por ${institucion.nombre}`}
       className="transition hover:opacity-70"
     >
       {institucion.logo_url ? (
@@ -50,16 +53,18 @@ function InstitucionPill({
   );
 }
 
-/** "Presentado por" — instituciones co-presentadoras (ej. "Rambla" + "Filmar").
+/** Logo(s) de las instituciones co-presentadoras (ej. "Rambla" + "Filmar").
  * Data-driven: sin instituciones vinculadas, no se muestra nada (Jime y el
  * resto de los talleres sin institución siguen viéndose igual que siempre).
  *
- * El pill es SOLO el logo (sin nombre al lado — pedido del dueño
- * 2026-08-20, "no le pondría el texto al lado del logo") y clickeable
- * hacia el hub interno (`/escuelas/instituciones/$slug`, no `institucion.web`
- * — siempre existe, a diferencia de la web externa, que muchas instituciones
- * no cargan). Sin logo cargado, el nombre queda de fallback visible (mismo
- * destino) para que el pill nunca se vea vacío.
+ * Sin ningún label visible ("Presentado por" se sacó — pedido del dueño
+ * 2026-08-20, "que sea solo el logo"; queda como `aria-label` de cada link,
+ * único contexto que le llega a un lector de pantalla ahora). El pill es
+ * SOLO el logo (sin nombre al lado tampoco — mismo pedido, un paso antes)
+ * y clickeable hacia el hub interno (`/escuelas/instituciones/$slug`, no
+ * `institucion.web` — siempre existe, a diferencia de la web externa, que
+ * muchas instituciones no cargan). Sin logo cargado, el nombre queda de
+ * fallback visible (mismo destino) para que el link nunca se vea vacío.
  *
  * Debajo, si alguna institución tiene MÁS de 1 taller activo, un segundo
  * link al mismo hub ("Ver los N talleres", sin repetir el nombre — el logo
@@ -89,20 +94,10 @@ export function InstitucionesRow({
   const conMasTalleres = taller.instituciones.filter((i) => (i.talleres_count ?? 0) > 1);
   return (
     <div className={cn("flex flex-col gap-2", className)}>
-      <div className="flex flex-col gap-3">
-        <p
-          className={cn(
-            "text-xs font-mono uppercase tracking-widest",
-            variant === "dark" ? "text-background/50" : "text-muted-foreground",
-          )}
-        >
-          Presentado por
-        </p>
-        <div className="flex flex-wrap items-center gap-4">
-          {taller.instituciones.map((inst) => (
-            <InstitucionPill key={inst.id} institucion={inst} variant={variant} />
-          ))}
-        </div>
+      <div className="flex flex-wrap items-center gap-4">
+        {taller.instituciones.map((inst) => (
+          <InstitucionPill key={inst.id} institucion={inst} variant={variant} />
+        ))}
       </div>
       {conMasTalleres.map((inst) => (
         <Link
