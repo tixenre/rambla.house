@@ -131,22 +131,25 @@ export function TallerCalendario({ sesiones, horario }: TallerCalendarioProps) {
   // Todos los meses que abarca el taller, uno al lado del otro (antes topeaba
   // en 3 y un taller de 4+ meses escondía el resto detrás de la navegación).
   const numberOfMonths = lastMonthKey - firstMonthKey + 1;
-  // En mobile los meses siguen apilados 1 por fila (sin cambios, hay ancho de
-  // sobra) — el achique es SOLO desktop, `md:`, donde el objetivo pasa a ser
-  // que entren lado a lado en el ancho de la card (~530-610px) en vez de
-  // apilarse. Sin el prefijo `md:` acá, un taller de 4 meses también
-  // encogería el mobile (celdas de 16px con medio ancho de card vacío al
-  // lado — nadie lo pidió, ahí sí sobra lugar). Base mobile-safe (44px)
-  // siempre presente, el tramo por mes solo pisa desde `md:`. Números
+  // En mobile los meses siguen apilados 1 por fila (hay ancho de sobra, no
+  // hace falta que entren lado a lado) — pero con 3+ meses el apilado se
+  // vuelve MUY alto (4 meses a 44px de celda medían 1485px reales, puro
+  // scroll — pedido del dueño en vivo: "ocupan mucho espacio al pedo").
+  // Se puede achicar la celda en mobile sin tocar el gate de tap target de
+  // 44px (HIG): el día NO es un control (`pointer-events-none`/sin
+  // `onDayClick` real más abajo — "es meramente una imagen"), así que el
+  // piso de 44px no aplica acá, solo a controles reales. El desktop (`md:`)
+  // sigue con su propio tramo, sin cambios — el objetivo ahí es que entren
+  // lado a lado en el ancho de la card, no el mismo problema. Números
   // calibrados contra el ancho REAL medido en el build de prod: 4 meses a
   // 1.75rem medía 784px reales contra una card de ~530-610px — hacía falta
   // bastante menos, no un ajuste fino. Clases completas y estáticas (no
   // template string) para que Tailwind las genere en el build.
   const cellSizeClass =
     numberOfMonths >= 4
-      ? "[--cell-size:2.75rem] md:[--cell-size:1rem]"
+      ? "[--cell-size:2rem] md:[--cell-size:1rem]"
       : numberOfMonths === 3
-        ? "[--cell-size:2.75rem] md:[--cell-size:1.5rem]"
+        ? "[--cell-size:2.25rem] md:[--cell-size:1.5rem]"
         : numberOfMonths === 2
           ? "[--cell-size:2.75rem] md:[--cell-size:2.25rem]"
           : "[--cell-size:2.75rem]";
