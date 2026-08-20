@@ -947,7 +947,9 @@ def crear_inscripcion(slug: str, body: InscripcionBody, request: Request):
                     (edicion_id,),
                 )
             if body.session_id:
-                _borrador_marcar_confirmado(conn, body.session_id)
+                _borrador_marcar_confirmado(
+                    conn, body.session_id, edicion_id, nombre=nombre, email=email, telefono=telefono
+                )
             conn.commit()
         except Exception:
             conn.rollback()

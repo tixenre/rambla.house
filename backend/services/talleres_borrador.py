@@ -56,15 +56,36 @@ def heartbeat_upsert(
     )
 
 
-def marcar_confirmado(conn, session_id: str) -> None:
+def marcar_confirmado(
+    conn,
+    session_id: str,
+    edicion_id: int,
+    nombre: Optional[str] = None,
+    email: Optional[str] = None,
+    telefono: Optional[str] = None,
+) -> None:
     """Cierra el funnel: marca el borrador como confirmado al crear la
-    inscripción real. No-op si no había heartbeat previo (session_id nuevo/
-    nunca mandado) — `crear_inscripcion` no depende de que este módulo haya
-    visto nada antes."""
+    inscripción real. UPSERT, no un UPDATE plano: el heartbeat del form viaja
+    por `fetch` sin `await` (fire-and-forget) — puede llegar a la base
+    DESPUÉS de este commit (red lenta, WhatsApp in-app browser). Con un
+    UPDATE simple, esa llegada tardía no encontraba fila (todavía no
+    existía), y el heartbeat posterior insertaba una fila nueva
+    `confirmado=FALSE` para alguien que YA se había inscripto — aparecía a
+    la vez en "Confirmadas" y en "Empezaron el formulario y no lo enviaron"
+    (bug real, 2026-08-20). El upsert garantiza `confirmado=TRUE` sin
+    importar el orden de llegada: el heartbeat que llegue después solo
+    actualiza nombre/email/teléfono, nunca toca `confirmado` (no está en su
+    propio `SET`)."""
     conn.execute(
-        "UPDATE taller_inscripciones_borrador SET confirmado = TRUE, updated_at = NOW() "
-        "WHERE session_id = %s",
-        (session_id,),
+        """
+        INSERT INTO taller_inscripciones_borrador (
+            session_id, edicion_id, nombre, email, telefono, confirmado, updated_at
+        ) VALUES (%s, %s, %s, %s, %s, TRUE, NOW())
+        ON CONFLICT (session_id) DO UPDATE SET
+            confirmado = TRUE,
+            updated_at = NOW()
+        """,
+        (session_id, edicion_id, nombre or None, email or None, telefono or None),
     )
 
 

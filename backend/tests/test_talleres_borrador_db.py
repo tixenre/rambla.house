@@ -102,7 +102,7 @@ def test_marcar_confirmado_cierra_el_funnel(conn):
     conn.commit()
     assert listar_borradores_admin(conn, EDICION_ID)["total"] == 1
 
-    marcar_confirmado(conn, sid)
+    marcar_confirmado(conn, sid, EDICION_ID)
     conn.commit()
     assert listar_borradores_admin(conn, EDICION_ID)["total"] == 0, (
         "un borrador confirmado ya no aparece como 'sin enviar'"
@@ -114,8 +114,33 @@ def test_marcar_confirmado_sin_heartbeat_previo_no_rompe(conn):
     heartbeat que falló) — no debe tirar excepción."""
     from services.talleres_borrador import marcar_confirmado
 
-    marcar_confirmado(conn, str(uuid.uuid4()))
+    marcar_confirmado(conn, str(uuid.uuid4()), EDICION_ID)
     conn.commit()  # no explota
+
+
+def test_marcar_confirmado_antes_del_heartbeat_no_deja_fantasma(conn):
+    """Race real (bug 2026-08-20): el heartbeat del form viaja por `fetch`
+    sin `await` — puede llegar a la base DESPUÉS de que /inscripcion ya
+    confirmó (red lenta). Simulamos el orden invertido: confirmar ANTES de
+    que exista cualquier fila de heartbeat para ese session_id."""
+    from services.talleres_borrador import heartbeat_upsert, marcar_confirmado, listar_borradores_admin
+
+    sid = str(uuid.uuid4())
+    marcar_confirmado(
+        conn, sid, EDICION_ID, nombre="Ariana", email="ariana@example.com", telefono="+5492984153350"
+    )
+    conn.commit()
+    assert listar_borradores_admin(conn, EDICION_ID)["total"] == 0
+
+    # El heartbeat que venía "en vuelo" llega recién ahora, después de confirmar.
+    heartbeat_upsert(
+        conn, sid, EDICION_ID, nombre="Ariana", email="ariana@example.com", telefono="+5492984153350"
+    )
+    conn.commit()
+
+    assert listar_borradores_admin(conn, EDICION_ID)["total"] == 0, (
+        "un heartbeat tardío no debe resucitar como 'sin enviar' una inscripción ya confirmada"
+    )
 
 
 def test_listar_borradores_admin_kpis(conn):
