@@ -5,6 +5,7 @@ import { ArrowRight, Calendar, MapPin, Users } from "lucide-react";
 import { PublicLayout } from "@/components/rental/shell/PublicLayout";
 import { SectionBanner } from "@/components/rental/landing/SectionBanner";
 import { EmptyState } from "@/design-system/composites/EmptyState";
+import { Separator } from "@/design-system/ui/separator";
 import { Grain } from "@/components/common/Grain";
 import { LogoMark } from "@/components/rental/shell/LogoMark";
 import { InstitucionEyebrow } from "@/components/talleres/InstitucionesRow";
@@ -149,11 +150,22 @@ function SectionLabel({ label }: { label: string }) {
 // grande, flotando sola arriba de todo) quedó rechazada por el dueño en
 // vivo: "queda como si todo el listado fuera de esa institución". Esto es
 // lo opuesto: chico, subordinado, scoped SOLO al bloque de cards debajo.
+//
+// Primera versión (solo texto, sin línea) leía como una etiqueta duplicada
+// —casi el mismo peso que SectionLabel arriba, y la card de abajo YA repite
+// el mismo nombre en su propio badge— así que el dueño no la percibía como
+// una división real ("no veo ninguna division", 2026-08-20, confirmado en
+// vivo con 2 escuelas de prueba). Una línea es lo que hace que un separador
+// SE LEA como separador, con o sin más de un grupo — el texto solo aporta
+// contexto de a quién pertenece lo de abajo.
 function InstitucionDivider({ label }: { label: string }) {
   return (
-    <p className="font-mono text-2xs tracking-[0.2em] uppercase text-muted-foreground/70 mt-2 mb-0.5">
-      {label}
-    </p>
+    <div className="flex items-center gap-3 mt-6 pt-1">
+      <span className="font-mono text-2xs tracking-[0.25em] uppercase text-muted-foreground whitespace-nowrap">
+        {label}
+      </span>
+      <Separator className="flex-1" />
+    </div>
   );
 }
 
