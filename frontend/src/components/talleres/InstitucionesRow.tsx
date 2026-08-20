@@ -13,30 +13,35 @@ function InstitucionPill({
   institucion: InstitucionEntity;
   variant: Variant;
 }) {
-  const cls = cn(
-    "flex items-center gap-2 rounded-full border px-3 py-1.5 transition",
-    variant === "dark"
-      ? "border-background/20 bg-background/10 hover:border-background/40"
-      : "border-border/50 bg-muted/20 hover:border-border",
-  );
   return (
     <Link
       to="/escuelas/instituciones/$slug"
       params={{ slug: institucion.slug }}
-      className={cls}
       aria-label={institucion.nombre}
+      className="transition hover:opacity-70"
     >
       {institucion.logo_url ? (
+        // Logo desnudo — sin caja/borde alrededor: mismo tratamiento que
+        // `InstitucionFotoHero` (el hero propio de la institución), la
+        // única otra superficie que muestra este logo sobre fondo oscuro.
+        // Un pill con borde acá se leía como "otro botón" compitiendo con
+        // el CTA rosa, no como parte del diseño (feedback del dueño en
+        // vivo, con captura: "queda chico, raro con muchas cajitas
+        // chiquitas, no parece integrado al diseño").
         <img
           src={institucion.logo_url}
           alt={institucion.nombre}
-          className="h-5 w-auto max-w-16 object-contain"
+          className="h-7 w-auto max-w-28 object-contain"
         />
       ) : (
-        // Sin logo cargado: el nombre queda como fallback visible — el
-        // pill NUNCA se ve vacío.
+        // Sin logo cargado: el nombre queda como texto plano con
+        // subrayado al hover — mismo lenguaje de link que "Ver los N
+        // talleres" de abajo, no una caja aparte.
         <span
-          className={cn("text-sm font-medium", variant === "dark" ? "text-background" : "text-ink")}
+          className={cn(
+            "text-sm font-medium underline-offset-4 hover:underline",
+            variant === "dark" ? "text-background" : "text-ink",
+          )}
         >
           {institucion.nombre}
         </span>
