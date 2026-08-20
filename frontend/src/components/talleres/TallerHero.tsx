@@ -2,6 +2,7 @@ import { Calendar, Clock, MapPin, Users } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { Grain } from "@/components/common/Grain";
 import { YouTubeEmbed } from "@/components/common/YouTubeEmbed";
+import { InstitucionesRow } from "@/components/talleres/InstitucionesRow";
 import { TALLER_CONTENT_WIDTH } from "@/components/talleres/TallerGaleria";
 import { ordinalEdicion } from "@/lib/talleres/formato";
 import { trackClickInscribirseTaller } from "@/lib/analytics";
@@ -115,6 +116,13 @@ type Props = {
   formTaller: { direccion: string; cupos_total: number };
   fechasResumen: string;
   horarioResumen: string;
+  // `TallerHubBlock` (hub de institución) la pone en `true`: mostrar
+  // "Presentado por: Filmar" adentro de la propia página de Filmar es
+  // circular — la fila se sacó de ahí desde siempre (ver el doc-comment de
+  // `TallerHubBlock`); acá solo hace falta el flag para que este hero,
+  // ahora dueño de la fila (pedido del dueño 2026-08-20: junto al CTA, no
+  // más abajo en el cuerpo), respete la misma exclusión.
+  ocultarInstituciones?: boolean;
 };
 
 /**
@@ -130,7 +138,13 @@ type Props = {
  * agrupar talleres es responsabilidad exclusiva del hub de institución
  * (`InstitucionHeroMultiple`, N-way, no solo pares), no de este hero.
  */
-export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }: Props) {
+export function TallerHero({
+  taller,
+  formTaller,
+  fechasResumen,
+  horarioResumen,
+  ocultarInstituciones = false,
+}: Props) {
   const cta = (
     <a
       id="hero-cta"
@@ -160,6 +174,9 @@ export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }
               cuposTotal={formTaller.cupos_total}
             />
             <div className="mt-8">{cta}</div>
+            {!ocultarInstituciones && (
+              <InstitucionesRow taller={taller} variant="dark" className="mt-6" />
+            )}
           </div>
           <YouTubeEmbed
             videoId={taller.video.youtube_id}
@@ -185,6 +202,9 @@ export function TallerHero({ taller, formTaller, fechasResumen, horarioResumen }
           cuposTotal={formTaller.cupos_total}
         />
         <div className="mt-8">{cta}</div>
+        {!ocultarInstituciones && (
+          <InstitucionesRow taller={taller} variant="dark" className="mt-6" />
+        )}
       </div>
     </section>
   );

@@ -22,9 +22,10 @@ import type { Taller } from "@/lib/api";
  * Espeja la composición de `escuelas.$slug.lazy.tsx` (la página individual)
  * — un reorden de bloques en una se replica en la otra, para que no
  * diverjan — con 2 recortes a propósito para este contexto:
- *   - Sin `InstitucionesRow` (se leería "Presentado por: Filmar" adentro de
- *     la propia página de Filmar) ni `SoldOutModal`/`TallerCTABar` (pensados
- *     para una página con un solo taller).
+ *   - `TallerHero` recibe `ocultarInstituciones` (se leería "Presentado
+ *     por: Filmar" adentro de la propia página de Filmar) — ni
+ *     `SoldOutModal`/`TallerCTABar` (pensados para una página con un solo
+ *     taller).
  *   - `ocultarHero` (default false): cuando la institución tiene 2+
  *     talleres, `InstitucionPage` ya renderiza `InstitucionHeroMultiple`
  *     (el selector compartido) arriba, y pasa `ocultarHero` para que este
@@ -81,6 +82,7 @@ export function TallerHubBlock({
           formTaller={formTaller}
           fechasResumen={fechasResumen}
           horarioResumen={horarioResumen}
+          ocultarInstituciones
         />
       )}
 

@@ -17,7 +17,6 @@ import { TallerGaleria, TALLER_CONTENT_WIDTH } from "@/components/talleres/Talle
 import { TallerCalendario } from "@/components/talleres/TallerCalendario";
 import { ProgramaSection } from "@/components/talleres/ProgramaSection";
 import { InstructorCard } from "@/components/talleres/InstructorCard";
-import { InstitucionesRow } from "@/components/talleres/InstitucionesRow";
 import { TallerTrabajos } from "@/components/talleres/TallerTrabajos";
 import { TallerFAQ } from "@/components/talleres/TallerFAQ";
 import { TallerCTABar } from "@/components/talleres/TallerCTABar";
@@ -213,7 +212,6 @@ function TallerLandingPage() {
                   <TallerCalendario sesiones={formTaller.sesiones} horario={formTaller.horario} />
                 )}
 
-                <InstitucionesRow taller={taller} />
                 <InstructorCard taller={taller} />
                 <TallerTrabajos trabajos={taller.trabajos} />
               </div>
