@@ -35,9 +35,17 @@ export async function getEquipoFotos(equipoId: number): Promise<EquipoFoto[]> {
   return data.fotos;
 }
 
-export async function uploadEquipoFoto(equipoId: number, file: File): Promise<EquipoFoto> {
+/** `orden` (opcional): ver el mismo parámetro en `uploadEdicionFile`
+ * (lib/talleres/photos.ts) — evita que el upload concurrente desincronice
+ * la galería del orden en que el usuario eligió los archivos. */
+export async function uploadEquipoFoto(
+  equipoId: number,
+  file: File,
+  orden?: number,
+): Promise<EquipoFoto> {
   const fd = new FormData();
   fd.append("file", file);
+  if (orden !== undefined) fd.append("orden", String(orden));
   const res = await authedFetch(`/api/admin/equipos/${equipoId}/fotos`, {
     method: "POST",
     body: fd,

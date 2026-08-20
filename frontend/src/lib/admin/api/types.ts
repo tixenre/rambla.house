@@ -1960,6 +1960,9 @@ export type Instructor = {
   foto_media_id: number | null;
   // F6: "Trabajó con" — reemplaza el legacy `instructor_proyectos` (1 por taller).
   proyectos: string;
+  // Solo en GET /admin/instructores (vista global "Profesores") — ausente en
+  // la respuesta de create/update/delete de un instructor puntual.
+  talleres?: { id: number; nombre: string; slug_base: string }[];
 };
 
 // Institución co-presentadora de un taller (ej. "Rambla" + "Filmar") — mismo
@@ -1992,6 +1995,11 @@ export type Inscripcion = {
   modalidad_codigo: string | null;
   modalidad_label: string | null;
   modalidad_monto: number | null;
+  // Solo en GET /admin/inscripciones (vista global "Alumnos") — ausente en
+  // el listado scoped a un taller/edición puntual.
+  taller_id?: number;
+  taller_nombre?: string;
+  taller_slug?: string;
 };
 
 // Borrador de inscripción sin enviar (heartbeat de WorkshopInscripcionForm,

@@ -13,6 +13,7 @@ import {
   ClipboardList,
   ShoppingCart,
   Users,
+  UserCog,
   Clapperboard,
   CalendarClock,
   GraduationCap,
@@ -85,6 +86,8 @@ export const ADMIN_NAV: AdminNavGroup[] = [
       { title: "Estudio", url: "/admin/estudio", icon: Clapperboard, exact: true },
       { title: "Talleres", url: "/admin/talleres", icon: GraduationCap, exact: true },
       { title: "Instituciones", url: "/admin/talleres/instituciones", icon: Landmark },
+      { title: "Alumnos", url: "/admin/talleres/alumnos", icon: Users },
+      { title: "Profesores", url: "/admin/talleres/instructores", icon: UserCog },
     ],
   },
   {

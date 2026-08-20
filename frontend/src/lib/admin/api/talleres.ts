@@ -100,6 +100,10 @@ export const talleresAdminApi = {
   listInscripciones: (edicionId: number) =>
     authedJson<Inscripcion[]>(`/api/admin/ediciones/${edicionId}/inscripciones`),
 
+  // Vista global "Alumnos" (sidebar) — todas las inscripciones activas de
+  // todos los talleres, con el taller al que pertenece cada una.
+  listInscripcionesGlobal: () => authedJson<Inscripcion[]>("/api/admin/inscripciones"),
+
   listBorradores: (edicionId: number) =>
     authedJson<BorradoresResp>(`/api/admin/ediciones/${edicionId}/borradores`),
 

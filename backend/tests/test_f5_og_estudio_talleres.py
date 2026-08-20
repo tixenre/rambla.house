@@ -172,9 +172,10 @@ def test_workshop_og_inyecta_nombre_e_instructor(tmp_path):
     }
 
     conn = MagicMock()
-    # 3er valor = hero_row (fotos de la edición) — None = sin fotos subidas
-    # todavía, el preload se saltea (mismo caso real que un taller recién creado).
-    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor, None]
+    # 3er valor = institucion_row (sin institución vinculada, cae al
+    # instructor) — 4to = hero_row (fotos de la edición, sin fotos subidas
+    # todavía, el preload se saltea — mismo caso real que un taller recién creado).
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor, None, None]
     conn.close = MagicMock()
 
     with (
@@ -190,6 +191,105 @@ def test_workshop_og_inyecta_nombre_e_instructor(tmp_path):
     assert "Dirección de Arte" in body
     assert "Juana García" in body
     assert "https://cdn.example/instructor.jpg" in body
+
+
+def test_workshop_og_institucion_gana_sobre_instructor(tmp_path):
+    """Bug real reportado por el dueño: compartir el link de un taller
+    co-presentado por una institución (ej. Filmar) mostraba "Taller X con
+    Mila" (el instructor) — raro para un taller que, de hecho, es de la
+    institución. Con una institución vinculada, el título/imagen del OG
+    tienen que reflejarla a ELLA, no al instructor."""
+    index = tmp_path / "index.html"
+    index.write_text(STATIC_INDEX)
+
+    fake_taller = {
+        "id": 6,
+        "nombre": "Taller de Rodaje",
+        "descripcion": "",
+        "taller_id": 6,
+        "fecha_inicio": None,
+        "fecha_fin": None,
+        "precio_total": None,
+        "direccion": "",
+        "faqs": [],
+    }
+    fake_instructor = {
+        "nombre": "Mila",
+        "foto_url": "https://cdn.example/mila.jpg",
+        "foto_media_id": None,
+    }
+    fake_institucion = {
+        "id": 1,
+        "nombre": "Filmar Escuela",
+        "logo_url": "https://cdn.example/filmar-logo.svg",
+    }
+    fake_ins_foto = {"url": "https://cdn.example/filmar-destacada.jpg"}
+
+    conn = MagicMock()
+    # taller, instructor, institución, foto destacada de la institución, hero_row.
+    conn.execute.return_value.fetchone.side_effect = [
+        fake_taller, fake_instructor, fake_institucion, fake_ins_foto, None,
+    ]
+    conn.close = MagicMock()
+
+    with (
+        patch("main.FRONT_NEW", tmp_path),
+        patch("main.get_db", return_value=conn),
+        patch("main.SITE_URL", "https://rambla.house"),
+    ):
+        client = _make_app()
+        resp = client.get("/workshops/taller-de-rodaje")
+
+    assert resp.status_code == 200
+    body = resp.text
+    assert "con Filmar Escuela" in body
+    assert "https://cdn.example/filmar-destacada.jpg" in body
+    assert "con Mila" not in body
+    # El instructor real se sigue listando en el JSON-LD (SEO/datos
+    # estructurados) aunque la institución gane el título de marketing.
+    assert '"name": "Mila"' in body
+
+
+def test_workshop_og_institucion_sin_foto_cae_al_logo(tmp_path):
+    """Institución vinculada pero sin foto destacada en su galería propia —
+    cae al logo (mismo orden de preferencia que `institucion_page`, el hub)."""
+    index = tmp_path / "index.html"
+    index.write_text(STATIC_INDEX)
+
+    fake_taller = {
+        "id": 7,
+        "nombre": "Taller de Rodaje 2",
+        "descripcion": "",
+        "taller_id": 7,
+        "fecha_inicio": None,
+        "fecha_fin": None,
+        "precio_total": None,
+        "direccion": "",
+        "faqs": [],
+    }
+    fake_institucion = {
+        "id": 1,
+        "nombre": "Filmar Escuela",
+        "logo_url": "https://cdn.example/filmar-logo.svg",
+    }
+
+    conn = MagicMock()
+    # taller, instructor=None, institución, foto destacada=None → cae al logo, hero_row.
+    conn.execute.return_value.fetchone.side_effect = [
+        fake_taller, None, fake_institucion, None, None,
+    ]
+    conn.close = MagicMock()
+
+    with (
+        patch("main.FRONT_NEW", tmp_path),
+        patch("main.get_db", return_value=conn),
+        patch("main.SITE_URL", "https://rambla.house"),
+    ):
+        client = _make_app()
+        resp = client.get("/workshops/taller-de-rodaje-2")
+
+    assert resp.status_code == 200
+    assert "https://cdn.example/filmar-logo.svg" in resp.text
 
 
 def test_workshop_og_taller_inexistente(tmp_path):
@@ -236,8 +336,11 @@ def test_workshop_og_usa_media_variant_si_tiene_media_id(tmp_path):
     fake_mv = {"url": "https://cdn.example/og-variant.jpg"}
 
     conn = MagicMock()
-    # 4to valor = hero_row (fotos de la edición) — None = sin fotos subidas.
-    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor, fake_mv, None]
+    # 3er valor = institucion_row (sin institución) — 5to = hero_row (fotos
+    # de la edición) — None = sin fotos subidas.
+    conn.execute.return_value.fetchone.side_effect = [
+        fake_taller, fake_instructor, None, fake_mv, None,
+    ]
     conn.close = MagicMock()
 
     with (
@@ -273,7 +376,8 @@ def test_workshop_faqpage_inyectada_junto_a_course_si_hay_faqs(tmp_path):
         ],
     }
     conn = MagicMock()
-    conn.execute.return_value.fetchone.side_effect = [fake_taller, None, None]
+    # 3er None = institucion_row (sin institución vinculada) — 4to = hero_row.
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, None, None, None]
     conn.close = MagicMock()
 
     with (
@@ -310,7 +414,8 @@ def test_workshop_sin_faqpage_si_no_hay_faqs(tmp_path):
         "faqs": [],
     }
     conn = MagicMock()
-    conn.execute.return_value.fetchone.side_effect = [fake_taller, None, None]
+    # 3er None = institucion_row (sin institución vinculada) — 4to = hero_row.
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, None, None, None]
     conn.close = MagicMock()
 
     with (
@@ -361,7 +466,8 @@ def test_workshop_og_borrador_sin_bypass_filtra_por_activo(tmp_path):
         "direccion": "", "faqs": [],
     }
     conn = MagicMock()
-    conn.execute.return_value.fetchone.side_effect = [fake_taller, None, None]
+    # 3er None = institucion_row (sin institución vinculada) — 4to = hero_row.
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, None, None, None]
     conn.close = MagicMock()
 
     with (
@@ -398,7 +504,8 @@ def test_workshop_og_borrador_visible_con_dev_bypass(tmp_path):
         "foto_media_id": None,
     }
     conn = MagicMock()
-    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor, None]
+    # 3er None = institucion_row (sin institución vinculada) — 4to = hero_row.
+    conn.execute.return_value.fetchone.side_effect = [fake_taller, fake_instructor, None, None]
     conn.close = MagicMock()
 
     with (

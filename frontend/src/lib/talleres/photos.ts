@@ -19,10 +19,20 @@ type UploadResponse = {
   height?: number | null;
 };
 
-/** Sube un File del browser al backend, para la edición dada. */
-export async function uploadEdicionFile(edicionId: number, file: File): Promise<UploadResponse> {
+/** Sube un File del browser al backend, para la edición dada. `orden`
+ * (opcional): la posición que el caller ya calculó a partir del orden de
+ * SELECCIÓN del archivo — con upload concurrente (varios `File` a la vez),
+ * dejar que el backend infiera la posición por orden de LLEGADA desincroniza
+ * la galería del orden en que el usuario los eligió (bug real, ver
+ * `_insert_edicion_foto`). */
+export async function uploadEdicionFile(
+  edicionId: number,
+  file: File,
+  orden?: number,
+): Promise<UploadResponse> {
   const fd = new FormData();
   fd.append("file", file);
+  if (orden !== undefined) fd.append("orden", String(orden));
 
   const res = await authedFetch(`/api/admin/ediciones/${edicionId}/upload-foto`, {
     method: "POST",
@@ -40,9 +50,11 @@ export async function uploadEdicionFile(edicionId: number, file: File): Promise<
 export async function uploadInstitucionFile(
   institucionId: number,
   file: File,
+  orden?: number,
 ): Promise<UploadResponse> {
   const fd = new FormData();
   fd.append("file", file);
+  if (orden !== undefined) fd.append("orden", String(orden));
 
   const res = await authedFetch(`/api/admin/instituciones/${institucionId}/upload-foto`, {
     method: "POST",

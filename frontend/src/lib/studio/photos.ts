@@ -20,10 +20,14 @@ type UploadResponse = {
   height?: number | null;
 };
 
-/** Sube un File del browser al backend. Devuelve los metadatos de la foto creada. */
-export async function uploadStudioFile(file: File): Promise<UploadResponse> {
+/** Sube un File del browser al backend. Devuelve los metadatos de la foto
+ * creada. `orden` (opcional): ver el mismo parámetro en `uploadEdicionFile`
+ * (lib/talleres/photos.ts) — evita que el upload concurrente desincronice
+ * la galería del orden en que el usuario eligió los archivos. */
+export async function uploadStudioFile(file: File, orden?: number): Promise<UploadResponse> {
   const fd = new FormData();
   fd.append("file", file);
+  if (orden !== undefined) fd.append("orden", String(orden));
 
   const res = await authedFetch("/api/admin/estudio/upload-foto", {
     method: "POST",

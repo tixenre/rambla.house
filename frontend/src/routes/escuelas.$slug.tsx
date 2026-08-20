@@ -28,9 +28,16 @@ export const Route = createFileRoute("/escuelas/$slug")({
       };
     }
     const url = `${SITE_URL}/escuelas/${taller.slug}`;
+    // Institución co-presentadora (la primera vinculada) gana como identidad
+    // del título/OG sobre el/los instructor/es cuando el taller la tiene —
+    // mismo criterio que `taller_page` (backend/main.py, el que ven los
+    // crawlers sin JS): "Taller X con Mila" leía raro para un taller
+    // co-presentado por una institución.
+    const institucionPrincipal = taller.instituciones[0];
     const instructoresStr = taller.instructores.map((i) => i.nombre).join(" y ");
-    const title = instructoresStr
-      ? `${taller.nombre} con ${instructoresStr} — Rambla Rental`
+    const identidad = institucionPrincipal?.nombre || instructoresStr;
+    const title = identidad
+      ? `${taller.nombre} con ${identidad} — Rambla Rental`
       : `${taller.nombre} — Rambla Rental`;
     const desc = `${taller.descripcion}`.slice(0, 155).replace(/\s+/g, " ").trim();
 
@@ -45,7 +52,7 @@ export const Route = createFileRoute("/escuelas/$slug")({
       name: taller.nombre,
       description: desc,
       url,
-      image: taller.instructores[0]?.foto_url || undefined,
+      image: institucionPrincipal?.logo_url || taller.instructores[0]?.foto_url || undefined,
       provider: {
         "@type": "Organization",
         name: "Rambla",

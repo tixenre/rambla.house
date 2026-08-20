@@ -171,12 +171,18 @@ def _insert_foto(
     url_sm: str | None = None,
     url_avif: str | None = None,
     url_sm_avif: str | None = None,
+    orden: int | None = None,
 ) -> dict:
-    cur = conn.execute(
-        "SELECT COALESCE(MAX(orden), -1) + 1 AS next_orden FROM estudio_fotos WHERE estudio_id = 1",
-        (),
-    )
-    orden = cur.fetchone()["next_orden"]
+    # `orden` explícito gana — mismo criterio que `_insert_edicion_foto`
+    # (backend/routes/talleres.py): con upload concurrente, inferirlo acá
+    # corre una carrera (la foto que termina de procesarse primero, no la
+    # que el usuario eligió primero, gana el primer lugar).
+    if orden is None:
+        cur = conn.execute(
+            "SELECT COALESCE(MAX(orden), -1) + 1 AS next_orden FROM estudio_fotos WHERE estudio_id = 1",
+            (),
+        )
+        orden = cur.fetchone()["next_orden"]
 
     cur2 = conn.execute("SELECT COUNT(*) AS cnt FROM estudio_fotos WHERE estudio_id = 1", ())
     is_first = cur2.fetchone()["cnt"] == 0
@@ -629,6 +635,8 @@ async def upload_foto(request: Request):
         raise HTTPException(400, "Archivo vacío")
     if len(raw) > 20 * 1024 * 1024:
         raise HTTPException(413, "Archivo muy grande (máx 20 MB)")
+    orden_raw = form.get("orden")
+    orden = int(orden_raw) if orden_raw not in (None, "") else None
 
     with get_db() as conn:
         try:
@@ -656,6 +664,7 @@ async def upload_foto(request: Request):
                 url_sm=display_sm.url if display_sm else None,
                 url_avif=display_avif.url if display_avif else None,
                 url_sm_avif=display_sm_avif.url if display_sm_avif else None,
+                orden=orden,
             )
         except Exception:
             conn.rollback()

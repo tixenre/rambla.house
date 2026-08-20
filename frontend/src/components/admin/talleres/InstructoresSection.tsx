@@ -175,7 +175,7 @@ export function InstructoresSection({ concepto }: { concepto: TallerConcepto }) 
   );
 }
 
-function InstructorDialog({
+export function InstructorDialog({
   instructor,
   onClose,
   onCreated,

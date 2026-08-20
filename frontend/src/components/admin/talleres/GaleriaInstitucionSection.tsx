@@ -37,11 +37,15 @@ export function GaleriaInstitucionSection({
     files: File[],
     onFileSettled: (file: File, ok: boolean, error?: string) => void,
   ) {
+    // El orden final lo decide la posición de selección, no quién termina
+    // de procesarse primero — ver `uploadEdicionFile`.
+    const base = fotos.length;
+    const items = files.map((file, i) => ({ file, orden: base + i }));
     const { ok, failed } = await runInBatches(
-      files,
+      items,
       UPLOAD_CONCURRENCY,
-      (file) => uploadInstitucionFile(institucionId, file),
-      (file, fileOk, error) =>
+      ({ file, orden }) => uploadInstitucionFile(institucionId, file, orden),
+      ({ file }, fileOk, error) =>
         onFileSettled(
           file,
           fileOk,
