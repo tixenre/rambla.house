@@ -31,7 +31,7 @@ function InstitucionPill({
         <img
           src={institucion.logo_url}
           alt={institucion.nombre}
-          className="h-7 w-auto max-w-28 object-contain"
+          className="h-12 sm:h-14 w-auto max-w-[10rem] object-contain"
         />
       ) : (
         // Sin logo cargado: el nombre queda como texto plano con
@@ -89,18 +89,20 @@ export function InstitucionesRow({
   const conMasTalleres = taller.instituciones.filter((i) => (i.talleres_count ?? 0) > 1);
   return (
     <div className={cn("flex flex-col gap-2", className)}>
-      <div className="flex flex-wrap items-center gap-3">
+      <div className="flex flex-col gap-3">
         <p
           className={cn(
-            "text-xs font-mono uppercase tracking-widest shrink-0",
+            "text-xs font-mono uppercase tracking-widest",
             variant === "dark" ? "text-background/50" : "text-muted-foreground",
           )}
         >
           Presentado por
         </p>
-        {taller.instituciones.map((inst) => (
-          <InstitucionPill key={inst.id} institucion={inst} variant={variant} />
-        ))}
+        <div className="flex flex-wrap items-center gap-4">
+          {taller.instituciones.map((inst) => (
+            <InstitucionPill key={inst.id} institucion={inst} variant={variant} />
+          ))}
+        </div>
       </div>
       {conMasTalleres.map((inst) => (
         <Link
