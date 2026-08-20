@@ -689,3 +689,51 @@ def test_admin_list_inscripciones_global_incluye_taller_y_excluye_eliminadas(tal
     assert mia["taller_nombre"] == "Taller F4b"
     assert mia["taller_slug"] == SLUG
     assert mia["edicion_id"] == ed["id"]
+
+
+def test_admin_update_edicion_slug_lo_cambia(taller_base):
+    """Pedido del dueño (2026-08-20): un taller renombrado (ej. "Nivel 2" →
+    "Nivel Avanzado") queda con la URL vieja para siempre — el slug NO se
+    re-deriva de un rename (ni acá ni al corregir numero_edicion). Necesita
+    una vía explícita, deliberada (rompe cualquier link ya compartido con el
+    slug anterior)."""
+    t = taller_base
+    ed = _crear_edicion_activa(t)
+
+    updated = t.admin_update_edicion(
+        ed["id"], t.EdicionUpdateBody(slug="Taller Renombrado!!"), None
+    )
+    assert updated["slug"] == "taller-renombrado"
+
+    from database import get_db
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT slug FROM ediciones_taller WHERE id = %s", (ed["id"],)
+        ).fetchone()
+    assert row["slug"] == "taller-renombrado"
+
+
+def test_admin_update_edicion_slug_rechaza_duplicado(taller_base):
+    t = taller_base
+    ed1 = _crear_edicion_activa(t)
+    body2 = t.EdicionCreateBody(
+        clases=[t.ClaseBody(fecha="2099-04-06", hora_inicio_min=510, hora_fin_min=750)],
+        numero_edicion=2,
+        precio_total=200_000,
+        precio_sena=50_000,
+        activo=False,
+    )
+    d2 = t.admin_create_edicion(TALLER_ID, body2, None)
+    ed2 = d2["ediciones"][0] if "ediciones" in d2 else d2
+
+    with pytest.raises(t.HTTPException) as exc:
+        t.admin_update_edicion(ed2["id"], t.EdicionUpdateBody(slug=ed1["slug"]), None)
+    assert exc.value.status_code == 400
+
+
+def test_admin_update_edicion_slug_vacio_400(taller_base):
+    t = taller_base
+    ed = _crear_edicion_activa(t)
+    with pytest.raises(t.HTTPException) as exc:
+        t.admin_update_edicion(ed["id"], t.EdicionUpdateBody(slug="   "), None)
+    assert exc.value.status_code == 400
