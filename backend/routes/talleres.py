@@ -2409,9 +2409,14 @@ async def admin_upload_logo_institucion(institucion_id: int, request: Request):
 
 
 def _get_institucion_fotos(conn, institucion_id: int) -> list:
+    # `es_principal DESC` primero: mismo criterio que el carrusel público
+    # (TallerGaleria/hero, "principal primero, después orden") — sin esto, la
+    # grilla del admin mostraba un orden distinto al que ve el público
+    # (bug real, 2026-08-20: la "Principal" quedaba enterrada en el medio de
+    # la grilla en vez de primera).
     cur = conn.execute(
         "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
-        "FROM institucion_fotos WHERE institucion_id = %s ORDER BY orden, id",
+        "FROM institucion_fotos WHERE institucion_id = %s ORDER BY es_principal DESC, orden, id",
         (institucion_id,),
     )
     rows = cur.fetchall()
@@ -2865,9 +2870,11 @@ def admin_delete_portada_clase(clase_id: int, request: Request):
 
 
 def _get_edicion_fotos(conn, edicion_id: int) -> list:
+    # `es_principal DESC` primero — ver comentario gemelo en
+    # `_get_institucion_fotos` (mismo bug real, 2026-08-20).
     cur = conn.execute(
         "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
-        "FROM edicion_fotos WHERE edicion_id = %s ORDER BY orden, id",
+        "FROM edicion_fotos WHERE edicion_id = %s ORDER BY es_principal DESC, orden, id",
         (edicion_id,),
     )
     rows = cur.fetchall()

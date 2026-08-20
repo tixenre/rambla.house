@@ -755,9 +755,11 @@ async def admin_upload_foto_file(
 
 
 def _get_equipo_fotos(conn, equipo_id: int) -> list[dict]:
+    # `es_principal DESC` primero — mismo criterio que el resto de las
+    # galerías (talleres/estudio); ver comentario en `_get_institucion_fotos`.
     rows = conn.execute(
         "SELECT id, url, path, media_id, orden, es_principal, created_at "
-        "FROM equipo_fotos WHERE equipo_id = %s ORDER BY orden, id",
+        "FROM equipo_fotos WHERE equipo_id = %s ORDER BY es_principal DESC, orden, id",
         (equipo_id,),
     ).fetchall()
     return [

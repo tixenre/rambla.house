@@ -92,9 +92,11 @@ def _require_cliente(request):
 
 
 def _get_fotos(conn) -> list:
+    # `es_principal DESC` primero — mismo criterio que el hero público
+    # (heroImgProps/hero-photos.ts) y las galerías de talleres/equipos.
     cur = conn.execute(
         "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
-        "FROM estudio_fotos WHERE estudio_id = 1 ORDER BY orden, id",
+        "FROM estudio_fotos WHERE estudio_id = 1 ORDER BY es_principal DESC, orden, id",
         (),
     )
     rows = cur.fetchall()
