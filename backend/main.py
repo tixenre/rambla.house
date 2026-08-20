@@ -1196,20 +1196,46 @@ def workshop_page(slug: str, request: Request):
                 "WHERE ti.taller_id = %s ORDER BY ti.orden, i.id LIMIT 1",
                 (taller["taller_id"],),
             ).fetchone()
-            # Foto OG: preferir variante 'og' del media; fallback a 'display'
-            # o foto_url (foto subida antes del motor).
-            media_id = instructor_row["foto_media_id"] if instructor_row else None
+            # Institución co-presentadora — gana como identidad del OG/título
+            # sobre el instructor cuando el taller tiene una vinculada (pedido
+            # del dueño: compartir "Taller X... con Mila" leía raro para un
+            # taller co-presentado por una institución — la marca del hub
+            # tiene que ganar). Mismo orden que `_get_instituciones_taller`
+            # (ti.orden, ins.id): la PRIMERA vinculada, no todas.
+            institucion_row = conn.execute(
+                "SELECT ins.id, ins.nombre, ins.logo_url "
+                "FROM taller_instituciones ti JOIN instituciones ins ON ins.id = ti.institucion_id "
+                "WHERE ti.taller_id = %s ORDER BY ti.orden, ins.id LIMIT 1",
+                (taller["taller_id"],),
+            ).fetchone()
+            # Foto OG: institución (foto destacada de su galería, después su
+            # logo) gana sobre el instructor — mismo orden de preferencia que
+            # `institucion_page` usa para el hub. El instructor solo entra si
+            # el taller NO tiene institución vinculada.
             og_img = ""
-            if media_id:
-                mv = conn.execute(
-                    "SELECT url FROM media_variants "
-                    "WHERE asset_id = %s AND name IN ('og', 'display') "
-                    "ORDER BY CASE name WHEN 'og' THEN 0 ELSE 1 END LIMIT 1",
-                    (media_id,),
+            if institucion_row:
+                ins_foto_row = conn.execute(
+                    "SELECT url FROM institucion_fotos "
+                    "WHERE institucion_id = %s AND es_principal = TRUE LIMIT 1",
+                    (institucion_row["id"],),
                 ).fetchone()
-                og_img = (mv["url"] if mv else "") or ""
-            if not og_img and instructor_row:
-                og_img = instructor_row["foto_url"] or ""
+                og_img = (ins_foto_row["url"].strip() if ins_foto_row and ins_foto_row["url"] else "")
+                if not og_img:
+                    og_img = (institucion_row["logo_url"] or "").strip()
+            if not og_img:
+                # Foto OG del instructor: preferir variante 'og' del media;
+                # fallback a 'display' o foto_url (foto subida antes del motor).
+                media_id = instructor_row["foto_media_id"] if instructor_row else None
+                if media_id:
+                    mv = conn.execute(
+                        "SELECT url FROM media_variants "
+                        "WHERE asset_id = %s AND name IN ('og', 'display') "
+                        "ORDER BY CASE name WHEN 'og' THEN 0 ELSE 1 END LIMIT 1",
+                        (media_id,),
+                    ).fetchone()
+                    og_img = (mv["url"] if mv else "") or ""
+                if not og_img and instructor_row:
+                    og_img = instructor_row["foto_url"] or ""
             # Hero preload — misma fuente y orden que TallerGaleria.tsx
             # (es_principal DESC, orden ASC, id ASC): la portada de la
             # galería es el LCP de la página del taller, igual que
@@ -1223,12 +1249,17 @@ def workshop_page(slug: str, request: Request):
             conn.close()
         nombre = (taller["nombre"] or "").strip()
         instructor = (instructor_row["nombre"] or "").strip() if instructor_row else ""
+        institucion_nombre = (institucion_row["nombre"] or "").strip() if institucion_row else ""
+        # Identidad del título/descripción: institución primero (si el
+        # taller la tiene vinculada), instructor si no — mismo criterio que
+        # el de la foto OG de arriba.
+        identidad = institucion_nombre or instructor
         desc_raw = (taller["descripcion"] or "").strip()
         if len(desc_raw) > 200:
             desc_raw = desc_raw[:197].rstrip() + "…"
         if not desc_raw:
-            desc_raw = f"Taller con {instructor} en Rambla, Mar del Plata." if instructor else "Talleres audiovisuales en Mar del Plata."
-        title = f"{nombre} con {instructor} — Rambla" if instructor else f"{nombre} — Rambla"
+            desc_raw = f"Taller con {identidad} en Rambla, Mar del Plata." if identidad else "Talleres audiovisuales en Mar del Plata."
+        title = f"{nombre} con {identidad} — Rambla" if identidad else f"{nombre} — Rambla"
         if not og_img.startswith("http"):
             # og-image.png (1200×630, ya encuadrada para OG) — no icon-512.png
             # (ícono cuadrado): el mismo bug ya se había corregido en /c/{token}
