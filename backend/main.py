@@ -1348,7 +1348,7 @@ def institucion_page(slug: str):
             desc_raw = desc_raw[:197].rstrip() + "…"
         if not desc_raw:
             desc_raw = f"Talleres de {nombre} en Rambla, Mar del Plata."
-        title = f"Talleres con {nombre} — Rambla Rental"
+        title = f"Talleres de {nombre} en Rambla"
         # Misma preferencia que el resto de las páginas con OG dinámico: la
         # foto más rica primero (foto_destacada, pensada para una card
         # social), el logo como segunda opción (mejor que nada, aunque su
