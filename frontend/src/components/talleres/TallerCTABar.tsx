@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { formatARS } from "@/lib/format";
 import { trackClickInscribirseTaller } from "@/lib/analytics";
 import type { Taller } from "@/lib/api";
 
@@ -48,14 +47,10 @@ export function TallerCTABar({ taller, label }: { taller: Taller; label: string 
       aria-hidden={hidden}
     >
       <div className="flex items-center gap-3 border-t border-border/60 bg-background/95 backdrop-blur-xl px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-        <div className="min-w-0 flex-1">
-          <div className="text-2xs font-mono uppercase tracking-wider text-muted-foreground">
-            {taller.nombre}
-          </div>
-          <div className="truncate text-sm font-bold text-ink tabular-nums">
-            {formatARS(taller.precio_total)}
-          </div>
-        </div>
+        {/* Sin precio a propósito (pedido del dueño, 2026-08-20): esta
+            barra es solo el atajo al form — el monto ya se ve ahí, resuelto
+            por modalidad de pago (`ModalidadSelector`), no se duplica acá. */}
+        <div className="min-w-0 flex-1 truncate text-sm font-bold text-ink">{taller.nombre}</div>
         <a
           href="#inscripcion"
           onClick={() => trackClickInscribirseTaller(taller.id)}
