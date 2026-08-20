@@ -808,6 +808,31 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export RESERVAS_DB_TEST=1
           python -m pytest tests/test_backup_codes_db.py -v --tb=short -m integration
+      - name: Carritos activos — marcar_confirmado sobrevive un heartbeat tardío, contra Postgres real
+        run: |
+          cd backend
+          # Hallazgo del supervisor previo al PR dev→main del 2026-08-20: este
+          # archivo existía pero no estaba cableado a CI (mismo gap que tuvo
+          # test_talleres_borrador_db.py el 2026-08-13) — quedaba mudo en cada
+          # PR. marcar_confirmado pasó de UPDATE plano a upsert: el heartbeat
+          # del carrito viaja por fetch sin await y puede llegar a la base
+          # DESPUÉS de confirmar el pedido.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_carritos_activos_db.py -v --tb=short -m integration
+      - name: Sitemap lista cada edición de taller por su propio slug, contra Postgres real
+        run: |
+          cd backend
+          # Mismo hallazgo que el paso anterior. El sitemap leía talleres.slug
+          # (el concepto) en vez de ediciones_taller.slug — una segunda
+          # edición del mismo taller nunca aparecía indexada.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_sitemap_ediciones_db.py -v --tb=short -m integration
 
   e2e-admin:
     name: E2E admin (Playwright + backend real)

@@ -1,15 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import {
-  Bell,
-  CheckCircle2,
-  Clock,
-  Download,
-  ExternalLink,
-  Send,
-  Trash2,
-  Users,
-} from "lucide-react";
+import { Bell, Clock, Download, Send, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { formatDistanceToNow } from "date-fns";
@@ -25,6 +16,8 @@ import type {
   TallerConcepto,
 } from "@/lib/admin/api/types";
 import { whatsappLink } from "@/lib/whatsapp";
+import { buildBorradorWhatsappMessage } from "@/lib/talleres/borrador";
+import { ComprobanteLink } from "./ComprobanteLink";
 import { Button } from "@/design-system/ui/button";
 import { Pill } from "@/design-system/ui/Pill";
 import { Textarea } from "@/design-system/ui/textarea";
@@ -194,20 +187,7 @@ export function InscripcionesSection({
       },
       {
         header: "Comp.",
-        cell: (ins) =>
-          ins.comprobante_url ? (
-            <a
-              href={ins.comprobante_url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 text-ink hover:text-ink transition"
-            >
-              <CheckCircle2 className="h-3.5 w-3.5 text-verde-ink" strokeWidth={1.5} />
-              <ExternalLink className="h-3 w-3" />
-            </a>
-          ) : (
-            <span className="text-muted-foreground/50 text-xs">—</span>
-          ),
+        cell: (ins) => <ComprobanteLink url={ins.comprobante_url} />,
       },
       {
         header: "Fecha",
@@ -387,15 +367,8 @@ export function InscripcionesSection({
   );
 }
 
-/** Mensaje de WhatsApp pre-armado — mismo criterio que `CarritoCard`. */
-function buildWhatsappMessage(b: Borrador): string {
-  const nombre = b.nombre?.trim().split(/\s+/)[0];
-  const saludo = nombre ? `Hola ${nombre}` : "Hola";
-  return `${saludo}, te escribo de Rambla 👋 Vi que estabas por anotarte a uno de nuestros talleres. ¿Te ayudo a terminar la inscripción?`;
-}
-
 function BorradorRow({ borrador: b }: { borrador: Borrador }) {
-  const wasaLink = whatsappLink({ phone: b.telefono, message: buildWhatsappMessage(b) });
+  const wasaLink = whatsappLink({ phone: b.telefono, message: buildBorradorWhatsappMessage(b) });
   const ultimaActividad = formatDistanceToNow(new Date(b.updated_at), {
     addSuffix: true,
     locale: es,

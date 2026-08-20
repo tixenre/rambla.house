@@ -336,15 +336,28 @@ flexibles cuando hay buena comunicación (ej. ceder tu lugar a otra persona,
 si el taller lo permite).`,
   },
   {
+    id: "asistencia",
+    title: "6. Compromiso de asistencia a los rodajes",
+    content: `Si el taller incluye instancias de rodaje (producción grupal), te
+comprometés a asistir: el resto del grupo cuenta con tu presencia para
+completar la producción, y una ausencia sin aviso afecta a todos tus
+compañeros. Avisanos lo antes posible si sabés que vas a faltar.
+
+Si por algún motivo no podés continuar el taller, las cuotas pendientes se
+siguen abonando igual — tu lugar en el cupo y en el cronograma del curso
+quedan reservados desde la inscripción, con independencia de tu asistencia
+a cada clase.`,
+  },
+  {
     id: "equipamiento",
-    title: "6. Uso de equipos y estudio durante las clases",
+    title: "7. Uso de equipos y estudio durante las clases",
     content: `El equipamiento e instalaciones que se usan durante las clases del taller
 están incluidos y cubiertos por Rambla — no se cobra a los alumnos por
 daños accidentales del uso normal de la actividad.`,
   },
   {
     id: "imagen",
-    title: "7. Derecho de imagen",
+    title: "8. Derecho de imagen",
     content: `Al inscribirte autorizás a Rambla a usar fotos y videos tomados durante las
 clases y los proyectos realizados en el taller, para redes sociales y
 material de marketing de Rambla y de las instituciones co-presentadoras. Si
@@ -352,14 +365,14 @@ preferís no aparecer, avisanos antes de que empiece el taller.`,
   },
   {
     id: "jurisdiccion-talleres",
-    title: "8. Jurisdicción",
+    title: "9. Jurisdicción",
     content: `Cualquier disputa derivada de estos términos se somete a la competencia
 ordinaria de los Tribunales del Departamento Judicial de Mar del Plata, con
 renuncia a cualquier otro fuero o jurisdicción que pudiera corresponder.`,
   },
   {
     id: "contacto-terms-talleres",
-    title: "9. Contacto",
+    title: "10. Contacto",
     content: `Para consultas sobre estos términos:
 
 - Email: ${CONTACT.email}

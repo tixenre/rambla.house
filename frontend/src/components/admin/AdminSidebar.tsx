@@ -168,7 +168,7 @@ export function AdminSidebar({ email }: { email: string }) {
                 </SidebarGroupContent>
               </SidebarGroup>
             ))
-          : // Modo expandido: 5 grupos por dominio, label colapsable.
+          : // Modo expandido: grupos por dominio, label colapsable.
             ADMIN_NAV.map((g) => {
               const isOpen = openGroups[g.id] ?? g.defaultOpen;
               return (

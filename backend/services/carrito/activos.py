@@ -140,10 +140,27 @@ def _enrich_items(
 
 
 def marcar_confirmado(session_id: str, conn) -> None:
-    """Cierra el funnel: marca el carrito como confirmado al crear el pedido."""
+    """Cierra el funnel: marca el carrito como confirmado al crear el pedido.
+
+    UPSERT, no un UPDATE plano: el heartbeat del carrito viaja por `fetch`
+    sin `await` (fire-and-forget, mismo patrón que el heartbeat de
+    inscripción a talleres) — puede llegar a la base DESPUÉS de este commit
+    (red lenta). Con un UPDATE simple, esa llegada tardía no encontraba fila
+    (todavía no existía) y el heartbeat posterior insertaba una fila nueva
+    `confirmado=FALSE` para un carrito que YA se convirtió en pedido —
+    aparecía como "activo/abandonado" en el dashboard pese a estar cerrado
+    (mismo bug de fondo que talleres_borrador.marcar_confirmado, 2026-08-20).
+    El upsert garantiza `confirmado=TRUE` sin importar el orden de llegada:
+    el heartbeat que llegue después solo actualiza items/fechas/montos,
+    nunca toca `confirmado` (no está en su propio `SET`)."""
     conn.execute(
-        "UPDATE carritos_activos SET confirmado = TRUE, updated_at = NOW() "
-        "WHERE session_id = %s",
+        """
+        INSERT INTO carritos_activos (session_id, confirmado, updated_at)
+        VALUES (%s, TRUE, NOW())
+        ON CONFLICT (session_id) DO UPDATE SET
+            confirmado = TRUE,
+            updated_at = NOW()
+        """,
         (session_id,),
     )
 
