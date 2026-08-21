@@ -17,3 +17,14 @@ const twMerge = extendTailwindMerge({
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
+
+/**
+ * Comparador natural de nombres de archivo (2 < 10, "01.jpg" < "013.jpg") —
+ * el FileList que entrega el picker nativo de `<input type=file multiple>`
+ * no garantiza el orden de selección del usuario (varía por OS/browser), así
+ * que un upload múltiple necesita reordenar explícitamente por nombre antes
+ * de asignar el `orden` de galería (ver PhotoGallery.tsx).
+ */
+export function compareFilenames(a: string, b: string): number {
+  return a.localeCompare(b, undefined, { numeric: true, sensitivity: "base" });
+}
