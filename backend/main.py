@@ -96,6 +96,7 @@ from routes.carritos         import router as carritos_router
 from routes.checkout         import router as checkout_router
 from routes.compartir        import router as compartir_router
 from routes.rental_publico   import router as rental_publico_router
+from routes.portfolio_tokens import router as portfolio_tokens_router
 from routes.errores_admin    import router as errores_admin_router
 from routes.media_api        import router as media_api_router
 from routes.media_admin      import router as media_admin_router
@@ -394,6 +395,7 @@ app.include_router(carritos_router,       prefix="/api")
 app.include_router(checkout_router,       prefix="/api")
 app.include_router(compartir_router,      prefix="/api")  # /api/public/compartir (sin auth)
 app.include_router(rental_publico_router, prefix="/api")  # /api/public/rental/disclaimers (sin auth)
+app.include_router(portfolio_tokens_router, prefix="/api")  # /api/public/portfolio/brand-tokens (con API key)
 app.include_router(errores_admin_router,  prefix="/api")
 app.include_router(media_api_router,      prefix="/api")
 app.include_router(media_admin_router,    prefix="/api")

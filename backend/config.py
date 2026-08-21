@@ -114,6 +114,12 @@ class Settings(BaseSettings):
     # ── Integraciones ────────────────────────────────────────────────────
     GOOGLE_MAPS_API_KEY: str = ""
 
+    # ── Portfolio (mancino.dev) ──────────────────────────────────────────
+    # Gatea GET /api/public/portfolio/brand-tokens (routes/portfolio_tokens.py).
+    # Vacía = endpoint cerrado (401 a todo). Mismo patrón fail-closed que
+    # DIDIT_WEBHOOK_SECRET/WHATSAPP_APP_SECRET.
+    PORTFOLIO_API_KEY: str = ""
+
     @field_validator("SITE_URL")
     @classmethod
     def _strip_trailing_slash(cls, v: str) -> str:
