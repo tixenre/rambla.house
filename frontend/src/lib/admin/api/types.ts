@@ -1503,6 +1503,7 @@ export type EstudioFoto = {
   orden: number;
   es_principal: boolean;
   created_at: string | null;
+  size_bytes: number | null;
 };
 
 export type EstudioConfig = {
@@ -1856,6 +1857,8 @@ export type EdicionFoto = {
   url: string;
   orden: number;
   es_principal: boolean;
+  created_at: string | null;
+  size_bytes: number | null;
 };
 
 export type EdicionFotoOrdenItem = { id: number; orden: number; es_principal: boolean };
@@ -1868,6 +1871,8 @@ export type InstitucionFoto = {
   url: string;
   orden: number;
   es_principal: boolean;
+  created_at: string | null;
+  size_bytes: number | null;
 };
 
 export type InstitucionFotoOrdenItem = { id: number; orden: number; es_principal: boolean };

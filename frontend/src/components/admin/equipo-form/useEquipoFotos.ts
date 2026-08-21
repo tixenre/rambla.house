@@ -38,6 +38,8 @@ export function useEquipoFotos(initial: Equipo | null | undefined, open: boolean
     url: f.url,
     orden: f.orden,
     es_principal: f.es_principal,
+    created_at: f.created_at,
+    size_bytes: f.size_bytes,
   }));
 
   const deleteFotoMut = useMutation({

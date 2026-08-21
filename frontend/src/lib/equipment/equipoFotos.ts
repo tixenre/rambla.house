@@ -20,6 +20,7 @@ export type EquipoFoto = {
   orden: number;
   es_principal: boolean;
   created_at: string | null;
+  size_bytes: number | null;
 };
 
 export type EquipoFotoOrdenItem = {

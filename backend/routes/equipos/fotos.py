@@ -758,8 +758,10 @@ def _get_equipo_fotos(conn, equipo_id: int) -> list[dict]:
     # `es_principal DESC` primero — mismo criterio que el resto de las
     # galerías (talleres/estudio); ver comentario en `_get_institucion_fotos`.
     rows = conn.execute(
-        "SELECT id, url, path, media_id, orden, es_principal, created_at "
-        "FROM equipo_fotos WHERE equipo_id = %s ORDER BY es_principal DESC, orden, id",
+        "SELECT eqf.id, eqf.url, eqf.path, eqf.media_id, eqf.orden, eqf.es_principal, "
+        "eqf.created_at, ma.bytes AS size_bytes "
+        "FROM equipo_fotos eqf LEFT JOIN media_assets ma ON ma.id = eqf.media_id "
+        "WHERE eqf.equipo_id = %s ORDER BY eqf.es_principal DESC, eqf.orden, eqf.id",
         (equipo_id,),
     ).fetchall()
     return [
@@ -771,6 +773,7 @@ def _get_equipo_fotos(conn, equipo_id: int) -> list[dict]:
             "orden": r["orden"],
             "es_principal": bool(r["es_principal"]),
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "size_bytes": r["size_bytes"],
         }
         for r in rows
     ]

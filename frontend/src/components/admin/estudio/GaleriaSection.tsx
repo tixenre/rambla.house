@@ -17,7 +17,14 @@ export function GaleriaSection({
   fotos,
   onChanged,
 }: {
-  fotos: Array<{ id: number; url: string; orden: number; es_principal: boolean }>;
+  fotos: Array<{
+    id: number;
+    url: string;
+    orden: number;
+    es_principal: boolean;
+    created_at: string | null;
+    size_bytes: number | null;
+  }>;
   onChanged: () => void;
 }) {
   const qc = useQueryClient();

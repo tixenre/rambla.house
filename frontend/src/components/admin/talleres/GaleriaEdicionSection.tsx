@@ -31,7 +31,14 @@ export function GaleriaEdicionSection({
   onChanged,
 }: {
   edicionId: number;
-  fotos: Array<{ id: number; url: string; orden: number; es_principal: boolean }>;
+  fotos: Array<{
+    id: number;
+    url: string;
+    orden: number;
+    es_principal: boolean;
+    created_at: string | null;
+    size_bytes: number | null;
+  }>;
   // Instituciones co-presentadoras de este taller — si alguna ya tiene fotos
   // propias, se puede importar de ahí en vez de volver a subir el archivo
   // (pedido del dueño 2026-08-19: "no subir las mismas fotos a los dos

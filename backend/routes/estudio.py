@@ -95,8 +95,10 @@ def _get_fotos(conn) -> list:
     # `es_principal DESC` primero — mismo criterio que el hero público
     # (heroImgProps/hero-photos.ts) y las galerías de talleres/equipos.
     cur = conn.execute(
-        "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
-        "FROM estudio_fotos WHERE estudio_id = 1 ORDER BY es_principal DESC, orden, id",
+        "SELECT ef.id, ef.url, ef.url_sm, ef.url_avif, ef.url_sm_avif, ef.path, "
+        "ef.orden, ef.es_principal, ef.created_at, ma.bytes AS size_bytes "
+        "FROM estudio_fotos ef LEFT JOIN media_assets ma ON ma.id = ef.media_id "
+        "WHERE ef.estudio_id = 1 ORDER BY ef.es_principal DESC, ef.orden, ef.id",
         (),
     )
     rows = cur.fetchall()
@@ -111,6 +113,7 @@ def _get_fotos(conn) -> list:
             "orden": r["orden"],
             "es_principal": bool(r["es_principal"]),
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "size_bytes": r["size_bytes"],
         }
         for r in rows
     ]

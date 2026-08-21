@@ -19,19 +19,32 @@ import {
   X,
   Check,
   AlertCircle,
+  LayoutGrid,
+  List as ListIcon,
 } from "lucide-react";
 import { Spinner } from "@/design-system/ui/spinner";
 import { Checkbox } from "@/design-system/ui/checkbox";
 import { Button } from "@/design-system/ui/button";
 import { useConfirm } from "@/components/admin/useConfirm";
-import { cn } from "@/lib/utils";
+import { cn, formatBytes, extFromUrl } from "@/lib/utils";
 
 export type GalleryFoto = {
   id: number;
   url: string;
   orden: number;
   es_principal: boolean;
+  created_at: string | null;
+  size_bytes: number | null;
 };
+
+function formatFotoDate(iso: string | null): string {
+  if (!iso) return "—";
+  return new Date(iso).toLocaleDateString("es-AR", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+  });
+}
 
 type PendingUpload = {
   key: string;
@@ -72,6 +85,11 @@ export function PhotoGallery({
   const [pending, setPending] = useState<PendingUpload[]>([]);
   const [selected, setSelected] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  // Lista chica y densa para navegar galerías grandes (38+ fotos importadas
+  // de una institución) sin la grilla de thumbnails ocupando varias
+  // pantallas — pedido del dueño 2026-08-21. Ephemeral, no persiste entre
+  // sesiones (cada entidad puede preferir una distinta).
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
   const uploading = pending.some((p) => p.status === "pending");
 
@@ -190,7 +208,7 @@ export function PhotoGallery({
           archivos (antes de que termine de subir cualquiera) y cada uno se
           marca en tiempo real a medida que termina o falla. */}
       {pending.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
           {pending.map((p) => (
             <div
               key={p.key}
@@ -258,30 +276,62 @@ export function PhotoGallery({
               ? "Deseleccionar todas"
               : `Seleccionar todas (${fotos.length})`}
           </button>
-          {selected.size > 0 && (
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-muted-foreground">
-                {selected.size} seleccionada{selected.size === 1 ? "" : "s"}
-              </span>
-              <Button
+          <div className="flex items-center gap-3">
+            {selected.size > 0 && (
+              <div className="flex items-center gap-3">
+                <span className="text-xs text-muted-foreground">
+                  {selected.size} seleccionada{selected.size === 1 ? "" : "s"}
+                </span>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleBulkDelete}
+                  loading={bulkDeleting}
+                  disabled={disabled}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                  Borrar
+                </Button>
+              </div>
+            )}
+            <div className="flex items-center gap-0.5 rounded-lg border hairline p-0.5">
+              <button
                 type="button"
-                variant="destructive"
-                size="sm"
-                onClick={handleBulkDelete}
-                loading={bulkDeleting}
-                disabled={disabled}
+                onClick={() => setViewMode("grid")}
+                aria-pressed={viewMode === "grid"}
+                title="Vista en grilla"
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+                  viewMode === "grid"
+                    ? "bg-ink text-background"
+                    : "text-muted-foreground hover:text-ink",
+                )}
               >
-                <Trash2 className="h-3.5 w-3.5" />
-                Borrar
-              </Button>
+                <LayoutGrid className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("list")}
+                aria-pressed={viewMode === "list"}
+                title="Vista en lista"
+                className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-md transition-colors",
+                  viewMode === "list"
+                    ? "bg-ink text-background"
+                    : "text-muted-foreground hover:text-ink",
+                )}
+              >
+                <ListIcon className="h-3.5 w-3.5" />
+              </button>
             </div>
-          )}
+          </div>
         </div>
       )}
 
       {/* Grid de thumbnails */}
-      {fotos.length > 0 && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+      {fotos.length > 0 && viewMode === "grid" && (
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8">
           {fotos.map((foto, idx) => (
             <div
               key={foto.id}
@@ -312,9 +362,17 @@ export function PhotoGallery({
                   aria-label="Seleccionar foto"
                 />
                 {foto.es_principal && (
-                  <div className="flex items-center gap-1 rounded-full bg-amber px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide text-ink">
+                  // Icon-only (no texto "Principal"): a densidad alta (hasta
+                  // 8 columnas) el pill con texto se desbordaba de la card
+                  // (bug real, confirmado en vivo — "PRINCI" cortado). La
+                  // card ya lleva el ring/border ámbar como refuerzo visual;
+                  // acá alcanza con el ícono + title/aria-label.
+                  <div
+                    className="flex h-5 w-5 items-center justify-center rounded-full bg-amber text-ink shadow"
+                    title="Foto principal"
+                    aria-label="Foto principal"
+                  >
                     <Star className="h-2.5 w-2.5 fill-current" />
-                    Principal
                   </div>
                 )}
               </div>
@@ -375,6 +433,100 @@ export function PhotoGallery({
                     </button>
                   )}
                 </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Vista en lista: fila chica por foto, detalle (extensión/tamaño/fecha)
+          visible sin hover — pensada para navegar galerías grandes (38+
+          fotos) sin que la grilla de thumbnails ocupe varias pantallas. */}
+      {fotos.length > 0 && viewMode === "list" && (
+        <div className="space-y-1.5">
+          {fotos.map((foto, idx) => (
+            <div
+              key={foto.id}
+              className={cn(
+                "flex items-center gap-3 rounded-lg border p-2",
+                foto.es_principal ? "border-amber ring-1 ring-amber" : "hairline",
+                selected.has(foto.id) && "ring-2 ring-primary",
+              )}
+            >
+              <Checkbox
+                checked={selected.has(foto.id)}
+                onCheckedChange={() => toggleSelected(foto.id)}
+                disabled={disabled}
+                className="h-5 w-5 shrink-0 rounded"
+                aria-label={selected.has(foto.id) ? "Deseleccionar foto" : "Seleccionar foto"}
+              />
+              <button
+                type="button"
+                onClick={() => toggleSelected(foto.id)}
+                disabled={disabled}
+                className="h-12 w-12 shrink-0 overflow-hidden rounded-md appearance-none border-0 bg-transparent p-0 disabled:cursor-not-allowed"
+                aria-label={selected.has(foto.id) ? "Deseleccionar foto" : "Seleccionar foto"}
+              >
+                <img src={foto.url} alt="" className="h-full w-full object-cover" loading="lazy" />
+              </button>
+
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <span className="rounded bg-muted px-1.5 py-0.5 font-mono text-2xs uppercase text-muted-foreground">
+                    {extFromUrl(foto.url)}
+                  </span>
+                  {foto.es_principal && (
+                    <span className="flex items-center gap-1 rounded-full bg-amber px-2 py-0.5 text-2xs font-semibold uppercase tracking-wide text-ink">
+                      <Star className="h-2.5 w-2.5 fill-current" />
+                      Principal
+                    </span>
+                  )}
+                </div>
+                <p className="mt-0.5 text-2xs text-muted-foreground">
+                  {foto.size_bytes != null ? formatBytes(foto.size_bytes) : "—"} ·{" "}
+                  {formatFotoDate(foto.created_at)}
+                </p>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => movePhoto(idx, -1)}
+                  disabled={disabled || uploading || idx === 0}
+                  title="Mover arriba"
+                  className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-muted disabled:opacity-30"
+                >
+                  <ChevronUp className="h-3.5 w-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => movePhoto(idx, 1)}
+                  disabled={disabled || uploading || idx === fotos.length - 1}
+                  title="Mover abajo"
+                  className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-muted disabled:opacity-30"
+                >
+                  <ChevronDown className="h-3.5 w-3.5" />
+                </button>
+                {!foto.es_principal && (
+                  <button
+                    type="button"
+                    onClick={() => onSetPrincipal(foto.id)}
+                    disabled={disabled || uploading}
+                    title="Marcar como principal"
+                    className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-amber hover:text-ink disabled:opacity-50"
+                  >
+                    <Star className="h-3.5 w-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => onDelete(foto.id)}
+                  disabled={disabled || uploading}
+                  title="Eliminar"
+                  className="flex h-7 w-7 items-center justify-center rounded-lg text-destructive hover:bg-destructive hover:text-white disabled:opacity-50"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
               </div>
             </div>
           ))}

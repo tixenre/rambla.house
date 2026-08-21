@@ -2427,8 +2427,10 @@ def _get_institucion_fotos(conn, institucion_id: int) -> list:
     # (bug real, 2026-08-20: la "Principal" quedaba enterrada en el medio de
     # la grilla en vez de primera).
     cur = conn.execute(
-        "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
-        "FROM institucion_fotos WHERE institucion_id = %s ORDER BY es_principal DESC, orden, id",
+        "SELECT ifo.id, ifo.url, ifo.url_sm, ifo.url_avif, ifo.url_sm_avif, ifo.path, "
+        "ifo.orden, ifo.es_principal, ifo.created_at, ma.bytes AS size_bytes "
+        "FROM institucion_fotos ifo LEFT JOIN media_assets ma ON ma.id = ifo.media_id "
+        "WHERE ifo.institucion_id = %s ORDER BY ifo.es_principal DESC, ifo.orden, ifo.id",
         (institucion_id,),
     )
     rows = cur.fetchall()
@@ -2443,6 +2445,7 @@ def _get_institucion_fotos(conn, institucion_id: int) -> list:
             "orden": r["orden"],
             "es_principal": bool(r["es_principal"]),
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "size_bytes": r["size_bytes"],
         }
         for r in rows
     ]
@@ -2884,9 +2887,15 @@ def admin_delete_portada_clase(clase_id: int, request: Request):
 def _get_edicion_fotos(conn, edicion_id: int) -> list:
     # `es_principal DESC` primero — ver comentario gemelo en
     # `_get_institucion_fotos` (mismo bug real, 2026-08-20).
+    # LEFT JOIN media_assets: `size_bytes` viene NULL para una foto IMPORTADA
+    # de una institución (`media_id` queda NULL a propósito, ver
+    # `_importar_fotos_institucion_en_edicion`) — el front muestra "—" en
+    # ese caso, no es un dato faltante por error.
     cur = conn.execute(
-        "SELECT id, url, url_sm, url_avif, url_sm_avif, path, orden, es_principal, created_at "
-        "FROM edicion_fotos WHERE edicion_id = %s ORDER BY es_principal DESC, orden, id",
+        "SELECT ef.id, ef.url, ef.url_sm, ef.url_avif, ef.url_sm_avif, ef.path, "
+        "ef.orden, ef.es_principal, ef.created_at, ma.bytes AS size_bytes "
+        "FROM edicion_fotos ef LEFT JOIN media_assets ma ON ma.id = ef.media_id "
+        "WHERE ef.edicion_id = %s ORDER BY ef.es_principal DESC, ef.orden, ef.id",
         (edicion_id,),
     )
     rows = cur.fetchall()
@@ -2901,6 +2910,7 @@ def _get_edicion_fotos(conn, edicion_id: int) -> list:
             "orden": r["orden"],
             "es_principal": bool(r["es_principal"]),
             "created_at": r["created_at"].isoformat() if r["created_at"] else None,
+            "size_bytes": r["size_bytes"],
         }
         for r in rows
     ]
