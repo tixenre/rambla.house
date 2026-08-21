@@ -24,7 +24,7 @@ import { Spinner } from "@/design-system/ui/spinner";
 import { Checkbox } from "@/design-system/ui/checkbox";
 import { Button } from "@/design-system/ui/button";
 import { useConfirm } from "@/components/admin/useConfirm";
-import { cn, compareFilenames } from "@/lib/utils";
+import { cn } from "@/lib/utils";
 
 export type GalleryFoto = {
   id: number;
@@ -94,12 +94,7 @@ export function PhotoGallery({
   }
 
   async function handleFilesPicked(fileList: FileList) {
-    // El picker nativo no garantiza que el FileList venga en el orden de
-    // selección del usuario (varía por OS/browser) — se ordena por nombre
-    // así la galería queda en el orden que el nombre de archivo sugiere
-    // (ej. subir 01.jpg...013.jpg desde Finder termina en ese mismo orden,
-    // no en el que el browser haya listado los paths seleccionados).
-    const files = Array.from(fileList).sort((a, b) => compareFilenames(a.name, b.name));
+    const files = Array.from(fileList);
     const withPreview: PendingUpload[] = files.map((file) => ({
       key: `${file.name}-${file.size}-${file.lastModified}-${Math.random().toString(36).slice(2)}`,
       file,

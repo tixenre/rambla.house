@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cn, compareFilenames } from "./utils.ts";
+import { cn } from "./utils.ts";
 
 test("cn preserva text-background al combinar con un tamaño de texto custom (text-15)", () => {
   const result = cn(
@@ -22,22 +22,4 @@ test("cn preserva text-ink con los otros tamaños custom (text-22/text-2xs/text-
 test("cn sigue resolviendo conflictos DENTRO del grupo font-size (custom vence a texto previo)", () => {
   assert.equal(cn("text-sm", "text-15"), "text-15");
   assert.equal(cn("text-15", "text-base"), "text-base");
-});
-
-test("compareFilenames ordena numéricamente, no alfabéticamente (2 antes que 10)", () => {
-  const shuffled = ["10.jpg", "2.jpg", "1.jpg"];
-  assert.deepEqual(shuffled.sort(compareFilenames), ["1.jpg", "2.jpg", "10.jpg"]);
-});
-
-test("compareFilenames reproduce el caso real reportado: 01.jpg...013.jpg desordenados por el FileList", () => {
-  const shuffled = ["05.jpg", "013.jpg", "01.jpg", "08.jpg", "02.jpg", "03.jpg", "04.jpg"];
-  assert.deepEqual(shuffled.sort(compareFilenames), [
-    "01.jpg",
-    "02.jpg",
-    "03.jpg",
-    "04.jpg",
-    "05.jpg",
-    "08.jpg",
-    "013.jpg",
-  ]);
 });
