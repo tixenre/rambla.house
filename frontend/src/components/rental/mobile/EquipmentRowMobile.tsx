@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { StepperPill } from "@/components/rental/equipment/shared/StepperPill";
 import { PriceBlock } from "@/components/rental/equipment/shared/PriceBlock";
 import { FavButton } from "@/components/rental/equipment/shared/FavButton";
+import { ShareButton } from "@/components/rental/equipment/shared/ShareButton";
 import { useClienteSession, aplicaIva } from "@/lib/iva";
 import { EquipoFoto } from "@/components/rental/EquipoFoto";
 import { CatIcon } from "./shared";
@@ -236,17 +237,26 @@ export function EquipmentRowMobile({
             </div>
           )}
 
-          {/* Ficha link */}
-          <button
-            className="inline-flex items-center gap-1 font-sans text-xs font-semibold text-ink border-b border-b-ink pb-px hover:text-amber hover:border-amber transition-colors"
-            onClick={(e) => {
-              e.stopPropagation();
-              onFicha();
-            }}
-          >
-            Ver ficha técnica
-            <ChevronRight size={12} />
-          </button>
+          {/* Ficha link + compartir — antes compartir solo vivía adentro de la
+              ficha (2 toques: expandir la fila, después "Ver ficha técnica").
+              En desktop, ShareButton ya está a mano en la card sin expandir
+              nada (EquipmentCard.tsx) — acá queda a 1 toque, mismo botón
+              compartido, sin recrear la lógica (ver @/lib/share). */}
+          <div className="flex items-center justify-between gap-2">
+            <button
+              className="inline-flex items-center gap-1 font-sans text-xs font-semibold text-ink border-b border-b-ink pb-px hover:text-amber hover:border-amber transition-colors"
+              onClick={(e) => {
+                e.stopPropagation();
+                onFicha();
+              }}
+            >
+              Ver ficha técnica
+              <ChevronRight size={12} />
+            </button>
+            <div onClick={(e) => e.stopPropagation()}>
+              <ShareButton item={eq} size="sm" />
+            </div>
+          </div>
         </div>
       )}
     </div>

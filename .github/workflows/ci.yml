@@ -833,6 +833,33 @@ jobs:
           export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
           export RESERVAS_DB_TEST=1
           python -m pytest tests/test_sitemap_ediciones_db.py -v --tb=short -m integration
+      - name: Ledger de pagos (/admin/pagos) muestra el cliente en vivo, contra Postgres real
+        run: |
+          cd backend
+          # Mismo patrón exacto que el pedido real #466, ya arreglado en
+          # calendario/dashboard — este ledger global de cobros leía
+          # alquileres.cliente_nombre crudo (la foto congelada) y se había
+          # quedado afuera de ese fix. Reportado en vivo por el dueño.
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_pagos_log_contacto_en_vivo_db.py -v --tb=short -m integration
+      - name: Galería — orden explícito gana sobre orden de inserción/ANY(), contra Postgres real
+        run: |
+          cd backend
+          # test_galeria_orden_explicito_db.py existía desde 2026-08-20 pero
+          # nunca tuvo step propio — mismo gap silencioso que
+          # test_carritos_activos_db.py/test_sitemap_ediciones_db.py más
+          # arriba. Se cablea ahora de paso, al sumarle el test nuevo del
+          # bug de "importar fotos de institución" (ANY(array) no preserva
+          # el orden del array pedido — el carrusel público de la edición
+          # quedaba desordenado pese a que el front mandaba bien el orden).
+          export SECRET_KEY=ci-test-secret-not-for-production
+          export ADMIN_EMAILS=admin@test.com
+          export DATABASE_URL=postgresql://postgres:postgres@localhost:5432/rambla_rental_test
+          export RESERVAS_DB_TEST=1
+          python -m pytest tests/test_galeria_orden_explicito_db.py -v --tb=short -m integration
 
   e2e-admin:
     name: E2E admin (Playwright + backend real)

@@ -20,6 +20,7 @@ from rate_limit import limiter, ADMIN_WRITE_LIMIT
 from routes.contabilidad import map_pg_errors
 from routes.alquileres.core import router
 from services.alquileres.queries.detalle import _get_alquiler_pagos
+from services.pedidos_enriquecimiento import _enriquecer_pedidos_con_cliente
 from services.alquileres.commands.pagos import (
     DESTINATARIOS_PAGO,  # noqa: F401 — re-export, lo usa routes/alquileres/__init__.py
     METODOS_PAGO,  # noqa: F401 — re-export, lo usa routes/alquileres/__init__.py
@@ -150,6 +151,15 @@ def list_all_pagos(
     destinatario, método y rango de fechas (inclusive). Por defecto excluye
     los anulados (mismo patrón que `listar_movimientos`). Devuelve también el
     total del subconjunto filtrado.
+
+    El nombre del cliente se resuelve EN VIVO (`_enriquecer_pedidos_con_cliente`,
+    decisión 2026-06-06) — el `al.cliente_nombre` del SELECT es solo la foto
+    congelada al crear el pedido, punto de partida que la enriquecida
+    sobrescribe. Bug real (mismo patrón que pedido #466, ya arreglado en
+    calendario/dashboard pero no acá): un cliente sin nombre cargado al
+    vincularse que lo completó después quedaba "sin cliente" para siempre en
+    este ledger, aunque el pedido y el resto de las pantallas ya mostraban
+    el nombre correcto.
     """
     require_admin(request)
     where = ["1=1"]
@@ -174,7 +184,7 @@ def list_all_pagos(
             SELECT ap.id, ap.pedido_id, ap.monto, ap.concepto,
                    ap.destinatario, ap.metodo, ap.fecha, ap.created_by,
                    ap.anulado, ap.anulado_por, ap.anulado_at, ap.anulado_motivo,
-                   al.numero_pedido, al.cliente_nombre
+                   al.numero_pedido, al.cliente_nombre, al.cliente_id, al.pedido_principal_id
               FROM alquiler_pagos ap
               JOIN alquileres al ON al.id = ap.pedido_id
              WHERE {" AND ".join(where)}
@@ -184,5 +194,6 @@ def list_all_pagos(
             (*params, limit),
         ).fetchall()
         pagos = [row_to_dict(r) for r in rows]
+        _enriquecer_pedidos_con_cliente(conn, pagos)
         total = sum((p["monto"] or 0) for p in pagos)
         return {"pagos": pagos, "total": total, "count": len(pagos)}

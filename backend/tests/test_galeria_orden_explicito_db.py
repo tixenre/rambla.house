@@ -347,3 +347,88 @@ def test_estudio_fotos_principal_gana_sobre_orden():
         finally:
             conn.execute("DELETE FROM estudio_fotos WHERE path IN ('a.jpg', 'b.jpg')")
             conn.commit()
+
+
+# ── Importar fotos de institución preserva el orden de selección, no el
+# orden crudo de `ANY(array)` (bug real, 2026-08-21) ────────────────────────
+#
+# El front manda `institucion_foto_ids` en el orden de selección real (con
+# "Seleccionar todas", el orden canónico de la galería de la institución:
+# `es_principal DESC, orden, id`). El backend hacía `SELECT ... WHERE id =
+# ANY(%s)` y recorría el resultado tal cual — pero Postgres NO garantiza que
+# `ANY(array)` devuelva las filas en el orden del array; en la práctica
+# devuelve el orden físico del scan (ascendente por id), descartando la
+# selección del front. El carrusel público de la edición (`TallerGaleria`,
+# vía `_get_edicion_fotos`) terminaba en un orden distinto al de la galería
+# de la institución en el back-office — reportado por el dueño con
+# screenshots ("el carrusel de Filmar, el hub" no coincidía con el
+# back-office).
+
+EDICION_IMPORT_ID = 9_850_010
+INSTITUCION_IMPORT_ID = 9_850_010
+SLUG_IMPORT = "test-galeria-import-orden-zzq"
+
+
+def test_importar_fotos_institucion_preserva_orden_de_seleccion_no_el_de_any():
+    from database import get_db, init_db
+    from routes.talleres import (
+        _get_edicion_fotos,
+        _importar_fotos_institucion_en_edicion,
+        _insert_institucion_foto,
+    )
+
+    init_db()
+    with get_db() as conn:
+        conn.execute("DELETE FROM edicion_fotos WHERE edicion_id = %s", (EDICION_IMPORT_ID,))
+        conn.execute("DELETE FROM ediciones_taller WHERE id = %s", (EDICION_IMPORT_ID,))
+        conn.execute("DELETE FROM talleres WHERE id = %s", (EDICION_IMPORT_ID,))
+        conn.execute(
+            "DELETE FROM institucion_fotos WHERE institucion_id = %s", (INSTITUCION_IMPORT_ID,)
+        )
+        conn.execute("DELETE FROM instituciones WHERE id = %s", (INSTITUCION_IMPORT_ID,))
+        conn.execute(
+            "INSERT INTO instituciones (id, slug, nombre) VALUES (%s, %s, %s)",
+            (INSTITUCION_IMPORT_ID, SLUG_IMPORT + "-inst", "Test Institución Import Orden"),
+        )
+        conn.execute(
+            "INSERT INTO talleres (id, slug, slug_base, nombre) VALUES (%s, %s, %s, %s)",
+            (EDICION_IMPORT_ID, SLUG_IMPORT, SLUG_IMPORT, "Test Galería Import Orden"),
+        )
+        conn.execute(
+            "INSERT INTO ediciones_taller (id, taller_id, numero_edicion, slug, "
+            "fecha_inicio, fecha_fin) VALUES (%s, %s, 1, %s, '2099-01-01', '2099-01-01')",
+            (EDICION_IMPORT_ID, EDICION_IMPORT_ID, SLUG_IMPORT + "-ed1"),
+        )
+        conn.commit()
+
+        try:
+            # Se suben en orden A, B, C (ids ascendentes por inserción) —
+            # así queda ordenada la galería de la institución.
+            a = _insert_institucion_foto(conn, INSTITUCION_IMPORT_ID, "https://x/a.jpg", "a.jpg")
+            b = _insert_institucion_foto(conn, INSTITUCION_IMPORT_ID, "https://x/b.jpg", "b.jpg")
+            c = _insert_institucion_foto(conn, INSTITUCION_IMPORT_ID, "https://x/c.jpg", "c.jpg")
+            conn.execute(
+                "UPDATE institucion_fotos SET es_principal = FALSE WHERE institucion_id = %s",
+                (INSTITUCION_IMPORT_ID,),
+            )
+            conn.commit()
+
+            # El front pide importarlas en OTRO orden (C, A, B) — no
+            # ascendente por id.
+            orden_pedido = [c["id"], a["id"], b["id"]]
+            _importar_fotos_institucion_en_edicion(conn, EDICION_IMPORT_ID, orden_pedido)
+
+            fotos = _get_edicion_fotos(conn, EDICION_IMPORT_ID)
+            # Sin el fix: `ANY(array)` devuelve las filas en su orden físico
+            # (ascendente por id: a, b, c), no en el orden pedido.
+            assert [f["path"] for f in fotos] == ["c.jpg", "a.jpg", "b.jpg"]
+        finally:
+            conn.execute("DELETE FROM edicion_fotos WHERE edicion_id = %s", (EDICION_IMPORT_ID,))
+            conn.execute("DELETE FROM ediciones_taller WHERE id = %s", (EDICION_IMPORT_ID,))
+            conn.execute("DELETE FROM talleres WHERE id = %s", (EDICION_IMPORT_ID,))
+            conn.execute(
+                "DELETE FROM institucion_fotos WHERE institucion_id = %s",
+                (INSTITUCION_IMPORT_ID,),
+            )
+            conn.execute("DELETE FROM instituciones WHERE id = %s", (INSTITUCION_IMPORT_ID,))
+            conn.commit()
