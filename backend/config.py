@@ -114,6 +114,17 @@ class Settings(BaseSettings):
     # ── Integraciones ────────────────────────────────────────────────────
     GOOGLE_MAPS_API_KEY: str = ""
 
+    # ── arca-service — motor de facturación ARCA/AFIP NUEVO, EN PARALELO a
+    # arca_fe (services/facturacion/) — no lo reemplaza todavía. Vacío = inerte,
+    # mismo criterio default-deny que Didit/WhatsApp. Las credenciales de
+    # Plataforma salen de `arca-service-client login` (self-serve, corrido a
+    # mano por el dueño) — nunca se generan ni se piden acá. Ver
+    # services/facturacion_arca_service/config.py.
+    ARCA_SERVICE_BASE_URL: str = ""
+    ARCA_SERVICE_CLIENT_CERT_PATH: str = ""
+    ARCA_SERVICE_CLIENT_KEY_PATH: str = ""
+    ARCA_SERVICE_API_KEY: str = ""
+
     @field_validator("SITE_URL")
     @classmethod
     def _strip_trailing_slash(cls, v: str) -> str:
@@ -156,6 +167,15 @@ class Settings(BaseSettings):
     @property
     def didit_enabled(self) -> bool:
         return bool(self.DIDIT_API_KEY and self.DIDIT_WEBHOOK_SECRET)
+
+    @property
+    def arca_service_enabled(self) -> bool:
+        return bool(
+            self.ARCA_SERVICE_BASE_URL
+            and self.ARCA_SERVICE_CLIENT_CERT_PATH
+            and self.ARCA_SERVICE_CLIENT_KEY_PATH
+            and self.ARCA_SERVICE_API_KEY
+        )
 
 
 settings = Settings()

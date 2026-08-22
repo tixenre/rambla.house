@@ -57,6 +57,14 @@ segno>=1.5.0
 pymupdf==1.28.0
 pyhanko==0.35.1
 
+# Cliente de arca-service (tixenre/arca-service-sdk) — motor de facturación
+# ARCA/AFIP NUEVO, en paralelo a arca_fe (services/facturacion_arca_service/).
+# NO reemplaza a arca_fe/zeep de arriba todavía (MEMORIA). Pineado al commit
+# exacto auditado (no a un tag — el SDK todavía no publicó ninguno) para que
+# un cambio futuro del SDK no altere el comportamiento sin una actualización
+# explícita acá.
+arca-service-client @ git+https://github.com/tixenre/arca-service-sdk.git@2970c80d6e7ed70c318afe5d9daf815c071b763f#subdirectory=arca_service_client
+
 # Validación/formateo de teléfonos a E.164 (libphonenumber de Google) — el embudo
 # único services/telefono.py, para el canal WhatsApp y para guardar los números bien.
 phonenumbers==9.0.34
