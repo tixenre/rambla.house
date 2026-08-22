@@ -43,12 +43,19 @@ def _pack_equipo_ids(conn) -> list[int]:
 def _promo_info(conn, estudio_row, fecha_desde=None, fecha_hasta=None,
                 exclude_pedido_id: int | None = None) -> dict | None:
     """Info de la promo (combo) del Estudio: nombre/foto/precio/componentes —
-    `None` si todavía no se creó (#1283 Fase 5). El precio sale de
-    `precio_jornada_efectivo` (fuente única, sigue en vivo el precio de los
-    componentes). `descripcion` reusa `pack_descripcion` (texto libre ya
-    editable desde el back-office, no se agrega un campo nuevo). `componentes`
-    (listado público "qué incluye") sale de la puerta única
-    `services.contenido.contenido_de` — MISMA fuente que el catálogo
+    `None` si todavía no se creó (#1283 Fase 5). El precio es el NÚMERO FIJO
+    que el dueño puso (`estudio.pack_precio`, revivida — ver docstring de
+    `crear_promo`), NO el derivado en vivo de los componentes: a diferencia de
+    un combo cualquiera del catálogo (`precio_jornada_efectivo`, que SÍ sigue
+    el precio actual de cada componente y por eso puede correrse del objetivo
+    con el que se armó — el drift que motivó este cambio), la promo del
+    Estudio es plata negociada por el dueño, no un cálculo. Fallback a
+    `precio_jornada_efectivo` solo si `pack_precio` todavía no tiene un valor
+    (0/NULL — no debería pasar para una promo creada después de este cambio,
+    `crear_promo` siempre lo sincroniza). `descripcion` reusa `pack_descripcion`
+    (texto libre ya editable desde el back-office, no se agrega un campo
+    nuevo). `componentes` (listado público "qué incluye") sale de la puerta
+    única `services.contenido.contenido_de` — MISMA fuente que el catálogo
     (`attach_kit`), nunca puede desincronizarse de lo que la promo realmente
     reserva. Si se pasa una franja (`fecha_desde`/`fecha_hasta`, ambos
     `datetime`), suma `disponible` (deriva de `get_disponibilidad`, que expande
@@ -67,7 +74,7 @@ def _promo_info(conn, estudio_row, fecha_desde=None, fecha_hasta=None,
         "nombre": combo["nombre"],
         "descripcion": estudio_row["pack_descripcion"],
         "foto_url": combo["foto_url"],
-        "precio": precio_jornada_efectivo(conn, combo_id) or 0,
+        "precio": estudio_row["pack_precio"] or precio_jornada_efectivo(conn, combo_id) or 0,
         "componentes": [
             {"nombre": c["nombre"], "cantidad": c["cantidad"], "foto_url": c["foto_url"]}
             for c in contenido_de(conn, combo_id, solo_activos=True)

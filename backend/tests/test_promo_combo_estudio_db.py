@@ -281,6 +281,53 @@ def test_reserva_con_promo_items_veraces_y_atribucion_rental(client_con_db, setu
     assert promo_item["dueno"] == "Rental"  # NO los dueños tradicionales de EQ_A/EQ_B
 
 
+def test_promo_precio_fijo_no_seguido_por_cambio_de_componente(client_con_db, setup):
+    """El precio de la promo es FIJO (`pack_precio`), no derivado en vivo de
+    sus componentes — si un componente cambia de precio en el catálogo
+    DESPUÉS de crear la promo, `_promo_info` y una reserva nueva siguen
+    cobrando el objetivo original, no un número corrido."""
+    assert _crear_promo(client_con_db, precio_objetivo=1200).status_code == 201
+
+    from database import get_db
+    conn = get_db()
+    try:
+        conn.execute("UPDATE equipos SET precio_jornada = 9000 WHERE id = %s", (EQ_A,))
+        conn.commit()
+    finally:
+        conn.close()
+
+    r = client_con_db.get("/api/estudio")
+    assert r.json()["promo"]["precio"] == 1200
+
+    r = _reservar(client_con_db, fecha="2030-04-06", start="14:00", horas=2, con_promo=True)
+    assert r.status_code == 201, r.text
+    pedido_id = r.json()["id"]
+
+    conn = get_db()
+    try:
+        pedido = conn.execute(
+            "SELECT monto_total FROM alquileres WHERE id=%s", (pedido_id,)
+        ).fetchone()
+    finally:
+        conn.close()
+    # 10000/h × 2h (espacio) + 1200 (promo, sigue fija pese al componente
+    # que ahora vale 9000×1 = 9000 solo — el derivado hubiera sido >1200).
+    assert pedido["monto_total"] == 21200
+
+
+def test_patch_estudio_actualiza_precio_fijo_de_la_promo(client_con_db, setup):
+    """`PATCH /admin/estudio {pack_precio}` es el único lugar para cambiar el
+    precio fijo de la promo YA creada — se refleja de inmediato en `_promo_info`."""
+    assert _crear_promo(client_con_db, precio_objetivo=1200).status_code == 201
+
+    r = client_con_db.patch("/api/admin/estudio", json={"pack_precio": 1500})
+    assert r.status_code == 200, r.text
+    assert r.json()["pack_precio"] == 1500
+
+    r = client_con_db.get("/api/estudio")
+    assert r.json()["promo"]["precio"] == 1500
+
+
 def test_reserva_con_promo_sin_stock_es_best_effort_no_bloquea(client_con_db, setup):
     """La promo es BEST-EFFORT (mismo criterio que tenía el pack ⏰ retirado,
     2026-07-24): si un componente no tiene stock, la reserva NO se bloquea —

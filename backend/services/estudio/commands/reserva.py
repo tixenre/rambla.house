@@ -62,19 +62,28 @@ class SueltoItem(BaseModel):
 def _precio_promo_y_sueltos(
     conn, estudio, con_promo: bool, sueltos: list,
 ) -> tuple[int, dict[int, int]]:
-    """Resuelve el precio de la promo + de cada suelto vía la fuente única
-    `precio_jornada_efectivo` (MEMORIA 2026-06-29 — el front no calcula
-    plata; esto tampoco calcula nada propio, solo lee lo que esa fuente
-    devuelve). Puro cálculo de lectura, sin validar stock ni insertar nada —
-    compartido por `_crear_pedido_estudio` (necesita los precios ANTES de
-    insertar el pedido), `editar_reserva` y `cotizar_reserva_estudio`
-    (`routes/estudio.py`, preview sin pedido_id).
+    """Resuelve el precio de la promo + de cada suelto. Los SUELTOS siguen la
+    fuente única `precio_jornada_efectivo` (MEMORIA 2026-06-29 — el front no
+    calcula plata; esto tampoco calcula nada propio, solo lee lo que esa
+    fuente devuelve). La PROMO es distinta a propósito: es un número FIJO que
+    pone el dueño (`estudio.pack_precio`), no el precio derivado en vivo de
+    sus componentes — mismo criterio y mismo fallback que
+    `queries/promo.py::_promo_info` (ver su docstring para el porqué). Puro
+    cálculo de lectura, sin validar stock ni insertar nada — compartido por
+    `_crear_pedido_estudio` (necesita los precios ANTES de insertar el
+    pedido), `editar_reserva` y `cotizar_reserva_estudio` (`routes/
+    estudio.py`, preview sin pedido_id).
 
     Devuelve `(promo_precio, precios_sueltos)`. Devolvía además un
     `monto_extra` (promo + sueltos×cantidad) que quedó muerto al pasar el
     total del turno por `total_turno_estudio` — el único que suma es ese, y
     suma TODAS las líneas (incluido el espacio) vía `calcular_total`."""
-    promo_precio = precio_jornada_efectivo(conn, estudio["promo_combo_id"]) or 0 if con_promo else 0
+    if con_promo:
+        promo_precio = (
+            estudio["pack_precio"] or precio_jornada_efectivo(conn, estudio["promo_combo_id"]) or 0
+        )
+    else:
+        promo_precio = 0
     precios_sueltos: dict[int, int] = {}
     for s in sueltos:
         precios_sueltos[s.equipo_id] = precio_jornada_efectivo(conn, s.equipo_id) or 0

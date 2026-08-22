@@ -1518,10 +1518,11 @@ export type EstudioConfig = {
   close_hour: number;
   buffer_horas: number;
   anticipacion_min_horas: number;
-  // pack_nombre/pack_precio: defaults de una-vez leídos por
-  // crear_promo_desde_pack — ya no tienen UI de edición (Fase 8, #1283).
-  // pack_descripcion SIGUE viva: es la descripción de la promo actual
-  // (_promo_info la reusa), editable desde PromoSection.
+  // pack_nombre: default de nombre leído por crear_promo_desde_pack — sin UI
+  // de edición (Fase 8, #1283). pack_descripcion SIGUE viva: es la
+  // descripción de la promo actual (_promo_info la reusa), editable desde
+  // PromoSection. pack_precio: precio FIJO de la promo actual — revivida,
+  // editable desde PromoSection (no se deriva más de los componentes).
   pack_nombre: string;
   pack_descripcion: string;
   pack_precio: number;
@@ -1637,6 +1638,7 @@ export type EstudioInput = {
   precio_pintura_reciente?: number;
   anticipacion_pintura_horas?: number;
   pack_descripcion?: string;
+  pack_precio?: number;
   features_json?: string;
   faq_json?: string;
   direccion?: string;

@@ -138,7 +138,7 @@ def setup(monkeypatch):
         conn.execute(
             "UPDATE estudio SET precio_hora=10000, promo_combo_id=%s, pack_activo=FALSE, "
             "buffer_horas=0, min_horas=1, open_hour=0, close_hour=24, anticipacion_min_horas=48, "
-            "precio_pintura_reciente=1500 "
+            "precio_pintura_reciente=1500, pack_precio=0 "
             "WHERE id=1",
             (PROMO_COMBO_ID,),
         )

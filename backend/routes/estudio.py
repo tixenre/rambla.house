@@ -145,11 +145,13 @@ def _build_response(row, fotos: list) -> dict:
         "anticipacion_min_horas": row["anticipacion_min_horas"],
         # ⏰ LEGACY del pack (Fase 8, #1283) — el mecanismo del pack (con_pack,
         # pack_activo, la curación de estudio_pack_equipos) se retiró, pero estas
-        # 3 columnas SIGUEN vivas con otro rol: `pack_descripcion` es la
+        # columnas SIGUEN vivas con otro rol: `pack_descripcion` es la
         # descripción de la PROMO actual (`_promo_info` la reusa, nunca se
-        # agregó un campo nuevo); `pack_nombre`/`pack_precio` son el default
-        # de nombre/precio si algún día se recrea una promo borrada
-        # (`crear_promo_desde_pack`). No confundir con el pack legacy.
+        # agregó un campo nuevo); `pack_nombre` es el default de nombre si
+        # algún día se recrea una promo borrada (`crear_promo_desde_pack`).
+        # `pack_precio` es el PRECIO FIJO de la promo actual (revivida, editable
+        # — ver el comentario en `EstudioUpdate` más abajo). No confundir con
+        # el mecanismo del pack legacy, que sigue retirado.
         "pack_nombre": row["pack_nombre"],
         "pack_descripcion": row["pack_descripcion"],
         "pack_precio": row["pack_precio"],
@@ -562,10 +564,17 @@ class EstudioUpdate(BaseModel):
     anticipacion_min_horas: Optional[int] = None
     precio_pintura_reciente: Optional[int] = None
     anticipacion_pintura_horas: Optional[int] = None
-    # ⏰ pack_activo/pack_nombre/pack_precio retirados (Fase 8, #1283) — el pack
-    # ya no existe como mecanismo editable. `pack_descripcion` queda: es la
-    # descripción EN VIVO de la promo actual (ver `_build_response`).
+    # ⏰ pack_activo/pack_nombre retirados (Fase 8, #1283) — el pack como
+    # mecanismo de curación de equipos ya no existe. `pack_descripcion` sigue
+    # viva: es la descripción EN VIVO de la promo actual (ver `_build_response`).
+    # `pack_precio` REVIVIDA (no confundir con el pack legacy): es el precio
+    # FIJO de la promo actual — editable desde `PromoSection`, consumido por
+    # `services/estudio/queries/promo.py::_promo_info` y `commands/
+    # reserva.py::_precio_promo_y_sueltos` en vez del precio derivado de los
+    # componentes (ese derivaba solo, y se corría del objetivo original apenas
+    # cambiaba el precio de un componente en el catálogo).
     pack_descripcion: Optional[str] = None
+    pack_precio: Optional[int] = None
     features_json: Optional[str] = None
     faq_json: Optional[str] = None
     direccion: Optional[str] = None

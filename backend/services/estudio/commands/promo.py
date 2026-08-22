@@ -18,12 +18,25 @@ def crear_promo(conn, estudio, nombre: str | None, precio_objetivo: int | None) 
     `visible_catalogo=0` (oculto del catálogo público, solo se ofrece desde el
     Estudio/back-office). El precio objetivo (default = `pack_precio` actual)
     se clava vía un descuento % uniforme en sus componentes
-    (`resolver_descuento_uniforme`, misma pieza que el endpoint de Equipos).
+    (`resolver_descuento_uniforme`, misma pieza que el endpoint de Equipos) —
+    ESO fija el % en `kit_componentes` para cuando alguien mire el combo desde
+    Equipos, pero NO es la fuente de precio que usa el Estudio (ver abajo).
+
+    `pack_precio` se sincroniza con `precio_final` acá mismo: es el número FIJO
+    que `queries/promo.py::_promo_info`/`commands/reserva.py::
+    _precio_promo_y_sueltos` usan de ahí en más para mostrar/cobrar la promo —
+    a diferencia del % de descuento (que queda congelado y se corre si un
+    componente cambia de precio en el catálogo, el drift que motivó revivir
+    este campo), `pack_precio` es la fuente de verdad y no se mueve sola.
+    Editable después desde la propia pantalla del Estudio (`PromoSection`), no
+    desde Equipos — el precio y la composición del combo son dos cosas
+    distintas ahora.
 
     Reemplaza al pack: apaga `pack_activo` y setea `estudio.promo_combo_id`.
     No commitea — eso es responsabilidad del caller (route). El pack/sus datos
     NO se borran (⏰ LEGACY hasta la Fase 8) — el combo creado es un equipo
-    normal, editable después desde Equipos como cualquier otro combo."""
+    normal, sus COMPONENTES se editan después desde Equipos como cualquier
+    otro combo (el precio no)."""
     if estudio["promo_combo_id"]:
         raise HTTPException(
             409, "Ya existe una promo — editala desde Equipos o borrala primero"
@@ -69,7 +82,7 @@ def crear_promo(conn, estudio, nombre: str | None, precio_objetivo: int | None) 
         (descuento, combo_id),
     )
     conn.execute(
-        "UPDATE estudio SET promo_combo_id = %s, pack_activo = FALSE WHERE id = 1",
-        (combo_id,),
+        "UPDATE estudio SET promo_combo_id = %s, pack_activo = FALSE, pack_precio = %s WHERE id = 1",
+        (combo_id, precio_final),
     )
     return combo_id

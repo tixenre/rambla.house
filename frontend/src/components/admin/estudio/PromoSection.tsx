@@ -14,17 +14,22 @@ import { formatARS } from "@/lib/format";
 import { Section, Field } from "./shared";
 
 /** Gestión de la promo de equipos (combo real que reemplaza al pack curado,
- *  #1283 Fase 5). Si ya existe (`config.promo_combo_id`), solo muestra su
- *  estado — precio/componentes se editan desde Equipos como cualquier otro
- *  combo, no acá (evita mantener dos formularios para lo mismo). La
- *  descripción SÍ se edita acá (`pack_descripcion`, viva: `_promo_info` la
- *  reusa como descripción de la promo actual). Si no existe, ofrece crearla
- *  desde el pack curado actual. */
+ *  #1283 Fase 5). Si ya existe (`config.promo_combo_id`), el PRECIO se edita
+ *  acá (`pack_precio`, fijo — no se deriva más de los componentes, ver
+ *  docstring de `crear_promo`); los EQUIPOS que la componen se editan desde
+ *  Equipos como cualquier otro combo (evita mantener dos formularios para lo
+ *  mismo). La descripción también se edita acá (`pack_descripcion`, viva:
+ *  `_promo_info` la reusa como descripción de la promo actual). Si no existe,
+ *  ofrece crearla desde el pack curado actual. */
 export function PromoSection({ config }: { config: EstudioConfig }) {
   const qc = useQueryClient();
   const [nombre, setNombre] = useState(config.pack_nombre || "");
   const [precioObjetivo, setPrecioObjetivo] = useState(config.pack_precio || 0);
   const [descripcion, setDescripcion] = useState(config.pack_descripcion || "");
+  // Precio FIJO de la promo YA CREADA — estado propio, separado de
+  // `precioObjetivo` (que es el precio con el que se CREA una promo nueva,
+  // rama de abajo). Mismo campo (`pack_precio`), dos momentos distintos.
+  const [precioFijo, setPrecioFijo] = useState(config.pack_precio || 0);
 
   const crearMut = useMutation({
     mutationFn: () =>
@@ -47,6 +52,16 @@ export function PromoSection({ config }: { config: EstudioConfig }) {
     },
     onError: (e) =>
       toast.error("No se pudo guardar la descripción", { description: (e as Error).message }),
+  });
+
+  const guardarPrecioMut = useMutation({
+    mutationFn: () => estudioAdminApi.update({ pack_precio: precioFijo }),
+    onSuccess: (res) => {
+      qc.setQueryData(["admin", "estudio"], res);
+      toast.success("Precio guardado");
+    },
+    onError: (e) =>
+      toast.error("No se pudo guardar el precio", { description: (e as Error).message }),
   });
 
   if (config.promo_combo_id && config.promo) {
@@ -76,14 +91,27 @@ export function PromoSection({ config }: { config: EstudioConfig }) {
           </div>
           <Button asChild variant="outline" size="sm">
             <Link to="/admin/equipos/$id/editar" params={{ id: String(config.promo.equipo_id) }}>
-              <Pencil className="h-4 w-4" /> Editar
+              <Pencil className="h-4 w-4" /> Editar equipos
             </Link>
           </Button>
         </div>
         <p className="mt-3 text-sm text-muted-foreground">
-          El precio y los componentes de la promo se editan desde Equipos — es un combo normal,
-          igual que cualquier otro.
+          El precio es fijo — se pone acá y se mantiene, aunque cambien los precios de los equipos
+          que la componen. Los equipos que incluye se editan desde Equipos.
         </p>
+        <div className="mt-3 grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+          <Field label="Precio fijo">
+            <MoneyInput value={precioFijo} onChange={setPrecioFijo} />
+          </Field>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={guardarPrecioMut.isPending || precioFijo === (config.pack_precio || 0)}
+            onClick={() => guardarPrecioMut.mutate()}
+          >
+            Guardar precio
+          </Button>
+        </div>
         <div className="mt-3">
           <Field label="Descripción de la promo">
             <Textarea
