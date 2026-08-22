@@ -88,6 +88,7 @@ from routes.dataio           import router as dataio_router
 from routes.estudio          import router as estudio_router, _parse_json_field
 from routes.didit            import router as didit_router
 from routes.facturacion      import router as facturacion_router
+from routes.facturacion_arca_service import router as facturacion_arca_service_router
 from routes.whatsapp         import router as whatsapp_router
 from routes.comunicacion     import router as comunicacion_router
 from routes.productoras      import router as productoras_router
@@ -386,6 +387,7 @@ app.include_router(dataio_router,         prefix="/api")
 app.include_router(estudio_router,        prefix="/api")
 app.include_router(didit_router,          prefix="/api")
 app.include_router(facturacion_router,    prefix="/api")
+app.include_router(facturacion_arca_service_router, prefix="/api")
 app.include_router(whatsapp_router,       prefix="/api")
 app.include_router(comunicacion_router,   prefix="/api")
 app.include_router(productoras_router,    prefix="/api")
